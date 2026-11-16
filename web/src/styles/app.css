@@ -189,9 +189,9 @@
 
 /* ===== 代码页签 ===== */
 .code-view-real .code-files{padding:8px 6px}
-.code-files-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px 8px;color:var(--st-ink-2);font-size:11px}
-.code-files-head>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.code-new-file{width:24px;height:24px;display:grid;place-items:center;border-radius:6px;color:var(--st-muted)}
+.code-files-head{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 6px 8px;color:var(--st-ink-2);font-size:11px;min-width:0}
+.code-files-head>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.code-new-file{flex:none;width:24px;height:24px;display:grid;place-items:center;border-radius:6px;color:var(--st-muted)}
 .code-new-file:hover{background:var(--st-accent-soft);color:var(--st-accent-ink)}.code-new-file .icon{width:14px;height:14px}
 .code-tree{display:flex;flex-direction:column}
 .code-tree-dir,.code-tree-file{display:flex;align-items:center;gap:6px}

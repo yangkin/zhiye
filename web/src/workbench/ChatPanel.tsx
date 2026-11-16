@@ -116,6 +116,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     setError('');
   }, [app.id]);
 
+  // 任务切换或结束时同步待发送队列（避免上一条刚出队变成新任务时仍显示旧缓存）
+  useEffect(() => {
+    if (runningTaskId) void qc.invalidateQueries({ queryKey: ['queued', app.id] });
+    else qc.setQueryData(['queued', app.id], []);
+  }, [app.id, runningTaskId, qc]);
+
   useEffect(() => {
     if (!focusTick) return;
     const el = input.current;

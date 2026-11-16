@@ -111,8 +111,8 @@ button.tl-step:hover{background:var(--st-raised)}
   .tl-pre{max-height:220px}
 }
 /* 代码页：文件 / 改动 切换与「本次修改」列表 */
-.code-files-switch{display:inline-flex;margin-left:auto;border:1px solid var(--st-line);border-radius:7px;overflow:hidden}
-.code-files-switch button{padding:3px 9px;font-size:11px;color:var(--st-muted);background:none;border:0;font-family:inherit}
+.code-files-switch{flex:none;display:inline-flex;margin-left:auto;border:1px solid var(--st-line);border-radius:7px;overflow:hidden}
+.code-files-switch button{padding:3px 9px;font-size:11px;color:var(--st-muted);background:none;border:0;font-family:inherit;white-space:nowrap}
 .code-files-switch button:hover{color:var(--st-ink-2)}
 .code-files-switch button.active{background:var(--st-accent-soft);color:var(--st-accent-ink)}
 .code-changes{overflow:auto;flex:1;padding:4px 0}

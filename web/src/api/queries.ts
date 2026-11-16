@@ -42,6 +42,7 @@ export function useInvalidateApp() {
     void qc.invalidateQueries({ queryKey: qk.versions(appId) });
     void qc.invalidateQueries({ queryKey: qk.appTasks(appId) });
     void qc.invalidateQueries({ queryKey: qk.draft(appId) });
+    void qc.invalidateQueries({ queryKey: ['queued', appId] });
     void qc.invalidateQueries({ queryKey: ['cloud', appId] });
     void qc.invalidateQueries({ queryKey: ['apps'] });
     void qc.invalidateQueries({ queryKey: ['history'] });
