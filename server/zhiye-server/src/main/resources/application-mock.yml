@@ -1,0 +1,25 @@
+# 模拟内网（外网开发用）：平台统一认证、五星AI岛 openclaw、llm-gateway 都由本服务内置的模拟接口提供。
+# 启动：ZHIYE_MOCK_INTRANET=1 bash scripts/dev-up.sh（api 用 api,dev,mock，site 用 site,mock）
+# 登录页选一个工号即可；模拟网关把请求转给 zhiye.llm 的统一上游（DeepSeek / Kimi），每人每周额度见 mock-limit-tokens。
+# 内网联调：去掉 mock profile，按 docs/fivestar-integration.md 配真实地址。
+zhiye:
+  auth:
+    mode: sso
+    sso:
+      gateway-url: http://127.0.0.1:8080/mock/sso
+      redirect-url: http://127.0.0.1:8080/access_token
+  mock:
+    sso: true
+  fivestar:
+    enabled: true
+    mock: true
+    openclaw-base-url: http://127.0.0.1:8080/mock/openclaw
+    llm-gateway-base-url: http://127.0.0.1:8080/mock/llm-gateway
+    mock-limit-tokens: ${ZHIYE_MOCK_QUOTA:5000000}
+  skillhub:
+    enabled: true
+    mock: true
+    base-url: "{self}/mock/fivestar-service"
+    file-base-url: "{self}/mock/fivestar-service"
+    portal-url: "{self}/mock/fivestar-service/portal"
+    organization-id: "0"

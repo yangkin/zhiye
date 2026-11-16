@@ -1,0 +1,25 @@
+# 本地 kind 测试：
+#   - 两个 hostPath PV 指向 kind 节点上的 /var/zhiye-runtime（两个节点都 extraMount 同一个宿主机目录，相当于 RWX）
+#   - 集群内 PostgreSQL（单副本 StatefulSet，仅测试）
+#   - 本地文件对象存储（objects/ 在共享卷上，site 只读挂载）
+#   - NodePort 30080/30083 → 宿主机 127.0.0.1:18080/18083（kind-config.yaml）
+#   - 沙箱 provider=k8s（legacy 回滚路径，本地没有公司 OpenSandbox）；不设置 runtimeClass；
+#     沙箱节点 zhiye-kind-worker 打了 zhiye/pool=sandbox 标签和 zhiye/sandbox 污点
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - postgres.yaml
+  - nodeports.yaml
+  - networkpolicy-kind.yaml
+patches:
+  - path: pv-hostpath.yaml
+    target: { kind: PersistentVolume }
+  - path: config.yaml
+  - path: api.yaml
+  - path: site.yaml
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: zhiye, namespace: zhiye }

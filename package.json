@@ -1,0 +1,12 @@
+{
+  "name": "zhiye",
+  "private": true,
+  "description": "织页：AI 应用创作平台",
+  "workspaces": [
+    "web",
+    "e2e"
+  ],
+  "engines": {
+    "node": ">=22.19"
+  }
+}

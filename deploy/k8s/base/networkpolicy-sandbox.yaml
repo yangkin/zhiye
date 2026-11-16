@@ -1,0 +1,67 @@
+# 【legacy 回滚专用】以下策略只对 provider=k8s 的沙箱 Pod 生效。
+# 生产默认 provider=opensandbox：每个沙箱的出网策略由 OpenSandbox SDK 下发（默认拒绝 + 放行模型网关域名），
+# 织页不再需要自己的沙箱 NetworkPolicy。保留到验证期结束，回滚路径仍需要它们。
+#
+# 沙箱命名空间：默认拒绝所有入站和出站。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: zhiye-sandbox
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# 所有沙箱 Pod：只能访问 DNS 和模型网关（zhiye-api:8080）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-egress-gateway
+  namespace: zhiye-sandbox
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-sandbox }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: zhiye }
+          podSelector:
+            matchLabels: { app: zhiye-api }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# 导入任务（zhiye/allow-net=1，npm install）：额外允许访问公网，但不能访问内网网段
+# （集群 Pod/Service 网段、VPC、云元数据 100.100.100.200 / 169.254.169.254 都在排除范围内）。
+# 生产有 npm 内网镜像时，把 0.0.0.0/0 换成镜像的 CIDR 并去掉 except（见 overlays/prod）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-egress-npm
+  namespace: zhiye-sandbox
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-sandbox, zhiye/allow-net: "1" }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 80 }

@@ -1,0 +1,4 @@
+# 本地开发：打开故障注入（E2E 用）
+zhiye:
+  dev:
+    faults-enabled: true

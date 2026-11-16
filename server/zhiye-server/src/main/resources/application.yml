@@ -1,0 +1,114 @@
+spring:
+  application:
+    name: zhiye
+  profiles:
+    default: api
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${ZHIYE_DB_URL:jdbc:postgresql://127.0.0.1:5433/zhiye}
+    username: ${ZHIYE_DB_USER:zhiye}
+    password: ${ZHIYE_DB_PASSWORD:zhiye}
+    hikari:
+      maximum-pool-size: 20
+  flyway:
+    enabled: true
+    # 迁移按编号顺序执行；新增迁移请取下一个编号（当前到 V25）
+  # 提示文字（对齐五星AI岛）：i18n/core/messages*.properties，默认中文
+  messages:
+    basename: i18n/core/messages
+    encoding: UTF-8
+    fallback-to-system-locale: false
+  servlet:
+    multipart:
+      max-file-size: 60MB
+      max-request-size: 61MB
+  web:
+    resources:
+      add-mappings: false
+  mvc:
+    async:
+      request-timeout: -1
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8080
+  shutdown: graceful
+  tomcat:
+    max-swallow-size: -1
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{task:-}] %logger{20} - %msg%n"
+  level:
+    org.eclipse.jgit: warn
+
+zhiye:
+  root: ${ZHIYE_ROOT:}
+  public-base-url: http://127.0.0.1:8080
+  site:
+    preview-base: http://127.0.0.1:8083
+    site-scheme: http
+    site-host-suffix: localhost:8083
+  task:
+    concurrency: 4
+    # 不限制任务的总步数：每做 max-agent-turns 步暂停一次，弹出「要继续吗？」，用户点「继续」或说「继续」接着做
+    max-agent-turns: 60
+    continue-wait-minutes: 30
+    # 一段运行（两次「继续」之间）的时限，只防执行环境卡死
+    max-duration-minutes: 60
+    sandbox-max-hours: 8
+    verify-fix-rounds: 3
+    lease-seconds: 30
+  workspace:
+    daily-task-limit: 200
+    max-concurrent-tasks: 1
+    max-apps: 10
+  sandbox:
+    provider: local
+    seatbelt: ${ZHIYE_SEATBELT:true}
+    seatbelt-profile: deploy/sandbox/runner.sb
+    node-binary: ${ZHIYE_NODE_BINARY:${user.home}/.nvm/versions/node/v24.14.1/bin/node}
+    chrome-path: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  runner:
+    script: ${ZHIYE_RUNNER_SCRIPT:runner/src/main.mjs}
+    # Pi 里的 provider 名（写进 models.json），默认沿用 kimi-coding；换 DeepSeek 时设 ZHIYE_MODEL_PROVIDER=deepseek
+    model-provider: ${ZHIYE_MODEL_PROVIDER:kimi-coding}
+    model-id: ${ZHIYE_MODEL_ID:kimi-for-coding}
+  llm:
+    # 网关转发的上游（OpenAI 兼容）：默认 Kimi，可换成 DeepSeek 等
+    upstream-base-url: ${ZHIYE_LLM_BASE_URL:https://api.kimi.com/coding/v1}
+    api-key-env: ${ZHIYE_LLM_KEY_ENV:KIMI_API_KEY}
+    model: ${ZHIYE_LLM_MODEL:kimi-for-coding}
+    provider: ${ZHIYE_MODEL_PROVIDER:kimi-coding}
+  # 五星AI岛：模型列表、默认模型、额度以五星AI岛为准，模型调用走 llm-gateway 的个人路由（X-User-Id / X-Project-Id）。
+  # 关闭时用上面 llm 的统一上游。需要统一登录（zhiye.auth.mode=sso），匿名工作空间不能调用模型。
+  # mock=true：用本服务内置的模拟 openclaw / llm-gateway（/mock/...），外网把整条链路跑通；内网改成真实地址并关掉 mock。
+  fivestar:
+    enabled: ${ZHIYE_FIVESTAR_ENABLED:false}
+    mock: ${ZHIYE_FIVESTAR_MOCK:false}
+    organization-id: ${ZHIYE_FIVESTAR_ORG:0}
+    openclaw-base-url: ${ZHIYE_OPENCLAW_BASE_URL:{self}/mock/openclaw}
+    llm-gateway-base-url: ${ZHIYE_LLM_GATEWAY_URL:{self}/mock/llm-gateway}
+    project-id: zhiye
+    internal-token-env: ZHIYE_OPENCLAW_INTERNAL_TOKEN
+  storage:
+    type: local
+  dev:
+    faults-enabled: ${ZHIYE_DEV_FAULTS:false}
+  # 数据源代理：本地开发允许访问 127.0.0.1；生产在 k8s 配置里关闭，并用 allowed-hosts 限定公司网关
+  sources:
+    allow-loopback: ${ZHIYE_SOURCES_ALLOW_LOOPBACK:true}
+    file: ${ZHIYE_SOURCES_FILE:}
+  # 公司 SkillHub（fivestar-service 的 Skill 市场）：浏览 / 安装 / 发布技能。默认关闭；mock=true 用内置模拟。
+  skillhub:
+    enabled: ${ZHIYE_SKILLHUB_ENABLED:false}
+    mock: ${ZHIYE_SKILLHUB_MOCK:false}
+    base-url: ${ZHIYE_SKILLHUB_URL:}
+    file-base-url: ${ZHIYE_SKILLHUB_FILE_URL:}
+    portal-url: ${ZHIYE_SKILLHUB_PORTAL:}
+    organization-id: ${ZHIYE_SKILLHUB_ORG:0}
+    timeout-seconds: 60

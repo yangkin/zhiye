@@ -1,0 +1,15 @@
+# kind 没有 Ingress 控制器：NodePort 流量的来源是 kind 节点所在的 docker 网络（172.16.0.0/12 内），
+# 用它代替「来自 ingress-nginx 命名空间」。Pod 网段 10.244.0.0/16 不在其中，沙箱 Pod 仍然只能访问 api:8080。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kind-nodeport-ingress
+  namespace: zhiye
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app, operator: In, values: [zhiye-api, zhiye-site] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - ipBlock: { cidr: 172.16.0.0/12 }

@@ -1,0 +1,38 @@
+# kind 本地测试集群：1 个常规节点（控制面，去掉污点后也跑 api/site/postgres）+ 1 个沙箱节点（打标签和污点，
+# 仅供 legacy k8s provider 回滚路径使用；生产默认走公司 OpenSandbox）。
+# 两个节点用 extraMounts 挂同一个宿主机目录到 /var/zhiye-runtime，模拟生产的 NAS（RWX）。
+# 宿主机端口 18080/18083 → NodePort 30080/30083，避开本机开发服务的 8080/8083。
+#   kind create cluster --name zhiye-kind --config deploy/k8s/overlays/kind/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  # kindnet 自 v0.24 起内置 NetworkPolicy 支持（kube-network-policies）
+  disableDefaultCNI: false
+nodes:
+  - role: control-plane
+    labels:
+      zhiye/pool: general
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 18080
+        listenAddress: 127.0.0.1
+      - containerPort: 30083
+        hostPort: 18083
+        listenAddress: 127.0.0.1
+    extraMounts:
+      - hostPath: /private/tmp/zhiye-kind-runtime
+        containerPath: /var/zhiye-runtime
+  - role: worker
+    labels:
+      zhiye/pool: sandbox
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          taints:
+            - key: zhiye/sandbox
+              value: "true"
+              effect: NoSchedule
+    extraMounts:
+      - hostPath: /private/tmp/zhiye-kind-runtime
+        containerPath: /var/zhiye-runtime

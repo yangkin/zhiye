@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+runtime/
+*.log
+.env
+.env.*
+e2e/test-results/
+e2e/playwright-report/
+.DS_Store
+.m2-metis-stub/

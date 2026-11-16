@@ -1,0 +1,113 @@
+# K8s 部署：SPRING_PROFILES_ACTIVE=api,k8s（主服务 + 工作进程）或 site,k8s（预览/站点网关）
+# 集群里的具体值通过 ConfigMap（deploy/k8s/base/configmap.yaml）里的环境变量覆盖。
+server:
+  forward-headers-strategy: framework
+
+spring:
+  datasource:
+    url: ${ZHIYE_DB_URL:jdbc:postgresql://zhiye-postgres.zhiye.svc:5432/zhiye}
+    username: ${ZHIYE_DB_USER:zhiye}
+    password: ${ZHIYE_DB_PASSWORD:}
+
+zhiye:
+  root: ${ZHIYE_ROOT:/opt/zhiye}
+  # 共享 RWX 卷（NAS）挂载点：repos/、workspaces/、agents/、logs/、objects/（本地对象存储时）
+  runtime-dir: ${ZHIYE_RUNTIME_DIR:/var/lib/zhiye/runtime}
+  public-base-url: ${ZHIYE_PUBLIC_BASE_URL:http://127.0.0.1:18080}
+  # 数据源代理：生产不允许访问本机，allowed-hosts 用逗号分隔（例如 apigw.tcl.com,*.csot.tcl.com）
+  sources:
+    allow-loopback: false
+    allowed-hosts: ${ZHIYE_SOURCES_ALLOWED_HOSTS:}
+    file: ${ZHIYE_SOURCES_FILE:}
+  site:
+    preview-base: ${ZHIYE_PREVIEW_BASE:http://127.0.0.1:18083}
+    site-scheme: ${ZHIYE_SITE_SCHEME:http}
+    site-host-suffix: ${ZHIYE_SITE_HOST_SUFFIX:localhost:18083}
+  task:
+    concurrency: ${ZHIYE_TASK_CONCURRENCY:4}
+    # 一段运行（两次「继续」之间）的防卡死时限；任务总步数不限
+    max-duration-minutes: ${ZHIYE_TASK_MAX_MINUTES:60}
+    continue-wait-minutes: ${ZHIYE_TASK_CONTINUE_WAIT_MINUTES:30}
+    # 沙箱存活上限：要覆盖多次「继续」，不能按单段时限算
+    sandbox-max-hours: ${ZHIYE_SANDBOX_MAX_HOURS:8}
+  # 登录：anonymous（免登录）或 sso（平台统一认证，内网）。见 docs/sso.md
+  auth:
+    mode: ${ZHIYE_AUTH_MODE:anonymous}
+    sso:
+      gateway-url: ${ZHIYE_SSO_GATEWAY_URL:http://testmetis.csot.tcl.com}
+      client-id: ${ZHIYE_SSO_CLIENT_ID:SSO-METIS}
+      redirect-url: ${ZHIYE_SSO_REDIRECT_URL:http://127.0.0.1:18080/access_token}
+      secure-cookie: ${ZHIYE_SSO_SECURE_COOKIE:true}
+  storage:
+    type: ${ZHIYE_STORAGE_TYPE:local}
+    s3:
+      endpoint: ${ZHIYE_S3_ENDPOINT:}
+      region: ${ZHIYE_S3_REGION:cn-shenzhen}
+      bucket: ${ZHIYE_S3_BUCKET:zhiye}
+      access-key: ${ZHIYE_S3_ACCESS_KEY:}
+      secret-key: ${ZHIYE_S3_SECRET_KEY:}
+      path-style: ${ZHIYE_S3_PATH_STYLE:false}
+  llm:
+    # runner 在沙箱 Pod 里访问网关用的地址（集群内 Service）
+    gateway-url: ${ZHIYE_GATEWAY_URL:http://zhiye-api.zhiye.svc:8080/llm/v1}
+  sandbox:
+    # api 用公司 OpenSandbox；site 不执行任务，设 ZHIYE_SANDBOX_PROVIDER=local 避免创建 SDK 客户端。
+    # 回滚时把 ZHIYE_SANDBOX_PROVIDER 改成 k8s（自研实现会保留到验证期结束）。
+    provider: ${ZHIYE_SANDBOX_PROVIDER:opensandbox}
+    seatbelt: false
+    opensandbox:
+      # 公司 OpenSandbox Server 地址与 API key（key 只放 Secret，环境变量名固定）
+      domain: ${ZHIYE_OPENSANDBOX_DOMAIN:opensandbox-server.opensandbox-system.svc:80}
+      protocol: ${ZHIYE_OPENSANDBOX_PROTOCOL:http}
+      api-key-env: ZHIYE_OPENSANDBOX_API_KEY
+      image: ${ZHIYE_RUNNER_IMAGE:zhiye-runner:dev}
+      entrypoint: ${ZHIYE_RUNNER_ENTRYPOINT:/opt/zhiye/bin/start-runner.sh}
+      control-port: ${ZHIYE_RUNNER_PORT:8790}
+      workspace-mount: /workspace
+      agent-mount: /agent
+      # 工作进程看到的 NAS 运行时根目录；工作区/agent 目录必须在其下
+      volume-root: ${ZHIYE_RUNTIME_DIR:/var/lib/zhiye/runtime}
+      # OpenSandbox 命名空间里指向同一块 NAS 的 PVC
+      pvc-name: ${ZHIYE_SANDBOX_PVC:zhiye-runtime}
+      gateway-url: ${ZHIYE_GATEWAY_URL:http://zhiye-api.zhiye.svc:8080/llm/v1}
+      npm-registry: ${ZHIYE_NPM_REGISTRY:https://registry.npmmirror.com}
+      chrome-path: ${ZHIYE_CHROME_PATH:/usr/bin/chromium}
+      cpu: ${ZHIYE_SANDBOX_CPU_LIMIT:2}
+      memory: ${ZHIYE_SANDBOX_MEMORY_LIMIT:4Gi}
+      cpu-request: ${ZHIYE_SANDBOX_CPU_REQUEST:2}
+      memory-request: ${ZHIYE_SANDBOX_MEMORY_REQUEST:4Gi}
+      startup-timeout-seconds: ${ZHIYE_SANDBOX_STARTUP_TIMEOUT:120}
+      deadline-margin-seconds: ${ZHIYE_SANDBOX_DEADLINE_MARGIN:300}
+      # 本地 kind 联调时设为 false（集群内 DNS 会被出网 sidecar 拦住）
+      network-policy-enabled: ${ZHIYE_OPENSANDBOX_NETWORK_POLICY:true}
+      reaper-interval-seconds: 60
+      reaper-grace-seconds: 120
+      # 透传给沙箱里 runner 的额外环境变量；为空则不设置
+      extra-env:
+        # 压低模型上下文窗口（如 256000），留空用模型内置窗口
+        ZHIYE_MODEL_CONTEXT_WINDOW: ${ZHIYE_MODEL_CONTEXT_WINDOW:}
+    # 自研 Kubernetes 沙箱（回滚用，验证期结束后删除）
+    k8s:
+      namespace: ${ZHIYE_SANDBOX_NAMESPACE:zhiye-sandbox}
+      image: ${ZHIYE_RUNNER_IMAGE:zhiye-runner:dev}
+      image-pull-policy: ${ZHIYE_RUNNER_PULL_POLICY:IfNotPresent}
+      # gvisor / runv / kata；为空不设置（kind）
+      runtime-class-name: ${ZHIYE_SANDBOX_RUNTIME_CLASS:}
+      pvc-name: ${ZHIYE_SANDBOX_PVC:zhiye-runtime}
+      gateway-url: ${ZHIYE_GATEWAY_URL:http://zhiye-api.zhiye.svc:8080/llm/v1}
+      npm-registry: ${ZHIYE_NPM_REGISTRY:https://registry.npmmirror.com}
+      startup-timeout-seconds: ${ZHIYE_SANDBOX_STARTUP_TIMEOUT:120}
+      resources:
+        cpu-request: ${ZHIYE_SANDBOX_CPU_REQUEST:2}
+        cpu-limit: ${ZHIYE_SANDBOX_CPU_LIMIT:2}
+        memory-request: ${ZHIYE_SANDBOX_MEMORY_REQUEST:4Gi}
+        memory-limit: ${ZHIYE_SANDBOX_MEMORY_LIMIT:4Gi}
+      # 沙箱节点池（键里有 / 时要用 "[...]" 括起来）
+      node-selector:
+        "[zhiye/pool]": sandbox
+      tolerations:
+        - key: zhiye/sandbox
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      reaper-interval-seconds: 60

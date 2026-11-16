@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zhiye
+  labels:
+    app.kubernetes.io/part-of: zhiye
+---
+# 【legacy 回滚专用】沙箱命名空间：只在 zhiye.sandbox.provider=k8s 时使用。
+# 生产默认使用公司 OpenSandbox，沙箱运行在公司的沙箱命名空间里，不由织页创建。
+# 保留到验证期结束，回滚路径仍需要它。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zhiye-sandbox
+  labels:
+    app.kubernetes.io/part-of: zhiye
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

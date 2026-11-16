@@ -1,0 +1,48 @@
+# api / site 只接受来自 Ingress 控制器的流量；api 另外接受 OpenSandbox 沙箱命名空间（占位，生产默认）
+# 和 legacy 沙箱 Pod 访问 8080（模型网关）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-ingress
+  namespace: zhiye
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-api }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # OpenSandbox 沙箱访问模型网关（生产默认路径）。
+    # 占位：把命名空间换成公司 OpenSandbox 的沙箱命名空间；如果公司用标签选择器，改成对应的 matchLabels。
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: opensandbox-sandbox }
+      ports:
+        - { protocol: TCP, port: 8080 }
+    # 【legacy 回滚专用】provider=k8s 的沙箱 Pod 访问模型网关；保留到验证期结束。
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: zhiye-sandbox }
+          podSelector:
+            matchLabels: { app: zhiye-sandbox }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: site-ingress
+  namespace: zhiye
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-site }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports:
+        - { protocol: TCP, port: 8083 }

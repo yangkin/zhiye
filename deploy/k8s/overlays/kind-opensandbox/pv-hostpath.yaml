@@ -1,0 +1,7 @@
+- op: remove
+  path: /spec/nfs
+- op: remove
+  path: /spec/mountOptions
+- op: add
+  path: /spec/hostPath
+  value: { path: /var/zhiye-runtime, type: DirectoryOrCreate }

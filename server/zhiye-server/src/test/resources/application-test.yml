@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5433/zhiye_test
+    # 每组测试属性一个 Spring 上下文（会被缓存），连接池放小，避免全量跑时撑满 PostgreSQL 的连接数
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 1
+  flyway:
+    enabled: true
+server:
+  port: 0
+zhiye:
+  runtime-dir: target/test-runtime
+  runner:
+    script: server/dev/fake-runner.mjs
+  sandbox:
+    seatbelt: false
+  llm:
+    upstream-base-url: "{self}/test-upstream/v1"
+    max-retries: 1
+    retry-backoff-millis: 10
+  task:
+    poll-millis: 100
+    verify-fix-rounds: 2
+  workspace:
+    daily-task-limit: 1000
+  dev:
+    faults-enabled: true
+logging:
+  level:
+    root: warn
+    com.zhiye: info

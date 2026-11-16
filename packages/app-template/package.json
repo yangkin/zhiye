@@ -1,0 +1,32 @@
+{
+  "name": "zhiye-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "react": "~19.2.0",
+    "react-dom": "~19.2.0",
+    "dayjs": "1.11.23",
+    "lucide-react": "1.69.0",
+    "papaparse": "5.7.0",
+    "react-router": "7.18.5",
+    "read-excel-file": "9.3.14",
+    "recharts": "3.10.1",
+    "write-excel-file": "4.1.1"
+  },
+  "devDependencies": {
+    "@types/papaparse": "5.5.2",
+    "@tailwindcss/vite": "~4.1.0",
+    "@types/react": "~19.2.0",
+    "@types/react-dom": "~19.2.0",
+    "@vitejs/plugin-react": "~5.1.0",
+    "tailwindcss": "~4.1.0",
+    "typescript": "~5.9.0",
+    "vite": "7.3.7"
+  }
+}

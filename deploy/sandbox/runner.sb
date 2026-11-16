@@ -1,0 +1,71 @@
+;; 织页 agent-runner 的 macOS Seatbelt 配置（本地开发用，SandboxProvider = local）
+;;
+;; sandbox-exec -f zhiye/deploy/sandbox/runner.sb \
+;;   -D WORKSPACE=<工作区> -D AGENT_DIR=<agent 目录> -D ZHIYE_ROOT=<zhiye 仓库根> \
+;;   -D NODE_DIR=<node 安装目录> -D ALLOW_NET=0|1 \
+;;   <node> zhiye/runner/src/main.mjs
+;;
+;; 所有路径参数必须是真实路径（不含符号链接，例如 /private/var/... 而不是 /var/...），
+;; 否则规则不匹配。
+;;
+;; 策略：默认允许（系统框架、Chrome 需要大量 mach / IOKit 服务，逐条白名单很脆弱），
+;; 然后收紧三件事：
+;;   1. 写：只允许 WORKSPACE、AGENT_DIR、临时目录和少量设备文件
+;;   2. 读：/Users 下（用户主目录）只允许 WORKSPACE、AGENT_DIR、NODE_DIR、
+;;      ZHIYE_ROOT/{runner,packages,runtime/template-cache,runtime/vue-template-cache}；/Volumes 同样禁止
+;;   3. 网络：只能连 127.0.0.1 / localhost（模型网关、冒烟测试服务器）和本机 unix socket；
+;;      ALLOW_NET=1 时放开出网（导入项目 npm install）。只能在 localhost 上监听。
+
+(version 1)
+(allow default)
+
+;; ---------- 写 ----------
+(deny file-write*)
+(allow file-write*
+  (subpath (param "WORKSPACE"))
+  (subpath (param "AGENT_DIR"))
+  (subpath "/private/tmp")
+  (subpath "/private/var/tmp")
+  (subpath "/private/var/folders")
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/dtracehelper")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (regex #"^/dev/tty")
+  (regex #"^/dev/fd/")
+  (regex #"^/dev/ptmx$")
+  (regex #"^/dev/ttys[0-9]+$"))
+
+;; ---------- 读 ----------
+;; 只禁止读文件内容；stat 等元数据读取仍然允许（路径解析需要）。
+(deny file-read-data file-read-xattr
+  (subpath "/Users")
+  (subpath "/Volumes"))
+(allow file-read-data file-read-xattr
+  (subpath (param "WORKSPACE"))
+  (subpath (param "AGENT_DIR"))
+  (subpath (param "NODE_DIR"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runner"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/packages"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runtime/template-cache"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runtime/vue-template-cache"))
+  ;; 读目录列表时会读 /Users 本身
+  (literal "/Users"))
+
+;; ---------- 网络 ----------
+(deny network-outbound)
+(allow network-outbound
+  (remote ip "localhost:*")
+  (remote unix-socket))
+(if (string=? (param "ALLOW_NET") "1")
+  (allow network-outbound)
+  ;; 不出网时也不允许 DNS 查询（mDNSResponder），避免通过 DNS 外传数据
+  (deny network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder"))))
+
+(deny network-bind)
+(allow network-bind (local ip "localhost:*") (local unix-socket))
+(deny network-inbound)
+(allow network-inbound (local ip "localhost:*") (local unix-socket))

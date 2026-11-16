@@ -1,0 +1,70 @@
+# 仅测试用：单副本 PostgreSQL。生产用 RDS（overlays/prod）。
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zhiye-postgres
+  namespace: zhiye
+  labels: { app: zhiye-postgres }
+spec:
+  serviceName: zhiye-postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: zhiye-postgres }
+  template:
+    metadata:
+      labels: { app: zhiye-postgres }
+    spec:
+      nodeSelector: { zhiye/pool: general }
+      containers:
+        - name: postgres
+          image: postgres:16
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: POSTGRES_DB, value: zhiye }
+            - { name: POSTGRES_USER, value: zhiye }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_DB_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: pg, containerPort: 5432 }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "zhiye", "-d", "zhiye"] }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 768Mi }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zhiye-postgres
+  namespace: zhiye
+spec:
+  selector: { app: zhiye-postgres }
+  ports:
+    - { name: pg, port: 5432, targetPort: pg }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: zhiye
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-postgres }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [zhiye-api, zhiye-site] }
+      ports:
+        - { protocol: TCP, port: 5432 }

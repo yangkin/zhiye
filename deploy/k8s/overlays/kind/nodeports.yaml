@@ -1,0 +1,22 @@
+# kind 没有 Ingress 控制器：用 NodePort + kind extraPortMappings 暴露到宿主机 127.0.0.1:18080 / 18083
+apiVersion: v1
+kind: Service
+metadata:
+  name: zhiye-api-nodeport
+  namespace: zhiye
+spec:
+  type: NodePort
+  selector: { app: zhiye-api }
+  ports:
+    - { name: http, port: 8080, targetPort: http, nodePort: 30080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zhiye-site-nodeport
+  namespace: zhiye
+spec:
+  type: NodePort
+  selector: { app: zhiye-site }
+  ports:
+    - { name: http, port: 8083, targetPort: http, nodePort: 30083 }

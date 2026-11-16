@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zhiye-config
+  namespace: zhiye
+data:
+  ZHIYE_DB_URL: jdbc:postgresql://<rds 内网地址>:5432/zhiye?sslmode=require
+  ZHIYE_PUBLIC_BASE_URL: https://zhiye.example.com
+  ZHIYE_PREVIEW_BASE: https://preview.zhiye.example.com
+  ZHIYE_SITE_SCHEME: https
+  ZHIYE_SITE_HOST_SUFFIX: sites.zhiye.example.com
+  ZHIYE_STORAGE_TYPE: s3
+  ZHIYE_S3_ENDPOINT: https://oss-cn-shenzhen-internal.aliyuncs.com
+  ZHIYE_S3_BUCKET: <bucket>
+  ZHIYE_RUNNER_IMAGE: <registry>.cn-shenzhen.cr.aliyuncs.com/zhiye/zhiye-runner:<版本>
+  # 公司 OpenSandbox Server（占位：换成公司环境地址）
+  ZHIYE_OPENSANDBOX_DOMAIN: <opensandbox-server 域名:端口>
+  ZHIYE_OPENSANDBOX_PROTOCOL: https
+  # 公司沙箱命名空间里指向同一 NAS 的 RWX PVC（占位）
+  ZHIYE_SANDBOX_PVC: <共享 RWX PVC 名称>
+  ZHIYE_NPM_REGISTRY: https://<npm 内网镜像>/
+  # 以下仅 legacy k8s provider 回滚时使用（crun 普通运行时，不需要 runtimeClass）
+  ZHIYE_RUNNER_PULL_POLICY: IfNotPresent
+  ZHIYE_SANDBOX_RUNTIME_CLASS: ""

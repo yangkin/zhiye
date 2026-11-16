@@ -1,0 +1,109 @@
+# zhiye-api：REST + SSE + 模型网关 + 任务工作进程（通过 OpenSandbox SDK 创建沙箱）+ 前端静态资源
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zhiye-api
+  namespace: zhiye
+  labels: { app: zhiye-api }
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: { app: zhiye-api }
+  template:
+    metadata:
+      labels: { app: zhiye-api }
+    spec:
+      serviceAccountName: zhiye-api
+      # 任务工作进程优雅退出：等运行中的任务释放（租约过期的任务会被其他实例标记为 worker_lost）
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
+      nodeSelector:
+        zhiye/pool: general
+      containers:
+        - name: api
+          image: zhiye-server:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: "api,k8s" }
+            # 沙箱 provider 由 ConfigMap 的 ZHIYE_SANDBOX_PROVIDER 决定（默认 opensandbox；回滚改为 k8s）
+            - name: KIMI_API_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: KIMI_API_KEY } }
+            # 换供应商时把 ConfigMap 的 ZHIYE_LLM_KEY_ENV 指向这里（可选，不配就继续用上面的 KIMI_API_KEY）
+            - name: DEEPSEEK_API_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: DEEPSEEK_API_KEY, optional: true } }
+            # provider=opensandbox 时必须提供（否则 OpenSandboxConfig 启动时报错）；
+            # 回滚到 k8s 或本地 kind 时可以没有这个键。
+            - name: ZHIYE_OPENSANDBOX_API_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENSANDBOX_API_KEY, optional: true } }
+            - name: ZHIYE_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_DB_PASSWORD } }
+            - name: ZHIYE_S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_S3_ACCESS_KEY, optional: true } }
+            - name: ZHIYE_S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_S3_SECRET_KEY, optional: true } }
+            # 云服务令牌签名密钥；k8s profile 下缺失会启动失败，所以正式部署必须提供
+            - name: ZHIYE_CLOUD_SECRET
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_CLOUD_SECRET, optional: true } }
+            # 五星AI岛开启时按工号取 llm-gateway 路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
+            - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+          envFrom:
+            - configMapRef: { name: zhiye-config }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits: { cpu: "2", memory: 2Gi }
+          startupProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: runtime, mountPath: /var/lib/zhiye/runtime }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: runtime
+          persistentVolumeClaim: { claimName: zhiye-runtime }
+        - name: tmp
+          emptyDir: { sizeLimit: 2Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zhiye-api
+  namespace: zhiye
+  labels: { app: zhiye-api }
+spec:
+  selector: { app: zhiye-api }
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zhiye-api
+  namespace: zhiye
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: zhiye-api }

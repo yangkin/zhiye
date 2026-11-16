@@ -1,0 +1,13 @@
+{
+  "name": "@zhiye/vite-plugin-loc",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "给预览构建注入 data-loc 源码位置标记和织页可视化编辑桥",
+  "main": "index.mjs",
+  "dependencies": {
+    "@babel/parser": "~7.28.0",
+    "magic-string": "~0.30.0",
+    "parse5": "~7.3.0"
+  }
+}

@@ -1,0 +1,72 @@
+# 五星AI岛对接（统一登录、模型与额度）
+
+织页独立部署，不注册到平台服务、不依赖 metis。登录用平台统一认证，模型列表、默认模型和额度以五星AI岛（openclaw-service）为准，
+模型调用走 llm-gateway 上员工自己的路由。外网开发全部用内置模拟接口，内网联调时只改配置。
+
+## 一、整体链路
+
+```
+浏览器 ──(织页会话 cookie + Authorization: Bearer 平台令牌)──▶ 织页 /api
+  ├─ /api/llm/models、/api/llm/quota ──(平台令牌)──▶ openclaw  /{org}/llm/models/providers|default、/{org}/tokenCostDetail/usage
+  └─ 计划 / 生成 / 修改 / 问答 / 小织 / 应用内 AI
+        └─ LlmRouter：工作空间所有者的工号 + 选的模型
+              ├─(服务间令牌)──▶ openclaw  POST /internal/zhiye/llm/route   ← 需要 openclaw 新增，见第三节
+              └─(虚拟密钥 + X-User-Id: 工号 + X-Project-Id: zhiye)──▶ llm-gateway /v1/chat/completions
+```
+
+- 平台令牌：统一认证回调里的 `access_token`，前端存在 localStorage（与平台前端一致），只用于调五星AI岛的用户接口。服务端不保存、不打印。
+  生成的应用在预览 / 发布域名上（`zhiye.site.preview-base` 等），与织页主站不同源，读不到这个令牌——**部署时不能把预览域名配成和主站同源**。
+- 模型路由（含虚拟密钥）只缓存在内存里（默认 10 分钟），不落库、不给浏览器、不进生成的应用。网关返回 401 时清缓存重取。
+- 额度按人：用量计入这个员工在五星AI岛的周额度，和星Claw、星域工作台共用；`X-Project-Id: zhiye` 只用于区分来源。
+- 应用内 AI（发布后的应用里调用 `zhiye.ai`）记在**应用作者**的额度上（访问者可能未登录）。
+- 不设任务级 token 上限。额度用完时（llm-gateway 429 且错误体是额度类）：任务失败为 `PROVIDER_QUOTA`，提示「你在五星AI岛的本周模型额度已用完，X月X日 HH:mm 重置。已做的部分都保留着，额度恢复后点「重试」会接着做。」；问答、润色、小织直接提示。
+- 五星模式要求统一登录（`zhiye.auth.mode=sso`）；匿名工作空间调用模型会返回 `LOGIN_REQUIRED`。
+
+## 二、配置
+
+| 配置 | 说明 | 内网示例 |
+|---|---|---|
+| `zhiye.auth.mode` | `sso` | `sso` |
+| `zhiye.auth.sso.gateway-url` | 平台网关 | `http://testmetis.csot.tcl.com` |
+| `zhiye.auth.sso.redirect-url` | 回调（需在网关登记） | `https://织页域名/access_token` |
+| `zhiye.fivestar.enabled` | 打开五星对接 | `true` |
+| `zhiye.fivestar.mock` | 内置模拟 openclaw / llm-gateway | `false` |
+| `zhiye.fivestar.organization-id` | 平台租户 ID | 按平台实际 |
+| `zhiye.fivestar.openclaw-base-url` | openclaw 根地址（含 context-path） | `http://网关/openclaw-service` |
+| `ZHIYE_OPENCLAW_INTERNAL_TOKEN`（环境变量） | 服务间令牌 | 由 openclaw 团队提供，放 Secret |
+| `zhiye.fivestar.project-id` | `X-Project-Id` | `zhiye` |
+
+外网模拟：`ZHIYE_MOCK_INTRANET=1 bash scripts/dev-up.sh`（profile `mock`，见 `application-mock.yml`）。
+登录页会跳到模拟统一认证，输入任意工号登录；模拟 openclaw 给每人两个供应商三个模型，模拟网关每人每周 500 万 tokens（`ZHIYE_MOCK_QUOTA`），请求转给本机配置的 DeepSeek / Kimi。
+
+## 三、需要 openclaw 团队提供的接口
+
+织页一次生成在后台跑十几分钟、调用几十次模型，不能依赖浏览器，所以需要一个服务间接口按工号取路由
+（openclaw 已有把虚拟密钥下发给 CM 的先例：`CmDefaultModelSyncHelper`）。模拟实现见 `MockFivestarController.route`。
+
+```
+POST /internal/zhiye/llm/route
+X-Internal-Token: <服务间令牌>
+{"userAccount": "工号", "providerId": "11", "modelId": "deepseek-v4-flash"}   // 两个字段都不传 = 用该员工的默认模型
+
+200 {"code":200,"data":{
+  "baseUrl": "http://llm-gateway/v1",
+  "providerModelName": "xclaw-{工号}-{供应商名}/{模型ID}",
+  "virtualKey": "<该员工的虚拟密钥>",
+  "providerId": "11", "providerName": "deepseek", "modelId": "deepseek-v4-flash", "modelName": "DeepSeek V4 Flash"}}
+```
+
+- 模型不存在 / 未启用：`{"code":400,"message":"模型不存在或未启用"}`；员工还没有虚拟密钥时由 openclaw 按现有逻辑补建。
+- 只允许织页的服务间令牌调用；建议限制来源 IP。
+
+## 四、内网联调清单
+
+1. 统一认证：网关登记回调 `https://织页域名/access_token`；用测试账号登录，确认 `/iam/tcl/v1/users/self` 字段（`loginName` 是否就是 openclaw 的 userAccount / 工号）。
+2. 前端令牌：登录后 `/api/llm/models` 能列出该账号在五星AI岛配置的模型，默认模型与五星AI岛一致；令牌过期时返回 `PLATFORM_TOKEN_INVALID`，前端引导重新登录。
+3. organizationId：确认租户 ID，`/{org}/llm/models/providers` 返回 200。
+4. 路由接口：`/internal/zhiye/llm/route` 返回的 `providerModelName` 与 llm-gateway 上的 provider 名一致；用返回的虚拟密钥直接调一次网关。
+5. 用量与额度：织页里生成一个应用，五星AI岛额度页的已用量增长；llm-gateway 日志里 `metadata.x-project-id = zhiye`、`X-User-Id` 归一化后等于工号。
+6. 超额：用小额测试套餐把额度用完，确认 429 错误体里有重置时间，织页提示正确；额度恢复后点「重试」能接着做。
+7. 套餐建档中（quota 404 / ENROLLING）：模型菜单显示「建档中」，不显示 0/0。
+8. 应用内 AI：发布一个用 `zhiye.ai` 的应用，访问者调用后用量记在作者名下。
+9. 预览 / 发布域名与主站不同源（令牌安全前提）。

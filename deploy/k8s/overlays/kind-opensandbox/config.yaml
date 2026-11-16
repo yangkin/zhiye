@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zhiye-config
+  namespace: zhiye
+data:
+  ZHIYE_DB_URL: jdbc:postgresql://zhiye-postgres.zhiye.svc:5432/zhiye
+  ZHIYE_PUBLIC_BASE_URL: http://127.0.0.1:18080
+  ZHIYE_PREVIEW_BASE: http://127.0.0.1:18083
+  ZHIYE_SITE_SCHEME: http
+  ZHIYE_SITE_HOST_SUFFIX: localhost:18083
+  ZHIYE_STORAGE_TYPE: local
+  ZHIYE_S3_ENDPOINT: ""
+  ZHIYE_TASK_CONCURRENCY: "2"
+  # 联调用的模型供应商：改这几行就能在 Kimi / DeepSeek 之间切换
+  ZHIYE_LLM_BASE_URL: https://api.deepseek.com/v1
+  ZHIYE_LLM_KEY_ENV: DEEPSEEK_API_KEY
+  ZHIYE_LLM_MODEL: deepseek-flash
+  ZHIYE_MODEL_PROVIDER: deepseek
+  ZHIYE_MODEL_ID: deepseek-flash
+  # 内置窗口是 1M，联调收到 256k（runner 会按内置定义整份覆盖后只改这个字段）
+  ZHIYE_MODEL_CONTEXT_WINDOW: "256000"
+  # E2E（e2e/tests）靠 /api/dev/faults 注入模型/构建失败，只在本地 kind 打开；生产保持关闭
+  ZHIYE_DEV_FAULTS: "true"
+  ZHIYE_RUNNER_IMAGE: zhiye-runner:dev
+  # 本地 kind 里部署一套 OpenSandbox（see README 7.1），用真实的 opensandbox provider
+  ZHIYE_SANDBOX_PROVIDER: opensandbox
+  ZHIYE_OPENSANDBOX_DOMAIN: opensandbox-server.opensandbox-system.svc:80
+  ZHIYE_OPENSANDBOX_PROTOCOL: http
+  # kind 里出网 sidecar 会拦掉集群 DNS，联调时关掉策略；生产保持 true
+  ZHIYE_OPENSANDBOX_NETWORK_POLICY: "false"
+  ZHIYE_RUNNER_PORT: "8790"
+  ZHIYE_SANDBOX_PVC: zhiye-runtime
+  ZHIYE_RUNNER_PULL_POLICY: Never
+  ZHIYE_SANDBOX_RUNTIME_CLASS: ""
+  # Docker Desktop 资源有限：请求降到 1 CPU / 1.5Gi，上限保持 2 CPU / 3Gi
+  ZHIYE_SANDBOX_CPU_REQUEST: "1"
+  ZHIYE_SANDBOX_CPU_LIMIT: "2"
+  ZHIYE_SANDBOX_MEMORY_REQUEST: 1536Mi
+  ZHIYE_SANDBOX_MEMORY_LIMIT: 3Gi

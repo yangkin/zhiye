@@ -1,0 +1,22 @@
+# kind 用本地文件对象存储：site 挂载共享卷读取 objects/。
+# （LocalFsObjectStore 启动时会创建 objects/ 目录，所以不能只读挂载；生产用 OSS，site 不挂共享卷。）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zhiye-site
+  namespace: zhiye
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: site
+          imagePullPolicy: Never
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { cpu: "1", memory: 768Mi }
+          volumeMounts:
+            - { name: runtime, mountPath: /var/lib/zhiye/runtime }
+      volumes:
+        - name: runtime
+          persistentVolumeClaim: { claimName: zhiye-runtime }

@@ -1,0 +1,24 @@
+# 本地 kind + 自建 OpenSandbox（README 7.1 的完整步骤的一部分）：
+#   - 与 overlays/kind 相同的基础设施（hostPath PV、集群内 PostgreSQL、本地对象存储、NodePort）
+#   - 区别：sandbox provider=opensandbox，走集群里的 OpenSandbox Server + Ingress Gateway
+#   - 另外需要手工准备：OpenSandbox 的 Helm 安装、opensandbox 命名空间的 PV/PVC、
+#     allow-opensandbox-ingress 补丁（本目录 networkpolicy-opensandbox.yaml）
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - postgres.yaml
+  - nodeports.yaml
+  - networkpolicy-kind.yaml
+  - networkpolicy-opensandbox.yaml
+patches:
+  - path: pv-hostpath.yaml
+    target: { kind: PersistentVolume }
+  - path: config.yaml
+  - path: api.yaml
+  - path: site.yaml
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: zhiye, namespace: zhiye }

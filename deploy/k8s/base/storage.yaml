@@ -1,0 +1,70 @@
+# 共享运行时卷（NAS，ReadWriteMany）：repos/、workspaces/、agents/、logs/、objects/ 都在这一块卷上。
+#
+# 生产默认 provider=opensandbox：
+#   - zhiye/zhiye-runtime 挂到 zhiye-api（整卷，/var/lib/zhiye/runtime）和 zhiye-site（只读）
+#   - 沙箱侧使用公司 OpenSandbox 沙箱命名空间里已存在的 RWX PVC（ZHIYE_SANDBOX_PVC），由公司平台管理，
+#     不由本文件创建；它必须指向同一个 NAS 目录。
+#
+# 【legacy 回滚专用】只有 provider=k8s 时才需要 zhiye-sandbox 命名空间里的第二套 PV/PVC：
+#   静态创建两个 PV 指向「同一个」NAS 目录，各自用 claimRef 预绑定到两个命名空间里同名的 PVC zhiye-runtime；
+#   沙箱 Pod 用 subPath 挂 workspaces/{id}、agents/{id}。保留到验证期结束。
+# base 用 NFS 写法（任何 NFS / NAS 都适用）；overlays/kind 改成 hostPath，overlays/prod 改成阿里云 NAS CSI。
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: zhiye-runtime-zhiye
+  labels: { zhiye/volume: runtime }
+spec:
+  capacity: { storage: 100Gi }
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: zhiye-nas-static
+  mountOptions: ["nolock", "proto=tcp", "noresvport", "vers=3"]
+  nfs:
+    server: nas.example.com   # 由 overlay 覆盖
+    path: /zhiye-runtime
+  claimRef:
+    namespace: zhiye
+    name: zhiye-runtime
+---
+# 【legacy 回滚专用】沙箱命名空间的 PV；provider=opensandbox 时不需要。
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: zhiye-runtime-sandbox
+  labels: { zhiye/volume: runtime }
+spec:
+  capacity: { storage: 100Gi }
+  accessModes: ["ReadWriteMany"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: zhiye-nas-static
+  mountOptions: ["nolock", "proto=tcp", "noresvport", "vers=3"]
+  nfs:
+    server: nas.example.com
+    path: /zhiye-runtime
+  claimRef:
+    namespace: zhiye-sandbox
+    name: zhiye-runtime
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zhiye-runtime
+  namespace: zhiye
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: zhiye-nas-static
+  volumeName: zhiye-runtime-zhiye
+  resources: { requests: { storage: 100Gi } }
+---
+# 【legacy 回滚专用】沙箱命名空间的 PVC；provider=opensandbox 时由公司平台提供 PVC。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zhiye-runtime
+  namespace: zhiye-sandbox
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: zhiye-nas-static
+  volumeName: zhiye-runtime-sandbox
+  resources: { requests: { storage: 100Gi } }

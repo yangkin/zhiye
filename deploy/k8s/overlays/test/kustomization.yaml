@@ -1,0 +1,31 @@
+# 测试环境（阿里云 ACK）占位 overlay：与 prod 相同的结构，规模更小。部署前把 <...> 换成真实值。
+#   - 公司 OpenSandbox Server + API key；沙箱命名空间里指向织页 NAS 的 RWX PVC
+#   - NAS 静态卷（api 侧，同 prod）、RDS 测试库、OSS 测试 bucket
+#   - 沙箱节点池和污点只在保留 legacy k8s provider 回滚时需要；crun 是普通运行时
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: zhiye-server
+    newName: <registry>.cn-shenzhen.cr.aliyuncs.com/zhiye/zhiye-server
+    newTag: "<版本>"
+patches:
+  - path: pv-nas.yaml
+    target: { kind: PersistentVolume }
+  # CSI 要求每个 PV 的 volumeHandle 唯一（两个 PV 仍指向同一个 NAS 目录）
+  - patch: '[{"op":"replace","path":"/spec/csi/volumeHandle","value":"zhiye-runtime-zhiye"}]'
+    target: { kind: PersistentVolume, name: zhiye-runtime-zhiye }
+  - patch: '[{"op":"replace","path":"/spec/csi/volumeHandle","value":"zhiye-runtime-sandbox"}]'
+    target: { kind: PersistentVolume, name: zhiye-runtime-sandbox }
+  - path: config.yaml
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: zhiye-api, namespace: zhiye }
+      spec: { replicas: 1 }
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: { name: zhiye-site, namespace: zhiye }
+      spec: { replicas: 1 }

@@ -1,0 +1,14 @@
+{
+  "name": "@zhiye/e2e",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:ui": "playwright test --project=ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57.0",
+    "fflate": "0.8.2"
+  }
+}

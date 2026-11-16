@@ -1,0 +1,48 @@
+# zhiye-api 的 ServiceAccount：只能在 zhiye-sandbox 命名空间里管理 Pod（创建、查看、exec、删除）。
+# 【legacy 回滚专用】下面的 Role / RoleBinding（沙箱 Pod 的 create/exec/delete）只在 provider=k8s 时需要；
+# 生产默认 provider=opensandbox，走 OpenSandbox SDK，不需要 Pod RBAC。保留到验证期结束。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zhiye-api
+  namespace: zhiye
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zhiye-site
+  namespace: zhiye
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zhiye-sandbox-manager
+  namespace: zhiye-sandbox
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  - apiGroups: [""]
+    resources: ["pods/log", "pods/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zhiye-api-sandbox-manager
+  namespace: zhiye-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: zhiye-api
+    namespace: zhiye
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zhiye-sandbox-manager

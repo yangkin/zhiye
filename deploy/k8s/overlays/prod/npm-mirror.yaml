@@ -1,0 +1,17 @@
+# 【legacy 回滚专用】有 npm 内网镜像时，provider=k8s 的导入任务只能访问镜像（替换 base 里的「公网除私网段」）。
+# 生产默认 provider=opensandbox：导入任务的 npm 放行由 OpenSandbox SDK 的 per-sandbox 策略完成
+# （主机名取自 ZHIYE_NPM_REGISTRY），不需要这条 NetworkPolicy。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-egress-npm
+  namespace: zhiye-sandbox
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-sandbox, zhiye/allow-net: "1" }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock: { cidr: <npm 镜像 IP>/32 }
+      ports:
+        - { protocol: TCP, port: 443 }

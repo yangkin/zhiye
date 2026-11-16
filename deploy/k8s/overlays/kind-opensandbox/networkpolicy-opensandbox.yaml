@@ -1,0 +1,23 @@
+# base 里的 api-ingress 只放行 zhiye-sandbox 命名空间；公司 OpenSandbox 的沙箱在
+# opensandbox 命名空间，需要单独放行模型网关端口 8080。
+# 生产环境把 matchLabels 里的命名空间改成公司沙箱实际使用的命名空间。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-opensandbox-ingress
+  namespace: zhiye
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [zhiye-api]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensandbox
+      ports:
+        - port: 8080
+          protocol: TCP

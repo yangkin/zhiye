@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  # namespaces.yaml / rbac.yaml / storage.yaml / networkpolicy-sandbox.yaml 里的沙箱部分，
+  # 以及 networkpolicy-zhiye.yaml 里带 legacy 注释的规则，只在回滚到 provider=k8s 时需要；
+  # 生产默认 provider=opensandbox，验证期结束后删除这些 legacy 条目。
+  - namespaces.yaml
+  - rbac.yaml
+  - storage.yaml
+  - configmap.yaml
+  - api.yaml
+  - site.yaml
+  - ingress.yaml
+  - networkpolicy-sandbox.yaml
+  - networkpolicy-zhiye.yaml
+# Secret zhiye-secrets 不在这里，见 secret.example.yaml

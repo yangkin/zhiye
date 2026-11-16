@@ -1,0 +1,6 @@
+# 预览与站点网关：同一个 jar，profile=site
+server:
+  port: 8083
+spring:
+  flyway:
+    enabled: false

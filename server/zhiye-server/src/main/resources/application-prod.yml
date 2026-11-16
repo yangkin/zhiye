@@ -1,0 +1,6 @@
+zhiye:
+  dev:
+    faults-enabled: false
+  workspace:
+    secure-cookie: true
+    daily-task-limit: 50

@@ -1,0 +1,57 @@
+# application-k8s.yml 的覆盖值（环境变量）。敏感值放 Secret zhiye-secrets，见 secret.example.yaml。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zhiye-config
+  namespace: zhiye
+data:
+  ZHIYE_DB_URL: jdbc:postgresql://zhiye-postgres.zhiye.svc:5432/zhiye
+  ZHIYE_DB_USER: zhiye
+  ZHIYE_RUNTIME_DIR: /var/lib/zhiye/runtime
+  ZHIYE_PUBLIC_BASE_URL: https://zhiye.example.com
+  ZHIYE_PREVIEW_BASE: https://preview.zhiye.example.com
+  ZHIYE_SITE_SCHEME: https
+  ZHIYE_SITE_HOST_SUFFIX: sites.zhiye.example.com
+  ZHIYE_STORAGE_TYPE: s3
+  ZHIYE_S3_ENDPOINT: https://oss-cn-shenzhen-internal.aliyuncs.com
+  ZHIYE_S3_REGION: cn-shenzhen
+  ZHIYE_S3_BUCKET: zhiye
+  ZHIYE_S3_PATH_STYLE: "false"
+  ZHIYE_TASK_CONCURRENCY: "4"
+  # 一段运行的防卡死时限（分钟）；每 60 步弹「要继续吗？」，任务总步数不限
+  ZHIYE_TASK_MAX_MINUTES: "60"
+  ZHIYE_TASK_CONTINUE_WAIT_MINUTES: "30"
+  # 沙箱存活上限（小时），覆盖多次「继续」
+  ZHIYE_SANDBOX_MAX_HOURS: "8"
+  # 登录：anonymous / sso（平台统一认证，见 docs/sso.md）
+  ZHIYE_AUTH_MODE: anonymous
+  ZHIYE_SSO_GATEWAY_URL: http://testmetis.csot.tcl.com
+  ZHIYE_SSO_REDIRECT_URL: https://zhiye.example.com/access_token
+  # 五星AI岛：模型列表 / 默认模型 / 个人额度 / llm-gateway 路由（需要 sso，见 docs/fivestar-integration.md）
+  ZHIYE_FIVESTAR_ENABLED: "false"
+  ZHIYE_FIVESTAR_ORG: "0"
+  ZHIYE_OPENCLAW_BASE_URL: http://openclaw-service.fivestar.svc:9060/openclaw-service
+  ZHIYE_LLM_GATEWAY_URL: http://llm-gateway.example.svc
+  # 沙箱：生产默认使用公司 OpenSandbox；site 进程在 site.yaml 里显式设为 local。
+  # 回滚 legacy k8s provider：把 ZHIYE_SANDBOX_PROVIDER 改成 k8s（见 README 第 10 节）。
+  ZHIYE_SANDBOX_PROVIDER: opensandbox
+  # OpenSandbox Server 地址（默认值来自 application-k8s.yml；实际公司地址由 overlays 覆盖）
+  ZHIYE_OPENSANDBOX_DOMAIN: opensandbox-server.opensandbox-system.svc:80
+  ZHIYE_OPENSANDBOX_PROTOCOL: http
+  # runner 作为 sandbox entrypoint 启动，控制端口 8790
+  ZHIYE_RUNNER_PORT: "8790"
+  ZHIYE_RUNNER_ENTRYPOINT: /opt/zhiye/bin/start-runner.sh
+  ZHIYE_RUNNER_IMAGE: zhiye-runner:dev
+  ZHIYE_GATEWAY_URL: http://zhiye-api.zhiye.svc:8080/llm/v1
+  ZHIYE_SANDBOX_PVC: zhiye-runtime
+  ZHIYE_NPM_REGISTRY: https://registry.npmmirror.com
+  ZHIYE_SANDBOX_STARTUP_TIMEOUT: "120"
+  ZHIYE_SANDBOX_DEADLINE_MARGIN: "300"
+  ZHIYE_SANDBOX_CPU_REQUEST: "2"
+  ZHIYE_SANDBOX_CPU_LIMIT: "2"
+  ZHIYE_SANDBOX_MEMORY_REQUEST: 4Gi
+  ZHIYE_SANDBOX_MEMORY_LIMIT: 4Gi
+  # 以下仅 legacy k8s provider（回滚用，验证期结束后删除）
+  ZHIYE_SANDBOX_NAMESPACE: zhiye-sandbox
+  ZHIYE_RUNNER_PULL_POLICY: IfNotPresent
+  ZHIYE_SANDBOX_RUNTIME_CLASS: ""

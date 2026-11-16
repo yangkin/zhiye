@@ -1,0 +1,94 @@
+# zhiye-site：预览 /p/{buildId}/ 与已发布站点 {slug}.sites.<域名>（公网流量，单独扩缩容）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zhiye-site
+  namespace: zhiye
+  labels: { app: zhiye-site }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: zhiye-site }
+  template:
+    metadata:
+      labels: { app: zhiye-site }
+    spec:
+      serviceAccountName: zhiye-site
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
+      nodeSelector:
+        zhiye/pool: general
+      containers:
+        - name: site
+          image: zhiye-server:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8083 }
+          env:
+            - { name: SPRING_PROFILES_ACTIVE, value: "site,k8s" }
+            # site 不执行任务：显式 local，覆盖 ConfigMap 里的 opensandbox（Deployment env 优先于 envFrom），
+            # 避免构造 OpenSandbox SDK 客户端。
+            - { name: ZHIYE_SANDBOX_PROVIDER, value: local }
+            - name: ZHIYE_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_DB_PASSWORD } }
+            - name: ZHIYE_S3_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_S3_ACCESS_KEY, optional: true } }
+            - name: ZHIYE_S3_SECRET_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_S3_SECRET_KEY, optional: true } }
+            # site 也会构造 CloudService（预览注入令牌），k8s profile 下缺这个密钥会启动失败
+            - name: ZHIYE_CLOUD_SECRET
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_CLOUD_SECRET, optional: true } }
+            # 发布站点的应用内 AI（/__zhiye/ai）按作者工号走五星AI岛路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
+            - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+          envFrom:
+            - configMapRef: { name: zhiye-config }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zhiye-site
+  namespace: zhiye
+  labels: { app: zhiye-site }
+spec:
+  selector: { app: zhiye-site }
+  ports:
+    - { name: http, port: 8083, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: zhiye-site
+  namespace: zhiye
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app: zhiye-site }
