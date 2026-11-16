@@ -24,6 +24,7 @@ test('systemPrompt 包含沙箱存储安全与云函数调用防呆约束', () =
   assert.match(on, /window\.zhiye\.fn\.call/)
   assert.match(on, /幂等/)
   assert.match(on, /loginName/)
+  assert.match(on, /function_write/)
 })
 
 test('smokeTest 在沙箱 iframe 中捕获未加 try/catch 的 localStorage 崩溃', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {

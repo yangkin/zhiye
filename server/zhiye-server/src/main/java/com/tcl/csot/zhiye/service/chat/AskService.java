@@ -32,7 +32,7 @@ import java.util.List;
 @Service
 public class AskService {
     private static final Logger log = LoggerFactory.getLogger(AskService.class);
-    public static final int MAX_CHARS = 2000;
+    public static final int MAX_CHARS = 3000;
     public static final int MAX_SKILLS = com.tcl.csot.zhiye.service.skillhub.SkillRefs.MAX_SKILLS;
     private static final int MAX_TOKENS = 2000;
     /** 会话里可能直接写一整份文档（文件），给足输出长度；思考也算在里面 */

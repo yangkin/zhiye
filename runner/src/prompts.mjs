@@ -110,9 +110,9 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
   改了这个文件后，任务成功时平台会自动补建新表和新列；已有的列不会被删除或改类型。
 - 谁能看、谁能改写在 cloud/policies.json，由平台在接口层执行（页面只做提示，不要自己在前端过滤别人的数据）：
   \`{ "tables": { "表名": { "preset": "own_admin_read", "fields": { "qty": { "required": true, "min": 0 }, "code": { "unique": true }, "status": { "enum": ["待审","通过","驳回"] }, "remark": { "maxLength": 200 } }, "transitions": { "status": [ { "from": "待审", "to": ["通过","驳回"], "by": "admin" } ] } } } }\`
-  - preset：shared 所有人可看可改（默认）/ admin_write 所有人可看、管理员可改 / own 每人只看和改自己的 / own_admin_read 自己提交、管理员看全部 / anon_submit 免登录可提交、管理员查看
+  - preset：shared 所有人可看可改（默认）/ admin_write 所有人可看、管理员可改 / own 每人只看和改自己的 / own_admin_read 自己提交、管理员看全部 / anon_submit 免登录可提交、管理员查看 / function_write 所有人可看、前端禁止增删改，只能由云函数写入（适合流水账本、审计日志）
   - transitions 的 by：anyone / admin / owner（提交人本人）；新记录的状态只能是流程的起点
-  - 除 shared、anon_submit 外的预设都需要员工登录，在总结里提醒用户发布时把访问设置改成「员工登录」
+  - 除 shared、anon_submit、function_write 外的预设都需要员工登录，在总结里提醒用户发布时把访问设置改成「员工登录」
 - 表名/字段名只用小写字母、数字、下划线。未知字段、类型不符、违反规则的写入会被拒绝（返回中文说明，错误对象有 code 和 status），页面要把 error.message 提示给用户；
   status 为 401 表示需要登录，403 表示没有权限。
 - 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），

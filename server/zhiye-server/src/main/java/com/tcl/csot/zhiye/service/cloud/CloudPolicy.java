@@ -50,7 +50,8 @@ public final class CloudPolicy {
                 new Preset("admin_write", "所有人可看，管理员可改", "all", "admin", true),
                 new Preset("own", "每人只看和改自己的", "own", "own", true),
                 new Preset("own_admin_read", "自己提交，管理员看全部", "own_admin", "own_admin", true),
-                new Preset("anon_submit", "免登录可提交，管理员查看", "admin", "insert_all", false)))
+                new Preset("anon_submit", "免登录可提交，管理员查看", "admin", "insert_all", false),
+                new Preset("function_write", "所有人可看，仅云函数可改", "all", "function", false)))
             PRESETS.put(p.id(), p);
     }
     public static final String DEFAULT_PRESET = "shared";
@@ -87,6 +88,7 @@ public final class CloudPolicy {
             case "all", "insert_all" -> { }
             case "admin" -> { requireLogin(who); if (!who.admin()) throw denied("只有管理员能新增"); }
             case "own", "own_admin" -> requireLogin(who);
+            case "function" -> throw denied("只能由云函数写入，请通过应用内操作");
             default -> throw denied("没有写入权限");
         }
     }
@@ -100,6 +102,7 @@ public final class CloudPolicy {
             case "admin" -> { requireLogin(who); if (!who.admin()) throw denied("只有管理员能修改"); yield null; }
             case "own" -> { requireLogin(who); yield "created_by = ?"; }
             case "own_admin" -> { requireLogin(who); yield who.admin() ? null : "created_by = ?"; }
+            case "function" -> throw denied("只能由云函数修改或删除，请通过应用内操作");
             default -> throw denied("没有修改权限");
         };
     }

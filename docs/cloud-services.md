@@ -53,6 +53,7 @@ SDK 是 `web/public/cloud/sdk.js`，由 `SiteFilter` 按需注入（启用了云
   | `own` | 每人只看和改自己的 |
   | `own_admin_read` | 自己提交，管理员看全部 |
   | `anon_submit` | 免登录可提交，管理员查看 |
+  | `function_write` | 所有人可看，仅云函数可写（前端禁止增删改） |
 
   `transitions.by`：`anyone` / `admin` / `owner` / `function`（只允许云函数改）。新记录的状态只能是流程起点。
 - 错误：未知字段、类型不符、违反规则返回 400（中文说明，`code` 如 `CLOUD_BAD_VALUE`）；401 需要登录，403 没有权限。

@@ -20,9 +20,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CloudFunctionTest extends IntegrationTest {
     static final String SCHEMA = "create table requests (title text, status text);\ncreate table approvals (request_id bigint, decision text);";
     static final String POLICIES = """
-            { "tables": { "requests": { "preset": "shared",
+            { "tables": {
+              "requests": { "preset": "shared",
                 "fields": { "status": { "enum": ["待审", "通过", "驳回"] } },
-                "transitions": { "status": [ { "from": "待审", "to": ["通过", "驳回"], "by": "function" } ] } } } }
+                "transitions": { "status": [ { "from": "待审", "to": ["通过", "驳回"], "by": "function" } ] } },
+              "approvals": { "preset": "function_write" } } }
             """;
     static final String APPROVE = """
             import type { Handler } from './zhiye-fn.d.ts'
@@ -87,13 +89,21 @@ class CloudFunctionTest extends IntegrationTest {
         var direct = c.send("PATCH", db + "requests/" + rid, Map.of("status", "通过"), auth);
         assertThat(direct.status()).isEqualTo(403);
         assertThat(direct.body()).contains("应用里的操作");
+        // function_write：前端不能直接写入，只能通过云函数写入
+        var directApproval = c.send("POST", db + "approvals", Map.of("request_id", rid, "decision", "通过"), auth);
+        assertThat(directApproval.status()).isEqualTo(403);
+        assertThat(directApproval.body()).contains("云函数");
 
         // 函数执行：事务里写审批记录 + 改状态，updated_by 记为 fn:approve
         JsonNode r = c.ok(c.send("POST", "/cloud/" + id + "/fn/approve", Map.of("args", Map.of("id", rid)), auth));
         assertThat(r.path("result").path("status").asText()).isEqualTo("通过");
         assertThat(r.path("result").path("updatedBy").asText()).startsWith("fn:approve");
         assertThat(r.path("logs").toString()).contains("审批");
-        assertThat(c.ok(c.send("GET", db + "approvals", null, auth)).path("total").asInt()).isEqualTo(1);
+        JsonNode approvals = c.ok(c.send("GET", db + "approvals", null, auth));
+        assertThat(approvals.path("total").asInt()).isEqualTo(1);
+        String aid = approvals.path("rows").get(0).path("id").asText();
+        assertThat(c.send("PATCH", db + "approvals/" + aid, Map.of("decision", "驳回"), auth).status()).isEqualTo(403);
+        assertThat(c.send("DELETE", db + "approvals/" + aid, null, auth).status()).isEqualTo(403);
 
         // 事务回滚：已经是「通过」再改「驳回」不允许，第一步插入的审批记录也不保留
         var again = c.send("POST", "/cloud/" + id + "/fn/approve", Map.of("args", Map.of("id", rid, "decision", "驳回")), auth);
