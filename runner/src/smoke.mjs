@@ -21,12 +21,53 @@ export function startStaticServer(root) {
     if (file !== base && !file.startsWith(base + path.sep)) { res.writeHead(403).end(); return }
     if (existsSync(file) && statSync(file).isDirectory()) file = path.join(file, 'index.html')
     if (!existsSync(file) || !statSync(file).isFile()) { res.writeHead(404, { 'content-type': 'text/plain' }).end('not found'); return }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store' })
+    res.writeHead(200, { 'content-type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'cache-control': 'no-store', 'access-control-allow-origin': '*' })
     createReadStream(file).pipe(res)
   })
   return new Promise((resolve, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, close: () => new Promise((r) => server.close(() => r())) }))
+  })
+}
+
+async function readRenderState(target) {
+  return target.evaluate(() => {
+    const root = document.getElementById('root') || document.getElementById('app')
+    const visible = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' }
+    const isUi = (el) => !!el.closest('[data-zhiye-editor-ui]')
+    const text = (document.body?.innerText || '').trim()
+    const media = Array.from(document.querySelectorAll('body img, body svg, body canvas, body video, body button, body input')).filter((el) => !isUi(el) && visible(el)).length
+    return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title }
+  })
+}
+
+function checkRenderState(content, requireRoot, errors, prefix = '') {
+  if (!content) return
+  if (requireRoot && (!content.hasRoot || content.rootChildren === 0)) {
+    errors.push(`${prefix}页面是空白的：挂载节点（#root / #app）里没有渲染出任何内容（可能是渲染时报错或 App 返回了空内容）`)
+  } else if (content.textLen === 0 && content.media === 0) {
+    errors.push(`${prefix}页面是空白的：body 里没有可见内容`)
+  }
+}
+
+async function attachPageWatchers(page, { origin, blocked, errors, warnings, prefix = '' }) {
+  await page.route('**/*', (route) => {
+    const u = route.request().url()
+    if (u.startsWith(origin) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue()
+    blocked.add(u)
+    return route.abort('blockedbyclient')
+  })
+  page.on('pageerror', (err) => errors.push(`${prefix}页面脚本错误：${err.message}`))
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return
+    const url = msg.location()?.url || ''
+    const text = msg.text()
+    if ((url && !url.startsWith(origin)) || /ERR_BLOCKED_BY_CLIENT/.test(text)) { warnings.push(`外部资源未加载：${url || text}`); return }
+    errors.push(`${prefix}控制台错误：${text}${url ? `（${url.replace(origin, '')}）` : ''}`)
+  })
+  page.on('response', (res) => {
+    const u = res.url()
+    if (u.startsWith(origin) && res.status() >= 400 && !/\/favicon\.ico$/.test(u)) errors.push(`${prefix}资源加载失败：${u.replace(origin, '')}（HTTP ${res.status()}）`)
   })
 }
 
@@ -63,47 +104,73 @@ export async function smokeTest(dir, { requireRoot = false, chromePath = process
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const page = await ctx.newPage()
     const blocked = new Set()
-    await page.route('**/*', (route) => {
-      const u = route.request().url()
-      if (u.startsWith(origin) || u.startsWith('data:') || u.startsWith('blob:')) return route.continue()
-      blocked.add(u)
-      return route.abort('blockedbyclient')
-    })
-    page.on('pageerror', (err) => errors.push(`页面脚本错误：${err.message}`))
-    page.on('console', (msg) => {
-      if (msg.type() !== 'error') return
-      const url = msg.location()?.url || ''
-      const text = msg.text()
-      if ((url && !url.startsWith(origin)) || /ERR_BLOCKED_BY_CLIENT/.test(text)) { warnings.push(`外部资源未加载：${url || text}`); return }
-      errors.push(`控制台错误：${text}${url ? `（${url.replace(origin, '')}）` : ''}`)
-    })
-    page.on('response', (res) => {
-      const u = res.url()
-      if (u.startsWith(origin) && res.status() >= 400 && !/\/favicon\.ico$/.test(u)) errors.push(`资源加载失败：${u.replace(origin, '')}（HTTP ${res.status()}）`)
-    })
+    await attachPageWatchers(page, { origin, blocked, errors, warnings })
     try {
       await page.goto(origin + '/index.html', { waitUntil: 'load', timeout: timeoutMs })
     } catch (e) {
       errors.push(`页面打开失败：${String(e.message).split('\n')[0]}`)
     }
     await page.waitForTimeout(800)
-    let content = null
     try {
-      content = await page.evaluate(() => {
-        const root = document.getElementById('root') || document.getElementById('app')
-        const visible = (el) => { const r = el.getBoundingClientRect(); const cs = getComputedStyle(el); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' }
-        const isUi = (el) => !!el.closest('[data-zhiye-editor-ui]')
-        const text = (document.body?.innerText || '').trim()
-        const media = Array.from(document.querySelectorAll('body img, body svg, body canvas, body video, body button, body input')).filter((el) => !isUi(el) && visible(el)).length
-        return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title }
-      })
+      checkRenderState(await readRenderState(page), requireRoot, errors)
     } catch (e) {
       errors.push(`无法检查页面内容：${String(e.message).split('\n')[0]}`)
     }
-    if (content) {
-      if (requireRoot && (!content.hasRoot || content.rootChildren === 0)) errors.push('页面是空白的：挂载节点（#root / #app）里没有渲染出任何内容（可能是渲染时报错或 App 返回了空内容）')
-      else if (content.textLen === 0 && content.media === 0) errors.push('页面是空白的：body 里没有可见内容')
+
+    // 多页面 hash 路由巡检：不点击操作按钮，只切换侧边/导航里的 #/ 链接验证不会报错白屏
+    if (requireRoot && errors.length === 0) {
+      try {
+        const hashes = await page.evaluate(() => {
+          const cur = window.location.hash
+          const out = []
+          for (const a of document.querySelectorAll('a[href^="#/"]')) {
+            const h = a.getAttribute('href')
+            if (h && h !== cur && !out.includes(h)) out.push(h)
+            if (out.length >= 5) break
+          }
+          return out
+        })
+        for (const h of hashes) {
+          await page.evaluate((hash) => { window.location.hash = hash }, h)
+          await page.waitForTimeout(200)
+          checkRenderState(await readRenderState(page), requireRoot, errors, `路由 ${h} `)
+        }
+      } catch (e) {
+        errors.push(`路由切换检查失败：${String(e.message).split('\n')[0]}`)
+      }
     }
+
+    // 沙箱 iframe 冒烟：工作台预览使用 sandbox="allow-scripts allow-forms"（禁用 localStorage/sessionStorage）
+    if (errors.length === 0) {
+      const sboxPage = await ctx.newPage()
+      const sboxErrors = []
+      try {
+        await attachPageWatchers(sboxPage, { origin, blocked, errors: sboxErrors, warnings, prefix: '沙箱预览' })
+        await sboxPage.setContent(
+          `<!doctype html><html><body style="margin:0"><iframe sandbox="allow-scripts allow-forms" src="${origin}/index.html" style="width:1280px;height:800px;border:0"></iframe></body></html>`,
+          { waitUntil: 'load', timeout: timeoutMs },
+        )
+        const frame = sboxPage.frames()[1]
+        if (frame) {
+          await frame.waitForLoadState('load', { timeout: timeoutMs }).catch(() => {})
+          await sboxPage.waitForTimeout(600)
+          checkRenderState(await readRenderState(frame), requireRoot, sboxErrors, '沙箱预览')
+        }
+      } catch (e) {
+        sboxErrors.push(`沙箱预览打开失败：${String(e.message).split('\n')[0]}`)
+      } finally {
+        await sboxPage.close().catch(() => {})
+      }
+      if (sboxErrors.length) {
+        const msg = sboxErrors.join('\n')
+        const storageHint = /localStorage|sessionStorage|SecurityError|空白/.test(msg)
+          ? '（工作台预览 iframe 使用 sandbox="allow-scripts allow-forms" 禁用本地存储，请对所有 localStorage / sessionStorage 读写加 try/catch 降级为内存状态）'
+          : ''
+        errors.push(...sboxErrors)
+        if (storageHint) errors.push(storageHint)
+      }
+    }
+
     if (blocked.size) warnings.push(...[...blocked].slice(0, 5).map((u) => `已拦截外部请求：${u}`))
     await ctx.close().catch(() => {})
     const uniq = [...new Set(errors)]

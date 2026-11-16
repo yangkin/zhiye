@@ -9,6 +9,7 @@ ${TODO_RULES}
 - 不要启动开发服务器或任何长期运行的进程（vite、npm run dev、npm start 等）；织页会在你结束后自动构建、校验和预览。
 - 不要修改 node_modules/、.git/、.zhiye/、.env* 和锁文件。
 - 页面里不要引用外部网络资源（CDN 脚本、外链字体、外链图片）；需要图标请用内联 SVG 或 Unicode 字符。
+- **沙箱存储安全**：工作台预览运行在禁用本地存储的沙箱 iframe（无 allow-same-origin）中，直接调用 localStorage / sessionStorage 会抛出 SecurityError 导致白屏。**所有**存储读写（含模块顶层初始化和角色状态）必须封装在 try/catch 里并在失败时静默降级为内存状态。
 - 严格按需求和计划实现：不要擅自增加需求里没有的交互步骤（如二次确认、弹窗、引导页）或改变按钮的行为；需要禁用的按钮使用原生 disabled 属性。
 - 界面文字用中文；页面同时适配桌面和手机；保证按钮、输入框等元素可访问（有清楚的文字或 aria-label）。
 - 用户消息里如果附带了「选中元素」上下文（loc = 文件:行:列），优先修改那个位置对应的源码。
@@ -115,8 +116,10 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
 - 表名/字段名只用小写字母、数字、下划线。未知字段、类型不符、违反规则的写入会被拒绝（返回中文说明，错误对象有 code 和 status），页面要把 error.message 提示给用户；
   status 为 401 表示需要登录，403 表示没有权限。
 - 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），
-  页面用 \`await window.zhiye.fn.call('name', { ... })\` 调用；简单增删改查直接用 zhiye.cloud.db。函数只能用 ctx（db/storage/source/ai/log/user），不能读写文件、读环境变量、访问外网，10 秒超时。
-  只允许函数做的状态变更在 policies.json 的 transitions 里写 \`"by": "function"\`，这样页面绕过函数直接改会被拒绝。写函数前先读内置技能 cloud-functions。`
+  页面**必须真实通过 \`await window.zhiye.fn.call('name', { ... })\` 调用它们**，不能只写云函数文件却在前端算完直写 db；简单增删改查才直接用 zhiye.cloud.db。函数只能用 ctx（db/storage/source/ai/log/user），不能读写文件、读环境变量、访问外网，10 秒超时。
+  云函数里不要假设 \`ctx.user.loginName\` 有特定前缀（预览身份下为 author），若演示角色切换需要做角色校验，请结合 \`ctx.user.admin\` 与显式传入的角色参数判断。
+  只允许函数做的状态变更在 policies.json 的 transitions 里写 \`"by": "function"\`，这样页面绕过函数直接改会被拒绝。写函数前先读内置技能 cloud-functions。
+- 首次演示数据播种（seed）必须幂等并覆盖全部主表与关联业务表（或放在初始化云函数里按表补齐），不要只判断某一张表为空就跳过其余表，避免半途失败后页面长期空白。`
 
 const CLOUD = `
 ## 云服务（这个应用已启用）
@@ -126,7 +129,7 @@ const CLOUD_OFF = `
 ## 云服务（这个应用还没启用）
 - 用户要求「开启云服务 / 存到数据库 / 多人共用一份数据 / 上传附件长期保存」时，先调用 request_confirm 工具（kind 填 cloud，reason 写一句为什么需要），
   由用户在界面上确认；不要自己起服务端或连接别的数据库。
-- 用户确认后工具会返回云服务的用法，按用法设计 cloud/schema.sql 并接入；用户暂不启用时，改用 localStorage 保存，并在总结里说明数据只存在当前浏览器。
+- 用户确认后工具会返回云服务的用法，按用法设计 cloud/schema.sql 并接入；用户暂不启用时，改用带 try/catch 降级的 localStorage 保存，并在总结里说明数据只存在当前浏览器。
 - 需求本身不需要持久化（纯展示、一次性计算、只读数据源）时不要调用。`
 
 export const SCREENSHOT = `
