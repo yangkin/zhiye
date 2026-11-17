@@ -29,9 +29,9 @@ export default function App() {
 
 ## 目录
 - `src/pages/`：每个页面一个文件；`src/components/`：通用组件（Layout、PageHeader、EmptyState、ConfirmButton）；`src/data/`：示例数据；`src/lib/`：纯函数（筛选、统计、格式化）。
-- 共享状态（如设备列表）放一个 `src/store.ts`：用 React context 或简单的模块级 store + `useSyncExternalStore`，并同步到 localStorage，刷新后不丢。
+- 共享状态（如设备列表）放一个 `src/store.ts`：用 React context 或简单的模块级 store + `useSyncExternalStore`，同步到 localStorage 时**必须封装在 `try / catch` 中降级为内存状态**（工作台沙箱预览禁用同源存储，直接访问会抛 `SecurityError` 白屏）。
 
 ## 布局
 - 桌面：左侧 200px 导航（图标用 lucide-react，当前项高亮），右侧内容区；手机：顶部标题栏 + 抽屉菜单。
 - 每个页面顶部：标题 + 一句说明 + 右侧主操作按钮（如「新增设备」）。
-- 列表页：搜索框 + 筛选下拉 + 表格；行操作（查看、编辑、删除）放在最后一列，删除用原生 `confirm()` 二次确认即可。
+- 列表页：搜索框 + 筛选下拉 + 表格；行操作（查看、编辑、删除）放在最后一列，不要调用浏览器原生 `window.confirm()` / `alert()` / `prompt()`（沙箱预览会静默拦截）。

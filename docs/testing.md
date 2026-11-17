@@ -6,7 +6,9 @@
 |---|---|---|---|
 | 前端类型检查 / 构建 | `web/` | — | `cd web && npx tsc --noEmit -p .`；`npm run build -w web` |
 | runner 单测 | `runner/test/*.test.mjs` | `runtime/template-cache`（`dev-up.sh` 会准备） | `cd runner && npm test` |
+| 黄金评测基准（离线 / 在线） | `evals/` | 离线：模板缓存 + Chrome；在线：本地 8080 | `node evals/run-eval.mjs --offline`；`node evals/run-eval.mjs --live` |
 | 服务端集成测试 | `server/zhiye-server/src/test` | PostgreSQL `zhiye_test`（5433）；假上游 / 假统一认证 / 假 runner 都在测试里 | 见下 |
+| 全量 CI 门禁 | `scripts/ci.sh` | PostgreSQL + Node + JDK | `bash scripts/ci.sh` |
 | 功能回归（不调模型） | `e2e/qa-func.mjs` | 本地 8080 / 8083 | `cd e2e && node qa-func.mjs` |
 | 页面布局巡检 | `e2e/layout-audit.mjs` | 本地 8080 | `cd e2e && node layout-audit.mjs /tmp/zhiye-audit` |
 | 端到端（真实模型） | `e2e/tests/*.spec.ts`（Playwright，api / ui 两个项目） | 本地 8080 / 8083 + 模型密钥 | `cd e2e && npx playwright test` |
@@ -53,8 +55,7 @@ mvn -o -q spring-boot:run -pl zhiye-server -Dspring-boot.run.profiles=api,dev,mo
 
 这个实例没有 site 进程，预览区会显示 404，属正常。
 
-## 4. 用例与需求的对应
+## 4. 黄金评测与回归覆盖
 
-- 原型验收清单（`交接资料/01-产品需求与验收清单.md` 第 8 节的 10 个回归场景）：`ui-flows.spec.ts`、`api-core.spec.ts`、`api-tasks.spec.ts`、`api-import.spec.ts` 覆盖。
-- 交互清单逐条状态：`docs/ui-checklist.md`。
-- 最近一次全量结果：`docs/test-report.md`。
+- 核心回归套件：`e2e/tests/ui-flows.spec.ts`、`api-core.spec.ts`、`api-tasks.spec.ts`、`api-import.spec.ts`、`api-cloud.spec.ts`、`ui-timeline.spec.ts`。
+- 12 个黄金业务场景评测集：`evals/cases.json`（覆盖 React CRUD、Recharts 看板、多页哈希路由、云数据库权限、云函数流水账本、应用内 AI、Vue 3 + ECharts、Python CLI 脚本、Skill 技能包、沙箱存储降级安全、390px 移动端适配、多轮增量修改）。在线评测完成后自动在 `runtime/eval-report.json` 输出通过率、平均耗时与 Token 消耗。

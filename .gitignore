@@ -3,6 +3,8 @@ dist/
 target/
 runtime/
 *.log
+*.tsbuildinfo
+.claude/
 .env
 .env.*
 e2e/test-results/

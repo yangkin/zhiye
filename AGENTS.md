@@ -3,14 +3,16 @@
 ## 本地环境
 - 一键启动：`bash scripts/dev-up.sh`（PostgreSQL 5433 → 前端构建 → api 8080 + site 8083）；停止：`bash scripts/dev-down.sh`
 - 只启动数据库：`pg_ctl -D runtime/pg -o "-p 5433 -k /tmp -c listen_addresses=127.0.0.1" -l runtime/pg.log -w start`
-- 目录不是 git 仓库，没有回滚手段：改动要小而可控。
+- 仓库已納入 Git 管理（`main` 分支）并配置了 GitHub Actions（`.github/workflows/ci.yml`）；改动保持小步提交、通过全量测试门禁。
 - 两个模板各有一份依赖缓存：React `packages/app-template` → `runtime/template-cache`，Vue `packages/vue-template` → `runtime/vue-template-cache`。锁文件在 `deploy/docker/{template-cache,vue-template-cache}/package-lock.json`，`dev-up.sh` 发现 package.json 或锁文件变化时用它 `npm ci`，runner 镜像也用同一份。
 - 改模板的 package.json 后重新生成锁文件：空目录放入 package.json，`npm install --package-lock-only --before=<7 天前的日期>`（传递依赖也只取发布满 7 天的版本），拷回 `deploy/docker/...`。新增依赖写死版本号。vite 固定 7.3.7（7.3.6 及以前有安全公告）。
 - 模型上游：`scripts/env.sh` 按 `ZHIYE_MODEL`（kimi / deepseek）设置网关上游、模型和密钥文件；本机选择写在 `runtime/local.env`（目前 `ZHIYE_MODEL=deepseek`，只放非密钥配置，命令行显式设置的变量优先）。DeepSeek 用 `deepseek-flash`（V4.1 Flash，支持图片，Pi 内置 `deepseek/deepseek-flash`），密钥在 `/tmp/claude-501/zhiye-secrets/deepseek.env`（`DEEPSEEK_API_KEY`，`/tmp` 重启电脑会被清掉）。临时切回 Kimi：`ZHIYE_MODEL=kimi bash scripts/dev-up.sh`。
 - 重启服务前先确认没有进行中的任务（用户可能正在用本地环境）：`psql -h 127.0.0.1 -p 5433 -U zhiye -d zhiye -tAc "select id,type from task where status in ('QUEUED','RUNNING')"`，重启会让进行中的任务失败。
 
 ## 验证命令
+- 全量 CI 门禁：`bash scripts/ci.sh`（依次跑 runner 单测、黄金评测离线基线、前端 tsc + 构建、服务端 Maven 测试）
 - runner 单测：`cd runner && npm test`（模板依赖/导入构建的测试会用 `runtime/template-cache/node_modules`）
+- 黄金评测基准（12 个典型场景）：离线检查 `node evals/run-eval.mjs --offline`；在线端到端生成与契约评分 `node evals/run-eval.mjs --live`（报告输出到 `runtime/eval-report.json`）
 - 前端类型检查：`cd web && npx tsc --noEmit -p .`；构建：`npm run build -w web`
 - 服务端是 Maven 多模块（`server/pom.xml` 父工程 = spring-boot-starter-parent，模块 `zhiye-common` / `zhiye-api` / `zhiye-server`，包名 `com.tcl.csot.zhiye`，Java 17）。织页独立部署、不注册到平台服务，**不依赖 metis**；只参照五星AI岛的模块划分、配置和国际化写法。jar 在 `server/zhiye-server/target/zhiye-server.jar`。
 - 服务端测试（需要数据库）：
@@ -75,8 +77,11 @@
 - 访问级别 `public/login/members` 在 `app_site_access`（V16），非 public 需要 `zhiye.auth.mode=sso`；表预设需要身份而访问级别是内网公开时拒绝发布。
 - 云函数用 Deno（`zhiye.functions.deno`，宿主 `packages/fn-runtime/host.ts`）；应用内 AI 走 `AppAiService`（复用上游客户端）。
 
-## 截图自查
-- runner 工具 `screenshot`（`runner/src/screenshot.mjs`，在 `steps.mjs` 注册，`agent.mjs` 的扩展和工具白名单都要有它）；需要 `ZHIYE_CHROME_PATH`，本地是系统 Chrome。runner 镜像设了 `ZHIYE_SMOKE_REQUIRED=1`，浏览器起不来时冒烟测试判失败。
+## 截图自查与视觉质检门禁
+- runner 工具 `screenshot`（`runner/src/screenshot.mjs`，在 `steps.mjs` 注册，`agent.mjs` 的扩展和工具白名单都要有它）；需要 `ZHIYE_CHROME_PATH`，本地是系统 Chrome。模板项目优先通过内存级 Vite Dev Server 直接渲染截图，免去写盘构建产物（`.zhiye/dist-shot`）。
+- 平台校验阶段（`verify.mjs` + `smoke.mjs`）：预览版（`minify: false`）与发布版并行构建；Chromium 冒烟覆盖首屏渲染、多页 `#/` 路由巡检、安全 Tab 与搜索框探活、按钮重叠与死图检查、390px 移动端视口溢出、以及无同源 `sandbox="allow-scripts allow-forms"` iframe 沙箱探活。runner 镜像设了 `ZHIYE_SMOKE_REQUIRED=1`，浏览器起不来时冒烟测试判失败。
+- 校验首轮通过后，`VisualCritiqueService` 基于冒烟采集的真实桌面截图调用多模态模型做一次快速视觉把关（专查严重遮挡、排版坍塌或泄露标记，上游异常时默认 fail-open 放行）。
+- 增量修改（`modify`）上下文增强：`RepoMap.build` 自动注入最近 3 个版本演进摘要与仓库文件/顶层符号索引；`TaskExecutor.recentWorkbenchQa` 自动桥接上一轮任务后的工作台问答记录；`AskService` 保证静态提示词前置以提升 KV Cache 命中率，并对多轮历史执行 `user`/`assistant` 严格交替归一化与字符/Token 双预算裁剪。
 
 ## 会话里的成品判断（文档 vs 应用）
 - 创造页会话（`AskService.CONVERSATION_RULES`，只在没有 appId 时追加）先判断成品：文字材料（技术设计文档、方案、手册、报告等）不建应用，直接输出 `[[file:名称.md]] … [[/file]]` 文件块；明确要「文档网站」才走 `[[build]]`。
@@ -105,12 +110,13 @@
 - **任务不设 token 上限，也不限执行步数**（用户决定）：任务级预算代码已删除；额度以五星AI岛为准。步数只是检查点：runner 每做 `max-agent-turns`（60）步返回 TURN_LIMIT，`TaskExecutor.awaitContinue` 发 `kind=continue` 的确认卡（「继续」/「先到这里」），用户点继续、或在输入框里说话（`POST /api/tasks/{id}/confirm` 带 `text`，或 steer）就在同一个 agent 会话里接着做（`Prompts.keepGoing`），并重新计时；「先到这里」或 `continue-wait-minutes`（30）没回应 → `PAUSED`，重试接着做。`max-duration-minutes`（60）只是一段运行的防卡死时限；沙箱存活上限 `sandbox-max-hours`（8）。上游 402（DeepSeek 余额不足）归 `PROVIDER_QUOTA`。
 
 
-## 文档索引（2026-11-14 补齐）
-- 总体设计 `docs/architecture.md`、能力边界与待办 `docs/capabilities.md`、部署与配置项 `docs/deployment.md`、测试 `docs/testing.md`、最近一次全量结果 `docs/test-report.md`。接口改动先改 `docs/api-contract.md`（末节是继续检查点 / 额度 / 停止回答 / 登录失效）。
+## 文档索引
+- 总体设计 `docs/architecture.md`、能力边界与待办 `docs/capabilities.md`、部署与配置项 `docs/deployment.md`、测试与黄金评测 `docs/testing.md`。接口改动先改 `docs/api-contract.md`（末节是继续检查点 / 额度 / 停止回答 / 登录失效）。
 
 ## 多实例（base 部署 api 2 副本）
 - 不要只靠进程内存传「用户对正在执行的任务的操作」：停止走 `CANCELLING` 状态；确认卡和补充要求在本实例没有这个任务时写 `task_signal`（V25），执行实例的 `TaskWorker.heartbeat` 取走交给 agent（`TaskController.confirm/steer`、测试 `TaskSignalRelayTest`）。新增类似操作照这个做。
-- 会话回答流：停止请求落到别的实例时按数据库判断 `finished`；浏览器断开流时回答所在实例停下并保存**已发出去的**部分（`ConversationStopTest`）。
+- 会话回答流：停止请求落到别的实例时除了按数据库判断 `finished`，还会标记 `conversation_message.stop_requested = true`（V27），流所在实例实时感知并中断流、保存**已发出去的**部分（`ConversationStopTest`）。
+- 跨实例限流：`RateLimitService` 基于 PostgreSQL `rate_limit_hit` 表（V27）对问答、润色、意图识别、应用内 AI 做全局滑动窗口限流。
 - 服务端测试里配置不同的上下文（`@TestPropertySource`）必须用自己的 schema：`spring.datasource.url=…/zhiye_test?currentSchema=ctx_xxx` + `spring.flyway.schemas=ctx_xxx`，否则各上下文的工作进程会领走彼此的任务。
 
 ## 前端约定补充

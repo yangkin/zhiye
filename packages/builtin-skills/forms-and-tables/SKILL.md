@@ -19,4 +19,4 @@ description: 业务表单（录入、编辑、校验）和数据表格（搜索�
 
 ## 数据
 - 主键用 `crypto.randomUUID()`；创建时间、修改时间自动填（dayjs）。
-- 应用启用了云服务时，用 `window.zhiye.cloud.db` 读写；否则保存到 localStorage，并在页面上注明「数据保存在本机浏览器」。
+- 应用启用了云服务时，用 `window.zhiye.cloud.db` 读写；否则保存到 localStorage（**必须用 `try / catch` 包裹并在失败时静默降级为内存状态**，因为工作台预览运行在禁用本地存储的沙箱 iframe 中），并在页面上注明「数据保存在本机浏览器」。

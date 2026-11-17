@@ -51,29 +51,30 @@ server/                          Maven 多模块（父工程 spring-boot-starter
 └── zhiye-server/  com.tcl.csot.zhiye
     ├── controller/              REST / SSE 入口（mock/ 下是外网开发用的模拟统一认证、五星AI岛）
     ├── service/                 按领域分包：app task conversation chat help version repo importer
-    │                            cloud source skillhub template site workspace auth llm dev
+    │                            cloud source skillhub template site workspace auth llm common dev
     ├── repository/              JdbcClient 手写 SQL（不用 ORM）
     ├── entity/                  表行 record
     ├── sandbox/                 SandboxProvider：local / k8s / opensandbox；RunnerSession（HTTP 命令 + SSE）
     ├── client/                  外部调用：UpstreamClient（模型）、OpenclawClient、SsoClient、SkillHub
     ├── filter/                  SsoAuthFilter（登录）、SiteFilter（预览/站点/同源 /__zhiye/*）
     ├── config/ constants/ exception/ handler/ storage/ util/
-    └── resources/db/migration   Flyway V1…V25
-web/        React 19 + TypeScript + Vite + TanStack Query；pages/ 页面，workbench/ 工作台，editor/ 可视化编辑
-runner/     AI 编码代理（Node 22，Pi），verify（tsc / 构建 / Chromium 冒烟）、visual 写回、import
+    └── resources/db/migration   Flyway V1…V27
+web/        React 19 + TypeScript + Vite + TanStack Query；路由按需分包，pages/ 页面，workbench/ 工作台，editor/ 可视化编辑
+runner/     AI 编码代理（Node 22，Pi），verify（tsc / 双路并行构建 / 多视口与沙箱 Chromium 冒烟）、screenshot（内存 Vite Dev Server 免写盘截图）、visual AST 写回、import
 packages/   生成项目的模板（React / Vue / 静态 / 脚本 / 技能）、内置技能、编辑桥、云函数宿主
+evals/      12 个黄金场景的确定性离线校验与在线契约评测基准（run-eval.mjs / score.mjs / cases.json）
 deploy/     Dockerfile、K8s（Kustomize）、macOS 沙箱配置
-e2e/        Playwright 端到端用例与脚本（见 docs/testing.md）
+e2e/        Playwright 端到端用例与页面巡检脚本（见 docs/testing.md）
 ```
 
 ## 4. 核心流程
 
 ### 4.1 从一句话到应用
 
-1. **创造页会话**：`POST /api/conversations/{id}/ask`（SSE）。模型先判断成品是文档还是应用、是否超出能力边界；聊清楚后回答以 `[[build:类型]]` 开头，前端调 `/build` 用整段对话建应用。
-2. **计划任务（plan）**：生成需求文档（Markdown，可编辑）、设计风格、形态（React / Vue / 静态…）。超出单次能力时写「分期计划」，只做第一期。
-3. **生成任务（generate）**：`PREPARING`（检出 git、准备工作区和 agent 目录）→ `RUNNING`（runner 编码，事件实时推到时间线）→ `VERIFYING`（tsc、两次构建（预览版带编辑桥 / 发布版）、Chromium 冒烟；失败自动交回 AI 修，最多 `verify-fix-rounds` 轮）→ `COMMITTING`（JGit 提交、生成版本、产物写入对象存储 `builds/{buildId}/preview|publish`）→ `SUCCEEDED`。
-4. 之后的**修改（modify）**、**可视化保存（visual_save）**、**代码保存（code_save）**、**导入（import）**、**复刻模板（clone）**都是同一套任务机制，只是步骤不同。
+1. **创造页会话**：`POST /api/conversations/{id}/ask`（SSE）。模型先判断成品是文档还是应用、是否超出能力边界；聊清楚后回答以 `[[build:类型]]` 开头，前端调 `/build` 用水位线算法（Water-filling）合成完整对话简报并建应用。
+2. **计划任务（plan）**：生成需求文档（Markdown，支持直接双击或点编辑修改）、设计风格、形态（React / Vue / 静态 / 脚本 / 文档站）。超出单次能力时写「分期计划」，只做第一期。
+3. **生成任务（generate）**：`PREPARING`（检出 git、准备工作区和 agent 目录）→ `RUNNING`（runner 编码，可调用内存 Vite `screenshot` 自查，事件实时推到时间线）→ `VERIFYING`（`tsc`/`vue-tsc` + 路由规范 Lint、预览版免压缩与发布版 `Promise.all` 并行构建、云表 Schema 与 Deno 云函数预编译检查、Chromium 多维冒烟［Hash 路由巡检 / 安全 Tab 与搜索探活 / 按钮碰撞重叠与死图检查 / 390px 移动端视口 / 无同源沙箱 iframe 探活］、以及 `VisualCritiqueService` 多模态首屏视觉门禁；失败自动交回 AI 修，最多 `verify-fix-rounds` 轮）→ `COMMITTING`（JGit 提交、生成版本、产物写入对象存储 `builds/{buildId}/preview|publish`）→ `SUCCEEDED`。
+4. **增量修改（modify）**：自动注入紧凑仓库结构地图（`RepoMap`：最近 3 个版本演进摘要 + 源码文件行数与顶层符号）、工作台最近问答记录（`recentWorkbenchQa`）以及云函数最近报错日志，避免 Agent 从零盲目遍历目录。之后的**可视化保存（visual_save）**、**代码保存（code_save）**、**导入（import）**、**复刻模板（clone）**都是同一套任务机制。
 
 ### 4.2 任务语义
 
@@ -98,12 +99,11 @@ e2e/        Playwright 端到端用例与脚本（见 docs/testing.md）
 
 - **领取与租约**：`TaskWorker` 轮询 `task` 表领取（`lease_owner` + `lease_until`，每 10 秒续约）；实例挂掉 → 租约过期 → 其他实例的回收器把任务标成 `worker_lost`（可重试）。
 - **事件**：`TaskEvents` 把事件写入 `task_event`，SSE 接口从数据库按 seq 推送，所以前端连到哪个实例都能看到完整进度（只有「思考过程」的逐字增量走本机内存，其他实例上按落库批次显示）。
-- **跨实例信号**：
-  - 停止：写 `CANCELLING` 状态，执行任务的实例心跳（1 秒）发现后停止；
-  - 确认卡（启用云服务 / 继续）与补充要求：收到请求的实例不在执行该任务时，写一条 `task_signal`（确认卡按 `confirm:{id}` 去重），执行实例心跳取走后交给 agent。测试 `TaskSignalRelayTest`。
-- **仍是单实例内存的**（多副本时的影响已经处理成可接受的退化）：
-  - 会话回答流：停止请求落在别的实例时按数据库判断；浏览器断开后，回答所在实例停下并保存已显示部分（`ConversationStopTest`）；
-  - 小织、应用内 AI 的限流计数按实例算（N 个副本 ≈ N 倍额度），需要严格限流时改成数据库或 Redis 计数；
+- **跨实例协同（全量通过 PostgreSQL 共享，无单机内存盲区）**：
+  - 停止任务：写 `CANCELLING` 状态，执行任务的实例心跳（1 秒）发现后停止；
+  - 确认卡（启用云服务 / 继续）与补充要求：收到请求的实例不在执行该任务时，写一条 `task_signal`（确认卡按 `confirm:{id}` 去重），执行实例心跳取走后交给 agent。测试 `TaskSignalRelayTest`；
+  - 会话回答流停止：停止请求落到任意实例时同时标记数据库 `conversation_message.stop_requested = true`（V27），流所在实例实时轮询感知并立即中断推送、保存已输出片段（`ConversationStopTest`）；
+  - 跨实例滑动窗口限流：`RateLimitService` 基于 `rate_limit_hit` 表（V27）对问答、润色、意图识别、应用内 AI 执行全局一致的滑动窗口限流；
   - 实时文件视图优先用本机路径，回落到共享卷 `workspaces/{taskId}`。
 
 ## 6. 身份与权限
@@ -122,7 +122,7 @@ e2e/        Playwright 端到端用例与脚本（见 docs/testing.md）
 
 ## 8. 数据库
 
-Flyway 迁移 `V1…V25`，控制面的表：工作空间与应用 `workspace`、`app`、`version`、`build`、`deployment`、`draft`、`checkpoint`、`asset`、`upload`；任务 `task`、`task_event`、`task_token`、`task_signal`、`task_message_queue`、`message`、`model_usage`；会话 `conversation`、`conversation_message`、`conversation_file`、`app_conversation`；登录 `app_user`、`user_session`；站点 `app_site_access`、`site_session`、`site_sso_code`、`app_pageview_daily`；云服务 `app_cloud`、`app_cloud_table`、`app_fn_log`（每个应用的数据另在独立 schema 里）；数据源 `data_source`、`app_data_source`、`data_source_call`；技能与社区 `skill_publication`、`template`、`template_like`；小织 `help_conversation`、`help_message`、`help_feedback`。约定：snake_case 列，JSON 用 jsonb，时间 timestamptz；新表只加迁移，不改老迁移。
+Flyway 迁移 `V1…V27`，控制面的表：工作空间与应用 `workspace`、`app`、`version`、`build`、`deployment`、`draft`、`checkpoint`、`asset`、`upload`；任务 `task`、`task_event`、`task_token`、`task_signal`、`task_message_queue`、`message`、`model_usage`；会话 `conversation`、`conversation_message`（含 `stop_requested`）、`conversation_file`、`app_conversation`；登录 `app_user`、`user_session`；站点 `app_site_access`、`site_session`、`site_sso_code`、`app_pageview_daily`；云服务 `app_cloud`、`app_cloud_table`、`app_fn_log`（每个应用的数据另在独立 schema 里）；数据源 `data_source`、`app_data_source`、`data_source_call`；技能与社区 `skill_publication`、`template`、`template_like`；小织 `help_conversation`、`help_message`、`help_feedback`；限流 `rate_limit_hit`。约定：snake_case 列，JSON 用 jsonb，时间 timestamptz；新表只加迁移，不改老迁移。
 
 ## 9. 安全要点
 
