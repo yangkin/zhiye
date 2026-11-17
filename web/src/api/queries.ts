@@ -5,6 +5,7 @@ export const qk = {
   meta: ['meta'] as const,
   workspace: ['workspace'] as const,
   appsSummary: ['apps', 'summary'] as const,
+  dashboard: (range: string, scope: string) => ['dashboard', range, scope] as const,
   activeTask: ['activeTask'] as const,
   appStats: (id: string, range: string) => ['appStats', id, range] as const,
   apps: (q?: AppListQuery) => (q ? (['apps', q] as const) : (['apps'] as const)),

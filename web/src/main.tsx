@@ -12,6 +12,7 @@ import './styles/app.css';
 import './styles/create.css';
 import './styles/timeline.css';
 import './styles/community.css';
+import './styles/dashboard.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

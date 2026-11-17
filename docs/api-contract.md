@@ -158,7 +158,8 @@ interface Meta {
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/meta` | → `Meta` |
-| GET | `/api/meta/metrics` | → `{ tasks, sandbox, llm }`（任务耗时/成功率/失败码分布、沙箱冷启动、模型延迟与额度错误率） |
+| GET | `/api/meta/metrics` | → `{ scope, instances, tasks, sandbox, llm, trend, alerts }`（PostgreSQL 多实例汇总：任务耗时含 p95、失败码分布、沙箱冷启动、模型延迟/额度错误率、24 小时趋势与阈值告警） |
+| GET | `/api/meta/metrics/prometheus` | → Prometheus 文本格式指标（`zhiye_tasks_total`、`zhiye_sandbox_start_avg_ms`、`zhiye_llm_quota_errors_total`、`zhiye_alerts_active`） |
 | GET | `/api/workspace` | → `{ id, createdAt, recoveryUrl }`，recoveryUrl 形如 `http://127.0.0.1:8080/recover#<token>` |
 | POST | `/api/workspace/recover` | `{ token }` → 设置 cookie 切换到该工作空间 → `{ id }` |
 
@@ -411,3 +412,9 @@ interface Selection {
 | 401 | `PLATFORM_TOKEN_MISSING` / `LOGIN_REQUIRED` | 只提示，不跳转（例如免登录工作空间想用五星模型） |
 
 同一页面同时多个 401 只跳一次。草稿都在 localStorage（`zhiye.draft.*`），重新登录不丢。用例：`e2e/qa-auth-expiry.mjs`。
+
+## 系统全景统计看板（2026-11 新增）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/dashboard?range=today\|7d\|30d\|90d\|all&scope=platform\|workspace` | 全景统计看板：支持全平台管理视角（`platform`，默认）与当前工作空间隔离视角（`workspace`），返回 KPI 环比、转化漏斗、逐日趋势、24h 时段分布、工作空间/用户排行、应用资产、任务效能与失败诊断、模型/Token 成本、版本部署、云服务与云函数、数据源与 AGW、会话/素材/小织反馈、技能生态与社区、运行期监控 |

@@ -608,3 +608,360 @@ export interface TemplateQuery {
   type?: string;
   q?: string;
 }
+
+export type DashboardRange = 'today' | '7d' | '30d' | '90d' | 'all';
+export type DashboardScope = 'platform' | 'workspace';
+
+export interface DashboardCountItem {
+  key: string;
+  count: number;
+  sample?: string;
+}
+
+export interface DashboardDailyRow {
+  date: string;
+  pv: number;
+  appsCreated: number;
+  activeWorkspaces: number;
+  tasksTotal: number;
+  tasksSucceeded: number;
+  tasksFailed: number;
+  versions: number;
+  deployments: number;
+  tokens: number;
+  modelCalls: number;
+  messages: number;
+  fnCalls: number;
+  sourceCalls: number;
+}
+
+export interface DashboardTaskItem {
+  id: string;
+  workspaceId: string;
+  appId: string;
+  appName: string;
+  type: string;
+  status: string;
+  phaseLabel: string;
+  progress: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  tokenUsed: number;
+  durationMs: number;
+  createdAt: string;
+}
+
+export interface DashboardData {
+  meta: {
+    scope: DashboardScope;
+    range: DashboardRange;
+    startDate: string;
+    endDate: string;
+    days: number;
+    generatedAt: string;
+    workspaceId: string;
+    fivestarEnabled: boolean;
+    skillhubEnabled: boolean;
+  };
+  overview: {
+    workspacesTotal: number;
+    workspacesProductive: number;
+    workspacesActiveRange: number;
+    ssoUsersTotal: number;
+    appsTotal: number;
+    appsRange: number;
+    appsPrevRange: number;
+    appsLimit: number;
+    appsUsedInMyWs: number;
+    appsPublished: number;
+    appsFavorite: number;
+    appsDeleted: number;
+    appsReady: number;
+    appsFailed: number;
+    appsStopped: number;
+    appsInProgress: number;
+    pvTotal: number;
+    pvRange: number;
+    pvPrevRange: number;
+    pvToday: number;
+    pvYesterday: number;
+    pvAvgDaily: number;
+    appsWithPv: number;
+    tasksTotal: number;
+    tasksRange: number;
+    tasksPrevRange: number;
+    tasksSucceeded: number;
+    tasksFailed: number;
+    tasksCancelled: number;
+    tasksActive: number;
+    taskSuccessRate: number;
+    taskAvgDurationSec: number;
+    taskP50DurationSec: number;
+    taskP95DurationSec: number;
+    versionsTotal: number;
+    versionsRange: number;
+    deploymentsTotal: number;
+    buildsTotal: number;
+    modelCallsTotal: number;
+    modelCallsRange: number;
+    tokensInput: number;
+    tokensOutput: number;
+    tokensTotal: number;
+    tokensRange: number;
+    tokensPrevRange: number;
+    costTotal: number;
+    conversationsTotal: number;
+    conversationsConverted: number;
+    workbenchMessagesTotal: number;
+    helpMessagesTotal: number;
+    helpFeedbackTotal: number;
+    cloudEnabledApps: number;
+    cloudTablesTotal: number;
+    fnCallsTotal: number;
+    dataSourcesTotal: number;
+    sourceCallsTotal: number;
+    assetsTotal: number;
+    assetsSizeBytes: number;
+    templatesPublished: number;
+    skillhubInstalled: number;
+  };
+  funnel: { key: string; label: string; count: number }[];
+  trends: {
+    daily: DashboardDailyRow[];
+  };
+  hourly: { hour: number; total: number; succeeded: number; failed: number }[];
+  workspaces: {
+    workspaceId: string;
+    ownerName: string;
+    apps: number;
+    published: number;
+    tasks: number;
+    rangeTasks: number;
+    successRate: number;
+    tokens: number;
+    cost: number;
+    pv: number;
+    todayPv: number;
+    lastActiveAt: string | null;
+  }[];
+  apps: {
+    byType: { key: string; count: number; published: number; pv: number }[];
+    byProjectKind: DashboardCountItem[];
+    byPhase: DashboardCountItem[];
+    bySource: DashboardCountItem[];
+    byMode: DashboardCountItem[];
+    byStyle: DashboardCountItem[];
+    topApps: {
+      id: string;
+      workspaceId: string;
+      name: string;
+      type: string;
+      projectKind: string;
+      phase: string;
+      style: string;
+      published: boolean;
+      cloudEnabled: boolean;
+      accessLevel: string;
+      versions: number;
+      tasks: number;
+      tokensUsed: number;
+      totalPv: number;
+      todayPv: number;
+      updatedAt: string;
+    }[];
+  };
+  tasks: {
+    byType: {
+      type: string;
+      total: number;
+      succeeded: number;
+      failed: number;
+      cancelled: number;
+      active: number;
+      successRate: number;
+      avgDurationMs: number;
+      maxDurationMs: number;
+      avgTokens: number;
+    }[];
+    byStatus: DashboardCountItem[];
+    errorCodes: DashboardCountItem[];
+    retries: number;
+    steerCount: number;
+    checkpointsCount: number;
+    eventsCount: number;
+    queue: { pending: number; sent: number; cancelled: number; enableCloudCount: number };
+    activeList: DashboardTaskItem[];
+    recentFailures: DashboardTaskItem[];
+    recentTasks: DashboardTaskItem[];
+  };
+  llm: {
+    totalCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    totalCost: number;
+    byModel: {
+      provider: string;
+      model: string;
+      calls: number;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      avgTokensPerCall: number;
+      cost: number;
+    }[];
+    byTaskType: { taskType: string; calls: number; inputTokens: number; outputTokens: number; totalTokens: number; cost: number }[];
+    byAppModelSetting: DashboardCountItem[];
+    quota: {
+      enabled: boolean;
+      available: boolean;
+      packageName?: string | null;
+      status?: string | null;
+      usedTokens?: number | null;
+      limitTokens?: number | null;
+      remainingTokens?: number | null;
+      resetAt?: string | null;
+    };
+  };
+  versions: {
+    bySource: DashboardCountItem[];
+    byTaskStage: DashboardCountItem[];
+    favoritedCount: number;
+    notedCount: number;
+    restoredCount: number;
+    buildsTotal: number;
+    buildsEditable: number;
+    deploymentsTotal: number;
+    deploymentsSucceeded: number;
+    deploymentsFailed: number;
+    pendingDrafts: number;
+  };
+  cloud: {
+    enabledApps: number;
+    disabledApps: number;
+    tablesCount: number;
+    tablePolicies: DashboardCountItem[];
+    siteAccessLevels: DashboardCountItem[];
+    activeSiteSessions: number;
+    functions: {
+      totalCalls: number;
+      okCalls: number;
+      errorCalls: number;
+      successRate: number;
+      avgDurationMs: number;
+      p95DurationMs: number;
+      byName: { name: string; calls: number; errors: number; avgDurationMs: number }[];
+      recentErrors: { appId: string; appName: string; name: string; error: string | null; durationMs: number; at: string }[];
+    };
+  };
+  dataSources: {
+    workspaceCount: number;
+    platformCount: number;
+    boundAppsCount: number;
+    totalBindings: number;
+    byProvider: DashboardCountItem[];
+    byMethod: DashboardCountItem[];
+    byAuthType: DashboardCountItem[];
+    calls: {
+      totalCalls: number;
+      okCalls: number;
+      errorCalls: number;
+      successRate: number;
+      avgDurationMs: number;
+      byOrigin: { origin: string; calls: number; errors: number }[];
+      topSources: { id: string; key: string; name: string; provider: string; calls: number; errors: number; avgDurationMs: number }[];
+    };
+  };
+  interactions: {
+    conversations: {
+      total: number;
+      convertedToApp: number;
+      conversionRate: number;
+      userMessages: number;
+      assistantMessages: number;
+      thinkingMessages: number;
+      filesTotal: number;
+      fileVersionsTotal: number;
+    };
+    workbench: {
+      totalMessages: number;
+      userMessages: number;
+      assistantMessages: number;
+      systemMessages: number;
+      elementContextMessages: number;
+      skillAttachedMessages: number;
+      assetAttachedMessages: number;
+      steerMessages: number;
+    };
+    assets: {
+      total: number;
+      totalBytes: number;
+      byCategory: { category: string; count: number; bytes: number }[];
+      uploadsTotal: number;
+      uploadsByFormat: DashboardCountItem[];
+    };
+    help: {
+      conversations: number;
+      userQuestions: number;
+      assistantReplies: number;
+      feedbackCount: number;
+      recentFeedbacks: { id: string; workspaceId: string; content: string; createdAt: string }[];
+    };
+  };
+  ecosystem: {
+    skills: {
+      selfBuiltCount: number;
+      builtinCount: number;
+      hubInstalledCount: number;
+      hubInstalledBytes: number;
+      hubInstalledFiles: number;
+      publicationsCount: number;
+      publicationsByReview: DashboardCountItem[];
+      publicationsByVisibility: DashboardCountItem[];
+    };
+    myCommunity: {
+      publishedWorks: number;
+      totalViews: number;
+      totalClones: number;
+      totalLikes: number;
+      likedByMe: number;
+    };
+    platformCommunity: {
+      totalWorks: number;
+      totalViews: number;
+      totalClones: number;
+      totalLikes: number;
+      byAppType: { type: string; count: number; likes: number; clones: number }[];
+      topWorks: { id: string; name: string; appType: string; author: string; views: number; clones: number; likes: number; createdAt: string }[];
+    };
+  };
+  system: {
+    runtime: {
+      tasks?: {
+        total: number;
+        succeeded: number;
+        failed: number;
+        cancelled: number;
+        byType?: Record<string, { count: number; errors: number; avgMs: number; maxMs: number }>;
+        failureCodes?: Record<string, number>;
+      };
+      sandbox?: { count: number; errors: number; avgMs: number; maxMs: number };
+      llm?: { count: number; errors: number; avgMs: number; maxMs: number; retries: number; quotaErrors: number; quotaErrorRate: number };
+    };
+    rateLimits: {
+      hitsLast10Min: number;
+      byBucket: { bucket: string; count: number }[];
+    };
+    taskSignals: { pending: number; consumed: number };
+    platformPulse: {
+      workspaces: number;
+      ssoUsers: number;
+      totalApps: number;
+      publishedApps: number;
+      totalTasks: number;
+      activeTasks: number;
+      totalVersions: number;
+      totalPv: number;
+    };
+  };
+}

@@ -323,8 +323,8 @@ async function probeSafeControls(page, requireRoot, errors) {
 }
 
 /**
- * 面向实盘评测与端到端校验的真实浏览器交互流验证：
- * 验证页面在真实 Chromium 中渲染出预期业务文案，并执行无破坏交互探活。
+ * 面向实盘评测与端到端校验的真实浏览器业务结果验证：
+ * 不仅验证页面渲染和无报错，还通过状态迁移断言校验「新建确实新增记录 / 筛选确实改变列表 / 导出确实生成非空文件」。
  */
 export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHIYE_CHROME_PATH, timeoutMs = 30000 } = {}) {
   if (!chromePath || !existsSync(chromePath)) return { ok: true, skipped: true, detail: '无 Chrome' }
@@ -342,8 +342,55 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
       env: { ...process.env, HOME: process.env.HOME || userDataDir },
     })
     const origin = new URL(url).origin
-    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: true })
     const page = await ctx.newPage()
+    const downloads = []
+    page.on('download', async (dl) => {
+      downloads.push({ filename: dl.suggestedFilename() })
+    })
+    // 在页面脚本运行前注入导出探测钩子（覆盖 Blob + createObjectURL 与 data: 下载链接）
+    await page.addInitScript(() => {
+      window.__zhiyeExports = []
+      const OrigBlob = window.Blob
+      window.Blob = function (parts, opts) {
+        const b = new OrigBlob(parts, opts)
+        try {
+          b.__zhiyePreview = Array.isArray(parts)
+            ? parts.map((p) => (typeof p === 'string' ? p : '')).join('').slice(0, 600)
+            : ''
+        } catch {}
+        return b
+      }
+      window.Blob.prototype = OrigBlob.prototype
+      const origCreateUrl = URL.createObjectURL.bind(URL)
+      URL.createObjectURL = function (obj) {
+        try {
+          window.__zhiyeExports.push({
+            size: obj?.size || 0,
+            type: obj?.type || '',
+            preview: obj?.__zhiyePreview || '',
+          })
+        } catch {}
+        return origCreateUrl(obj)
+      }
+      const origClick = HTMLAnchorElement.prototype.click
+      HTMLAnchorElement.prototype.click = function () {
+        try {
+          const dl = this.getAttribute('download')
+          const href = this.getAttribute('href') || ''
+          if (dl !== null && href.startsWith('data:')) {
+            window.__zhiyeExports.push({
+              size: href.length,
+              type: 'data-uri',
+              filename: dl,
+              preview: decodeURIComponent(href.split(',').slice(1).join(',')).slice(0, 600),
+            })
+          }
+        } catch {}
+        return origClick.apply(this, arguments)
+      }
+    })
+
     await attachPageWatchers(page, { origin, blocked: new Set(), errors, warnings })
     await page.goto(url, { waitUntil: 'load', timeout: timeoutMs })
     await page.waitForTimeout(800)
@@ -352,7 +399,123 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
     for (const txt of flow.expectText || []) {
       if (!bodyText.includes(txt)) errors.push(`浏览器实机页面未渲染预期业务内容：${txt}`)
     }
-    if (flow.probeControls !== false && errors.length === 0) {
+
+    const snapListState = () => page.evaluate(() => {
+      const root = document.getElementById('root') || document.getElementById('app') || document.body
+      const rows = document.querySelectorAll('tbody tr, ul li, ol li, [class*="card"], [class*="item"]').length
+      return { text: (root?.innerText || '').trim(), rows }
+    })
+
+    // 1. 业务结果断言：新建 / 提交表单确实把新记录渲染进列表
+    if (flow.verifyCreate && errors.length === 0) {
+      const marker = typeof flow.verifyCreate === 'string' ? flow.verifyCreate : '验收预约9527'
+      const nonSearchInputSel = 'input:not([type="search"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])'
+      let hasVisibleInput = await page.locator(nonSearchInputSel).first().isVisible({ timeout: 200 }).catch(() => false)
+      if (!hasVisibleInput) {
+        const trigger = page.locator('button').filter({ hasText: /^(新增|新建|创建|添加|预约|登记)/ }).first()
+        if (await trigger.isVisible({ timeout: 300 }).catch(() => false)) {
+          await trigger.click({ timeout: 1500 }).catch(() => {})
+          await page.waitForTimeout(180)
+          hasVisibleInput = await page.locator(nonSearchInputSel).first().isVisible({ timeout: 300 }).catch(() => false)
+        }
+      }
+      if (!hasVisibleInput) {
+        errors.push('未找到可填写的新建表单或触发按钮')
+      } else {
+        const filled = await page.evaluate((m) => {
+          const scope = document.querySelector('[role="dialog"], form') || document
+          const inputs = Array.from(scope.querySelectorAll('input, textarea')).filter((el) => {
+            const r = el.getBoundingClientRect()
+            const cs = getComputedStyle(el)
+            return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !el.disabled && !el.readOnly && el.type !== 'search' && el.type !== 'hidden'
+          })
+          let textCount = 0
+          for (const el of inputs) {
+            const t = (el.type || 'text').toLowerCase()
+            const val = t === 'number' ? '12' : t === 'date' ? '2026-11-18' : t === 'time' ? '10:00' : t === 'email' ? 'test@csot.tcl.com' : m
+            const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+            if (setter) setter.call(el, val)
+            else el.value = val
+            el.dispatchEvent(new Event('input', { bubbles: true }))
+            el.dispatchEvent(new Event('change', { bubbles: true }))
+            if (t === 'text' || el.tagName === 'TEXTAREA' || t === '') textCount++
+          }
+          return textCount
+        }, marker)
+        const submitScope = (await page.locator('[role="dialog"]').first().isVisible({ timeout: 150 }).catch(() => false))
+          ? page.locator('[role="dialog"]').first()
+          : page
+        const submitBtn = submitScope.locator('button[type="submit"], button').filter({ hasText: /^(确认|提交|保存|新增|新建|创建|添加|预约|确定)/ }).first()
+        if (filled === 0 || !(await submitBtn.isVisible({ timeout: 300 }).catch(() => false))) {
+          errors.push('新建表单缺少可提交的输入项或确认按钮')
+        } else {
+          await submitBtn.click({ timeout: 1500 }).catch(() => {})
+          await page.waitForTimeout(220)
+          const afterCreate = await page.evaluate(() => document.body?.innerText || '')
+          if (!afterCreate.includes(marker)) {
+            errors.push('点击新建/提交后页面未新增并展示记录（疑似空壳按钮）')
+          }
+        }
+      }
+    }
+
+    // 2. 业务结果断言：筛选/下拉或搜索确实改变可见列表内容
+    if (flow.verifyFilter && errors.length === 0) {
+      let filterChanged = false
+      const selects = page.locator('select')
+      const selCount = Math.min(2, await selects.count().catch(() => 0))
+      for (let i = 0; i < selCount && !filterChanged; i++) {
+        const sel = selects.nth(i)
+        if (!(await sel.isVisible({ timeout: 200 }).catch(() => false))) continue
+        const vals = await sel.evaluate((el) => Array.from(el.options).filter((o) => !o.disabled).map((o) => o.value)).catch(() => [])
+        if (vals.length >= 2) {
+          const before = await snapListState()
+          await sel.selectOption(vals[1]).catch(() => {})
+          await page.waitForTimeout(150)
+          const after = await snapListState()
+          if (after.text !== before.text || after.items !== before.items || after.rows !== before.rows) filterChanged = true
+          await sel.selectOption(vals[0]).catch(() => {})
+          await page.waitForTimeout(100)
+        }
+      }
+      if (!filterChanged) {
+        const searchInput = page.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="筛选"], input[placeholder*="容量"]').first()
+        if (await searchInput.isVisible({ timeout: 250 }).catch(() => false)) {
+          const before = await snapListState()
+          await searchInput.fill('__ZHIYE_NO_MATCH_999__').catch(() => {})
+          await page.waitForTimeout(150)
+          const after = await snapListState()
+          if (after.text !== before.text || after.rows !== before.rows) filterChanged = true
+          await searchInput.fill('').catch(() => {})
+          await page.waitForTimeout(100)
+        }
+      }
+      if (!filterChanged) {
+        errors.push('筛选或下拉控件交互后页面列表未发生任何变化（疑似空壳筛选）')
+      }
+    }
+
+    // 3. 业务结果断言：导出按钮确实触发非空文件或 Blob 生成
+    if (flow.verifyExport && errors.length === 0) {
+      const beforeExp = await page.evaluate(() => window.__zhiyeExports?.length || 0)
+      const beforeDl = downloads.length
+      const expBtn = page.locator('button, a').filter({ hasText: /导出/ }).first()
+      if (!(await expBtn.isVisible({ timeout: 300 }).catch(() => false))) {
+        errors.push('未找到可点击的「导出」按钮')
+      } else {
+        await expBtn.click({ timeout: 1500 }).catch(() => {})
+        await page.waitForTimeout(250)
+        const exportsAfter = await page.evaluate((idx) => (window.__zhiyeExports || []).slice(idx), beforeExp)
+        const hasDownload = downloads.length > beforeDl
+        const validBlob = exportsAfter.some((e) => Number(e.size) > 0)
+        if (!hasDownload && !validBlob) {
+          errors.push('点击「导出」未产生任何下载文件或非空 Blob 输出（疑似空壳导出）')
+        }
+      }
+    }
+
+    if (flow.probeControls !== false && !flow.verifyCreate && !flow.verifyFilter && errors.length === 0) {
       await probeSafeControls(page, true, errors)
     }
     await ctx.close().catch(() => {})

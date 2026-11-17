@@ -16,6 +16,9 @@ import type {
   SkillHubMarket,
   AppStats,
   AppsSummary,
+  DashboardData,
+  DashboardRange,
+  DashboardScope,
   StatsRange,
   AppDetail,
   AppSummary,
@@ -346,6 +349,8 @@ export const api = {
   ) => request<AppDetail>('/api/apps', { method: 'POST', body: input, idempotencyKey }),
   appsSummary: () => request<AppsSummary>('/api/apps/summary'),
   appStats: (id: string, range: StatsRange) => request<AppStats>(`/api/apps/${enc(id)}/stats` + qs({ range })),
+  dashboard: (range: DashboardRange = '30d', scope: DashboardScope = 'platform') =>
+    request<DashboardData>('/api/dashboard' + qs({ range, scope })),
   getApp: (id: string) => request<AppDetail>(`/api/apps/${enc(id)}`),
   patchApp: (
     id: string,

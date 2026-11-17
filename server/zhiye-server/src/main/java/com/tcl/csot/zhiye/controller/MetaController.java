@@ -70,6 +70,12 @@ public class MetaController {
         return metrics == null ? Map.of() : metrics.snapshot();
     }
 
+    @GetMapping(value = "/meta/metrics/prometheus", produces = "text/plain; version=0.0.4; charset=utf-8")
+    public String metricsPrometheus() {
+        principal.workspaceId();
+        return metrics == null ? "" : metrics.prometheus();
+    }
+
     @GetMapping("/workspace")
     public Map<String, Object> workspace() {
         var ws = workspaces.byId(principal.workspaceId()).orElseThrow(() -> ApiException.notFound("工作空间"));

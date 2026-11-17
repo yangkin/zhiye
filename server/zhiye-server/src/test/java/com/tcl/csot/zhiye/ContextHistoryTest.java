@@ -251,10 +251,28 @@ class ContextHistoryTest extends IntegrationTest {
     void runtimeMetricsEndpointReportsTasksAndLlmStats() {
         Client c = client();
         c.createApp("做一个计数器");
+        // 按最近 1 小时内已有任务样本动态补足失败记录，避免共用测试库中的历史成功记录把失败率稀释到告警阈值以下
+        long existing1h = jdbc.sql("""
+                select count(*) from runtime_metric_event
+                where category = 'task' and created_at >= now() - interval '1 hour'
+                """).query(Long.class).single();
+        long failuresToInsert = Math.max(6L, existing1h + 6L);
+        for (long i = 0; i < failuresToInsert; i++) {
+            jdbc.sql("insert into runtime_metric_event (instance_id, category, name, ok, error_code, duration_ms) values (?, 'task', 'generate', false, 'VERIFY_FAILED', ?)")
+                    .params("pod-" + (i % 2), 1200L + (i % 10) * 100L).update();
+        }
         JsonNode m = c.ok(c.get("/api/meta/metrics"));
-        assertThat(m.at("/tasks/total").asLong()).isGreaterThanOrEqualTo(1L);
-        assertThat(m.has("sandbox")).isTrue();
+        assertThat(m.path("scope").asText()).isEqualTo("cluster");
+        assertThat(m.path("instances").toString()).contains("pod-0").contains("pod-1");
+        assertThat(m.at("/tasks/total").asLong()).isGreaterThanOrEqualTo(failuresToInsert + 1L);
+        assertThat(m.at("/tasks/p95Ms").asLong()).isGreaterThan(0L);
+        assertThat(m.path("trend").isArray()).isTrue();
+        assertThat(m.path("alerts").toString()).contains("TASK_FAILURE_RATE_HIGH");
         assertThat(m.at("/llm/count").asLong()).isGreaterThanOrEqualTo(1L);
+
+        var prom = c.get("/api/meta/metrics/prometheus");
+        assertThat(prom.status()).isEqualTo(200);
+        assertThat(prom.body()).contains("zhiye_tasks_total{status=\"succeeded\"}").contains("zhiye_alerts_active");
     }
 
     @Test
