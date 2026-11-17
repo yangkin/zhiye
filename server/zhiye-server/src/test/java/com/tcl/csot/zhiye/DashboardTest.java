@@ -21,7 +21,12 @@ class DashboardTest extends IntegrationTest {
     @Test
     void platformAndWorkspaceDashboardDimensions() {
         Client c = client();
-        // 空工作空间在 workspace 视角下全部归零，同时 funnel=6 步、hourly=24 小时
+        // 空工作空间在 workspace 视角下全部归零，同时 funnel=6 步、hourly=24 小时；全部时间（range=all）无数据时也不能抛 NPE
+        for (String r : new String[]{"today", "7d", "30d", "90d", "all"}) {
+            JsonNode emptyRange = c.ok(c.get("/api/dashboard?range=" + r + "&scope=workspace"));
+            assertThat(emptyRange.path("meta").path("range").asText()).isEqualTo(r);
+            assertThat(emptyRange.path("overview").path("appsTotal").asLong()).isZero();
+        }
         JsonNode emptyWs = c.ok(c.get("/api/dashboard?range=7d&scope=workspace"));
         assertThat(emptyWs.path("meta").path("scope").asText()).isEqualTo("workspace");
         assertThat(emptyWs.path("meta").path("range").asText()).isEqualTo("7d");
@@ -96,6 +101,10 @@ class DashboardTest extends IntegrationTest {
         assertThat(platform.path("meta").path("scope").asText()).isEqualTo("platform");
         assertThat(platform.path("overview").path("appsTotal").asLong()).isGreaterThanOrEqualTo(1);
         assertThat(platform.path("overview").path("tokensTotal").asLong()).isGreaterThanOrEqualTo(1540);
+        assertThat(platform.path("overview").has("taskP90DurationSec")).isTrue();
+        assertThat(platform.path("agentTelemetry").has("tools")).isTrue();
+        assertThat(platform.path("agentTelemetry").has("verifyChecks")).isTrue();
+        assertThat(platform.path("agentTelemetry").has("eventBreakdown")).isTrue();
         assertThat(platform.path("workspaces").size()).isGreaterThanOrEqualTo(1);
         assertThat(platform.path("tasks").path("recentTasks").toString()).contains(taskId);
     }

@@ -79,6 +79,7 @@ public class DashboardService {
         out.put("workspaces", workspacesSection(wsFilter, startTs, today));
         out.put("apps", appsSection(wsFilter, today));
         out.put("tasks", tasksSection(wsFilter));
+        out.put("agentTelemetry", agentTelemetrySection(wsFilter));
         out.put("llm", llmSection(wsFilter, platformToken));
         out.put("versions", versionsSection(wsFilter));
         out.put("cloud", cloudSection(wsFilter));
@@ -97,7 +98,7 @@ public class DashboardService {
             case "90d" -> today.minusDays(89);
             case "all" -> {
                 LocalDate first = today;
-                for (LocalDate candidate : List.of(
+                for (LocalDate candidate : Arrays.asList(
                         minDate("select min(created_at) from app where (?::text is null or workspace_id = ?) and deleted_at is null", wsFilter),
                         minDate("select min(created_at) from task where (?::text is null or workspace_id = ?)", wsFilter),
                         minLocalDate("""
@@ -246,6 +247,7 @@ public class DashboardService {
                   count(*) filter (where status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')) as active,
                   coalesce(avg(extract(epoch from (finished_at - started_at))) filter (where started_at is not null and finished_at is not null and finished_at >= started_at), 0) as avg_sec,
                   coalesce(percentile_cont(0.50) within group (order by extract(epoch from (finished_at - started_at))) filter (where started_at is not null and finished_at is not null and finished_at >= started_at), 0) as p50_sec,
+                  coalesce(percentile_cont(0.90) within group (order by extract(epoch from (finished_at - started_at))) filter (where started_at is not null and finished_at is not null and finished_at >= started_at), 0) as p90_sec,
                   coalesce(percentile_cont(0.95) within group (order by extract(epoch from (finished_at - started_at))) filter (where started_at is not null and finished_at is not null and finished_at >= started_at), 0) as p95_sec
                 from task where (?::text is null or workspace_id = ?)
                 """).params(startTs, prevStartTs, startTs, wsFilter, wsFilter).query((rs, i) -> {
@@ -265,6 +267,7 @@ public class DashboardService {
             tm.put("taskSuccessRate", rate);
             tm.put("taskAvgDurationSec", round1(rs.getDouble("avg_sec")));
             tm.put("taskP50DurationSec", round1(rs.getDouble("p50_sec")));
+            tm.put("taskP90DurationSec", round1(rs.getDouble("p90_sec")));
             tm.put("taskP95DurationSec", round1(rs.getDouble("p95_sec")));
             return tm;
         }).single();
@@ -444,15 +447,20 @@ public class DashboardService {
                 """, wsFilter, startTs);
 
         Map<LocalDate, long[]> llmByDay = new HashMap<>();
+        Map<LocalDate, Double> costByDay = new HashMap<>();
         jdbc.sql("""
                 select (mu.created_at at time zone 'Asia/Shanghai')::date as d,
                   coalesce(sum(mu.input_tokens + mu.output_tokens), 0) as tok,
-                  count(*) as calls
+                  count(*) as calls,
+                  coalesce(sum(mu.cost), 0) as cost
                 from model_usage mu join task t on t.id = mu.task_id
                 where (?::text is null or t.workspace_id = ?) and mu.created_at >= ?
                 group by 1
                 """).params(wsFilter, wsFilter, startTs).query((rs, i) -> {
-            llmByDay.put(rs.getObject("d", LocalDate.class), new long[]{rs.getLong("tok"), rs.getLong("calls")});
+            LocalDate day = rs.getObject("d", LocalDate.class);
+            llmByDay.put(day, new long[]{rs.getLong("tok"), rs.getLong("calls")});
+            BigDecimal c = rs.getBigDecimal("cost");
+            costByDay.put(day, c == null ? 0.0 : c.setScale(4, RoundingMode.HALF_UP).doubleValue());
             return null;
         }).list();
 
@@ -506,6 +514,7 @@ public class DashboardService {
             row.put("deployments", deploymentsByDay.getOrDefault(d, 0L));
             row.put("tokens", lm[0]);
             row.put("modelCalls", lm[1]);
+            row.put("cost", costByDay.getOrDefault(d, 0.0));
             row.put("messages", wbMsgByDay.getOrDefault(d, 0L) + convMsgByDay.getOrDefault(d, 0L));
             row.put("fnCalls", fnByDay.getOrDefault(d, 0L));
             row.put("sourceCalls", srcByDay.getOrDefault(d, 0L));
@@ -806,6 +815,86 @@ public class DashboardService {
             r.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
             return r;
         }).list();
+    }
+
+    /** Agent 工具调用、质检门禁（类型/构建/冒烟/视觉）与确认卡遥测统计 */
+    private Map<String, Object> agentTelemetrySection(String wsFilter) {
+        Map<String, Object> m = new LinkedHashMap<>();
+
+        m.put("tools", jdbc.sql("""
+                select coalesce(nullif(te.payload->>'name', ''), 'unknown') as tool,
+                  count(*) as calls,
+                  count(*) filter (where (te.payload->>'ok')::boolean = false) as failed
+                from task_event te
+                join task t on t.id = te.task_id
+                where (?::text is null or t.workspace_id = ?)
+                  and te.type = 'tool'
+                  and te.payload->>'state' = 'end'
+                group by 1 order by calls desc
+                """).params(wsFilter, wsFilter).query((rs, i) -> {
+            long calls = rs.getLong("calls");
+            long failed = rs.getLong("failed");
+            long passed = Math.max(0, calls - failed);
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("tool", rs.getString("tool"));
+            r.put("calls", calls);
+            r.put("failed", failed);
+            r.put("passRate", calls == 0 ? 0.0 : round1((double) passed * 100.0 / calls));
+            return r;
+        }).list());
+
+        m.put("verifyChecks", jdbc.sql("""
+                select coalesce(nullif(c->>'name', ''), '未命名检查') as name,
+                  count(*) as total,
+                  count(*) filter (where (c->>'ok')::boolean = true) as passed,
+                  count(*) filter (where (c->>'ok')::boolean = false) as failed
+                from task_event te
+                join task t on t.id = te.task_id,
+                jsonb_array_elements(coalesce(te.payload->'checks', '[]'::jsonb)) as c
+                where (?::text is null or t.workspace_id = ?) and te.type = 'verify'
+                group by 1 order by total desc
+                """).params(wsFilter, wsFilter).query((rs, i) -> {
+            long total = rs.getLong("total");
+            long passed = rs.getLong("passed");
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("name", rs.getString("name"));
+            r.put("total", total);
+            r.put("passed", passed);
+            r.put("failed", rs.getLong("failed"));
+            r.put("passRate", total == 0 ? 0.0 : round1((double) passed * 100.0 / total));
+            return r;
+        }).list());
+
+        m.put("confirms", jdbc.sql("""
+                select coalesce(nullif(te.payload->>'kind', ''), 'other') as kind,
+                  coalesce(nullif(te.payload->>'state', ''), 'unknown') as state,
+                  count(*) as cnt
+                from task_event te
+                join task t on t.id = te.task_id
+                where (?::text is null or t.workspace_id = ?) and te.type = 'confirm'
+                group by 1, 2 order by cnt desc
+                """).params(wsFilter, wsFilter).query((rs, i) -> Map.<String, Object>of(
+                "kind", rs.getString("kind"),
+                "state", rs.getString("state"),
+                "count", rs.getLong("cnt")
+        )).list());
+
+        m.put("eventBreakdown", jdbc.sql("""
+                select
+                  count(*) filter (where te.type = 'thinking') as thinking_cnt,
+                  count(*) filter (where te.type = 'todo') as todo_cnt,
+                  count(*) filter (where te.type = 'steer') as steer_cnt,
+                  count(*) filter (where te.type = 'verify') as verify_cnt
+                from task_event te join task t on t.id = te.task_id
+                where (?::text is null or t.workspace_id = ?)
+                """).params(wsFilter, wsFilter).query((rs, i) -> Map.of(
+                "thinking", rs.getLong("thinking_cnt"),
+                "todo", rs.getLong("todo_cnt"),
+                "steer", rs.getLong("steer_cnt"),
+                "verify", rs.getLong("verify_cnt")
+        )).single());
+
+        return m;
     }
 
     private Map<String, Object> llmSection(String wsFilter, String platformToken) {

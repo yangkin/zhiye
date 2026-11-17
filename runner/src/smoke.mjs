@@ -1,6 +1,6 @@
 // 冒烟测试：127.0.0.1 随机端口的静态文件服务器 + playwright-core 驱动系统 Chrome（无头）。
 import http from 'node:http'
-import { createReadStream, existsSync, statSync, mkdtempSync, rmSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { log } from './util.mjs'
@@ -346,18 +346,42 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
     const page = await ctx.newPage()
     const downloads = []
     page.on('download', async (dl) => {
-      downloads.push({ filename: dl.suggestedFilename() })
+      const entry = { filename: dl.suggestedFilename() || '', size: 0, text: '', isBinaryZip: false }
+      try {
+        const p = await dl.path()
+        if (p && existsSync(p)) {
+          const buf = readFileSync(p)
+          entry.size = buf.length
+          entry.isBinaryZip = buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04
+          entry.text = buf.subarray(0, 4096).toString('utf8')
+        }
+      } catch {}
+      downloads.push(entry)
     })
     // 在页面脚本运行前注入导出探测钩子（覆盖 Blob + createObjectURL 与 data: 下载链接）
     await page.addInitScript(() => {
       window.__zhiyeExports = []
+      const previewParts = (parts) => {
+        if (!Array.isArray(parts)) return { text: '', isBinaryZip: false }
+        let isBinaryZip = false
+        const chunks = []
+        for (const p of parts) {
+          if (typeof p === 'string') chunks.push(p)
+          else if (ArrayBuffer.isView(p) || p instanceof ArrayBuffer) {
+            const bytes = ArrayBuffer.isView(p) ? new Uint8Array(p.buffer, p.byteOffset, p.byteLength) : new Uint8Array(p)
+            if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) isBinaryZip = true
+            try { chunks.push(new TextDecoder().decode(bytes.subarray(0, 2048))) } catch {}
+          }
+        }
+        return { text: chunks.join('').slice(0, 2048), isBinaryZip }
+      }
       const OrigBlob = window.Blob
       window.Blob = function (parts, opts) {
         const b = new OrigBlob(parts, opts)
         try {
-          b.__zhiyePreview = Array.isArray(parts)
-            ? parts.map((p) => (typeof p === 'string' ? p : '')).join('').slice(0, 600)
-            : ''
+          const meta = previewParts(parts)
+          b.__zhiyePreview = meta.text
+          b.__zhiyeIsZip = meta.isBinaryZip
         } catch {}
         return b
       }
@@ -369,6 +393,7 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
             size: obj?.size || 0,
             type: obj?.type || '',
             preview: obj?.__zhiyePreview || '',
+            isBinaryZip: Boolean(obj?.__zhiyeIsZip),
           })
         } catch {}
         return origCreateUrl(obj)
@@ -379,11 +404,13 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
           const dl = this.getAttribute('download')
           const href = this.getAttribute('href') || ''
           if (dl !== null && href.startsWith('data:')) {
+            const decoded = decodeURIComponent(href.split(',').slice(1).join(','))
             window.__zhiyeExports.push({
-              size: href.length,
+              size: decoded.length,
               type: 'data-uri',
               filename: dl,
-              preview: decodeURIComponent(href.split(',').slice(1).join(',')).slice(0, 600),
+              preview: decoded.slice(0, 2048),
+              isBinaryZip: false,
             })
           }
         } catch {}
@@ -400,13 +427,49 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
       if (!bodyText.includes(txt)) errors.push(`浏览器实机页面未渲染预期业务内容：${txt}`)
     }
 
-    const snapListState = () => page.evaluate(() => {
-      const root = document.getElementById('root') || document.getElementById('app') || document.body
-      const rows = document.querySelectorAll('tbody tr, ul li, ol li, [class*="card"], [class*="item"]').length
-      return { text: (root?.innerText || '').trim(), rows }
+    const snapDataView = () => page.evaluate(() => {
+      const excludedSel = 'nav, header, form, [role="dialog"], [role="alert"], [class*="toast"], [class*="alert"], [class*="notice"], [class*="hint"], [class*="status"], [class*="tip"]'
+      const isVisible = (el) => {
+        if (!el || el.closest(excludedSel)) return false
+        const r = el.getBoundingClientRect()
+        const cs = getComputedStyle(el)
+        return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden'
+      }
+      const isPlaceholder = (t) => !t || /^(暂无|无记录|无数据|空列表|没有|empty|no data)/i.test(t)
+      const semantic = Array.from(document.querySelectorAll('tbody tr, [role="row"], ul:not(nav ul):not(header ul) > li, ol:not(nav ol):not(header ol) > li, [role="listitem"]'))
+        .filter((el) => !el.querySelector('th') && isVisible(el))
+      let nodes = semantic
+      if (nodes.length === 0) {
+        const candidates = Array.from(document.querySelectorAll('[class*="card"], [class*="item"], [class*="record"], [class*="booking"]'))
+        nodes = candidates.filter((el) =>
+          isVisible(el)
+          && !el.querySelector('form, input, select, textarea')
+          && !el.querySelector('[class*="card"], [class*="item"], [class*="record"], [class*="booking"]')
+        )
+      }
+      const rowTexts = nodes.map((el) => (el.innerText || '').trim()).filter((t) => !isPlaceholder(t))
+      const chartSig = Array.from(document.querySelectorAll('svg'))
+        .filter((s) => { const r = s.getBoundingClientRect(); return r.width > 80 && r.height > 40 })
+        .map((s) => `${(s.innerHTML || '').length}:${(s.textContent || '').trim()}`)
+        .join('|')
+      const headerTexts = Array.from(document.querySelectorAll('thead th, table th')).filter(isVisible).map((el) => (el.innerText || '').trim())
+      const tokenSource = [...headerTexts, ...rowTexts]
+      const tokens = []
+      const seen = new Set()
+      for (const s of tokenSource) {
+        for (const part of s.split(/[\s,，;；:：()（）\[\]{}<>|/]+/)) {
+          const tok = part.trim()
+          if (tok.length >= 2 && tok.length <= 24 && !seen.has(tok)) {
+            seen.add(tok)
+            tokens.push(tok)
+          }
+        }
+      }
+      return { rowTexts, chartSig, tokens }
     })
 
-    // 1. 业务结果断言：新建 / 提交表单确实把新记录渲染进列表
+    let createdMarker = ''
+    // 1. 业务结果断言：新建 / 提交表单必须在数据列表/表格/卡片区真实新增并渲染包含唯一标识的记录（仅弹出“提交成功”提示将被拦截）
     if (flow.verifyCreate && errors.length === 0) {
       const marker = typeof flow.verifyCreate === 'string' ? flow.verifyCreate : '验收预约9527'
       const nonSearchInputSel = 'input:not([type="search"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])'
@@ -422,6 +485,7 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
       if (!hasVisibleInput) {
         errors.push('未找到可填写的新建表单或触发按钮')
       } else {
+        const beforeCreate = await snapDataView()
         const filled = await page.evaluate((m) => {
           const scope = document.querySelector('[role="dialog"], form') || document
           const inputs = Array.from(scope.querySelectorAll('input, textarea')).filter((el) => {
@@ -452,15 +516,19 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
         } else {
           await submitBtn.click({ timeout: 1500 }).catch(() => {})
           await page.waitForTimeout(220)
-          const afterCreate = await page.evaluate(() => document.body?.innerText || '')
-          if (!afterCreate.includes(marker)) {
-            errors.push('点击新建/提交后页面未新增并展示记录（疑似空壳按钮）')
+          const afterCreate = await snapDataView()
+          const rowAdded = afterCreate.rowTexts.length > beforeCreate.rowTexts.length
+          const renderedInList = afterCreate.rowTexts.some((t) => t.includes(marker))
+          if (!rowAdded || !renderedInList) {
+            errors.push('点击新建/提交后数据列表未真实新增并保存记录（仅提示提交成功或疑似空壳按钮）')
+          } else {
+            createdMarker = marker
           }
         }
       }
     }
 
-    // 2. 业务结果断言：筛选/下拉或搜索确实改变可见列表内容
+    // 2. 业务结果断言：筛选/下拉或搜索必须改变数据列表行数/内容或图表，仅改提示文字将被拦截
     if (flow.verifyFilter && errors.length === 0) {
       let filterChanged = false
       const selects = page.locator('select')
@@ -470,11 +538,15 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
         if (!(await sel.isVisible({ timeout: 200 }).catch(() => false))) continue
         const vals = await sel.evaluate((el) => Array.from(el.options).filter((o) => !o.disabled).map((o) => o.value)).catch(() => [])
         if (vals.length >= 2) {
-          const before = await snapListState()
-          await sel.selectOption(vals[1]).catch(() => {})
-          await page.waitForTimeout(150)
-          const after = await snapListState()
-          if (after.text !== before.text || after.items !== before.items || after.rows !== before.rows) filterChanged = true
+          const before = await snapDataView()
+          for (let k = 1; k < Math.min(vals.length, 4) && !filterChanged; k++) {
+            await sel.selectOption(vals[k]).catch(() => {})
+            await page.waitForTimeout(150)
+            const after = await snapDataView()
+            const listChanged = after.rowTexts.length !== before.rowTexts.length || after.rowTexts.join('\n') !== before.rowTexts.join('\n')
+            const chartChanged = Boolean(before.chartSig && after.chartSig !== before.chartSig)
+            if (listChanged || chartChanged) filterChanged = true
+          }
           await sel.selectOption(vals[0]).catch(() => {})
           await page.waitForTimeout(100)
         }
@@ -482,22 +554,29 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
       if (!filterChanged) {
         const searchInput = page.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="筛选"], input[placeholder*="容量"]').first()
         if (await searchInput.isVisible({ timeout: 250 }).catch(() => false)) {
-          const before = await snapListState()
+          const before = await snapDataView()
           await searchInput.fill('__ZHIYE_NO_MATCH_999__').catch(() => {})
           await page.waitForTimeout(150)
-          const after = await snapListState()
-          if (after.text !== before.text || after.rows !== before.rows) filterChanged = true
+          const after = await snapDataView()
+          if (before.rowTexts.length > 0
+            ? after.rowTexts.length < before.rowTexts.length
+            : (after.rowTexts.join('\n') !== before.rowTexts.join('\n') || Boolean(before.chartSig && after.chartSig !== before.chartSig))) {
+            filterChanged = true
+          }
           await searchInput.fill('').catch(() => {})
           await page.waitForTimeout(100)
         }
       }
       if (!filterChanged) {
-        errors.push('筛选或下拉控件交互后页面列表未发生任何变化（疑似空壳筛选）')
+        errors.push('筛选或下拉控件交互后数据列表与图表均未发生实际变化（仅改提示文字或疑似空壳筛选）')
       }
     }
 
-    // 3. 业务结果断言：导出按钮确实触发非空文件或 Blob 生成
+    // 3. 业务结果断言：导出必须生成结构化、且与当前页面数据关联的非空文件内容（单字节 "x" 等假 Blob 将被拦截）
     if (flow.verifyExport && errors.length === 0) {
+      const dataSnap = await snapDataView()
+      const dataTokens = [...dataSnap.tokens]
+      if (createdMarker && !dataTokens.includes(createdMarker)) dataTokens.unshift(createdMarker)
       const beforeExp = await page.evaluate(() => window.__zhiyeExports?.length || 0)
       const beforeDl = downloads.length
       const expBtn = page.locator('button, a').filter({ hasText: /导出/ }).first()
@@ -505,12 +584,33 @@ export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHI
         errors.push('未找到可点击的「导出」按钮')
       } else {
         await expBtn.click({ timeout: 1500 }).catch(() => {})
-        await page.waitForTimeout(250)
+        await page.waitForTimeout(280)
         const exportsAfter = await page.evaluate((idx) => (window.__zhiyeExports || []).slice(idx), beforeExp)
-        const hasDownload = downloads.length > beforeDl
-        const validBlob = exportsAfter.some((e) => Number(e.size) > 0)
-        if (!hasDownload && !validBlob) {
-          errors.push('点击「导出」未产生任何下载文件或非空 Blob 输出（疑似空壳导出）')
+        const candidates = [
+          ...downloads.slice(beforeDl).map((d) => ({ size: d.size, filename: d.filename, text: d.text, isBinaryZip: d.isBinaryZip })),
+          ...exportsAfter.map((e) => ({ size: Number(e.size || 0), filename: e.filename || '', text: e.preview || '', type: e.type || '', isBinaryZip: Boolean(e.isBinaryZip) })),
+        ]
+        const isStructuredWithData = (cand) => {
+          if (!cand || cand.size < 16) return false
+          if (cand.isBinaryZip && (/\.xlsx?$/i.test(cand.filename || '') || String(cand.type || '').includes('spreadsheet'))) return true
+          const txt = String(cand.text || '').trim()
+          if (!txt) return false
+          let structured = false
+          if (txt.startsWith('[') || txt.startsWith('{')) {
+            try {
+              const parsed = JSON.parse(txt)
+              structured = Array.isArray(parsed) ? parsed.length > 0 : Boolean(parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0)
+            } catch {}
+          }
+          if (!structured) {
+            const lines = txt.split(/\r?\n/).filter((l) => l.trim())
+            structured = lines.length >= 2 && /[,;\t|]/.test(txt)
+          }
+          if (!structured) return false
+          return dataTokens.length === 0 || dataTokens.some((tok) => txt.includes(tok))
+        }
+        if (!candidates.some(isStructuredWithData)) {
+          errors.push('点击「导出」未产生结构化且包含页面业务数据的有效文件或 Blob 内容（疑似空壳导出）')
         }
       }
     }

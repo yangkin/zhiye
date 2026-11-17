@@ -194,7 +194,7 @@ test('smokeTest 能检出切换下拉筛选框后的运行时崩溃，runLiveFlo
     <option value="all">全部容量</option>
     <option value="20人">20人以上</option>
   </select>
-  <button onclick="const u=window.URL.createObjectURL(new Blob(['主题,容量\\n测试,20人'],{type:'text/csv'}));const a=document.createElement('a');a.href=u;a.download='schedule.csv';a.click()">导出今日日程</button>
+  <button onclick="const rows=Array.from(document.querySelectorAll('#list li')).map(el=>el.textContent).join('\\n');const u=window.URL.createObjectURL(new Blob(['主题,容量\\n'+rows.replace(/ \\(/g,',').replace(/\\)/g,'')],{type:'text/csv'}));const a=document.createElement('a');a.href=u;a.download='schedule.csv';a.click()">导出今日日程</button>
   <ul id="list"><li>研发周会 (8人)</li><li>产品评审 (20人)</li></ul>
 </div>
 </body></html>`)
@@ -208,8 +208,23 @@ test('smokeTest 能检出切换下拉筛选框后的运行时崩溃，runLiveFlo
   <ul id="list"><li>研发周会 (8人)</li></ul>
 </div>
 </body></html>`)
+  const semiFake = makeSite(`<!doctype html><html><body>
+<div id="root">
+  <p id="hint">会议室预约看板（默认全量）</p>
+  <div id="toast" role="alert"></div>
+  <input id="title" type="text" placeholder="会议主题" />
+  <button onclick="document.getElementById('toast').textContent='提交成功：'+document.getElementById('title').value">新建预约</button>
+  <select onchange="document.getElementById('hint').textContent='当前筛选：'+this.value">
+    <option value="all">全部容量</option>
+    <option value="20人">20人以上</option>
+  </select>
+  <button onclick="const u=window.URL.createObjectURL(new Blob(['x'],{type:'text/csv'}));const a=document.createElement('a');a.href=u;a.download='empty.csv';a.click()">导出今日日程</button>
+  <ul id="list"><li>研发周会 (8人)</li></ul>
+</div>
+</body></html>`)
   const srv = await startStaticServer(goodFlow)
   const fakeSrv = await startStaticServer(hollowShell)
+  const semiFakeSrv = await startStaticServer(semiFake)
   try {
     const flowSpec = { expectText: ['预约', '容量', '导出'], verifyCreate: true, verifyFilter: true, verifyExport: true }
     const ok = await runLiveFlow(`http://127.0.0.1:${srv.port}/index.html`, flowSpec, { chromePath: CHROME })
@@ -218,15 +233,28 @@ test('smokeTest 能检出切换下拉筛选框后的运行时崩溃，runLiveFlo
     // 复现空壳页面陷阱：文案齐全、控件不报错，但点新建/改筛选/点导出均无真实业务结果 → 必须逐项拦截
     const failCreate = await runLiveFlow(`http://127.0.0.1:${fakeSrv.port}/index.html`, { verifyCreate: true }, { chromePath: CHROME })
     assert.equal(failCreate.ok, false)
-    assert.match(failCreate.detail, /空壳按钮|未新增/)
+    assert.match(failCreate.detail, /空壳按钮|未真实新增/)
 
     const failFilter = await runLiveFlow(`http://127.0.0.1:${fakeSrv.port}/index.html`, { verifyFilter: true }, { chromePath: CHROME })
     assert.equal(failFilter.ok, false)
-    assert.match(failFilter.detail, /空壳筛选|未发生任何变化/)
+    assert.match(failFilter.detail, /空壳筛选|未发生实际变化/)
 
     const failExport = await runLiveFlow(`http://127.0.0.1:${fakeSrv.port}/index.html`, { verifyExport: true }, { chromePath: CHROME })
     assert.equal(failExport.ok, false)
-    assert.match(failExport.detail, /空壳导出|未产生任何下载文件/)
+    assert.match(failExport.detail, /空壳导出|有效文件/)
+
+    // 复现伪造绕过：新建仅提示"提交成功"、筛选只改提示文字、导出仅生成单字节 "x" Blob → 必须全部拦截
+    const bypassCreate = await runLiveFlow(`http://127.0.0.1:${semiFakeSrv.port}/index.html`, { verifyCreate: true }, { chromePath: CHROME })
+    assert.equal(bypassCreate.ok, false, '仅弹出提交成功提示不应通过新建校验')
+    assert.match(bypassCreate.detail, /未真实新增|提交成功/)
+
+    const bypassFilter = await runLiveFlow(`http://127.0.0.1:${semiFakeSrv.port}/index.html`, { verifyFilter: true }, { chromePath: CHROME })
+    assert.equal(bypassFilter.ok, false, '只改变提示文字不应通过筛选校验')
+    assert.match(bypassFilter.detail, /未发生实际变化|提示文字/)
+
+    const bypassExport = await runLiveFlow(`http://127.0.0.1:${semiFakeSrv.port}/index.html`, { verifyExport: true }, { chromePath: CHROME })
+    assert.equal(bypassExport.ok, false, '仅导出内容为 "x" 的 Blob 不应通过导出校验')
+    assert.match(bypassExport.detail, /空壳导出|有效文件/)
 
     const miss = await runLiveFlow(`http://127.0.0.1:${srv.port}/index.html`, { expectText: ['不存在的模块'] }, { chromePath: CHROME })
     assert.equal(miss.ok, false)
@@ -234,7 +262,9 @@ test('smokeTest 能检出切换下拉筛选框后的运行时崩溃，runLiveFlo
   } finally {
     await srv.close()
     await fakeSrv.close()
+    await semiFakeSrv.close()
     rmSync(goodFlow, { recursive: true, force: true })
     rmSync(hollowShell, { recursive: true, force: true })
+    rmSync(semiFake, { recursive: true, force: true })
   }
 })
