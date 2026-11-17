@@ -342,26 +342,56 @@ public class RuntimeMetricsService {
 
     @SuppressWarnings("unchecked")
     public String prometheus() {
-        Map<String, Object> s = snapshot();
-        Map<String, Object> t = (Map<String, Object>) s.getOrDefault("tasks", Map.of());
-        Map<String, Object> sb = (Map<String, Object>) s.getOrDefault("sandbox", Map.of());
-        Map<String, Object> l = (Map<String, Object>) s.getOrDefault("llm", Map.of());
-        List<?> alerts = (List<?>) s.getOrDefault("alerts", List.of());
+        Map<String, Object> local = localSnapshot();
+        Map<String, Object> lt = (Map<String, Object>) local.getOrDefault("tasks", Map.of());
+        Map<String, Object> lsb = (Map<String, Object>) local.getOrDefault("sandbox", Map.of());
+        Map<String, Object> ll = (Map<String, Object>) local.getOrDefault("llm", Map.of());
+
+        Map<String, Object> cluster = snapshot();
+        Map<String, Object> ct = (Map<String, Object>) cluster.getOrDefault("tasks", Map.of());
+        Map<String, Object> csb = (Map<String, Object>) cluster.getOrDefault("sandbox", Map.of());
+        Map<String, Object> cl = (Map<String, Object>) cluster.getOrDefault("llm", Map.of());
+        List<?> alerts = (List<?>) cluster.getOrDefault("alerts", List.of());
+
+        String inst = promEscape(instanceId);
         return String.join("\n",
+                "# HELP zhiye_tasks_total Monotonic per-instance task count since process start",
                 "# TYPE zhiye_tasks_total counter",
-                "zhiye_tasks_total{status=\"succeeded\"} " + t.getOrDefault("succeeded", 0),
-                "zhiye_tasks_total{status=\"failed\"} " + t.getOrDefault("failed", 0),
-                "zhiye_tasks_total{status=\"cancelled\"} " + t.getOrDefault("cancelled", 0),
+                "zhiye_tasks_total{status=\"succeeded\",instance=\"" + inst + "\"} " + lt.getOrDefault("succeeded", 0),
+                "zhiye_tasks_total{status=\"failed\",instance=\"" + inst + "\"} " + lt.getOrDefault("failed", 0),
+                "zhiye_tasks_total{status=\"cancelled\",instance=\"" + inst + "\"} " + lt.getOrDefault("cancelled", 0),
+                "# HELP zhiye_sandbox_starts_total Monotonic per-instance sandbox start count since process start",
                 "# TYPE zhiye_sandbox_starts_total counter",
-                "zhiye_sandbox_starts_total " + sb.getOrDefault("count", 0),
-                "# TYPE zhiye_sandbox_start_avg_ms gauge",
-                "zhiye_sandbox_start_avg_ms " + sb.getOrDefault("avgMs", 0),
+                "zhiye_sandbox_starts_total{instance=\"" + inst + "\"} " + lsb.getOrDefault("count", 0),
+                "# HELP zhiye_llm_calls_total Monotonic per-instance LLM call count since process start",
                 "# TYPE zhiye_llm_calls_total counter",
-                "zhiye_llm_calls_total " + l.getOrDefault("count", 0),
+                "zhiye_llm_calls_total{instance=\"" + inst + "\"} " + ll.getOrDefault("count", 0),
+                "# HELP zhiye_llm_quota_errors_total Monotonic per-instance LLM quota error count since process start",
                 "# TYPE zhiye_llm_quota_errors_total counter",
-                "zhiye_llm_quota_errors_total " + l.getOrDefault("quotaErrors", 0),
+                "zhiye_llm_quota_errors_total{instance=\"" + inst + "\"} " + ll.getOrDefault("quotaErrors", 0),
+                "# HELP zhiye_cluster_tasks_7d Cluster-wide task count over rolling 7-day DB retention window",
+                "# TYPE zhiye_cluster_tasks_7d gauge",
+                "zhiye_cluster_tasks_7d{status=\"succeeded\"} " + ct.getOrDefault("succeeded", 0),
+                "zhiye_cluster_tasks_7d{status=\"failed\"} " + ct.getOrDefault("failed", 0),
+                "zhiye_cluster_tasks_7d{status=\"cancelled\"} " + ct.getOrDefault("cancelled", 0),
+                "# HELP zhiye_cluster_sandbox_starts_7d Cluster-wide sandbox starts over 7-day DB window",
+                "# TYPE zhiye_cluster_sandbox_starts_7d gauge",
+                "zhiye_cluster_sandbox_starts_7d " + csb.getOrDefault("count", 0),
+                "# TYPE zhiye_sandbox_start_avg_ms gauge",
+                "zhiye_sandbox_start_avg_ms " + csb.getOrDefault("avgMs", 0),
+                "# HELP zhiye_cluster_llm_calls_7d Cluster-wide LLM calls over 7-day DB window",
+                "# TYPE zhiye_cluster_llm_calls_7d gauge",
+                "zhiye_cluster_llm_calls_7d " + cl.getOrDefault("count", 0),
+                "# HELP zhiye_cluster_llm_quota_errors_7d Cluster-wide LLM quota errors over 7-day DB window",
+                "# TYPE zhiye_cluster_llm_quota_errors_7d gauge",
+                "zhiye_cluster_llm_quota_errors_7d " + cl.getOrDefault("quotaErrors", 0),
                 "# TYPE zhiye_alerts_active gauge",
                 "zhiye_alerts_active " + alerts.size(),
                 "");
+    }
+
+    private static String promEscape(String s) {
+        if (s == null) return "unknown";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "");
     }
 }

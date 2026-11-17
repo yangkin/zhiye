@@ -387,10 +387,10 @@
 .logs-mini-badge {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  height: 19px;
   padding: 0 6px;
   border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   background: #f3f0fa;
   color: #5c4b8a;
@@ -850,16 +850,45 @@
   line-height: 1.6;
 }
 
+.logs-mobile-back {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid #dfd8ee;
+  background: #faf8ff;
+  color: #5d43ad;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.logs-filter-mismatch-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  background: #fff9eb;
+  border-bottom: 1px solid #f3dc9f;
+  color: #875206;
+  font-size: 12px;
+}
+
 @media (max-width: 1120px) {
   .logs-split {
     grid-template-columns: 1fr;
   }
   .logs-list-pane {
-    max-height: 400px;
-    min-height: 280px;
+    max-height: 320px;
+    min-height: 240px;
   }
   .logs-meta-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .logs-mobile-back {
+    display: inline-flex;
   }
 }
 

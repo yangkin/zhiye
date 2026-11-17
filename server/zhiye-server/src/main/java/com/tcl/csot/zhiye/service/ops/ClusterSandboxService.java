@@ -1,7 +1,9 @@
 package com.tcl.csot.zhiye.service.ops;
 
 import com.alibaba.opensandbox.sandbox.SandboxManager;
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos;
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
@@ -407,8 +409,10 @@ public class ClusterSandboxService {
                 """).query((rs, i) -> {
             double ageSec = Math.max(0.0, rs.getDouble("hb_age_sec"));
             String persistedStatus = rs.getString("status");
+            boolean gracefulStop = "offline".equals(persistedStatus);
+            boolean staleHeartbeat = !gracefulStop && ageSec > 120;
             String liveStatus;
-            if ("offline".equals(persistedStatus) || ageSec > 120) {
+            if (gracefulStop || staleHeartbeat) {
                 liveStatus = "offline";
             } else if (ageSec > 35) {
                 liveStatus = "degraded";
@@ -435,6 +439,9 @@ public class ClusterSandboxService {
             n.put("sysMemUsedBytes", rs.getLong("sys_mem_used_bytes"));
             n.put("sysMemTotalBytes", rs.getLong("sys_mem_total_bytes"));
             n.put("status", liveStatus);
+            n.put("persistedStatus", persistedStatus);
+            n.put("gracefulStop", gracefulStop);
+            n.put("staleHeartbeat", staleHeartbeat);
             n.put("heartbeatAgeSeconds", Math.round(ageSec * 10.0) / 10.0);
             n.put("startedAt", Db.iso(Db.ts(rs, "started_at")));
             n.put("heartbeatAt", Db.iso(Db.ts(rs, "heartbeat_at")));
@@ -494,7 +501,8 @@ public class ClusterSandboxService {
                 from cluster_node
                 """).query(rs -> { nodeStatusMap.put(rs.getString("instance_id"), rs.getString("st")); });
 
-        List<Map<String, Object>> ledgerRows = jdbc.sql("""
+        // 全量读取活跃/创建中账本（不设 limit 截断），避免控制面比对把真实在跑沙箱误判为孤儿
+        List<Map<String, Object>> activeLedgerRows = jdbc.sql("""
                 select s.*,
                        coalesce(a.name, s.app_id) as app_name,
                        coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
@@ -502,21 +510,51 @@ public class ClusterSandboxService {
                        t.status as task_status,
                        t.progress as task_progress,
                        t.phase_label as task_phase,
-                       extract(epoch from (now() - s.created_at)) as age_sec,
-                       extract(epoch from (now() - coalesce(s.last_active_at, s.ready_at, s.created_at))) as idle_sec
+                       extract(epoch from (coalesce(s.destroyed_at, now()) - s.created_at)) as age_sec,
+                       extract(epoch from (coalesce(s.destroyed_at, now()) - coalesce(s.last_active_at, s.ready_at, s.created_at))) as idle_sec
                 from sandbox_instance s
                 left join app a on a.id = s.app_id
                 left join workspace w on w.id = s.workspace_id
                 left join app_user u on u.id = w.owner_user_id
                 left join task t on t.id = s.task_id
                 where s.state in ('creating', 'active')
-                   or s.created_at >= now() - interval '24 hours'
-                order by (case when s.state in ('creating', 'active') then 0 else 1 end), s.created_at desc
-                limit 300
+                order by s.created_at desc
                 """).query((rs, i) -> mapSandboxRow(rs)).list();
 
-        // 控制面实况探测（OpenSandbox 或 K8s 或本地 ProcessHandle）
-        ControlPlaneSnapshot cp = probeControlPlane(ledgerRows);
+        List<Map<String, Object>> recentClosedRows = jdbc.sql("""
+                select s.*,
+                       coalesce(a.name, s.app_id) as app_name,
+                       coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
+                       coalesce(u.login_name, '') as owner_login_name,
+                       t.status as task_status,
+                       t.progress as task_progress,
+                       t.phase_label as task_phase,
+                       extract(epoch from (coalesce(s.destroyed_at, now()) - s.created_at)) as age_sec,
+                       extract(epoch from (coalesce(s.destroyed_at, now()) - coalesce(s.last_active_at, s.ready_at, s.created_at))) as idle_sec
+                from sandbox_instance s
+                left join app a on a.id = s.app_id
+                left join workspace w on w.id = s.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                left join task t on t.id = s.task_id
+                where s.state not in ('creating', 'active')
+                  and s.created_at >= now() - interval '24 hours'
+                order by s.created_at desc
+                limit 200
+                """).query((rs, i) -> mapSandboxRow(rs)).list();
+
+        long closed24hCount = jdbc.sql("""
+                select count(*) from sandbox_instance
+                where state not in ('creating', 'active')
+                  and created_at >= now() - interval '24 hours'
+                """).query(Long.class).single();
+        boolean ledgerHistoryTruncated = closed24hCount > recentClosedRows.size();
+
+        List<Map<String, Object>> ledgerRows = new ArrayList<>(activeLedgerRows.size() + recentClosedRows.size());
+        ledgerRows.addAll(activeLedgerRows);
+        ledgerRows.addAll(recentClosedRows);
+
+        // 控制面实况探测（全分页 OpenSandbox / K8s / 本地 ProcessHandle）
+        ControlPlaneSnapshot cp = probeControlPlane(activeLedgerRows);
 
         List<Map<String, Object>> enriched = new ArrayList<>();
         Map<String, Long> byKind = new LinkedHashMap<>();
@@ -551,12 +589,15 @@ public class ClusterSandboxService {
                 kind = (alive || "creating".equals(state)) ? "session" : "ledger-ghost";
             } else {
                 String ownerSt = nodeStatusMap.getOrDefault(owner, "offline");
-                if (!cp.available()) {
-                    kind = "offline".equals(ownerSt) ? "ledger-ghost" : "session";
-                } else if ("opensandbox".equals(item.get("provider")) || "k8s".equals(item.get("provider"))) {
-                    String extRef = String.valueOf(item.getOrDefault("externalRef", ""));
-                    boolean onControlPlane = cp.liveRefs().contains(extRef);
-                    kind = onControlPlane ? "session" : ("offline".equals(ownerSt) || (item.get("ageSeconds") instanceof Number a && a.doubleValue() > 20) ? "ledger-ghost" : "session");
+                if ("opensandbox".equals(item.get("provider")) || "k8s".equals(item.get("provider"))) {
+                    if (!cp.available() || !cp.complete()) {
+                        // 控制面不可达或分页不完整时，不误判活跃容器为幽灵
+                        kind = "offline".equals(ownerSt) ? "unknown" : "session";
+                    } else {
+                        String extRef = String.valueOf(item.getOrDefault("externalRef", ""));
+                        boolean onControlPlane = cp.liveRefs().contains(extRef);
+                        kind = onControlPlane ? "session" : ("offline".equals(ownerSt) || (item.get("ageSeconds") instanceof Number a && a.doubleValue() > 20) ? "ledger-ghost" : "session");
+                    }
                 } else {
                     kind = "offline".equals(ownerSt) || (taskStatus != null && !ACTIVE_TASK_STATUSES.contains(taskStatus))
                             ? "ledger-ghost" : "session";
@@ -628,7 +669,9 @@ public class ClusterSandboxService {
         summary.put("cpuPercentAvg", cpuSamples == 0 ? null : Math.round(cpuSum / cpuSamples * 10.0) / 10.0);
         summary.put("avgStartupMs", startupCnt == 0 ? 0L : Math.round((double) startupSum / startupCnt));
         summary.put("controlPlaneAvailable", cp.available());
+        summary.put("controlPlaneComplete", cp.complete());
         summary.put("controlPlaneMessage", cp.message());
+        summary.put("ledgerHistoryTruncated", ledgerHistoryTruncated);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("ok", true);
@@ -659,8 +702,8 @@ public class ClusterSandboxService {
                            t.status as task_status,
                            t.progress as task_progress,
                            t.phase_label as task_phase,
-                           extract(epoch from (now() - s.created_at)) as age_sec,
-                           extract(epoch from (now() - coalesce(s.last_active_at, s.ready_at, s.created_at))) as idle_sec
+                           extract(epoch from (coalesce(s.destroyed_at, now()) - s.created_at)) as age_sec,
+                           extract(epoch from (coalesce(s.destroyed_at, now()) - coalesce(s.last_active_at, s.ready_at, s.created_at))) as idle_sec
                     from sandbox_instance s
                     left join app a on a.id = s.app_id
                     left join workspace w on w.id = s.workspace_id
@@ -751,21 +794,46 @@ public class ClusterSandboxService {
                     "沙箱 " + sandboxId + " 关联的任务仍在执行中（状态 " + taskStatus + "），如需强行终止并销毁请确认 force=true");
         }
 
+        String ownerInstance = (String) row.get("ownerInstance");
+        boolean isActiveLedger = "creating".equals(state) || "active".equals(state);
         String path;
         boolean killedProcessOrContainer = false;
+        String resultStatus;
+        String effectiveReason = rsn;
+
         if (live != null) {
             path = "local-runtime";
             try {
                 live.session().kill();
                 killedProcessOrContainer = true;
+                resultStatus = "destroyed";
             } catch (Exception e) {
                 log.warn("强杀本副本沙箱会话 {} 失败：{}", sandboxId, e.getMessage());
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SANDBOX_KILL_FAILED",
+                        "停止本副本沙箱运行时失败，沙箱状态保持未销毁：" + e.getMessage());
             }
             liveBySandboxId.remove(sandboxId);
             if (taskId != null) sandboxIdByTaskId.remove(taskId, sandboxId);
+        } else if (!isActiveLedger) {
+            path = "ledger-already-closed";
+            resultStatus = "already_destroyed";
         } else {
             path = "ledger-remote";
-            killedProcessOrContainer = killRemoteOrPid(provider, externalRef, row.get("pid"));
+            KillOutcome ko = killRemoteOrPid(provider, externalRef, row.get("pid"), ownerInstance);
+            if (ko.unsupportedRemote()) {
+                throw new ApiException(HttpStatus.CONFLICT, "CONFLICT", ko.detail());
+            }
+            if (!ko.killed() && !ko.notFound()) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SANDBOX_KILL_FAILED",
+                        "控制面销毁沙箱失败，沙箱状态保持未销毁：" + ko.detail());
+            }
+            killedProcessOrContainer = ko.killed();
+            if (ko.killed()) {
+                resultStatus = "destroyed";
+            } else {
+                resultStatus = "reconcile_settled";
+                effectiveReason = rsn + "（控制面已不存在，账本核销）";
+            }
         }
 
         // 若关联任务仍在运行，发取消信号避免任务挂起
@@ -775,37 +843,47 @@ public class ClusterSandboxService {
             if (taskSignals != null) taskSignals.signalCancel(taskId);
         }
 
-        jdbc.sql("""
-                update sandbox_instance set
-                  state = 'destroyed',
-                  destroyed_at = coalesce(destroyed_at, now()),
-                  destroyed_by = ?,
-                  destroy_reason = ?
-                where sandbox_id = ?
-                """).params(op, rsn, sandboxId).update();
+        if (!"already_destroyed".equals(resultStatus)) {
+            jdbc.sql("""
+                    update sandbox_instance set
+                      state = 'destroyed',
+                      destroyed_at = coalesce(destroyed_at, now()),
+                      destroyed_by = ?,
+                      destroy_reason = ?
+                    where sandbox_id = ?
+                    """).params(op, effectiveReason, sandboxId).update();
+        }
 
         recordDestroyAudit(sandboxId, taskId, (String) row.get("workspaceId"), (String) row.get("appId"),
-                provider, externalRef, path, op, rsn, cancelledTask);
+                provider, externalRef, path, op, effectiveReason, cancelledTask);
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("ok", true);
-        res.put("status", "already_destroyed".equals(state) || "destroyed".equals(state) ? "already_destroyed" : "destroyed");
+        res.put("status", resultStatus);
         res.put("path", path);
         res.put("sandboxId", sandboxId);
         res.put("taskId", taskId);
         res.put("killedRuntime", killedProcessOrContainer);
         res.put("cancelledTask", cancelledTask);
         res.put("operator", op);
-        res.put("reason", rsn);
+        res.put("reason", effectiveReason);
         return res;
     }
 
     /**
      * 对账清理全部幽灵账本行（ledger-ghost）及控制面孤儿容器/Pod。
+     * 控制面不可达或分页结果不完整时拒绝批量对账，防止误杀正常在跑沙箱。
      */
     public Map<String, Object> reapOrphansAndGhosts(String operator) {
         String op = (operator == null || operator.isBlank()) ? "admin" : operator.trim();
         Map<String, Object> view = listSandboxes(null, null, null, null, false);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) view.getOrDefault("summary", Map.of());
+        if (!Boolean.TRUE.equals(summary.get("controlPlaneAvailable"))
+                || !Boolean.TRUE.equals(summary.get("controlPlaneComplete"))) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONFLICT",
+                    "控制面探测不可达或不完整，已阻止批量对账清理：" + summary.get("controlPlaneMessage"));
+        }
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> items = (List<Map<String, Object>>) view.getOrDefault("items", List.of());
 
@@ -830,7 +908,8 @@ public class ClusterSandboxService {
             } else if ("unregistered".equals(kind)) {
                 String provider = String.valueOf(it.get("provider"));
                 String extRef = String.valueOf(it.get("externalRef"));
-                if (killRemoteOrPid(provider, extRef, it.get("pid"))) {
+                String ownerInst = it.get("ownerInstance") == null ? null : String.valueOf(it.get("ownerInstance"));
+                if (killRemoteOrPid(provider, extRef, it.get("pid"), ownerInst).killed()) {
                     orphansKilled++;
                 }
             }
@@ -911,7 +990,7 @@ public class ClusterSandboxService {
         return result;
     }
 
-    private record ControlPlaneSnapshot(boolean available, String message, Set<String> liveRefs, List<Map<String, Object>> unregistered) {}
+    private record ControlPlaneSnapshot(boolean available, boolean complete, String message, Set<String> liveRefs, List<Map<String, Object>> unregistered) {}
 
     private ControlPlaneSnapshot probeControlPlane(List<Map<String, Object>> ledgerRows) {
         Set<String> knownActiveRefs = ledgerRows.stream()
@@ -922,35 +1001,51 @@ public class ClusterSandboxService {
 
         if (openSandboxManager != null) {
             try {
-                PagedSandboxInfos paged = openSandboxManager.listSandboxInfos(
-                        SandboxFilter.builder().metadata(Map.of("zhiye", "1")).pageSize(200).page(1).build());
                 Set<String> refs = new HashSet<>();
                 List<Map<String, Object>> orphans = new ArrayList<>();
-                if (paged != null && paged.getSandboxInfos() != null) {
-                    for (SandboxInfo info : paged.getSandboxInfos()) {
-                        if (info.getId() == null) continue;
-                        refs.add(info.getId());
-                        if (!knownActiveRefs.contains(info.getId())) {
-                            Map<String, String> md = info.getMetadata() == null ? Map.of() : info.getMetadata();
-                            Map<String, Object> o = new LinkedHashMap<>();
-                            o.put("sandboxId", info.getId());
-                            o.put("externalRef", info.getId());
-                            o.put("provider", "opensandbox");
-                            o.put("kind", "unregistered");
-                            o.put("state", "active");
-                            o.put("taskId", md.get("zhiye.taskId"));
-                            o.put("ownerInstance", "external");
-                            o.put("onThisReplica", false);
-                            o.put("taskRunning", false);
-                            o.put("createdAt", info.getCreatedAt() == null ? null : info.getCreatedAt().toInstant().toString());
-                            o.put("ageSeconds", info.getCreatedAt() == null ? 0 : Math.max(0, Duration.between(info.getCreatedAt().toInstant(), Instant.now()).getSeconds()));
-                            orphans.add(o);
+                boolean complete = true;
+                int maxPages = 50;
+                for (int page = 1; page <= maxPages; page++) {
+                    PagedSandboxInfos paged = openSandboxManager.listSandboxInfos(
+                            SandboxFilter.builder().metadata(Map.of("zhiye", "1")).pageSize(200).page(page).build());
+                    if (paged == null) {
+                        complete = false;
+                        break;
+                    }
+                    if (paged.getSandboxInfos() != null) {
+                        for (SandboxInfo info : paged.getSandboxInfos()) {
+                            if (info.getId() == null) continue;
+                            refs.add(info.getId());
+                            if (!knownActiveRefs.contains(info.getId())) {
+                                Map<String, String> md = info.getMetadata() == null ? Map.of() : info.getMetadata();
+                                Map<String, Object> o = new LinkedHashMap<>();
+                                o.put("sandboxId", info.getId());
+                                o.put("externalRef", info.getId());
+                                o.put("provider", "opensandbox");
+                                o.put("kind", "unregistered");
+                                o.put("state", "active");
+                                o.put("taskId", md.get("zhiye.taskId"));
+                                o.put("ownerInstance", "external");
+                                o.put("onThisReplica", false);
+                                o.put("taskRunning", false);
+                                o.put("createdAt", info.getCreatedAt() == null ? null : info.getCreatedAt().toInstant().toString());
+                                o.put("ageSeconds", info.getCreatedAt() == null ? 0 : Math.max(0, Duration.between(info.getCreatedAt().toInstant(), Instant.now()).getSeconds()));
+                                orphans.add(o);
+                            }
                         }
                     }
+                    PaginationInfo pi = paged.getPagination();
+                    if (pi == null || !pi.getHasNextPage()) {
+                        break;
+                    }
+                    if (page == maxPages) {
+                        complete = false;
+                    }
                 }
-                return new ControlPlaneSnapshot(true, "OpenSandbox 控制面正常", refs, orphans);
+                String msg = complete ? "OpenSandbox 控制面正常" : "OpenSandbox 沙箱数量超过安全分页上限，控制面快照未完整";
+                return new ControlPlaneSnapshot(true, complete, msg, refs, orphans);
             } catch (Exception e) {
-                return new ControlPlaneSnapshot(false, "OpenSandbox 控制面不可达：" + e.getMessage(), Set.of(), List.of());
+                return new ControlPlaneSnapshot(false, false, "OpenSandbox 控制面不可达：" + e.getMessage(), Set.of(), List.of());
             }
         }
 
@@ -982,54 +1077,103 @@ public class ClusterSandboxService {
                         orphans.add(o);
                     }
                 }
-                return new ControlPlaneSnapshot(true, "Kubernetes API 控制面正常", refs, orphans);
+                return new ControlPlaneSnapshot(true, true, "Kubernetes API 控制面正常", refs, orphans);
             } catch (Exception e) {
-                return new ControlPlaneSnapshot(false, "Kubernetes 控制面不可达：" + e.getMessage(), Set.of(), List.of());
+                return new ControlPlaneSnapshot(false, false, "Kubernetes 控制面不可达：" + e.getMessage(), Set.of(), List.of());
             }
         }
 
-        return new ControlPlaneSnapshot(true, "本地进程沙箱模式 (ProcessHandle)", Set.of(), List.of());
+        return new ControlPlaneSnapshot(true, true, "本地进程沙箱模式 (ProcessHandle)", Set.of(), List.of());
     }
+
+    private record KillOutcome(boolean killed, boolean notFound, boolean unsupportedRemote, String detail) {}
 
     private Map<String, Object> destroyServerOnly(String key, String op, String rsn) {
-        boolean killed = false;
         String provider = props.sandbox().provider();
         if (openSandboxManager != null) {
-            try { openSandboxManager.killSandbox(key); killed = true; } catch (Exception ignored) {}
+            KillOutcome k = killRemoteOrPid("opensandbox", key, null, null);
+            if (k.killed()) {
+                recordDestroyAudit(key, null, null, null, "opensandbox", key, "server-only", op, rsn, false);
+                return Map.of("ok", true, "status", "destroyed", "path", "server-only",
+                        "sandboxId", key, "killedRuntime", true, "cancelledTask", false, "operator", op, "reason", rsn);
+            }
+            if (!k.notFound()) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SANDBOX_KILL_FAILED", "控制面销毁沙箱失败：" + k.detail());
+            }
         }
-        if (!killed && kubernetesClient != null && k8sProps != null) {
-            String podName = key.contains("/") ? key.substring(key.indexOf('/') + 1) : key;
-            try {
-                var del = kubernetesClient.pods().inNamespace(k8sProps.namespace()).withName(podName).withGracePeriod(0).delete();
-                killed = del != null && !del.isEmpty();
-            } catch (Exception ignored) {}
+        if (kubernetesClient != null && k8sProps != null) {
+            KillOutcome k = killRemoteOrPid("k8s", key, null, null);
+            if (k.killed()) {
+                recordDestroyAudit(key, null, null, null, "k8s", key, "server-only", op, rsn, false);
+                return Map.of("ok", true, "status", "destroyed", "path", "server-only",
+                        "sandboxId", key, "killedRuntime", true, "cancelledTask", false, "operator", op, "reason", rsn);
+            }
+            if (!k.notFound()) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SANDBOX_KILL_FAILED", "Kubernetes 删除沙箱失败：" + k.detail());
+            }
         }
-        if (!killed) {
-            throw ApiException.notFound("沙箱实例");
-        }
-        recordDestroyAudit(key, null, null, null, provider, key, "server-only", op, rsn, false);
-        return Map.of("ok", true, "status", "destroyed", "path", "server-only",
-                "sandboxId", key, "killedRuntime", true, "cancelledTask", false, "operator", op, "reason", rsn);
+        throw ApiException.notFound("沙箱实例");
     }
 
-    private boolean killRemoteOrPid(String provider, String externalRef, Object pidObj) {
-        if ("opensandbox".equals(provider) && openSandboxManager != null && externalRef != null && !externalRef.isBlank()) {
-            try { openSandboxManager.killSandbox(externalRef); return true; } catch (Exception ignored) {}
+    private KillOutcome killRemoteOrPid(String provider, String externalRef, Object pidObj, String ownerInstance) {
+        if ("opensandbox".equals(provider)) {
+            if (openSandboxManager == null) {
+                return new KillOutcome(false, false, true, "当前节点未配置 OpenSandbox 管理客户端，无法远程销毁");
+            }
+            if (externalRef == null || externalRef.isBlank()) {
+                return new KillOutcome(false, true, false, "沙箱缺少 externalRef，按不存在核销");
+            }
+            try {
+                openSandboxManager.killSandbox(externalRef);
+                return new KillOutcome(true, false, false, "OpenSandbox 已销毁 " + externalRef);
+            } catch (Exception e) {
+                if (e instanceof SandboxApiException sae && Integer.valueOf(404).equals(sae.getStatusCode())) {
+                    return new KillOutcome(false, true, false, "OpenSandbox 返回 404");
+                }
+                return new KillOutcome(false, false, false, e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            }
         }
-        if ("k8s".equals(provider) && kubernetesClient != null && k8sProps != null && externalRef != null && !externalRef.isBlank()) {
+        if ("k8s".equals(provider)) {
+            if (kubernetesClient == null || k8sProps == null) {
+                return new KillOutcome(false, false, true, "当前节点未配置 Kubernetes 客户端，无法远程销毁");
+            }
+            if (externalRef == null || externalRef.isBlank()) {
+                return new KillOutcome(false, true, false, "Pod 缺少 externalRef，按不存在核销");
+            }
             String podName = externalRef.contains("/") ? externalRef.substring(externalRef.indexOf('/') + 1) : externalRef;
             try {
                 var del = kubernetesClient.pods().inNamespace(k8sProps.namespace()).withName(podName).withGracePeriod(0).delete();
-                return del != null && !del.isEmpty();
-            } catch (Exception ignored) {}
+                if (del != null && !del.isEmpty()) {
+                    return new KillOutcome(true, false, false, "已删除 Pod " + podName);
+                }
+                var existing = kubernetesClient.pods().inNamespace(k8sProps.namespace()).withName(podName).get();
+                if (existing == null) {
+                    return new KillOutcome(false, true, false, "Pod 已不存在");
+                }
+                return new KillOutcome(false, false, false, "Pod 删除未确认完成：" + podName);
+            } catch (Exception e) {
+                return new KillOutcome(false, false, false, e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            }
+        }
+        // 本地进程沙箱：严禁跨副本按 PID 强杀（F05）
+        if (!instanceId.equals(ownerInstance)) {
+            return new KillOutcome(false, false, true,
+                    "本地进程沙箱运行在节点 " + ownerInstance + "，当前节点 " + instanceId + " 禁止跨机按 PID 强杀");
         }
         if (pidObj instanceof Number n && n.longValue() > 0) {
-            return ProcessHandle.of(n.longValue()).map(ph -> {
-                ph.descendants().forEach(ProcessHandle::destroyForcibly);
-                return ph.destroyForcibly();
-            }).orElse(false);
+            var phOpt = ProcessHandle.of(n.longValue());
+            if (phOpt.isEmpty() || !phOpt.get().isAlive()) {
+                return new KillOutcome(false, true, false, "本机进程已退出");
+            }
+            ProcessHandle ph = phOpt.get();
+            ph.descendants().forEach(ProcessHandle::destroyForcibly);
+            boolean destroyed = ph.destroyForcibly();
+            if (destroyed || !ph.isAlive()) {
+                return new KillOutcome(true, false, false, "已强杀本机进程 PID " + n.longValue());
+            }
+            return new KillOutcome(false, false, false, "无法终止本机进程 PID " + n.longValue());
         }
-        return false;
+        return new KillOutcome(false, true, false, "无活跃 PID");
     }
 
     private void recordDestroyAudit(String sandboxId, String taskId, String workspaceId, String appId,

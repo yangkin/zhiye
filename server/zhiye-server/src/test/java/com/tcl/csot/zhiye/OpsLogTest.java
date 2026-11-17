@@ -38,11 +38,11 @@ class OpsLogTest extends IntegrationTest {
         // 触发一次参数校验报错，验证 GlobalExceptionHandler api_error 采集
         assertThat(owner.post("/api/apps/" + appId + "/plan-feedback", Map.of("content", "")).status()).isEqualTo(400);
 
-        // 补充写入一条命令 log 事件、model_usage、app_fn_log、data_source_call 与 runner 日志文件
+        // 补充写入一条命令 log 事件、model_usage、app_fn_log、data_source_call 与 runner 日志文件（含敏感凭证测试脱敏 L02）
         eventRepo.append(taskId, "log", Map.of("line", "$ vite build\nerror TS2304: Cannot find name 'Foo'"));
         jdbc.sql("insert into model_usage (task_id, provider, model, input_tokens, output_tokens, cost) values (?, 'kimi', 'kimi-diag', 800, 120, 0.0042)")
                 .param(taskId).update();
-        jdbc.sql("insert into app_fn_log (app_id, name, ok, duration_ms, error, logs, caller) values (?, 'syncData', false, 65, 'TypeError: boom', 'step 1 ok', 'u1')")
+        jdbc.sql("insert into app_fn_log (app_id, name, ok, duration_ms, error, logs, caller) values (?, 'syncData', false, 65, 'TypeError: boom', 'Authorization: Bearer secret-fn-token-123456', 'u1')")
                 .param(appId).update();
         JsonNode ds = owner.ok(owner.post("/api/sources", Map.of(
                 "key", "ops_log_src",
@@ -51,8 +51,15 @@ class OpsLogTest extends IntegrationTest {
                 "url", "http://127.0.0.1:" + port + "/api/meta",
                 "authType", "none"
         )));
-        jdbc.sql("insert into data_source_call (source_id, app_id, origin, status, ok, duration_ms, error) values (?, ?, 'preview', 502, false, 1200, 'upstream timeout')")
+        jdbc.sql("insert into data_source_call (source_id, app_id, origin, status, ok, duration_ms, error) values (?, ?, 'preview', 502, false, 1200, 'upstream timeout sk-secretkey9876543210abcd')")
                 .params(ds.path("id").asText(), appId).update();
+
+        // F07: 仅带 task_id、workspace_id/app_id 为空的 llm_gateway 历史事件也必须正确归属工作空间并隔离他人
+        jdbc.sql("""
+                insert into platform_event_log (category, level, action, workspace_id, user_id, app_id, task_id, ok, status_code, duration_ms, summary, detail)
+                values ('llm_gateway', 'ERROR', 'GATEWAY_UPSTREAM_IO', null, null, null, ?, false, 502, 230,
+                        '模型网关连接失败', 'jdbc=postgresql://pguser:superSecretPass@10.0.0.5:5432/zhiye')
+                """).param(taskId).update();
 
         Path logFile = taskService.logFile(taskId);
         Files.createDirectories(logFile.getParent());
@@ -60,7 +67,7 @@ class OpsLogTest extends IntegrationTest {
                 [java] 创建沙箱成功
                 [runner] start prompt
                 [runner] WARN retry upstream 429
-                [runner] ERROR gateway 502 bad gateway
+                [runner] ERROR gateway 502 bad gateway Authorization: Bearer super-runner-secret-jwt-9999
                 [runner] cmd prompt#c1 ok 1200ms
                 """);
 
@@ -85,7 +92,7 @@ class OpsLogTest extends IntegrationTest {
         assertThat(detail.path("events").toString()).contains("Cannot find name 'Foo'");
         assertThat(detail.path("modelUsages").toString()).contains("kimi-diag");
         assertThat(detail.path("fnLogs").get(0).path("name").asText()).isEqualTo("syncData");
-        assertThat(detail.path("sourceCalls").get(0).path("error").asText()).isEqualTo("upstream timeout");
+        assertThat(detail.path("sourceCalls").get(0).path("error").asText()).isEqualTo("upstream timeout sk-***");
         assertThat(detail.path("cloudStatus").path("schemaName").asText()).startsWith("app_");
         assertThat(detail.path("cloudTables").size()).isGreaterThanOrEqualTo(1);
         assertThat(detail.path("runnerLog").path("exists").asBoolean()).isTrue();
@@ -97,35 +104,45 @@ class OpsLogTest extends IntegrationTest {
         assertThat(schemas.path("items").toString()).contains("CLOUD_ENABLE");
         assertThat(schemas.path("items").toString()).contains("create schema if not exists");
 
-        // 全链路网关、API 报错与生命周期日志检索
+        // 全链路网关、API 报错与生命周期日志检索（F07 + L02 脱敏）
         JsonNode apiErrs = ops.ok(ops.get("/api/logs/events?category=api_error&q=plan-feedback"));
         assertThat(apiErrs.path("total").asLong()).isGreaterThanOrEqualTo(1);
         JsonNode lifecycle = ops.ok(ops.get("/api/logs/events?category=lifecycle&appId=" + appId));
         assertThat(lifecycle.path("items").toString()).contains("APP_PUBLISH");
+
+        JsonNode ownerGw = owner.ok(owner.get("/api/logs/events?category=llm_gateway&taskId=" + taskId));
+        assertThat(ownerGw.path("total").asLong()).isGreaterThanOrEqualTo(1);
+        assertThat(ownerGw.path("items").toString()).doesNotContain("superSecretPass").contains("pguser:***@");
+        JsonNode otherGw = other.ok(other.get("/api/logs/events?category=llm_gateway&taskId=" + taskId));
+        assertThat(otherGw.path("total").asLong()).isZero();
 
         // 增量事件
         JsonNode delta = ops.ok(ops.get("/api/logs/tasks/" + taskId + "/events?after=0"));
         assertThat(delta.path("events").size()).isEqualTo(detail.path("events").size());
         assertThat(delta.path("task").path("terminal").asBoolean()).isTrue();
 
-        // Runner 日志关键字过滤 & 原文件下载
+        // Runner 日志关键字过滤、凭证脱敏及按脱敏后行反查拦截（L02）
         JsonNode filteredLog = ops.ok(ops.get("/api/logs/tasks/" + taskId + "/runner-log?q=429"));
         assertThat(filteredLog.path("matchedLines").asInt()).isEqualTo(1);
         assertThat(filteredLog.path("lines").get(0).path("no").asInt()).isEqualTo(3);
         assertThat(filteredLog.path("lines").get(0).path("text").asText()).contains("429");
+        JsonNode secretProbe = ops.ok(ops.get("/api/logs/tasks/" + taskId + "/runner-log?q=super-runner-secret"));
+        assertThat(secretProbe.path("matchedLines").asInt()).isZero();
 
         var dl = ops.get("/api/logs/tasks/" + taskId + "/runner-log/download");
         assertThat(dl.status()).isEqualTo(200);
-        assertThat(dl.body()).contains("[runner] WARN retry upstream 429");
+        assertThat(dl.body()).contains("[runner] WARN retry upstream 429").doesNotContain("super-runner-secret-jwt-9999");
 
-        // 全平台云函数与数据源日志检索
+        // 全平台云函数与数据源日志检索（L02 脱敏验证）
         JsonNode fnRes = ops.ok(ops.get("/api/logs/functions?ok=false&q=syncData"));
         assertThat(fnRes.path("errorCount").asLong()).isGreaterThanOrEqualTo(1);
         assertThat(fnRes.path("items").get(0).path("error").asText()).contains("TypeError: boom");
+        assertThat(fnRes.path("items").get(0).path("logs").asText()).doesNotContain("secret-fn-token-123456");
 
         JsonNode srcRes = ops.ok(ops.get("/api/logs/sources?ok=false&origin=preview&q=timeout"));
         assertThat(srcRes.path("errorCount").asLong()).isGreaterThanOrEqualTo(1);
         assertThat(srcRes.path("items").get(0).path("sourceKey").asText()).isEqualTo("ops_log_src");
+        assertThat(srcRes.path("items").get(0).path("error").asText()).doesNotContain("sk-secretkey9876543210abcd");
 
         // Runner 日志级别筛选（ERROR / WARN）与关键字过滤
         JsonNode errLevelLog = ops.ok(ops.get("/api/logs/tasks/" + taskId + "/runner-log?level=ERROR"));
@@ -145,10 +162,13 @@ class OpsLogTest extends IntegrationTest {
         assertThat(detailWithSbx.path("sandboxes").size()).isGreaterThanOrEqualTo(1);
         assertThat(detailWithSbx.path("sandboxes").get(0).path("startupMs").asInt()).isGreaterThanOrEqualTo(0);
 
-        // 服务运行状态与参数校验
+        // 服务运行状态与参数校验 + L06 下载与运维查看审计留痕
         JsonNode rt = ops.ok(ops.get("/api/logs/runtime?target=api&tail=100"));
         assertThat(rt.path("prometheusEndpoint").asText()).isEqualTo("/api/meta/metrics/prometheus");
         assertThat(rt.has("clusterNodes")).isTrue();
+        long auditCnt = jdbc.sql("select count(*) from admin_audit_log where action in ('RUNNER_LOG_DOWNLOAD', 'RUNTIME_LOG_VIEW')")
+                .query(Long.class).single();
+        assertThat(auditCnt).isGreaterThanOrEqualTo(2L);
         assertThat(ops.get("/api/logs/tasks/task_missing").status()).isEqualTo(404);
         assertThat(ops.get("/api/logs/tasks?range=bad").status()).isEqualTo(400);
         assertThat(ops.get("/api/logs/runtime?target=bad").status()).isEqualTo(400);

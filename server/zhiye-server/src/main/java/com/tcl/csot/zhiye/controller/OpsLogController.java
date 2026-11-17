@@ -5,13 +5,12 @@ import com.tcl.csot.zhiye.service.ops.OpsLogService;
 import com.tcl.csot.zhiye.util.CurrentPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -83,18 +82,22 @@ public class OpsLogController {
     }
 
     @GetMapping("/tasks/{id}/runner-log/download")
-    public ResponseEntity<Resource> downloadRunnerLog(@PathVariable String id, HttpServletRequest req) {
+    public ResponseEntity<StreamingResponseBody> downloadRunnerLog(@PathVariable String id, HttpServletRequest req) {
         String ws = principal.workspaceId();
+        boolean isAdmin = adminAuth.isAdmin(req, ws);
         adminAuth.requireTaskAccess(req, ws, id);
         Path file = opsLogs.runnerLogFilePath(id);
         String safeName = file.getFileName().toString().replaceAll("[^a-zA-Z0-9._-]", "_");
+        opsLogs.recordOpsAudit(isAdmin ? adminAuth.requireAdminActor(req, ws) : "ws:" + ws,
+                "RUNNER_LOG_DOWNLOAD", "task", id, Map.of("workspaceId", ws, "admin", isAdmin));
         HttpHeaders headers = new HttpHeaders();
         headers.setContentDisposition(ContentDisposition.attachment().filename(safeName, StandardCharsets.UTF_8).build());
         headers.setCacheControl("no-store");
+        StreamingResponseBody body = out -> opsLogs.streamRedactedLogFile(file, out);
         return ResponseEntity.ok()
                 .headers(headers)
                 .contentType(new MediaType("text", "plain", StandardCharsets.UTF_8))
-                .body(new FileSystemResource(file));
+                .body(body);
     }
 
     @GetMapping("/functions")
@@ -173,7 +176,9 @@ public class OpsLogController {
                                        @RequestParam(required = false) String q,
                                        @RequestParam(required = false) String level,
                                        HttpServletRequest req) {
-        adminAuth.requireAdminActor(req, principal.workspaceId());
+        String actor = adminAuth.requireAdminActor(req, principal.workspaceId());
+        opsLogs.recordOpsAudit(actor, "RUNTIME_LOG_VIEW", "runtime_log", target,
+                Map.of("tail", tail, "hasQuery", q != null && !q.isBlank()));
         return opsLogs.runtimeOverview(target, tail, q, level);
     }
 }

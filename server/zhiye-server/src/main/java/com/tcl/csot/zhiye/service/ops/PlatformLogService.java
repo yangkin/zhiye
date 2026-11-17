@@ -1,6 +1,7 @@
 package com.tcl.csot.zhiye.service.ops;
 
 import com.tcl.csot.zhiye.util.Json;
+import com.tcl.csot.zhiye.util.LogRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,9 +51,34 @@ public class PlatformLogService {
                        Map<String, Object> meta) {
         if (jdbc == null) return;
         try {
-            String safeSummary = cleanText(summary, MAX_SUMMARY);
-            String safeDetail = cleanText(detail, MAX_DETAIL);
-            String metaJson = meta == null || meta.isEmpty() ? "{}" : cleanNullBytes(Json.write(meta));
+            String ws = blankToNull(workspaceId);
+            String uid = blankToNull(userId);
+            String aid = blankToNull(appId);
+            String tid = blankToNull(taskId);
+            if (tid != null && (ws == null || aid == null || uid == null)) {
+                try {
+                    var resolved = jdbc.sql("""
+                            select t.workspace_id, t.app_id, w.owner_user_id
+                            from task t
+                            left join workspace w on w.id = t.workspace_id
+                            where t.id = ?
+                            """).param(tid).query((rs, i) -> new String[]{
+                            rs.getString("workspace_id"),
+                            rs.getString("app_id"),
+                            rs.getString("owner_user_id")
+                    }).optional().orElse(null);
+                    if (resolved != null) {
+                        if (ws == null) ws = blankToNull(resolved[0]);
+                        if (aid == null) aid = blankToNull(resolved[1]);
+                        if (uid == null) uid = blankToNull(resolved[2]);
+                    }
+                } catch (Exception ignored) {
+                    // 仅补充任务归属，不影响在精简测试库中写入事件
+                }
+            }
+            String safeSummary = LogRedactor.redact(cleanText(summary, MAX_SUMMARY));
+            String safeDetail = LogRedactor.redact(cleanText(detail, MAX_DETAIL));
+            String metaJson = meta == null || meta.isEmpty() ? "{}" : LogRedactor.redact(cleanNullBytes(Json.write(meta)));
             jdbc.sql("""
                     insert into platform_event_log
                       (category, level, action, workspace_id, user_id, app_id, task_id, ok, status_code, duration_ms, summary, detail, meta)
@@ -62,10 +88,10 @@ public class PlatformLogService {
                             safeStr(category, "system"),
                             safeStr(level, ok ? "INFO" : "ERROR"),
                             safeStr(action, "EVENT"),
-                            blankToNull(workspaceId),
-                            blankToNull(userId),
-                            blankToNull(appId),
-                            blankToNull(taskId),
+                            ws,
+                            uid,
+                            aid,
+                            tid,
                             ok,
                             statusCode,
                             durationMs,

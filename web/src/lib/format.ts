@@ -31,3 +31,24 @@ export function downloadUrl(url: string) {
   link.click();
   link.remove();
 }
+
+/** WAI-ARIA Tabs 键盘左右/Home/End 焦点与选中联动 */
+export function handleTabListKeyDown<T extends string>(
+  e: { key: string; preventDefault: () => void; currentTarget: HTMLElement },
+  ids: readonly T[],
+  activeId: T,
+  onSelect: (id: T) => void,
+) {
+  const idx = ids.indexOf(activeId);
+  if (idx < 0 || ids.length === 0) return;
+  let nextIdx = -1;
+  if (e.key === 'ArrowRight') nextIdx = (idx + 1) % ids.length;
+  else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + ids.length) % ids.length;
+  else if (e.key === 'Home') nextIdx = 0;
+  else if (e.key === 'End') nextIdx = ids.length - 1;
+  if (nextIdx < 0) return;
+  e.preventDefault();
+  onSelect(ids[nextIdx]);
+  const tabs = e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]');
+  tabs[nextIdx]?.focus();
+}

@@ -106,12 +106,17 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
     setBusyKey(`del-${sb.sandboxId}`);
     try {
       const res = await api.adminDestroySandbox(sb.sandboxId, { force, reason });
-      toast(`已销毁沙箱 ${res.sandboxId}${res.cancelledTask ? '，并已触发关联任务停止' : ''}`, 'ok');
+      const msg =
+        res.status === 'reconcile_settled'
+          ? `已核销账面幽灵 ${res.sandboxId}（控制面实体已退出）`
+          : `已销毁沙箱 ${res.sandboxId}${res.cancelledTask ? '，并已触发关联任务停止' : ''}`;
+      toast(msg, 'ok');
       setDestroyTarget(null);
       await invalidateCluster();
     } catch (err) {
       const status = (err as { status?: number }).status;
-      if (status === 409 && !force) {
+      const errMsg = errorMessage(err);
+      if (status === 409 && !force && errMsg.includes('force=true')) {
         setDestroyTarget(null);
         const confirmed = await confirmDialog({
           title: '沙箱仍有任务运行中，确认强杀？',
@@ -132,7 +137,7 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
           }
         }
       } else {
-        toast(errorMessage(err), 'error');
+        toast(errMsg, 'error');
       }
     } finally {
       setBusyKey(null);
@@ -316,7 +321,8 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
           <button
             type="button"
             className={`dash-action-btn ${anomalyCount > 0 ? 'warn' : ''}`}
-            disabled={busyKey === 'reap'}
+            disabled={busyKey === 'reap' || !sbxSum.controlPlaneAvailable || sbxSum.controlPlaneComplete === false}
+            title={!sbxSum.controlPlaneAvailable || sbxSum.controlPlaneComplete === false ? '控制面探测不完整，已安全禁用批量对账' : undefined}
             onClick={() => void handleReap()}
           >
             <Icon name="refresh" className={busyKey === 'reap' ? 'spinning' : ''} />
@@ -337,12 +343,12 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
       </div>
 
       {/* 告警提示条 */}
-      {(alerts.length > 0 || queue.expiredLeases > 0 || anomalyCount > 0 || !sbxSum.controlPlaneAvailable) ? (
+      {(alerts.length > 0 || queue.expiredLeases > 0 || anomalyCount > 0 || !sbxSum.controlPlaneAvailable || sbxSum.controlPlaneComplete === false) ? (
         <div className="dash-alert-stack" role="alert">
-          {!sbxSum.controlPlaneAvailable ? (
+          {!sbxSum.controlPlaneAvailable || sbxSum.controlPlaneComplete === false ? (
             <div className="dash-alert-item err">
-              <b>CONTROL_PLANE_UNREACHABLE</b>
-              <span>{sbxSum.controlPlaneMessage || '沙箱控制面不可达，请勿在降级视图下批量清理账本。'}</span>
+              <b>{!sbxSum.controlPlaneAvailable ? 'CONTROL_PLANE_UNREACHABLE' : 'CONTROL_PLANE_INCOMPLETE'}</b>
+              <span>{sbxSum.controlPlaneMessage || '沙箱控制面探测未完整，已自动阻断批量清理账本。'}</span>
             </div>
           ) : null}
           {queue.expiredLeases > 0 ? (
@@ -624,7 +630,14 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
                         </div>
                       </td>
                       <td>
-                        {sb.memoryUsedBytes != null || sb.cpuPercent != null ? (
+                        {sb.state === 'destroyed' || sb.state === 'failed' ? (
+                          <div className="dash-sbx-usage">
+                            <span className="dash-muted">{sb.state === 'failed' ? '启动失败' : '已释放销毁'}</span>
+                            {sb.memoryUsedBytes != null ? (
+                              <small className="dash-muted">定格峰值 {fmtBytes(sb.memoryUsedBytes)}</small>
+                            ) : null}
+                          </div>
+                        ) : sb.memoryUsedBytes != null || sb.cpuPercent != null ? (
                           <div className="dash-sbx-usage">
                             <div>
                               <b>{sb.memoryUsedBytes != null ? fmtBytes(sb.memoryUsedBytes) : '—'}</b>
@@ -636,13 +649,15 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
                             </small>
                           </div>
                         ) : (
-                          <span className="dash-muted">{sb.state === 'destroyed' ? '已释放' : '待采样'}</span>
+                          <span className="dash-muted">待采样</span>
                         )}
                       </td>
                       <td className="dash-nowrap">
                         <div>启 {sb.startupMs != null ? `${sb.startupMs}ms` : '—'}</div>
                         <small className="dash-muted">
-                          活 {fmtSecondsAgo(sb.ageSeconds)} · 闲 {fmtSecondsAgo(sb.idleSeconds)}
+                          {sb.state === 'destroyed' || sb.state === 'failed'
+                            ? `总存续 ${fmtSecondsAgo(sb.ageSeconds)}`
+                            : `活 ${fmtSecondsAgo(sb.ageSeconds)} · 闲 ${fmtSecondsAgo(sb.idleSeconds)}`}
                         </small>
                       </td>
                       <td>
@@ -733,6 +748,16 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
 
 function NodeTopologyCard({ node }: { node: ClusterNodeInfo }) {
   const slotPct = node.workerConcurrency > 0 ? Math.min(100, Math.round((node.activeTasks / node.workerConcurrency) * 100)) : 0;
+  const isGracefulStop = node.status === 'offline' && node.gracefulStop;
+  const statusPillClass = node.status === 'online' ? 'ok' : node.status === 'degraded' || isGracefulStop ? 'warn' : 'err';
+  const statusLabel =
+    node.status === 'online'
+      ? '在线'
+      : node.status === 'degraded'
+        ? '心跳延迟'
+        : isGracefulStop
+          ? '已停机'
+          : '已失联';
   return (
     <div className={`dash-node-card ${node.status}`}>
       <div className="dash-node-head">
@@ -741,8 +766,8 @@ function NodeTopologyCard({ node }: { node: ClusterNodeInfo }) {
           <b title={node.instanceId}>{node.instanceId}</b>
           {node.isCurrent ? <span className="dash-pill cloud">当前节点</span> : null}
         </div>
-        <span className={`dash-pill ${node.status === 'online' ? 'ok' : node.status === 'degraded' ? 'warn' : 'err'}`}>
-          {node.status === 'online' ? '在线' : node.status === 'degraded' ? '心跳延迟' : '已失联'}
+        <span className={`dash-pill ${statusPillClass}`}>
+          {statusLabel}
         </span>
       </div>
 

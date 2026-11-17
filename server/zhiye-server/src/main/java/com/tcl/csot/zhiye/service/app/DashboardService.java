@@ -1609,16 +1609,38 @@ public class DashboardService {
         m.put("runtime", runtimeMetrics == null ? Map.of() : runtimeMetrics.snapshot());
 
         List<Map<String, Object>> rateBuckets = jdbc.sql("""
-                select split_part(bucket, ':', 1) as k, count(*) as c
-                from rate_limit_hit
-                where created_at >= now() - interval '10 minutes'
-                group by 1 order by 2 desc
-                """).query((rs, i) -> Map.<String, Object>of(
-                "bucket", rs.getString("k"),
-                "count", rs.getLong("c")
-        )).list();
-        long hits10m = rateBuckets.stream().mapToLong(r -> ((Number) r.get("count")).longValue()).sum();
-        m.put("rateLimits", Map.of("hitsLast10Min", hits10m, "byBucket", rateBuckets));
+                select split_part(bucket, ':', 1) as k,
+                       count(*) filter (where outcome = 'rejected' and created_at >= now() - interval '10 minutes') as rejected_10m,
+                       count(*) filter (where outcome = 'allowed' and created_at >= now() - interval '10 minutes') as allowed_10m,
+                       count(*) filter (where outcome = 'rejected' and created_at >= now() - interval '24 hours') as rejected_24h
+                from rate_limit_event
+                where created_at >= now() - interval '24 hours'
+                group by 1
+                having count(*) filter (where outcome = 'rejected' and created_at >= now() - interval '24 hours') > 0
+                    or count(*) filter (where outcome = 'allowed' and created_at >= now() - interval '10 minutes') > 0
+                order by rejected_10m desc, rejected_24h desc, allowed_10m desc
+                """).query((rs, i) -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("bucket", rs.getString("k"));
+            row.put("count", rs.getLong("rejected_10m"));
+            row.put("rejected10m", rs.getLong("rejected_10m"));
+            row.put("allowed10m", rs.getLong("allowed_10m"));
+            row.put("rejected24h", rs.getLong("rejected_24h"));
+            return row;
+        }).list();
+        long rejected10m = rateBuckets.stream().mapToLong(r -> ((Number) r.get("rejected10m")).longValue()).sum();
+        long allowed10m = rateBuckets.stream().mapToLong(r -> ((Number) r.get("allowed10m")).longValue()).sum();
+        long rejected24h = rateBuckets.stream().mapToLong(r -> ((Number) r.get("rejected24h")).longValue()).sum();
+        long activeWindowHits = jdbc.sql("select count(*) from rate_limit_hit where created_at >= now() - interval '10 minutes'")
+                .query(Long.class).single();
+        Map<String, Object> rateLimitMap = new LinkedHashMap<>();
+        rateLimitMap.put("hitsLast10Min", rejected10m);
+        rateLimitMap.put("rejectedLast10Min", rejected10m);
+        rateLimitMap.put("allowedLast10Min", allowed10m);
+        rateLimitMap.put("rejected24h", rejected24h);
+        rateLimitMap.put("activeWindowHits", activeWindowHits);
+        rateLimitMap.put("byBucket", rateBuckets);
+        m.put("rateLimits", rateLimitMap);
 
         m.put("taskSignals", jdbc.sql("""
                 select

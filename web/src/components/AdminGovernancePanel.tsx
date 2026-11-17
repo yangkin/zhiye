@@ -37,6 +37,8 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   RATE_LIMIT_CLEAR: '清理限流窗口',
   SANDBOX_DESTROY: '销毁沙箱实例',
   SANDBOX_REAP: '幽灵沙箱对账清理',
+  RUNTIME_LOG_VIEW: '查看服务运行日志',
+  RUNNER_LOG_DOWNLOAD: '下载 Runner 日志',
 };
 
 export interface QuotaModalTarget {
@@ -180,9 +182,14 @@ export function AdminGovernancePanel({
           <small>支持一键无损恢复</small>
         </div>
         <div className="dash-admin-stat">
-          <span>24h 限流命中</span>
-          <b>{fmtNum(overview.rateLimitStats.recentHits24h)}</b>
-          <small>累计 {fmtNum(overview.rateLimitStats.totalHits)} 条记录</small>
+          <span>24h 限流拦截 (429)</span>
+          <b className={(overview.rateLimitStats.rejected24h ?? overview.rateLimitStats.recentHits24h) > 0 ? 'dash-warn-num' : ''}>
+            {fmtNum(overview.rateLimitStats.rejected24h ?? overview.rateLimitStats.recentHits24h)}
+          </b>
+          <small>
+            活跃滑窗 {fmtNum(overview.rateLimitStats.activeWindowHits ?? overview.rateLimitStats.totalHits)} · 24h 放行{' '}
+            {fmtNum(overview.rateLimitStats.allowed24h ?? 0)}
+          </small>
         </div>
       </div>
 
@@ -340,36 +347,43 @@ export function AdminGovernancePanel({
                 <thead>
                   <tr>
                     <th scope="col">限流 Bucket</th>
-                    <th scope="col">24h 命中</th>
-                    <th scope="col">累计命中</th>
+                    <th scope="col">活跃滑窗</th>
+                    <th scope="col">24h 拦截 (429)</th>
+                    <th scope="col">24h 放行</th>
                     <th scope="col">最近触发</th>
                     <th scope="col">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {overview.rateLimitStats.buckets.map((b) => (
-                    <tr key={b.bucket}>
-                      <td><code>{b.bucket}</code></td>
-                      <td><b>{fmtNum(b.hits24h)}</b></td>
-                      <td>{fmtNum(b.totalHits)}</td>
-                      <td className="dash-nowrap">{fmtTime(b.lastHitAt)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="dash-link danger"
-                          disabled={busyKey === `rl-${b.bucket}`}
-                          onClick={async () => {
-                            await runAction(`rl-${b.bucket}`, async () => {
-                              const res = await api.adminClearRateLimits(b.bucket);
-                              toast(`已清理 ${b.bucket}（${res.clearedCount} 条）`, 'ok');
-                            });
-                          }}
-                        >
-                          解除清理
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {overview.rateLimitStats.buckets.map((b) => {
+                    const activeWin = b.activeHits ?? b.totalHits;
+                    const rej24 = b.rejected24h ?? b.hits24h;
+                    const allow24 = b.allowed24h ?? 0;
+                    return (
+                      <tr key={b.bucket}>
+                        <td><code>{b.bucket}</code></td>
+                        <td>{fmtNum(activeWin)}</td>
+                        <td><b className={rej24 > 0 ? 'dash-err' : ''}>{fmtNum(rej24)}</b></td>
+                        <td>{fmtNum(allow24)}</td>
+                        <td className="dash-nowrap">{fmtTime(b.lastHitAt)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="dash-link danger"
+                            disabled={busyKey === `rl-${b.bucket}` || activeWin === 0}
+                            onClick={async () => {
+                              await runAction(`rl-${b.bucket}`, async () => {
+                                const res = await api.adminClearRateLimits(b.bucket);
+                                toast(`已清理 ${b.bucket} 活跃滑窗（${res.clearedCount} 条）`, 'ok');
+                              });
+                            }}
+                          >
+                            解除清理
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -673,7 +687,7 @@ export function AdminGovernancePanel({
         <header className="dash-panel-head compact">
           <div>
             <h3>管理操作审计日志（最近 {overview.auditLogs.length} 条）</h3>
-            <p>所有配额变更、站点下线、应用恢复/删除、任务强停/重跑、社区治理与限流清理均不可篡改落库留痕</p>
+            <p>所有配额变更、站点下线、应用恢复/删除、任务强停/重跑、社区治理、沙箱销毁与运维下载均已操作审计落库留痕</p>
           </div>
         </header>
         {overview.auditLogs.length === 0 ? (

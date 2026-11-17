@@ -11,6 +11,7 @@ import com.tcl.csot.zhiye.service.admin.AdminAuthService;
 import com.tcl.csot.zhiye.service.admin.AdminService;
 import com.tcl.csot.zhiye.service.app.AppService;
 import com.tcl.csot.zhiye.service.app.Views;
+import com.tcl.csot.zhiye.service.ops.ClusterSandboxService;
 import com.tcl.csot.zhiye.service.task.TaskService;
 import com.tcl.csot.zhiye.service.workspace.QuotaService;
 import com.tcl.csot.zhiye.storage.ObjectStore;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -211,18 +213,25 @@ class AdminGovernanceTest extends IntegrationTest {
                 """).update();
 
         String activeTaskId = "task_sbx_guard_" + System.nanoTime();
+        Process dummyProc = new ProcessBuilder("sleep", "60").start();
         try {
+            JsonNode preCluster = c.ok(c.send("GET", "/api/admin/cluster", null, ADMIN_HEADERS));
+            String currentReplica = preCluster.path("sandboxes").path("replicaId").asText();
+            assertThat(currentReplica).isNotBlank();
+
             jdbc.sql("""
                     insert into task (id, app_id, workspace_id, type, status, phase_label, progress, lease_owner, lease_until)
                     values (?, ?, ?, 'generate', 'RUNNING', '正在编写代码', 40, 'worker-live', now() + interval '5 minutes')
                     """).params(activeTaskId, appId, wsId).update();
 
             jdbc.sql("""
-                    insert into sandbox_instance (sandbox_id, provider, task_id, app_id, workspace_id, owner_instance, state, external_ref, startup_ms)
-                    values ('sbx_ghost_1', 'local', null, ?, ?, 'dead-replica-1', 'active', 'pid-dead-1', 350),
-                           ('sbx_running_1', 'local', ?, ?, ?, 'live-replica-1', 'active', 'pid-live-1', 510)
-                    on conflict (sandbox_id) do update set state = excluded.state, task_id = excluded.task_id
-                    """).params(appId, wsId, activeTaskId, appId, wsId).update();
+                    insert into sandbox_instance (sandbox_id, provider, task_id, app_id, workspace_id, owner_instance, state, external_ref, pid, startup_ms)
+                    values ('sbx_ghost_1', 'local', null, ?, ?, 'dead-replica-1', 'active', 'pid-dead-1', null, 350),
+                           ('sbx_remote_1', 'local', null, ?, ?, 'other-host-replica', 'active', 'pid-remote-1', 99999, 410),
+                           ('sbx_running_1', 'local', ?, ?, ?, ?, 'active', 'pid-live-1', ?, 510)
+                    on conflict (sandbox_id) do update set state = excluded.state, task_id = excluded.task_id,
+                      owner_instance = excluded.owner_instance, pid = excluded.pid
+                    """).params(appId, wsId, appId, wsId, activeTaskId, appId, wsId, currentReplica, dummyProc.pid()).update();
 
             JsonNode cluster = c.ok(c.send("GET", "/api/admin/cluster", null, ADMIN_HEADERS));
             assertThat(cluster.path("nodes").size()).isGreaterThanOrEqualTo(1);
@@ -230,18 +239,25 @@ class AdminGovernanceTest extends IntegrationTest {
             assertThat(cluster.path("queue").path("running").asLong()).isGreaterThanOrEqualTo(1);
             assertThat(cluster.path("sandboxes").path("summary").path("ghostCount").asLong()).isGreaterThanOrEqualTo(1);
 
-            // 1. 进行中任务的沙箱，未传 force=true -> 409 冲突保护
+            // 1. 跨机本地 PID 沙箱严禁强杀 -> 409 CONFLICT 且不污染账本（F05）
+            var crossHost = c.send("DELETE", "/api/admin/sandboxes/sbx_remote_1?force=true", null, ADMIN_HEADERS);
+            assertThat(crossHost.status()).isEqualTo(409);
+            assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = 'sbx_remote_1'").query(String.class).single())
+                    .isEqualTo("active");
+
+            // 2. 进行中任务的沙箱，未传 force=true -> 409 冲突保护
             var conflict = c.send("DELETE", "/api/admin/sandboxes/sbx_running_1", null, ADMIN_HEADERS);
             assertThat(conflict.status()).isEqualTo(409);
 
-            // 2. force=true 强行销毁 -> 200 且记录审计、取消关联任务
+            // 3. 本节点活跃本地沙箱 force=true 强行销毁 -> 真杀进程返回 destroyed 且取消关联任务（F04）
             JsonNode forced = c.ok(c.send("DELETE", "/api/admin/sandboxes/sbx_running_1?force=true&reason=qa-force-kill", null, ADMIN_HEADERS));
             assertThat(forced.path("status").asText()).isEqualTo("destroyed");
+            assertThat(forced.path("killedRuntime").asBoolean()).isTrue();
             assertThat(forced.path("cancelledTask").asBoolean()).isTrue();
             assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = 'sbx_running_1'").query(String.class).single())
                     .isEqualTo("destroyed");
 
-            // 3. 一键对账清理幽灵账本行
+            // 4. 一键对账清理幽灵账本行
             JsonNode reaped = c.ok(c.send("POST", "/api/admin/sandboxes/reap", Map.of(), ADMIN_HEADERS));
             assertThat(reaped.path("ghostsSettled").asInt()).isGreaterThanOrEqualTo(1);
             assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = 'sbx_ghost_1'").query(String.class).single())
@@ -250,8 +266,76 @@ class AdminGovernanceTest extends IntegrationTest {
             JsonNode auditOverview = c.ok(c.send("GET", "/api/admin/overview", null, ADMIN_HEADERS));
             assertThat(auditOverview.path("auditLogs").toString()).contains("SANDBOX_DESTROY", "SANDBOX_REAP");
         } finally {
+            dummyProc.destroyForcibly();
+            jdbc.sql("delete from sandbox_instance where sandbox_id = 'sbx_remote_1'").update();
             jdbc.sql("update task set status = 'CANCELLED', finished_at = now(), lease_owner = null, lease_until = null where id = ?")
                     .param(activeTaskId).update();
+        }
+    }
+
+    @Test
+    void openSandboxKillFailureDoesNotFalseDestroyAndIncompleteControlPlaneBlocksReap() {
+        var mockOs = org.mockito.Mockito.mock(com.alibaba.opensandbox.sandbox.SandboxManager.class);
+        ClusterSandboxService mocked = new ClusterSandboxService(jdbc, props,
+                new org.springframework.mock.env.MockEnvironment(), null);
+        ReflectionTestUtils.setField(mocked, "openSandboxManager", mockOs);
+
+        Client guest = client();
+        JsonNode app = guest.createApp("OpenSandbox对账防护测试");
+        String appId = app.path("id").asText();
+        String wsId = guest.ok(guest.get("/api/workspace")).path("id").asText();
+        String sbxId = "sbx_os_fail_" + System.nanoTime();
+        String sbxGhostId = "sbx_os_404_" + System.nanoTime();
+
+        try {
+            jdbc.sql("""
+                    insert into sandbox_instance (sandbox_id, provider, app_id, workspace_id, owner_instance, state, external_ref)
+                    values (?, 'opensandbox', ?, ?, 'other-pod-1', 'active', 'os-ref-fail'),
+                           (?, 'opensandbox', ?, ?, 'other-pod-1', 'active', 'os-ref-404')
+                    """).params(sbxId, appId, wsId, sbxGhostId, appId, wsId).update();
+
+            // F04: 控制面 kill 抛 502/网络异常时，严禁把账本标成 destroyed 且不得返回 ok:true
+            org.mockito.Mockito.doThrow(new RuntimeException("control-plane timeout"))
+                    .when(mockOs).killSandbox("os-ref-fail");
+            assertThatThrownBy(() -> mocked.destroySandbox(sbxId, true, "admin", "test"))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("控制面销毁沙箱失败");
+            assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = ?").param(sbxId).query(String.class).single())
+                    .isEqualTo("active");
+
+            // 控制面明确 404 不存在时，核销账本且返回 reconcile_settled 区别于真销毁
+            var ex404 = org.mockito.Mockito.mock(com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException.class);
+            org.mockito.Mockito.when(ex404.getStatusCode()).thenReturn(404);
+            org.mockito.Mockito.doThrow(ex404)
+                    .when(mockOs).killSandbox("os-ref-404");
+            Map<String, Object> settled = mocked.destroySandbox(sbxGhostId, true, "admin", "test");
+            assertThat(settled.get("status")).isEqualTo("reconcile_settled");
+            assertThat(settled.get("killedRuntime")).isEqualTo(false);
+
+            // F06: 控制面列表多页分页时完整读取第 1、2 页，不把第 2 页的活跃沙箱误判为孤儿/幽灵；不可达时阻止对账
+            var infoP1 = org.mockito.Mockito.mock(com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo.class);
+            org.mockito.Mockito.when(infoP1.getId()).thenReturn("os-orphan-p1");
+            var infoP2 = org.mockito.Mockito.mock(com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo.class);
+            org.mockito.Mockito.when(infoP2.getId()).thenReturn("os-ref-fail");
+            var paged1 = new com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos(
+                    List.of(infoP1), new com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo(1, 200, 2, 2, true));
+            var paged2 = new com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos(
+                    List.of(infoP2), new com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo(2, 200, 2, 2, false));
+            org.mockito.Mockito.when(mockOs.listSandboxInfos(org.mockito.Mockito.any())).thenReturn(paged1, paged2);
+            Map<String, Object> multiPage = mocked.listSandboxes(null, null, null, null, false);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> multiSum = (Map<String, Object>) multiPage.get("summary");
+            assertThat(multiSum.get("controlPlaneComplete")).isEqualTo(true);
+            assertThat(multiSum.get("unregisteredCount")).isEqualTo(1L);
+            assertThat(multiSum.get("ghostCount")).isEqualTo(0L);
+
+            org.mockito.Mockito.when(mockOs.listSandboxInfos(org.mockito.Mockito.any()))
+                    .thenThrow(new RuntimeException("connection refused"));
+            assertThatThrownBy(() -> mocked.reapOrphansAndGhosts("admin"))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("已阻止批量对账清理");
+        } finally {
+            jdbc.sql("delete from sandbox_instance where sandbox_id in (?, ?)").params(sbxId, sbxGhostId).update();
         }
     }
 }

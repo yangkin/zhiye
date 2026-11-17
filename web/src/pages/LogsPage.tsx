@@ -13,7 +13,7 @@ import type {
   SandboxItem,
 } from '../api/types';
 import { Icon } from '../lib/icons';
-import { copyText, downloadUrl } from '../lib/format';
+import { copyText, downloadUrl, handleTabListKeyDown } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
 import { toast } from '../lib/store';
 import { fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
@@ -179,6 +179,37 @@ function HighlightText({ text, query }: { text: string; query: string }) {
   );
 }
 
+function OpsPager({
+  offset,
+  limit,
+  total,
+  onChange,
+}: {
+  offset: number;
+  limit: number;
+  total: number;
+  onChange: (nextOffset: number) => void;
+}) {
+  if (total <= 0) return null;
+  const start = offset + 1;
+  const end = Math.min(offset + limit, total);
+  return (
+    <div className="logs-pager">
+      <span>
+        第 {start}–{end} / {fmtNum(total)}
+      </span>
+      <div className="logs-pager-btns">
+        <button type="button" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>
+          上一页
+        </button>
+        <button type="button" disabled={offset + limit >= total} onClick={() => onChange(offset + limit)}>
+          下一页
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LogsPage() {
   const metaQ = useMeta();
   const isAdmin = Boolean(metaQ.data?.auth?.admin);
@@ -224,12 +255,25 @@ export function LogsPage() {
         </div>
       </header>
 
-      <nav className="dash-nav-bar logs-tabs" role="tablist" aria-label="日志排查模块">
+      <nav
+        className="dash-nav-bar logs-tabs"
+        role="tablist"
+        aria-label="日志排查模块"
+        onKeyDown={(e) =>
+          handleTabListKeyDown(
+            e,
+            tabs.map(([id]) => id),
+            mainTab,
+            setMainTab,
+          )
+        }
+      >
         {tabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
             role="tab"
+            tabIndex={mainTab === id ? 0 : -1}
             aria-selected={mainTab === id}
             className={mainTab === id ? 'active' : ''}
             onClick={() => setMainTab(id)}
@@ -270,6 +314,10 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
   const [autoRefreshList, setAutoRefreshList] = useState<boolean>(false);
   const limit = 30;
   const debouncedSearch = useDebounced(search.trim(), 260);
+  const filterSignature = `${range}|${status}|${type}|${filterWorkspaceId}|${filterUserId}|${errorCode}|${debouncedSearch}|${offset}`;
+  const lastFilterSignatureRef = useRef<string>(filterSignature);
+  const listPaneRef = useRef<HTMLElement>(null);
+  const detailPaneRef = useRef<HTMLElement>(null);
 
   const listQ = useQuery({
     queryKey: ['ops-tasks', range, status, type, filterWorkspaceId, filterUserId, errorCode, debouncedSearch, offset],
@@ -292,11 +340,14 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
   const data = listQ.data;
   const items = data?.items ?? [];
 
-  const selectTask = (id: string) => {
+  const selectTask = (id: string, scrollDetail = false) => {
     const next = new URLSearchParams(params);
     if (id) next.set('taskId', id);
     else next.delete('taskId');
     setParams(next, { replace: true });
+    if (scrollDetail && typeof window !== 'undefined' && window.innerWidth <= 1120) {
+      setTimeout(() => detailPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
+    }
   };
 
   const selectActor = (actor: { userId?: string | null; workspaceId?: string | null } | null) => {
@@ -315,13 +366,28 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
     setParams(next, { replace: true });
   };
 
-  // 若 URL 没指定 taskId，加载后默认选中第一条
+  // 过滤条件变化或列表首次加载完成时，同步选中当前结果第一条或清空陈旧详情（F02）
   useEffect(() => {
+    if (listQ.isLoading || listQ.isPlaceholderData || !data) return;
+    const filterChanged = lastFilterSignatureRef.current !== filterSignature;
+    if (filterChanged) {
+      lastFilterSignatureRef.current = filterSignature;
+    }
+    const inItems = selectedTaskId ? items.some((it) => it.id === selectedTaskId) : false;
+    if (filterChanged) {
+      if (!inItems) {
+        selectTask(items[0]?.id ?? '');
+      }
+      return;
+    }
     if (!selectedTaskId && items.length > 0) {
       selectTask(items[0].id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTaskId, items.length]);
+  }, [filterSignature, listQ.isLoading, listQ.isPlaceholderData, data, selectedTaskId, items]);
+
+  const selectionMismatchesList =
+    Boolean(selectedTaskId) && !listQ.isLoading && !listQ.isPlaceholderData && Boolean(data) && !items.some((it) => it.id === selectedTaskId);
 
   const activeActorLabel = useMemo(() => {
     const actors = data?.actors ?? [];
@@ -472,7 +538,7 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
       </div>
 
       <div className="logs-split">
-        <aside className="logs-list-pane" aria-label="任务列表">
+        <aside className="logs-list-pane" aria-label="任务列表" ref={listPaneRef}>
           <div className="logs-list-head">
             <span>匹配 {fmtNum(data?.total ?? 0)} 条任务</span>
             {errorCode ? (
@@ -495,36 +561,39 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
                   key={item.id}
                   item={item}
                   selected={item.id === selectedTaskId}
-                  onSelect={() => selectTask(item.id)}
+                  onSelect={() => selectTask(item.id, true)}
                 />
               ))
             )}
           </div>
 
-          <div className="logs-pager">
-            <span>
-              第 {data?.total ? offset + 1 : 0}–{Math.min(offset + limit, data?.total ?? 0)} / {fmtNum(data?.total ?? 0)}
-            </span>
-            <div className="logs-pager-btns">
-              <button type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - limit))}>
-                上一页
-              </button>
-              <button
-                type="button"
-                disabled={offset + limit >= (data?.total ?? 0)}
-                onClick={() => setOffset(offset + limit)}
-              >
-                下一页
-              </button>
-            </div>
-          </div>
+          <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
         </aside>
 
-        <section className="logs-detail-pane" aria-label="任务全链路诊断">
+        <section className="logs-detail-pane" aria-label="任务全链路诊断" ref={detailPaneRef}>
+          {selectionMismatchesList ? (
+            <div className="logs-filter-mismatch-note" role="status">
+              <span>当前筛选列表不含此任务（已按 URL 参数直达打开）</span>
+              {items.length > 0 ? (
+                <button type="button" className="dash-link" onClick={() => selectTask(items[0].id)}>
+                  切换到匹配第一条
+                </button>
+              ) : (
+                <button type="button" className="dash-link" onClick={() => selectTask('')}>
+                  清空详情
+                </button>
+              )}
+            </div>
+          ) : null}
           {!selectedTaskId ? (
             <EmptyState icon="terminal" title="选择一条任务查看开发日志" desc="从左侧挑选任意任务，或在管理看板点击失败任务跳转至此。" />
           ) : (
-            <TaskDiagnosticPane taskId={selectedTaskId} onOpenApp={(appId) => navigate('/apps/' + appId)} onJumpSandboxes={onJumpSandboxes} />
+            <TaskDiagnosticPane
+              taskId={selectedTaskId}
+              onOpenApp={(appId) => navigate('/apps/' + appId)}
+              onJumpSandboxes={onJumpSandboxes}
+              onBackToList={() => listPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            />
           )}
         </section>
       </div>
@@ -581,10 +650,12 @@ function TaskDiagnosticPane({
   taskId,
   onOpenApp,
   onJumpSandboxes,
+  onBackToList,
 }: {
   taskId: string;
   onOpenApp: (appId: string) => void;
   onJumpSandboxes?: () => void;
+  onBackToList?: () => void;
 }) {
   const [subTab, setSubTab] = useState<DetailTab>('events');
   const [liveFollow, setLiveFollow] = useState<boolean>(true);
@@ -774,6 +845,11 @@ function TaskDiagnosticPane({
       <div className="logs-detail-head">
         <div className="logs-detail-title-row">
           <h2>
+            {onBackToList ? (
+              <button type="button" className="logs-mobile-back" onClick={onBackToList}>
+                ↑ 列表
+              </button>
+            ) : null}
             <span>{task.appName}</span>
             <span className={`logs-status ${tone}`}>
               {task.active ? <i className="logs-live-dot" aria-hidden="true" /> : null}
@@ -1621,17 +1697,20 @@ function FunctionLogsView() {
   const [range, setRange] = useState<OpsLogRange>('7d');
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
   const [q, setQ] = useState<string>('');
+  const [offset, setOffset] = useState<number>(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  const limit = 40;
   const debouncedQ = useDebounced(q.trim(), 260);
 
   const fnQ = useQuery({
-    queryKey: ['ops-fn-logs', range, onlyErrors, debouncedQ],
+    queryKey: ['ops-fn-logs', range, onlyErrors, debouncedQ, offset],
     queryFn: () =>
       api.opsFunctionLogs({
         range,
         ok: onlyErrors ? false : undefined,
         q: debouncedQ || undefined,
-        limit: 50,
+        limit,
+        offset,
       }),
     placeholderData: keepPreviousData,
   });
@@ -1649,15 +1728,32 @@ function FunctionLogsView() {
               <input
                 placeholder="搜应用名 / 函数名 / 报错堆栈 / console 输出…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
               />
               {q ? (
-                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                <button
+                  type="button"
+                  className="logs-search-clear"
+                  onClick={() => {
+                    setQ('');
+                    setOffset(0);
+                  }}
+                >
                   <Icon name="close" />
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+            <select
+              className="logs-select"
+              value={range}
+              onChange={(e) => {
+                setRange(e.target.value as OpsLogRange);
+                setOffset(0);
+              }}
+            >
               {RANGES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
@@ -1667,7 +1763,10 @@ function FunctionLogsView() {
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
-              onClick={() => setOnlyErrors((v) => !v)}
+              onClick={() => {
+                setOnlyErrors((v) => !v);
+                setOffset(0);
+              }}
             >
               <span>仅看报错</span>
               <b>{fmtNum(data?.errorCount ?? 0)}</b>
@@ -1742,6 +1841,7 @@ function FunctionLogsView() {
             </table>
           </div>
         )}
+        <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
       </div>
     </>
   );
@@ -1756,17 +1856,20 @@ function SourceCallsView() {
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
   const [origin, setOrigin] = useState<string>('ALL');
   const [q, setQ] = useState<string>('');
+  const [offset, setOffset] = useState<number>(0);
+  const limit = 40;
   const debouncedQ = useDebounced(q.trim(), 260);
 
   const srcQ = useQuery({
-    queryKey: ['ops-source-calls', range, onlyErrors, origin, debouncedQ],
+    queryKey: ['ops-source-calls', range, onlyErrors, origin, debouncedQ, offset],
     queryFn: () =>
       api.opsSourceCalls({
         range,
         ok: onlyErrors ? false : undefined,
         origin: origin === 'ALL' ? undefined : origin,
         q: debouncedQ || undefined,
-        limit: 60,
+        limit,
+        offset,
       }),
     placeholderData: keepPreviousData,
   });
@@ -1784,21 +1887,45 @@ function SourceCallsView() {
               <input
                 placeholder="搜数据源 key / 名称 / 应用名 / 报错原因…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
               />
               {q ? (
-                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                <button
+                  type="button"
+                  className="logs-search-clear"
+                  onClick={() => {
+                    setQ('');
+                    setOffset(0);
+                  }}
+                >
                   <Icon name="close" />
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={origin} onChange={(e) => setOrigin(e.target.value)}>
+            <select
+              className="logs-select"
+              value={origin}
+              onChange={(e) => {
+                setOrigin(e.target.value);
+                setOffset(0);
+              }}
+            >
               <option value="ALL">全部来源</option>
               <option value="preview">预览环境 (preview)</option>
               <option value="site">线上站点 (site)</option>
               <option value="test">连通性测试 (test)</option>
             </select>
-            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+            <select
+              className="logs-select"
+              value={range}
+              onChange={(e) => {
+                setRange(e.target.value as OpsLogRange);
+                setOffset(0);
+              }}
+            >
               {RANGES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
@@ -1808,7 +1935,10 @@ function SourceCallsView() {
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
-              onClick={() => setOnlyErrors((v) => !v)}
+              onClick={() => {
+                setOnlyErrors((v) => !v);
+                setOffset(0);
+              }}
             >
               <span>仅看失败</span>
               <b>{fmtNum(data?.errorCount ?? 0)}</b>
@@ -1872,6 +2002,7 @@ function SourceCallsView() {
             </table>
           </div>
         )}
+        <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
       </div>
     </>
   );
@@ -1915,7 +2046,9 @@ function RuntimeLogsView() {
               沙箱引擎：<b className="logs-mono">{data?.sandboxProvider ?? '—'}</b> · 在线实例：
               <b className="logs-mono">
                 {data?.clusterNodes?.length
-                  ? data.clusterNodes.map((n) => `${n.instanceId}(${n.status})`).join(', ')
+                  ? data.clusterNodes
+                      .map((n) => `${n.instanceId}(${n.gracefulStop ? 'stopped' : n.status})`)
+                      .join(', ')
                   : (data?.metrics?.instances ?? []).join(', ') || '—'}
               </b>
             </p>
@@ -2085,29 +2218,42 @@ function RuntimeLogsView() {
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>限流触发流水（rate_limit_hit · 最新 50 条）</h3>
-              <p>记录滑窗限流命中的 bucket 与触发时间，排查 429 频繁请求</p>
+              <h3>限流判定流水（rate_limit_event · 最新 80 条）</h3>
+              <p>分别记录 429 拦截（rejected）与滑窗放行（allowed），便于分辨真实限流事件与正常流量</p>
             </div>
           </header>
           {!data?.rateLimitHits?.length ? (
-            <p className="dash-empty">近期无限流触发记录</p>
+            <p className="dash-empty">近期无限流判定记录</p>
           ) : (
             <div className="dash-scroll-list">
               <div className="dash-table-wrap">
                 <table className="dash-table">
                   <thead>
                     <tr>
-                      <th scope="col">触发时间</th>
+                      <th scope="col">时间</th>
+                      <th scope="col">判定结果</th>
                       <th scope="col">限流 Bucket</th>
+                      <th scope="col">窗口计次 / 上限</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.rateLimitHits.map((r, i) => (
-                      <tr key={i}>
-                        <td className="dash-nowrap">{fmtDateTime(r.createdAt)}</td>
-                        <td className="logs-mono">{r.bucket}</td>
-                      </tr>
-                    ))}
+                    {data.rateLimitHits.map((r, i) => {
+                      const isRejected = r.outcome === 'rejected';
+                      return (
+                        <tr key={i}>
+                          <td className="dash-nowrap">{fmtDateTime(r.createdAt)}</td>
+                          <td>
+                            <span className={`logs-status ${isRejected ? 'err' : 'ok'}`}>
+                              {isRejected ? '429 拦截' : '放行'}
+                            </span>
+                          </td>
+                          <td className="logs-mono">{r.bucket}</td>
+                          <td className="dash-nowrap">
+                            {r.maxRequests != null ? `${r.currentCount ?? 0} / ${r.maxRequests} (${r.windowSeconds ?? 60}s)` : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2165,17 +2311,20 @@ function SchemasView() {
   const [range, setRange] = useState<OpsLogRange>('7d');
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
   const [q, setQ] = useState<string>('');
+  const [offset, setOffset] = useState<number>(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  const limit = 40;
   const debouncedQ = useDebounced(q.trim(), 260);
 
   const schemaQ = useQuery({
-    queryKey: ['ops-schemas', range, onlyErrors, debouncedQ],
+    queryKey: ['ops-schemas', range, onlyErrors, debouncedQ, offset],
     queryFn: () =>
       api.opsSchemas({
         range,
         ok: onlyErrors ? false : undefined,
         q: debouncedQ || undefined,
-        limit: 50,
+        limit,
+        offset,
       }),
     placeholderData: keepPreviousData,
   });
@@ -2194,15 +2343,32 @@ function SchemasView() {
               <input
                 placeholder="搜 Schema 名 (app_xxx) / 应用名 / 表名 / DDL SQL…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
               />
               {q ? (
-                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                <button
+                  type="button"
+                  className="logs-search-clear"
+                  onClick={() => {
+                    setQ('');
+                    setOffset(0);
+                  }}
+                >
                   <Icon name="close" />
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+            <select
+              className="logs-select"
+              value={range}
+              onChange={(e) => {
+                setRange(e.target.value as OpsLogRange);
+                setOffset(0);
+              }}
+            >
               {RANGES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
@@ -2212,7 +2378,10 @@ function SchemasView() {
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
-              onClick={() => setOnlyErrors((v) => !v)}
+              onClick={() => {
+                setOnlyErrors((v) => !v);
+                setOffset(0);
+              }}
             >
               <span>仅看建表/Schema 报错</span>
               <b>{fmtNum(data?.errorCount ?? 0)}</b>
@@ -2293,6 +2462,7 @@ function SchemasView() {
             </table>
           </div>
         )}
+        <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
       </div>
 
       <div className="dash-panel">
@@ -2359,18 +2529,21 @@ function PlatformEventsView() {
   const [category, setCategory] = useState<string>('ALL');
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
   const [q, setQ] = useState<string>('');
+  const [offset, setOffset] = useState<number>(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  const limit = 50;
   const debouncedQ = useDebounced(q.trim(), 260);
 
   const evQ = useQuery({
-    queryKey: ['ops-platform-events', range, category, onlyErrors, debouncedQ],
+    queryKey: ['ops-platform-events', range, category, onlyErrors, debouncedQ, offset],
     queryFn: () =>
       api.opsEvents({
         range,
         category,
         ok: onlyErrors ? false : undefined,
         q: debouncedQ || undefined,
-        limit: 60,
+        limit,
+        offset,
       }),
     placeholderData: keepPreviousData,
   });
@@ -2388,15 +2561,32 @@ function PlatformEventsView() {
               <input
                 placeholder="搜接口路径 / 错误码 / 模型 / taskId / 异常堆栈…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
               />
               {q ? (
-                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                <button
+                  type="button"
+                  className="logs-search-clear"
+                  onClick={() => {
+                    setQ('');
+                    setOffset(0);
+                  }}
+                >
                   <Icon name="close" />
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+            <select
+              className="logs-select"
+              value={range}
+              onChange={(e) => {
+                setRange(e.target.value as OpsLogRange);
+                setOffset(0);
+              }}
+            >
               {RANGES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
@@ -2406,7 +2596,10 @@ function PlatformEventsView() {
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
-              onClick={() => setOnlyErrors((v) => !v)}
+              onClick={() => {
+                setOnlyErrors((v) => !v);
+                setOffset(0);
+              }}
             >
               <span>仅看失败与异常</span>
               <b>{fmtNum(data?.errorCount ?? 0)}</b>
@@ -2430,7 +2623,10 @@ function PlatformEventsView() {
                 key={k}
                 type="button"
                 className={`logs-chip ${category === k ? 'active' : ''}`}
-                onClick={() => setCategory(k)}
+                onClick={() => {
+                  setCategory(k);
+                  setOffset(0);
+                }}
               >
                 <span>{label}</span>
                 <b>{fmtNum(cnt)}</b>
@@ -2511,6 +2707,7 @@ function PlatformEventsView() {
             </table>
           </div>
         )}
+        <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
       </div>
     </>
   );
@@ -2606,17 +2803,20 @@ function SandboxLogsView() {
   const [state, setState] = useState<string>('ALL');
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
   const [q, setQ] = useState<string>('');
+  const [offset, setOffset] = useState<number>(0);
+  const limit = 40;
   const debouncedQ = useDebounced(q.trim(), 260);
 
   const sbxQ = useQuery({
-    queryKey: ['ops-sbx-logs', range, state, onlyErrors, debouncedQ],
+    queryKey: ['ops-sbx-logs', range, state, onlyErrors, debouncedQ, offset],
     queryFn: () =>
       api.opsSandboxes({
         range,
         state: state === 'ALL' ? undefined : state,
         onlyErrors: onlyErrors ? true : undefined,
         q: debouncedQ || undefined,
-        limit: 60,
+        limit,
+        offset,
       }),
     placeholderData: keepPreviousData,
   });
@@ -2644,22 +2844,46 @@ function SandboxLogsView() {
               <input
                 placeholder="搜 sandboxId / taskId / PID / Pod / 副本 / 销毁原因…"
                 value={q}
-                onChange={(e) => setQ(e.target.value)}
+                onChange={(e) => {
+                  setQ(e.target.value);
+                  setOffset(0);
+                }}
               />
               {q ? (
-                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                <button
+                  type="button"
+                  className="logs-search-clear"
+                  onClick={() => {
+                    setQ('');
+                    setOffset(0);
+                  }}
+                >
                   <Icon name="close" />
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={state} onChange={(e) => setState(e.target.value)}>
+            <select
+              className="logs-select"
+              value={state}
+              onChange={(e) => {
+                setState(e.target.value);
+                setOffset(0);
+              }}
+            >
               <option value="ALL">全部状态</option>
               <option value="active">活跃 (active)</option>
               <option value="creating">创建中 (creating)</option>
               <option value="destroyed">已销毁 (destroyed)</option>
               <option value="failed">启动失败 (failed)</option>
             </select>
-            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+            <select
+              className="logs-select"
+              value={range}
+              onChange={(e) => {
+                setRange(e.target.value as OpsLogRange);
+                setOffset(0);
+              }}
+            >
               {RANGES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
@@ -2669,7 +2893,10 @@ function SandboxLogsView() {
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
-              onClick={() => setOnlyErrors((v) => !v)}
+              onClick={() => {
+                setOnlyErrors((v) => !v);
+                setOffset(0);
+              }}
             >
               <span>仅看失败与强杀</span>
             </button>
@@ -2752,6 +2979,7 @@ function SandboxLogsView() {
             </table>
           </div>
         )}
+        <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
       </div>
 
       {events.length > 0 ? (

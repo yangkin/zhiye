@@ -9,7 +9,9 @@ import com.tcl.csot.zhiye.service.common.RuntimeMetricsService;
 import com.tcl.csot.zhiye.service.site.PageViewRecorder;
 import com.tcl.csot.zhiye.service.task.TaskService;
 import com.tcl.csot.zhiye.util.Db;
+import com.tcl.csot.zhiye.util.Ids;
 import com.tcl.csot.zhiye.util.Json;
+import com.tcl.csot.zhiye.util.LogRedactor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -17,6 +19,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -317,14 +322,18 @@ public class OpsLogService {
         List<Map<String, Object>> fnLogs = queryFnLogs(null, appId, null, null, null, 30, 0);
         List<Map<String, Object>> sourceCalls = querySourceCalls(null, appId, null, null, null, null, 30, 0);
         List<Map<String, Object>> platformEvents = jdbc.sql("""
-                select p.*, coalesce(a.name, p.app_id) as app_name,
+                select p.*,
+                       coalesce(p.workspace_id, a.workspace_id, t.workspace_id) as effective_workspace_id,
+                       coalesce(p.app_id, t.app_id) as effective_app_id,
+                       coalesce(a.name, coalesce(p.app_id, t.app_id)) as app_name,
                        coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name
                 from platform_event_log p
-                left join app a on a.id = p.app_id
-                left join workspace w on w.id = p.workspace_id
+                left join task t on t.id = p.task_id
+                left join app a on a.id = coalesce(p.app_id, t.app_id)
+                left join workspace w on w.id = coalesce(p.workspace_id, a.workspace_id, t.workspace_id)
                 left join app_user u on u.id = w.owner_user_id
                 where p.task_id = ?
-                   or (p.app_id = ? and p.category in ('cloud_schema', 'lifecycle')
+                   or (coalesce(p.app_id, t.app_id) = ? and p.category in ('cloud_schema', 'lifecycle')
                        and p.created_at >= (select created_at - interval '10 minutes' from task where id = ?)
                        and p.created_at <= coalesce((select finished_at + interval '2 minutes' from task where id = ?), now()))
                 order by p.created_at asc, p.id asc
@@ -532,8 +541,8 @@ public class OpsLogService {
         StringBuilder baseWhere = new StringBuilder(" where 1=1 ");
         List<Object> baseParams = new ArrayList<>();
         if (sinceTs != null) { baseWhere.append(" and p.created_at >= ? "); baseParams.add(sinceTs); }
-        if (ws != null) { baseWhere.append(" and coalesce(p.workspace_id, a.workspace_id) = ? "); baseParams.add(ws); }
-        if (appId != null) { baseWhere.append(" and p.app_id = ? "); baseParams.add(appId); }
+        if (ws != null) { baseWhere.append(" and coalesce(p.workspace_id, a.workspace_id, t.workspace_id) = ? "); baseParams.add(ws); }
+        if (appId != null) { baseWhere.append(" and coalesce(p.app_id, t.app_id) = ? "); baseParams.add(appId); }
         if (taskId != null) { baseWhere.append(" and p.task_id = ? "); baseParams.add(taskId); }
         if (okParam != null) { baseWhere.append(" and p.ok = ? "); baseParams.add(okParam); }
         if (level != null && !"ALL".equalsIgnoreCase(level)) {
@@ -547,10 +556,10 @@ public class OpsLogService {
                        p.action ilike ? escape '\\'
                        or p.summary ilike ? escape '\\'
                        or coalesce(p.detail, '') ilike ? escape '\\'
-                       or coalesce(p.app_id, '') ilike ? escape '\\'
+                       or coalesce(p.app_id, t.app_id, '') ilike ? escape '\\'
                        or coalesce(a.name, '') ilike ? escape '\\'
                        or coalesce(p.task_id, '') ilike ? escape '\\'
-                       or coalesce(p.workspace_id, '') ilike ? escape '\\'
+                       or coalesce(p.workspace_id, a.workspace_id, t.workspace_id, '') ilike ? escape '\\'
                      )
                     """);
             for (int i = 0; i < 7; i++) baseParams.add(pat);
@@ -558,8 +567,9 @@ public class OpsLogService {
 
         String fromSql = """
                 from platform_event_log p
-                left join app a on a.id = p.app_id
-                left join workspace w on w.id = coalesce(p.workspace_id, a.workspace_id)
+                left join task t on t.id = p.task_id
+                left join app a on a.id = coalesce(p.app_id, t.app_id)
+                left join workspace w on w.id = coalesce(p.workspace_id, a.workspace_id, t.workspace_id)
                 left join app_user u on u.id = w.owner_user_id
                 """;
 
@@ -587,7 +597,10 @@ public class OpsLogService {
         pageParams.add(limit);
         pageParams.add(offset);
         List<Map<String, Object>> items = jdbc.sql("""
-                select p.*, coalesce(a.name, p.app_id) as app_name,
+                select p.*,
+                       coalesce(p.workspace_id, a.workspace_id, t.workspace_id) as effective_workspace_id,
+                       coalesce(p.app_id, t.app_id) as effective_app_id,
+                       coalesce(a.name, coalesce(p.app_id, t.app_id)) as app_name,
                        coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name
                 """ + fromSql + fullWhere + """
                 order by p.created_at desc, p.id desc
@@ -807,10 +820,21 @@ public class OpsLogService {
         Map<String, Object> fileView = readLogFile(logPath, tail, null, clean(qParam), clean(levelParam));
 
         List<Map<String, Object>> rateLimitHits = jdbc.sql("""
-                select bucket, created_at from rate_limit_hit order by created_at desc limit 50
-                """).query((rs, i) -> Map.<String, Object>of(
-                "bucket", rs.getString("bucket"),
-                "createdAt", Db.iso(Db.ts(rs, "created_at")))).list();
+                select bucket, outcome, code, window_seconds, max_requests, current_count, created_at
+                from rate_limit_event
+                order by created_at desc
+                limit 80
+                """).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("bucket", rs.getString("bucket"));
+            m.put("outcome", rs.getString("outcome"));
+            m.put("code", rs.getString("code"));
+            m.put("windowSeconds", rs.getInt("window_seconds"));
+            m.put("maxRequests", rs.getInt("max_requests"));
+            m.put("currentCount", rs.getLong("current_count"));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).list();
 
         List<Map<String, Object>> auditLogs = jdbc.sql("""
                 select id, actor, action, target_type, target_id, detail, created_at
@@ -846,18 +870,18 @@ public class OpsLogService {
         m.put("category", rs.getString("category"));
         m.put("level", rs.getString("level"));
         m.put("action", rs.getString("action"));
-        m.put("workspaceId", rs.getString("workspace_id"));
+        m.put("workspaceId", rs.getString("effective_workspace_id"));
         m.put("userId", rs.getString("user_id"));
-        m.put("appId", rs.getString("app_id"));
+        m.put("appId", rs.getString("effective_app_id"));
         m.put("appName", rs.getString("app_name"));
         m.put("ownerName", rs.getString("owner_name"));
         m.put("taskId", rs.getString("task_id"));
         m.put("ok", rs.getBoolean("ok"));
         m.put("statusCode", rs.getObject("status_code"));
         m.put("durationMs", rs.getObject("duration_ms"));
-        m.put("summary", rs.getString("summary"));
-        m.put("detail", rs.getString("detail"));
-        m.put("meta", Json.read(rs.getString("meta")));
+        m.put("summary", LogRedactor.redact(rs.getString("summary")));
+        m.put("detail", LogRedactor.redact(rs.getString("detail")));
+        m.put("meta", Json.read(LogRedactor.redact(rs.getString("meta"))));
         m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
         return m;
     }
@@ -943,8 +967,8 @@ public class OpsLogService {
                     m.put("versionId", rs.getString("version_id"));
                     m.put("ok", rs.getBoolean("ok"));
                     m.put("durationMs", rs.getInt("duration_ms"));
-                    m.put("error", rs.getString("error"));
-                    m.put("logs", rs.getString("logs"));
+                    m.put("error", LogRedactor.redact(rs.getString("error")));
+                    m.put("logs", LogRedactor.redact(rs.getString("logs")));
                     m.put("caller", rs.getString("caller"));
                     m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
                     return m;
@@ -981,7 +1005,7 @@ public class OpsLogService {
                     m.put("status", rs.getObject("status"));
                     m.put("ok", rs.getBoolean("ok"));
                     m.put("durationMs", rs.getInt("duration_ms"));
-                    m.put("error", rs.getString("error"));
+                    m.put("error", LogRedactor.redact(rs.getString("error")));
                     m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
                     return m;
                 }).list();
@@ -1034,7 +1058,7 @@ public class OpsLogService {
         m.put("progress", rs.getInt("progress"));
         m.put("attempt", rs.getInt("attempt"));
         m.put("errorCode", rs.getString("error_code"));
-        m.put("errorMessage", rs.getString("error_message"));
+        m.put("errorMessage", LogRedactor.redact(rs.getString("error_message")));
         m.put("leaseOwner", rs.getString("lease_owner"));
         m.put("tokenUsed", rs.getLong("token_used"));
         m.put("durationMs", durationMs);
@@ -1153,14 +1177,15 @@ public class OpsLogService {
                     String line;
                     while ((line = br.readLine()) != null) {
                         totalLines++;
-                        String lineLvl = classifyLineLevel(line);
+                        String safeLine = LogRedactor.redact(line);
+                        String lineLvl = classifyLineLevel(safeLine);
                         if ("ERROR".equals(lineLvl)) errorLines++;
                         else if ("WARN".equals(lineLvl)) warnLines++;
-                        if (qLower != null && !line.toLowerCase(Locale.ROOT).contains(qLower)) continue;
+                        if (qLower != null && !safeLine.toLowerCase(Locale.ROOT).contains(qLower)) continue;
                         if (lvl != null && !lvl.equals(lineLvl)) continue;
                         int matchIdx = matchedLines++;
                         if (matchIdx >= offset && lines.size() < tailLines) {
-                            lines.add(Map.of("no", totalLines, "level", lineLvl, "text", line));
+                            lines.add(Map.of("no", totalLines, "level", lineLvl, "text", safeLine));
                         }
                     }
                 }
@@ -1171,17 +1196,18 @@ public class OpsLogService {
                     String line;
                     while ((line = br.readLine()) != null) {
                         totalLines++;
-                        String lineLvl = classifyLineLevel(line);
+                        String safeLine = LogRedactor.redact(line);
+                        String lineLvl = classifyLineLevel(safeLine);
                         if ("ERROR".equals(lineLvl)) errorLines++;
                         else if ("WARN".equals(lineLvl)) warnLines++;
-                        if (qLower != null && !line.toLowerCase(Locale.ROOT).contains(qLower)) continue;
+                        if (qLower != null && !safeLine.toLowerCase(Locale.ROOT).contains(qLower)) continue;
                         if (lvl != null && !lvl.equals(lineLvl)) continue;
                         matchedLines++;
                         if (ring.size() >= tailLines) {
                             ring.removeFirst();
                             truncated = true;
                         }
-                        ring.addLast(Map.of("no", totalLines, "level", lineLvl, "text", line));
+                        ring.addLast(Map.of("no", totalLines, "level", lineLvl, "text", safeLine));
                     }
                 }
                 lines = new ArrayList<>(ring);
@@ -1199,6 +1225,38 @@ public class OpsLogService {
             return out;
         } catch (IOException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", "读取日志文件失败：" + e.getMessage());
+        }
+    }
+
+    public void streamRedactedLogFile(Path path, OutputStream out) throws IOException {
+        try (BufferedReader br = Files.newBufferedReader(path, StandardCharsets.UTF_8);
+             Writer writer = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                writer.write(LogRedactor.redact(line));
+                writer.write('\n');
+            }
+            writer.flush();
+        }
+    }
+
+    public void recordOpsAudit(String actor, String action, String targetType, String targetId, Map<String, Object> detail) {
+        if (jdbc == null) return;
+        try {
+            jdbc.sql("""
+                    insert into admin_audit_log (id, actor, action, target_type, target_id, detail)
+                    values (?, ?, ?, ?, ?, ?::jsonb)
+                    """)
+                    .params(
+                            Ids.newId("aud"),
+                            (actor == null || actor.isBlank()) ? "system" : actor,
+                            action,
+                            targetType,
+                            targetId,
+                            Json.write(detail == null ? Map.of() : detail))
+                    .update();
+        } catch (Exception ignored) {
+            // 审计落库失败不阻断排障读取，生产库中正常留痕
         }
     }
 

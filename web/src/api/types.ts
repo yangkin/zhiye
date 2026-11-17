@@ -984,7 +984,11 @@ export interface DashboardData {
     };
     rateLimits: {
       hitsLast10Min: number;
-      byBucket: { bucket: string; count: number }[];
+      rejectedLast10Min?: number;
+      allowedLast10Min?: number;
+      rejected24h?: number;
+      activeWindowHits?: number;
+      byBucket: { bucket: string; count: number; rejected10m?: number; allowed10m?: number; rejected24h?: number }[];
     };
     taskSignals: { pending: number; consumed: number };
     platformPulse: {
@@ -1026,6 +1030,9 @@ export interface ClusterNodeInfo {
   sysMemUsedBytes: number;
   sysMemTotalBytes: number;
   status: 'online' | 'degraded' | 'offline' | string;
+  persistedStatus?: string;
+  gracefulStop?: boolean;
+  staleHeartbeat?: boolean;
   heartbeatAgeSeconds: number;
   startedAt: string | null;
   heartbeatAt: string | null;
@@ -1102,6 +1109,8 @@ export interface SandboxInventorySummary {
   cpuPercentAvg: number | null;
   avgStartupMs: number;
   controlPlaneAvailable: boolean;
+  controlPlaneComplete?: boolean;
+  ledgerHistoryTruncated?: boolean;
   controlPlaneMessage?: string;
 }
 
@@ -1414,7 +1423,15 @@ export interface OpsRuntimeResponse {
   };
   clusterNodes?: ClusterNodeInfo[];
   file: OpsLogFileView;
-  rateLimitHits?: { bucket: string; createdAt: string }[];
+  rateLimitHits?: {
+    bucket: string;
+    outcome?: 'allowed' | 'rejected' | string;
+    code?: string | null;
+    windowSeconds?: number;
+    maxRequests?: number;
+    currentCount?: number;
+    createdAt: string;
+  }[];
   auditLogs?: {
     id: string;
     actor: string;
@@ -1489,9 +1506,14 @@ export interface AdminTemplateItem {
 
 export interface AdminRateLimitBucket {
   bucket: string;
+  activeHits?: number;
+  rejected24h?: number;
+  allowed24h?: number;
+  totalRejected?: number;
   totalHits: number;
   hits24h: number;
   lastHitAt: string;
+  lastRejectedAt?: string | null;
 }
 
 export interface AdminAuditLogItem {
@@ -1519,6 +1541,9 @@ export interface AdminOverview {
   templates: AdminTemplateItem[];
   rateLimitStats: {
     totalHits: number;
+    activeWindowHits?: number;
+    rejected24h?: number;
+    allowed24h?: number;
     recentHits24h: number;
     buckets: AdminRateLimitBucket[];
   };

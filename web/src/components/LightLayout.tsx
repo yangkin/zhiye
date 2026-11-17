@@ -24,6 +24,15 @@ export function LightLayout() {
     document.querySelector('.main')?.scrollTo(0, 0);
   }, [location.pathname, setMobileNav]);
 
+  useEffect(() => {
+    if (!mobileNav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNav(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileNav, setMobileNav]);
+
   return (
     <div className="shell">
       {mobileNav ? <button className="nav-backdrop" aria-label="关闭导航" onClick={() => setMobileNav(false)} /> : null}

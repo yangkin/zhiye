@@ -242,6 +242,13 @@ class ContextHistoryTest extends IntegrationTest {
             for (var f : futures) f.get();
             assertThat(allowed.get()).isEqualTo(maxRequests);
             assertThat(rejected.get()).isEqualTo(threads - maxRequests);
+            // F03: 持久化事件表分别记下 5 次放行与 15 次 429 拦截
+            long recordedAllowed = jdbc.sql("select count(*) from rate_limit_event where bucket = ? and outcome = 'allowed'")
+                    .param(bucket).query(Long.class).single();
+            long recordedRejected = jdbc.sql("select count(*) from rate_limit_event where bucket = ? and outcome = 'rejected'")
+                    .param(bucket).query(Long.class).single();
+            assertThat(recordedAllowed).isEqualTo(maxRequests);
+            assertThat(recordedRejected).isEqualTo(threads - maxRequests);
         } finally {
             pool.shutdownNow();
         }
@@ -272,7 +279,22 @@ class ContextHistoryTest extends IntegrationTest {
 
         var prom = c.get("/api/meta/metrics/prometheus");
         assertThat(prom.status()).isEqualTo(200);
-        assertThat(prom.body()).contains("zhiye_tasks_total{status=\"succeeded\"}").contains("zhiye_alerts_active");
+        assertThat(prom.body())
+                .contains("zhiye_tasks_total{status=\"succeeded\",instance=\"")
+                .contains("# TYPE zhiye_cluster_tasks_7d gauge")
+                .contains("zhiye_cluster_tasks_7d{status=\"succeeded\"}")
+                .contains("zhiye_alerts_active");
+        // 其他实例写入 DB 的失败数体现于 7d 集群 gauge，但不污染本实例单调 counter
+        String failedClusterLine = prom.body().lines()
+                .filter(ln -> ln.startsWith("zhiye_cluster_tasks_7d{status=\"failed\"} "))
+                .findFirst().orElseThrow();
+        String failedLocalLine = prom.body().lines()
+                .filter(ln -> ln.startsWith("zhiye_tasks_total{status=\"failed\",instance=\""))
+                .findFirst().orElseThrow();
+        long clusterFailed = Long.parseLong(failedClusterLine.substring(failedClusterLine.lastIndexOf(' ') + 1).trim());
+        long localFailed = Long.parseLong(failedLocalLine.substring(failedLocalLine.lastIndexOf(' ') + 1).trim());
+        assertThat(clusterFailed).isGreaterThanOrEqualTo(failuresToInsert);
+        assertThat(localFailed).isLessThan(clusterFailed);
     }
 
     @Test

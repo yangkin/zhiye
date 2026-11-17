@@ -5,7 +5,7 @@ import { api, errorMessage } from '../api/client';
 import { qk, useMeta } from '../api/queries';
 import type { AdminCustomQuota, DashboardActor, DashboardData, DashboardRange } from '../api/types';
 import { Icon } from '../lib/icons';
-import { fmtTime } from '../lib/format';
+import { fmtTime, handleTabListKeyDown } from '../lib/format';
 import { toast } from '../lib/store';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
@@ -602,12 +602,21 @@ export function DashboardPage() {
       </div>
 
       {/* 维度导航页签 */}
-      <nav className="dash-nav-bar" role="tablist" aria-label="管理维度分组">
+      <nav
+        className="dash-nav-bar"
+        role="tablist"
+        aria-label="管理维度分组"
+        onKeyDown={(e) => {
+          const visibleIds = SECTION_TABS.filter(([id]) => isAdmin || (id !== 'admin' && id !== 'cluster')).map(([id]) => id);
+          handleTabListKeyDown(e, visibleIds, section, setSection);
+        }}
+      >
         {SECTION_TABS.filter(([id]) => isAdmin || (id !== 'admin' && id !== 'cluster')).map(([id, label]) => (
           <button
             key={id}
             type="button"
             role="tab"
+            tabIndex={section === id ? 0 : -1}
             aria-selected={section === id}
             className={section === id ? 'active' : ''}
             onClick={() => setSection(id)}
@@ -790,9 +799,29 @@ export function DashboardPage() {
                       </button>
                     </div>
                   </header>
-                  <div className="dash-metric-pills" role="tablist" aria-label="趋势指标">
+                  <div
+                    className="dash-metric-pills"
+                    role="tablist"
+                    aria-label="趋势指标"
+                    onKeyDown={(e) =>
+                      handleTabListKeyDown(
+                        e,
+                        TREND_METRICS.map(([m]) => m),
+                        trendMetric,
+                        setTrendMetric,
+                      )
+                    }
+                  >
                     {TREND_METRICS.map(([m, label]) => (
-                      <button key={m} type="button" role="tab" aria-selected={trendMetric === m} className={trendMetric === m ? 'active' : ''} onClick={() => setTrendMetric(m)}>
+                      <button
+                        key={m}
+                        type="button"
+                        role="tab"
+                        tabIndex={trendMetric === m ? 0 : -1}
+                        aria-selected={trendMetric === m}
+                        className={trendMetric === m ? 'active' : ''}
+                        onClick={() => setTrendMetric(m)}
+                      >
                         {label}
                       </button>
                     ))}
@@ -1983,7 +2012,7 @@ export function DashboardPage() {
                   <div>
                     <h3>集群运行期持久化监控与跨实例控制</h3>
                     <p>
-                      汇总自集群 {Math.max(1, data.system.runtime.instances?.length ?? 1)} 个实例（PostgreSQL 持久化遥测）、滑窗限流与跨实例信号
+                      固定窗口（7 天遥测 / 10 分钟滑窗 · 不受顶部空间与日期筛选影响）· 汇总 {Math.max(1, data.system.runtime.instances?.length ?? 1)} 个实例
                     </p>
                   </div>
                   {isAdmin ? (
@@ -2014,9 +2043,14 @@ export function DashboardPage() {
                     <small>额度错 {data.system.runtime.llm?.quotaErrors ?? 0} 次</small>
                   </div>
                   <div>
-                    <span>近 10 分钟限流</span>
-                    <b>{fmtNum(data.system.rateLimits.hitsLast10Min)}</b>
-                    <small>{data.system.rateLimits.byBucket.map((b) => `${b.bucket}:${b.count}`).join(' · ') || '无触发'}</small>
+                    <span>近 10 分钟限流拦截</span>
+                    <b className={(data.system.rateLimits.rejectedLast10Min ?? data.system.rateLimits.hitsLast10Min) > 0 ? 'dash-warn-num' : ''}>
+                      {fmtNum(data.system.rateLimits.rejectedLast10Min ?? data.system.rateLimits.hitsLast10Min)}
+                    </b>
+                    <small>
+                      滑窗 {fmtNum(data.system.rateLimits.activeWindowHits ?? 0)} · 放行 {fmtNum(data.system.rateLimits.allowedLast10Min ?? 0)} · 24h 拦截{' '}
+                      {fmtNum(data.system.rateLimits.rejected24h ?? 0)}
+                    </small>
                   </div>
                   <div>
                     <span>跨实例任务信号</span>

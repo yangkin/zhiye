@@ -240,28 +240,65 @@ public class AdminService {
     }
 
     private Map<String, Object> queryRateLimitStats() {
-        long total = jdbc.sql("select count(*) from rate_limit_hit").query(Long.class).single();
-        long recent24h = jdbc.sql("select count(*) from rate_limit_hit where created_at >= now() - interval '24 hours'")
+        long totalWindow = jdbc.sql("select count(*) from rate_limit_hit").query(Long.class).single();
+        long activeWindow = jdbc.sql("select count(*) from rate_limit_hit where created_at >= now() - interval '10 minutes'")
+                .query(Long.class).single();
+        long rejected24h = jdbc.sql("select count(*) from rate_limit_event where outcome = 'rejected' and created_at >= now() - interval '24 hours'")
+                .query(Long.class).single();
+        long allowed24h = jdbc.sql("select count(*) from rate_limit_event where outcome = 'allowed' and created_at >= now() - interval '24 hours'")
                 .query(Long.class).single();
         var buckets = jdbc.sql("""
-                select bucket, count(*) as total_hits,
-                       count(*) filter (where created_at >= now() - interval '24 hours') as hits_24h,
-                       max(created_at) as last_hit_at
-                from rate_limit_hit
-                group by bucket
-                order by last_hit_at desc
-                limit 20
+                with w as (
+                    select bucket, count(*) as active_hits, max(created_at) as last_w
+                    from rate_limit_hit
+                    group by bucket
+                ),
+                ev as (
+                    select bucket,
+                           count(*) filter (where outcome = 'rejected' and created_at >= now() - interval '24 hours') as rejected_24h,
+                           count(*) filter (where outcome = 'allowed' and created_at >= now() - interval '24 hours') as allowed_24h,
+                           count(*) filter (where outcome = 'rejected') as total_rejected,
+                           max(created_at) filter (where outcome = 'rejected') as last_rejected_at,
+                           max(created_at) as last_ev
+                    from rate_limit_event
+                    group by bucket
+                ),
+                b as (
+                    select bucket from w
+                    union
+                    select bucket from ev
+                )
+                select b.bucket,
+                       coalesce(w.active_hits, 0) as active_hits,
+                       coalesce(ev.rejected_24h, 0) as rejected_24h,
+                       coalesce(ev.allowed_24h, 0) as allowed_24h,
+                       coalesce(ev.total_rejected, 0) as total_rejected,
+                       greatest(w.last_w, ev.last_ev) as last_hit_at,
+                       ev.last_rejected_at
+                from b
+                left join w on w.bucket = b.bucket
+                left join ev on ev.bucket = b.bucket
+                order by rejected_24h desc, active_hits desc, last_hit_at desc nulls last
+                limit 30
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("bucket", rs.getString("bucket"));
-            m.put("totalHits", rs.getLong("total_hits"));
-            m.put("hits24h", rs.getLong("hits_24h"));
+            m.put("activeHits", rs.getLong("active_hits"));
+            m.put("rejected24h", rs.getLong("rejected_24h"));
+            m.put("allowed24h", rs.getLong("allowed_24h"));
+            m.put("hits24h", rs.getLong("rejected_24h"));
+            m.put("totalHits", rs.getLong("active_hits"));
+            m.put("totalRejected", rs.getLong("total_rejected"));
             m.put("lastHitAt", Db.iso(Db.ts(rs, "last_hit_at")));
+            m.put("lastRejectedAt", Db.iso(Db.ts(rs, "last_rejected_at")));
             return m;
         }).list();
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("totalHits", total);
-        m.put("recentHits24h", recent24h);
+        m.put("totalHits", totalWindow);
+        m.put("activeWindowHits", activeWindow);
+        m.put("rejected24h", rejected24h);
+        m.put("allowed24h", allowed24h);
+        m.put("recentHits24h", rejected24h);
         m.put("buckets", buckets);
         return m;
     }
