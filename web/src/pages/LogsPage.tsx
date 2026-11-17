@@ -780,34 +780,11 @@ function TaskDiagnosticPane({
     }
   }, [subTab, autoScrollRunner, runnerLog?.lines.length]);
 
-  const filteredEvents = useMemo(() => {
+  const filteredEvents = useMemo<DisplayEventRow[]>(() => {
     const q = evQuery.trim();
     const matched = events.filter((e) => eventMatchesFilter(e, evFilter, onlyEvErrors, q));
-    if (!compactStream || evFilter !== 'all' || onlyEvErrors || q) return matched;
-    // 结构化 Trace 模式下：将连续高频 agent_text 碎片合并为单条紧凑卡片，突出工具与门禁主干
-    const merged: OpsTaskEventRow[] = [];
-    let textAcc: string[] = [];
-    let firstTextEv: OpsTaskEventRow | null = null;
-    const flushTextAcc = () => {
-      if (!firstTextEv) return;
-      merged.push({
-        ...firstTextEv,
-        payload: { ...firstTextEv.payload, delta: textAcc.join('') },
-      });
-      textAcc = [];
-      firstTextEv = null;
-    };
-    for (const ev of matched) {
-      if (ev.type === 'agent_text') {
-        if (!firstTextEv) firstTextEv = ev;
-        textAcc.push(String(ev.payload?.delta ?? ''));
-      } else {
-        flushTextAcc();
-        merged.push(ev);
-      }
-    }
-    flushTextAcc();
-    return merged;
+    if (!compactStream || onlyEvErrors || q) return matched;
+    return compactTraceEvents(matched);
   }, [events, evFilter, onlyEvErrors, evQuery, compactStream]);
 
   const jumpFirstErrorEvent = () => {
@@ -1037,9 +1014,9 @@ function TaskDiagnosticPane({
                   type="button"
                   className={`logs-chip ${compactStream ? 'active' : ''}`}
                   onClick={() => setCompactStream((v) => !v)}
-                  title="开启后会折叠连续打字碎片，高亮工具与门禁"
+                  title="合并成对的 tool start/end 与 thinking 阶段，折叠打字碎片"
                 >
-                  {compactStream ? 'Trace 合并视图' : '原始流'}
+                  {compactStream ? `Trace 合并视图 (${filteredEvents.length})` : `原始流 (${filteredEvents.length})`}
                 </button>
                 {eventStats.errors > 0 ? (
                   <button type="button" className="logs-chip err" onClick={jumpFirstErrorEvent}>
@@ -1446,7 +1423,127 @@ function TaskDiagnosticPane({
   );
 }
 
-function EventCard({ ev, defaultOpen }: { ev: OpsTaskEventRow; defaultOpen: boolean }) {
+type DisplayEventRow = OpsTaskEventRow & {
+  _spanLabel?: string;
+  _spanDurationMs?: number;
+};
+
+function compactTraceEvents(matched: OpsTaskEventRow[]): DisplayEventRow[] {
+  const merged: DisplayEventRow[] = [];
+  const startsByCallId = new Map<string, number>();
+  const startsByKey = new Map<string, number[]>();
+  let textAcc: string[] = [];
+  let firstTextEv: OpsTaskEventRow | null = null;
+  let lastThinkingIdx = -1;
+
+  const flushTextAcc = () => {
+    if (!firstTextEv) return;
+    merged.push({
+      ...firstTextEv,
+      payload: { ...firstTextEv.payload, delta: textAcc.join('') },
+    });
+    textAcc = [];
+    firstTextEv = null;
+  };
+
+  for (const ev of matched) {
+    if (ev.type === 'agent_text') {
+      lastThinkingIdx = -1;
+      if (!firstTextEv) firstTextEv = ev;
+      textAcc.push(String(ev.payload?.delta ?? ''));
+      continue;
+    }
+    flushTextAcc();
+
+    const p = ev.payload ?? {};
+    if (ev.type === 'thinking') {
+      merged.push({ ...ev, payload: { ...p } });
+      lastThinkingIdx = merged.length - 1;
+      continue;
+    }
+
+    if (ev.type === 'thinking_end' && lastThinkingIdx >= 0) {
+      const target = merged[lastThinkingIdx];
+      const dur = typeof p.durationMs === 'number' ? p.durationMs : target.payload?.durationMs;
+      merged[lastThinkingIdx] = {
+        ...target,
+        _spanLabel: `#${target.seq}–${ev.seq}`,
+        payload: { ...target.payload, ...(dur !== undefined ? { durationMs: dur } : {}) },
+      };
+      lastThinkingIdx = -1;
+      continue;
+    }
+    lastThinkingIdx = -1;
+
+    if (ev.type === 'tool' && p.state === 'start') {
+      const idx = merged.length;
+      merged.push({ ...ev, payload: { ...p } });
+      const callId = typeof p.toolCallId === 'string' && p.toolCallId ? p.toolCallId : '';
+      if (callId) startsByCallId.set(callId, idx);
+      const nameKey = `${String(p.name ?? '')}|${String(p.summary ?? '')}`;
+      const listExact = startsByKey.get(nameKey) ?? [];
+      listExact.push(idx);
+      startsByKey.set(nameKey, listExact);
+      const nameOnlyKey = String(p.name ?? '');
+      const listName = startsByKey.get(nameOnlyKey) ?? [];
+      listName.push(idx);
+      startsByKey.set(nameOnlyKey, listName);
+      continue;
+    }
+
+    if (ev.type === 'tool' && p.state === 'end') {
+      const callId = typeof p.toolCallId === 'string' && p.toolCallId ? p.toolCallId : '';
+      let startIdx: number | undefined;
+      if (callId && startsByCallId.has(callId)) {
+        startIdx = startsByCallId.get(callId);
+        startsByCallId.delete(callId);
+      }
+      const nameKey = `${String(p.name ?? '')}|${String(p.summary ?? '')}`;
+      const exactQueue = startsByKey.get(nameKey);
+      if (startIdx === undefined && exactQueue?.length) {
+        startIdx = exactQueue.shift();
+      }
+      const nameQueue = startsByKey.get(String(p.name ?? ''));
+      if (startIdx === undefined && nameQueue?.length) {
+        startIdx = nameQueue.shift();
+      }
+      if (startIdx !== undefined && merged[startIdx]) {
+        const startEv = merged[startIdx];
+        // 从另一个索引队列里同步移除已配对项，避免重复匹配
+        if (exactQueue?.length) {
+          const i = exactQueue.indexOf(startIdx);
+          if (i >= 0) exactQueue.splice(i, 1);
+        }
+        if (nameQueue?.length) {
+          const i = nameQueue.indexOf(startIdx);
+          if (i >= 0) nameQueue.splice(i, 1);
+        }
+        const durMs =
+          typeof p.durationMs === 'number'
+            ? p.durationMs
+            : Math.max(0, new Date(ev.createdAt).getTime() - new Date(startEv.createdAt).getTime());
+        merged[startIdx] = {
+          ...ev,
+          _spanLabel: `#${startEv.seq}–${ev.seq}`,
+          _spanDurationMs: durMs,
+          payload: {
+            ...startEv.payload,
+            ...p,
+            state: 'span',
+            startDetail: startEv.payload?.detail,
+          },
+        };
+        continue;
+      }
+    }
+
+    merged.push({ ...ev });
+  }
+  flushTextAcc();
+  return merged;
+}
+
+function EventCard({ ev, defaultOpen }: { ev: DisplayEventRow; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const p = ev.payload ?? {};
   const err = isEventError(ev);
@@ -1456,7 +1553,9 @@ function EventCard({ ev, defaultOpen }: { ev: OpsTaskEventRow; defaultOpen: bool
       case 'status':
         return `${String(p.status ?? '')} · ${String(p.phaseLabel ?? '')} (${String(p.progress ?? 0)}%)`;
       case 'tool':
-        return `${String(p.name ?? '')} [${String(p.state ?? '')}] · ${String(p.summary ?? '')}`;
+        return p.state === 'span'
+          ? `${String(p.name ?? '')} · ${String(p.summary ?? '')}`
+          : `${String(p.name ?? '')} [${String(p.state ?? '')}] · ${String(p.summary ?? '')}`;
       case 'log': {
         const line = String(p.line ?? '');
         const first = line.split('\n')[0];
@@ -1515,10 +1614,15 @@ function EventCard({ ev, defaultOpen }: { ev: OpsTaskEventRow; defaultOpen: bool
     <div className={`logs-ev-card ${err ? 'is-err' : ''}`}>
       <div className="logs-ev-head">
         <div className="logs-ev-left">
-          <span className="logs-ev-seq">#{ev.seq}</span>
+          <span className="logs-ev-seq">{ev._spanLabel ?? `#${ev.seq}`}</span>
           <span className={`logs-ev-type ${typeCls}`}>{EVENT_TYPE_LABELS[ev.type] ?? ev.type}</span>
           {ev.type === 'tool' && typeof p.ok === 'boolean' ? (
             <span className={`logs-mini-badge ${p.ok ? '' : 'err'}`}>{p.ok ? 'OK' : '失败'}</span>
+          ) : ev.type === 'tool' && p.state === 'start' ? (
+            <span className="logs-mini-badge">进行中</span>
+          ) : null}
+          {ev._spanDurationMs !== undefined ? (
+            <span className="logs-mini-badge">{fmtDurationMs(ev._spanDurationMs)}</span>
           ) : null}
           <span className="logs-ev-summary">{summary}</span>
         </div>
