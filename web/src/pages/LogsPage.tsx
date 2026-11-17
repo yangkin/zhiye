@@ -961,52 +961,50 @@ function TaskDiagnosticPane({
         {subTab === 'events' ? (
           <>
             <div className="logs-event-toolbar">
-              <div className="logs-chip-row">
-                {(
-                  [
-                    ['all', '全部', events.length],
-                    ['tool', '工具调用', eventStats.counts.tool ?? 0],
-                    ['log', '命令输出', eventStats.counts.log ?? 0],
-                    ['verify', '质检门禁', eventStats.counts.verify ?? 0],
-                    ['thinking', '推理思考', eventStats.counts.thinking ?? 0],
-                    ['status', '阶段状态', (eventStats.counts.status ?? 0) + (eventStats.counts.finished ?? 0)],
-                    ['collab', '确认/补充', (eventStats.counts.confirm ?? 0) + (eventStats.counts.steer ?? 0) + (eventStats.counts.todo ?? 0)],
-                  ] as [EventFilter, string, number][]
-                ).map(([k, label, cnt]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    className={`logs-chip ${evFilter === k ? 'active' : ''}`}
-                    onClick={() => setEvFilter(k)}
-                  >
-                    <span>{label}</span>
-                    <b>{cnt}</b>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className={`logs-chip err ${onlyEvErrors ? 'active' : ''}`}
-                  onClick={() => setOnlyEvErrors((v) => !v)}
-                >
-                  <span>仅看报错</span>
-                  <b>{eventStats.errors}</b>
-                </button>
-              </div>
-
-              <div className="logs-filter-right">
-                <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 260, height: 30 }}>
+              <div className="logs-filter-left">
+                <label className="logs-search-box" style={{ minWidth: 220, maxWidth: 320, height: 32 }}>
                   <Icon name="search" />
                   <input
+                    aria-label="过滤过程事件"
                     placeholder="过滤事件内容 / 命令 / 文件路径…"
                     value={evQuery}
                     onChange={(e) => setEvQuery(e.target.value)}
                   />
                   {evQuery ? (
-                    <button type="button" className="logs-search-clear" onClick={() => setEvQuery('')}>
+                    <button type="button" className="logs-search-clear" aria-label="清除搜索" onClick={() => setEvQuery('')}>
                       <Icon name="close" />
                     </button>
                   ) : null}
                 </label>
+
+                <select
+                  className="logs-select"
+                  aria-label="筛选事件类型"
+                  style={{ height: 32 }}
+                  value={onlyEvErrors ? '__errors__' : evFilter}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__errors__') {
+                      setEvFilter('all');
+                      setOnlyEvErrors(true);
+                    } else {
+                      setOnlyEvErrors(false);
+                      setEvFilter(val as EventFilter);
+                    }
+                  }}
+                >
+                  <option value="all">全部事件 ({events.length})</option>
+                  <option value="__errors__">仅看报错 ({eventStats.errors})</option>
+                  <option value="tool">工具调用 ({eventStats.counts.tool ?? 0})</option>
+                  <option value="log">命令输出 ({eventStats.counts.log ?? 0})</option>
+                  <option value="verify">质检门禁 ({eventStats.counts.verify ?? 0})</option>
+                  <option value="thinking">推理思考 ({eventStats.counts.thinking ?? 0})</option>
+                  <option value="status">阶段状态 ({(eventStats.counts.status ?? 0) + (eventStats.counts.finished ?? 0)})</option>
+                  <option value="collab">确认 / 补充 ({(eventStats.counts.confirm ?? 0) + (eventStats.counts.steer ?? 0) + (eventStats.counts.todo ?? 0)})</option>
+                </select>
+              </div>
+
+              <div className="logs-filter-right">
                 <button type="button" className="logs-chip" onClick={() => setExpandAllEvents((v) => !v)}>
                   {expandAllEvents ? '全部收起' : '全部展开'}
                 </button>
@@ -1016,11 +1014,11 @@ function TaskDiagnosticPane({
                   onClick={() => setCompactStream((v) => !v)}
                   title="合并成对的 tool start/end 与 thinking 阶段，折叠打字碎片"
                 >
-                  {compactStream ? `Trace 合并视图 (${filteredEvents.length})` : `原始流 (${filteredEvents.length})`}
+                  {compactStream ? `Trace 合并 (${filteredEvents.length})` : `原始流 (${filteredEvents.length})`}
                 </button>
                 {eventStats.errors > 0 ? (
                   <button type="button" className="logs-chip err" onClick={jumpFirstErrorEvent}>
-                    定位首个报错
+                    定位报错 ({eventStats.errors})
                   </button>
                 ) : null}
               </div>
