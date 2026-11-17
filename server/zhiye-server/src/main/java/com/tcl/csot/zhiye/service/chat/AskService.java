@@ -307,7 +307,8 @@ public class AskService {
     private ArrayNode baseMessages(String ws, String content, List<String> skillAppIds, String appId,
                                    java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets) {
         boolean conversation = appId == null || appId.isBlank();
-        String context = skillContext(ws, skillAppIds) + appContext(ws, appId) + builtinContext();
+        // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
+        String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId);
         if (conversation && type != null && !type.isBlank())
             context += "\n\n用户在创造页选的类型：" + type + "（只是参考，成品形态仍按「先判断要交付什么」自己判断）";
         ArrayNode msgs = Json.M.createArrayNode();

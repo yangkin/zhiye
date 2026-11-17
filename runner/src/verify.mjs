@@ -119,19 +119,18 @@ async function verifyTemplate(cwd, env) {
     const problems = templateLint(cwd)
     return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: '' }
   }))
-  const preview = await step('构建预览版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: plugin }), { mode: 'preview', outDir: PREVIEW_DIR }))
-  checks.push(preview)
+  const [preview, publish] = await Promise.all([
+    step('构建预览版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: plugin }), { mode: 'preview', outDir: PREVIEW_DIR })),
+    step('构建发布版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: PUBLISH_DIR })),
+  ])
   if (preview.ok) {
     // 防御：确认预览版确实带了 data-loc 和编辑桥
     const html = readFileSync(path.join(cwd, PREVIEW_DIR, 'index.html'), 'utf8')
     if (!html.includes('data-zhiye-editor-ui')) { preview.ok = false; preview.detail = '预览版没有注入编辑桥（vite.config.ts 里的织页插件配置被改动了？）' }
   }
-  const publish = preview.ok
-    ? await step('构建发布版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: PUBLISH_DIR }))
-    : { name: '构建发布版', ok: false, skipped: true, detail: SKIPPED }
-  checks.push(publish)
+  checks.push(preview, publish)
   checks.push(preview.ok && publish.ok
-    ? await step('冒烟测试', () => smokeTest(path.join(cwd, PREVIEW_DIR), { requireRoot: true, chromePath: env.ZHIYE_CHROME_PATH }))
+    ? await step('冒烟测试', () => smokeTest(path.join(cwd, PREVIEW_DIR), { requireRoot: true, captureShot: true, chromePath: env.ZHIYE_CHROME_PATH }))
     : { name: '冒烟测试', ok: false, skipped: true, detail: SKIPPED })
   return { checks, editable: true }
 }
@@ -177,7 +176,7 @@ async function verifyVue(cwd, env) {
     : { name: '构建发布版', ok: false, skipped: true, detail: SKIPPED }
   checks.push(publish)
   checks.push(preview.ok && publish.ok
-    ? await step('冒烟测试', () => smokeTest(path.join(cwd, PREVIEW_DIR), { requireRoot: true, chromePath: env.ZHIYE_CHROME_PATH }))
+    ? await step('冒烟测试', () => smokeTest(path.join(cwd, PREVIEW_DIR), { requireRoot: true, captureShot: true, chromePath: env.ZHIYE_CHROME_PATH }))
     : { name: '冒烟测试', ok: false, skipped: true, detail: SKIPPED })
   return { checks, editable: false }
 }
@@ -360,6 +359,11 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)
   // 报错里的绝对路径换成相对工作区的路径，便于 agent 阅读
   const strip = (d) => [cwd, realCwd(cwd)].reduce((acc, p) => acc.split(p + '/').join(''), String(d || ''))
-  const checks = r.checks.map(({ name, ok, detail, skipped, durationMs }) => ({ name, ok, detail: strip(detail), ...(skipped ? { skipped: true } : {}), ...(durationMs !== undefined ? { durationMs } : {}) }))
+  const checks = r.checks.map(({ name, ok, detail, skipped, durationMs, screenshot }) => ({
+    name, ok, detail: strip(detail),
+    ...(skipped ? { skipped: true } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(screenshot ? { screenshot } : {}),
+  }))
   return { ok: checks.every((c) => c.ok), checks, previewDir: r.noDist ? null : PREVIEW_DIR, publishDir: r.noDist ? null : PUBLISH_DIR, editable: r.editable, ...(r.notes?.length ? { notes: r.notes } : {}) }
 }

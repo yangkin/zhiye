@@ -128,13 +128,42 @@ test('smokeTest 对响应式正常且 Tab 切换无异常的应用放行', { ski
     <button role="tab" onclick="document.getElementById('panel').textContent='概览'">概览</button>
     <button role="tab" onclick="document.getElementById('panel').textContent='设置'">设置</button>
   </nav>
+  <input type="search" placeholder="搜索设备" oninput="document.getElementById('panel').dataset.q=this.value" />
   <main id="panel" style="max-width:100%">内容区</main>
 </div>
 </body></html>`)
   try {
-    const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
+    const r = await smokeTest(dir, { requireRoot: true, captureShot: true, chromePath: CHROME })
     assert.equal(r.ok, true, r.detail)
+    assert.ok(typeof r.screenshot === 'string' && r.screenshot.length > 100)
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('smokeTest 能检出按钮控件重叠与损坏的本地图片', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+  const dir = makeSite(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0">
+<div id="root"><main style="position:relative;height:120px">
+  <button style="position:absolute;left:10px;top:10px;width:120px;height:40px">导出报表</button>
+  <button style="position:absolute;left:20px;top:15px;width:120px;height:40px">新建巡检</button>
+</main></div>
+</body></html>`)
+  try {
+    const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, false)
+    assert.match(r.detail, /控件位置重叠/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+
+  const badImg = makeSite(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<div id="root"><img src="./missing.png" alt="损坏图标" style="width:40px;height:40px" /><p>正常文字</p></div>
+</body></html>`)
+  try {
+    const r = await smokeTest(badImg, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, false)
+    assert.match(r.detail, /损坏图标|missing\.png|资源加载失败/)
+  } finally {
+    rmSync(badImg, { recursive: true, force: true })
   }
 })

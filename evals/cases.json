@@ -1,0 +1,101 @@
+[
+  {
+    "id": "crud-inspection",
+    "name": "设备点检台账（React CRUD）",
+    "type": "日常开发",
+    "mode": "标准",
+    "prompt": "做一个产线设备点检台账应用，支持按车间筛选、搜索设备编号、新增与修改点检记录、导出 CSV，适配手机与桌面。",
+    "expect": { "projectKind": "template", "mustContainText": ["点检"], "minFiles": 2 }
+  },
+  {
+    "id": "dashboard-charts",
+    "name": "良率与异常运营看板",
+    "type": "日常开发",
+    "mode": "标准",
+    "prompt": "做一个工厂良率看板：看板 · 展示今日良率、停机时长 KPI，按产线联动筛选的 Recharts 折线与柱状图，识别异常波动并支持导出。",
+    "expect": { "projectKind": "template", "mustContainCode": ["recharts"], "minFiles": 2 }
+  },
+  {
+    "id": "multipage-hash-router",
+    "name": "多页面哈希路由资产系统",
+    "type": "开发网站",
+    "mode": "标准",
+    "prompt": "做一个多页面 IT 资产管理系统，包含总览、设备清单、借还记录、报废审批 4 个页面并支持路由切换。",
+    "expect": { "projectKind": "template", "mustContainCode": ["HashRouter", "createHashRouter"], "forbidCode": ["BrowserRouter", "createBrowserRouter"] }
+  },
+  {
+    "id": "cloud-schema-policy",
+    "name": "云数据库与状态流转权限",
+    "type": "开发网站",
+    "mode": "标准",
+    "cloud": true,
+    "prompt": "做一个多人协作请假审批应用，使用织页云服务持久化，员工提交后只有管理员可以批准或驳回，自己只能看自己的记录。",
+    "expect": { "projectKind": "template", "requireFiles": ["cloud/schema.sql", "cloud/policies.json"], "mustContainCode": ["zhiye.cloud"] }
+  },
+  {
+    "id": "cloud-function-ledger",
+    "name": "云函数原子流水账本",
+    "type": "开发网站",
+    "mode": "标准",
+    "cloud": true,
+    "prompt": "做一个物料领用申请与库存扣减系统，领用审批通过时必须通过云函数在服务端校验库存并写入流水账本（表规则使用 function_write）。",
+    "expect": { "projectKind": "template", "requireGlobPrefix": ["functions/"], "mustContainCode": ["zhiye.fn.call"] }
+  },
+  {
+    "id": "app-inline-ai",
+    "name": "应用内 AI 智能工单分派",
+    "type": "日常开发",
+    "mode": "快速",
+    "prompt": "做一个客服工单自动分类与回复建议工具，用户输入工单文本后调用应用内置 AI 返回分类与处理建议。",
+    "expect": { "projectKind": "template", "mustContainCode": ["zhiye.ai.chat"] }
+  },
+  {
+    "id": "vue-echarts",
+    "name": "Vue 3 + ECharts 能耗看板",
+    "type": "日常开发",
+    "mode": "快速",
+    "prompt": "用 Vue 做一个工厂水电气能耗监测应用，带 ECharts 图表和多页切换。",
+    "expect": { "projectKind": "vue", "mustContainCode": ["echarts"], "forbidCode": ["createWebHistory", "react"] }
+  },
+  {
+    "id": "python-cli",
+    "name": "Python 标准库数据清洗脚本",
+    "type": "写脚本",
+    "mode": "快速",
+    "prompt": "写一个 Python 命令行脚本，读取 CSV 生产日志，统计每条产线报错 Top5 并输出汇总 CSV，不依赖第三方库且提供 --help。",
+    "expect": { "projectKind": "script", "requireFiles": ["README.md"], "forbidFiles": ["index.html"] }
+  },
+  {
+    "id": "skill-package",
+    "name": "规范周报 Skill 技能包",
+    "type": "开发skill",
+    "mode": "快速",
+    "prompt": "做一个面向研发团队的周报润色与风险提炼 skill，包含 SKILL.md、模板 references 和统计脚本。",
+    "expect": { "projectKind": "skill", "requireFiles": ["SKILL.md"], "forbidFiles": ["index.html"] }
+  },
+  {
+    "id": "sandbox-storage-safe",
+    "name": "沙箱存储降级安全",
+    "type": "日常开发",
+    "mode": "快速",
+    "prompt": "做一个个人番茄钟与任务清单，支持把配置和待办优先保存到 localStorage，同时在无同源存储的沙箱预览里正常使用不白屏。",
+    "expect": { "projectKind": "template", "mustContainCode": ["try", "catch"] }
+  },
+  {
+    "id": "mobile-responsive-table",
+    "name": "移动端 390px 表格响应式适配",
+    "type": "日常开发",
+    "mode": "快速",
+    "prompt": "做一个移动端优先的设备巡检日报填写与列表页，在手机 390px 宽度下无横向滚动条、按钮不重叠。",
+    "expect": { "projectKind": "template", "maxMobileOverflow": 16 }
+  },
+  {
+    "id": "incremental-modify",
+    "name": "多轮增量修改不丢旧功能",
+    "type": "日常开发",
+    "mode": "快速",
+    "prompt": "做一个简洁的会议室预约看板，支持查看今日预约与快速新建预约。",
+    "followUpModify": "保留现有预约列表和新建功能，额外增加「按会议室容量筛选」和「导出今日日程 CSV」两个按钮。",
+    "expect": { "projectKind": "template", "mustContainText": ["容量", "导出"] }
+  }
+]

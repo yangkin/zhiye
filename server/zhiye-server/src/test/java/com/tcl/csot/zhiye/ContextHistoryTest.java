@@ -10,6 +10,7 @@ import com.tcl.csot.zhiye.service.conversation.ConversationService;
 import com.tcl.csot.zhiye.service.task.Prompts;
 import com.tcl.csot.zhiye.service.task.RepoMap;
 import com.tcl.csot.zhiye.service.task.TaskExecutor;
+import com.tcl.csot.zhiye.service.task.VisualCritiqueService;
 import com.tcl.csot.zhiye.support.Client;
 import com.tcl.csot.zhiye.support.FakeUpstreamController;
 import com.tcl.csot.zhiye.support.IntegrationTest;
@@ -227,5 +228,16 @@ class ContextHistoryTest extends IntegrationTest {
         JsonNode last = msgs.get(msgs.size() - 1);
         assertThat(last.path("role").asText()).isEqualTo("assistant");
         assertThat(last.path("content").asText()).isEqualTo("第一段，\n\n（已停止回答）");
+    }
+
+    @Test
+    void visualCritiqueParsesPassAndFixResponses() {
+        assertThat(VisualCritiqueService.parseCritique("PASS")).isEmpty();
+        assertThat(VisualCritiqueService.parseCritique("pass\n画面正常")).isEmpty();
+        assertThat(VisualCritiqueService.parseCritique(null)).isEmpty();
+        assertThat(VisualCritiqueService.parseCritique("FIX: 顶部导出按钮与筛选框发生重叠，请增大间距"))
+                .contains("顶部导出按钮与筛选框发生重叠，请增大间距");
+        assertThat(VisualCritiqueService.parseCritique("FIX：主区域空白"))
+                .contains("主区域空白");
     }
 }

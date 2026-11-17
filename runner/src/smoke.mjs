@@ -42,7 +42,31 @@ async function readRenderState(target) {
     const vw = window.innerWidth
     const scrollWidth = document.documentElement ? document.documentElement.scrollWidth : vw
     const hasViewport = !!document.querySelector('meta[name="viewport"]')
-    return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title, vw, scrollWidth, hasViewport }
+    const brokenImgs = Array.from(document.querySelectorAll('img')).filter((img) => {
+      if (isUi(img) || !visible(img)) return false
+      const src = img.getAttribute('src') || ''
+      if (/^https?:\/\//i.test(src) && !src.startsWith(location.origin)) return false
+      return img.complete && img.naturalWidth === 0
+    }).map((img) => img.getAttribute('alt') || img.getAttribute('src') || '图片').slice(0, 3)
+
+    const btns = Array.from(document.querySelectorAll('nav button, header button, main button, a[role="button"]')).filter((el) => !isUi(el) && visible(el)).slice(0, 30)
+    const overlaps = []
+    for (let i = 0; i < btns.length && overlaps.length < 2; i++) {
+      const a = btns[i].getBoundingClientRect()
+      for (let j = i + 1; j < btns.length; j++) {
+        if (btns[i].contains(btns[j]) || btns[j].contains(btns[i])) continue
+        const b = btns[j].getBoundingClientRect()
+        const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+        const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+        if (ox > 8 && oy > 8) {
+          const la = (btns[i].innerText || btns[i].getAttribute('aria-label') || '按钮').trim().slice(0, 12)
+          const lb = (btns[j].innerText || btns[j].getAttribute('aria-label') || '按钮').trim().slice(0, 12)
+          overlaps.push(`「${la}」与「${lb}」`)
+          break
+        }
+      }
+    }
+    return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title, vw, scrollWidth, hasViewport, brokenImgs, overlaps }
   })
 }
 
@@ -55,6 +79,10 @@ function checkRenderState(content, requireRoot, errors, prefix = '', maxWidth = 
   } else if (maxWidth > 0 && (content.scrollWidth > content.vw + 16 || (content.hasViewport && content.vw > maxWidth + 16))) {
     const actual = Math.max(content.scrollWidth, content.vw)
     errors.push(`${prefix}存在横向溢出：页面宽度 ${actual}px 超出视口 ${maxWidth}px，请检查布局响应式适配`)
+  } else if (content.brokenImgs?.length) {
+    errors.push(`${prefix}存在无法加载的图片：${content.brokenImgs.join('、')}`)
+  } else if (content.overlaps?.length) {
+    errors.push(`${prefix}控件位置重叠：${content.overlaps.join('、')}`)
   }
 }
 
@@ -83,7 +111,7 @@ async function attachPageWatchers(page, { origin, blocked, errors, warnings, pre
  * 返回 { ok, skipped?, detail }
  * requireRoot：模板项目要求挂载节点（React 模板 #root / Vue 模板 #app）非空
  */
-export async function smokeTest(dir, { requireRoot = false, chromePath = process.env.ZHIYE_CHROME_PATH, timeoutMs = 30000 } = {}) {
+export async function smokeTest(dir, { requireRoot = false, captureShot = false, chromePath = process.env.ZHIYE_CHROME_PATH, timeoutMs = 30000 } = {}) {
   if (!existsSync(path.join(dir, 'index.html'))) return { ok: false, detail: '构建产物里没有 index.html' }
   if (!chromePath || !existsSync(chromePath)) {
     return skipped(`没有可用的 Chrome（ZHIYE_CHROME_PATH=${chromePath || '未设置'}）`)
@@ -170,9 +198,27 @@ export async function smokeTest(dir, { requireRoot = false, chromePath = process
           checkRenderState(await readRenderState(page), requireRoot, errors, `切换「${c.label.slice(0, 16)}」后 `)
           clicked++
         }
+        // 安全搜索框输入探活：验证筛选状态变化不触发崩溃或空白
+        if (errors.length === 0) {
+          const searchInput = page.locator('input[type="search"], input[placeholder*="搜索"], input[placeholder*="筛选"]').first()
+          if (await searchInput.isVisible({ timeout: 300 }).catch(() => false)) {
+            await searchInput.fill('测试').catch(() => {})
+            await page.waitForTimeout(100)
+            await searchInput.fill('').catch(() => {})
+            await page.waitForTimeout(100)
+            checkRenderState(await readRenderState(page), requireRoot, errors, '输入搜索词后 ')
+          }
+        }
       } catch (e) {
         errors.push(`交互切换检查失败：${String(e.message).split('\n')[0]}`)
       }
+    }
+
+    let screenshot = null
+    if (captureShot && errors.length === 0) {
+      try {
+        screenshot = (await page.screenshot({ type: 'jpeg', quality: 60, fullPage: false })).toString('base64')
+      } catch {}
     }
 
     // 移动端（390×844）视口冒烟：检测常见的小屏横向溢出或渲染报错
@@ -227,7 +273,9 @@ export async function smokeTest(dir, { requireRoot = false, chromePath = process
     await ctx.close().catch(() => {})
     const uniq = [...new Set(errors)]
     const detail = [...uniq, ...[...new Set(warnings)].map((w) => `（提示）${w}`)].join('\n')
-    return { ok: uniq.length === 0, detail: uniq.length ? detail : warnings.length ? detail : '' }
+    const out = { ok: uniq.length === 0, detail: uniq.length ? detail : warnings.length ? detail : '' }
+    if (screenshot && out.ok) out.screenshot = screenshot
+    return out
   } finally {
     if (browser) await browser.close().catch(() => {})
     await srv.close().catch(() => {})

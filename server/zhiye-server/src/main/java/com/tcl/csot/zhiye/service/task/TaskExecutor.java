@@ -542,7 +542,7 @@ public class TaskExecutor {
         List<String> fixes = new ArrayList<>();
         for (int round = 0; ; round++) {
             phase(ctx, "VERIFYING", "正在校验：类型检查、构建、冒烟测试", 70);
-            JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app.projectKind())));
+            JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app, round)));
             if (v.path("ok").asBoolean(false)) { passed = v; break; }
             if (round >= fixRounds)
                 throw new TaskContext.Fail("VERIFY_FAILED", "校验未通过（已修复 " + fixRounds + " 轮）：" + failedSummary(v));
@@ -1002,6 +1002,14 @@ public class TaskExecutor {
     }
 
     private JsonNode verify(TaskContext ctx, String projectKind) throws Exception {
+        return verify(ctx, null, -1, projectKind);
+    }
+
+    private JsonNode verify(TaskContext ctx, AppRow app, int round) throws Exception {
+        return verify(ctx, app, round, app.projectKind());
+    }
+
+    private JsonNode verify(TaskContext ctx, AppRow app, int round, String projectKind) throws Exception {
         JsonNode v;
         try {
             v = call(ctx, "verify", Json.obj().put("projectKind", projectKind));
@@ -1022,8 +1030,29 @@ public class TaskExecutor {
             v = n;
         }
         ArrayNode checks = v.path("checks").isArray() ? (ArrayNode) v.get("checks") : Json.M.createArrayNode();
+        String shot = extractAndStripScreenshot(checks);
+        if (round == 0 && shot != null && app != null && app.isTemplateLike() && visualCritique != null && v.path("ok").asBoolean(false)) {
+            Optional<String> issue = visualCritique.review(ctx.id(), app, shot);
+            if (issue.isPresent()) {
+                if (v.isObject()) ((ObjectNode) v).put("ok", false);
+                checks.addObject().put("name", "视觉自查").put("ok", false).put("detail", issue.get());
+            } else {
+                checks.addObject().put("name", "视觉自查").put("ok", true).put("detail", "");
+            }
+        }
         events.emit(ctx.id(), "verify", Map.of("checks", checks));
         return v;
+    }
+
+    private static String extractAndStripScreenshot(ArrayNode checks) {
+        String shot = null;
+        for (JsonNode c : checks) {
+            if (c.isObject() && c.has("screenshot")) {
+                if (shot == null && c.get("screenshot").isTextual()) shot = c.get("screenshot").asText();
+                ((ObjectNode) c).remove("screenshot");
+            }
+        }
+        return shot;
     }
 
     /** 校验通过后的一行结论：通过的检查名称拼在一起，跳过项单独列出。 */
@@ -1054,6 +1083,8 @@ public class TaskExecutor {
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.service.cloud.CloudService cloud;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private VisualCritiqueService visualCritique;
 
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.service.cloud.FunctionService functions;
