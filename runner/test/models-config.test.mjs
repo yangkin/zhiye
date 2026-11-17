@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { writeModelsJson, contextWindowOverride } from '../src/agent.mjs'
+import { writeModelsJson, contextWindowOverride, modelDefFromEnv } from '../src/agent.mjs'
 
 /** 与内置 deepseek-flash 同形状的最小定义 */
 const builtin = {
@@ -73,4 +73,36 @@ test('contextWindowOverride 只改窗口，其余字段原样保留', () => {
 test('contextWindowOverride 不改动入参', () => {
   contextWindowOverride(builtin, 1)
   assert.equal(builtin.contextWindow, 1000000)
+})
+
+test('modelDefFromEnv：未配置返回 null', () => {
+  assert.equal(modelDefFromEnv(''), null)
+  assert.equal(modelDefFromEnv(undefined), null)
+  assert.equal(modelDefFromEnv('   '), null)
+})
+
+test('modelDefFromEnv：解析整条定义并剥掉运行时字段', () => {
+  const def = modelDefFromEnv(JSON.stringify({ ...builtin, baseUrl: 'http://gw/llm/v1' }))
+  assert.equal(def.id, 'deepseek-flash')
+  assert.equal(def.api, 'openai-completions')
+  assert.equal(def.contextWindow, 1000000)
+  assert.equal(def.baseUrl, undefined)
+  assert.equal(def.provider, undefined)
+})
+
+test('modelDefFromEnv：坏 JSON / 缺字段直接抛错', () => {
+  assert.throws(() => modelDefFromEnv('{not json'), /不是合法 JSON/)
+  assert.throws(() => modelDefFromEnv('{"id":"x"}'), /id \/ api/)
+})
+
+test('modelDefFromEnv 的产出可以直接写进 models.json', () => {
+  const { dir, done } = tempDir()
+  try {
+    writeModelsJson(dir, 'deepseek', 'http://gw/llm/v1', modelDefFromEnv(JSON.stringify(builtin)))
+    const cfg = JSON.parse(readFileSync(path.join(dir, 'models.json'), 'utf8'))
+    assert.equal(cfg.providers.deepseek.baseUrl, 'http://gw/llm/v1')
+    assert.equal(cfg.providers.deepseek.models.length, 1)
+    assert.equal(cfg.providers.deepseek.models[0].id, 'deepseek-flash')
+    assert.equal(cfg.providers.deepseek.models[0].provider, undefined)
+  } finally { done() }
 })

@@ -81,7 +81,7 @@
   window.zhiye.cloud = {
     appId: cfg.appId,
     db: {
-      /** 列表：{limit, offset, order: 'id'|'-col', after, 字段: 值, 字段__gte/__lte/__gt/__lt/__ne/__like/__in} → {rows, total, next} */
+      /** 列表：{limit, offset, order: 'id'|'-col'|多列（逗号分隔、每列可加 '-' 前缀，如 '-report_date,line'）, after, 字段: 值, 字段__gte/__lte/__gt/__lt/__ne/__like/__in} → {rows, total, next} */
       list: function (table, params) { return call('GET', '/db/' + table + qs(params)); },
       insert: function (table, row) { return call('POST', '/db/' + table, row); },
       update: function (table, id, row) { return call('PATCH', '/db/' + table + '/' + id, row); },

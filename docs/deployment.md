@@ -82,9 +82,16 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 | `KIMI_API_KEY`* / `DEEPSEEK_API_KEY`* + `ZHIYE_LLM_*` | — | 本地统一上游（不开五星AI岛时） |
 | `ZHIYE_AUTH_MODE` | `anonymous` | `sso` 开启统一登录 |
 | `ZHIYE_SSO_GATEWAY_URL`、`ZHIYE_SSO_CLIENT_ID`、`ZHIYE_SSO_REDIRECT_URL`、`ZHIYE_SSO_SECURE_COOKIE` | 测试网关 / `SSO-METIS` / — / `true` | 统一认证；回调地址要在网关登记，形如 `https://织页域名/access_token` |
-| `ZHIYE_FIVESTAR_ENABLED`、`ZHIYE_FIVESTAR_ORG`、`ZHIYE_OPENCLAW_BASE_URL`、`ZHIYE_LLM_GATEWAY_URL` | `false` / 0 / — / — | 五星AI岛模型、额度、llm-gateway 路由（需要 sso） |
+| `ZHIYE_FIVESTAR_ENABLED`、`ZHIYE_FIVESTAR_ORG`、`ZHIYE_OPENCLAW_BASE_URL`、`ZHIYE_LLM_GATEWAY_URL` | `false` / 31 / — / — | 五星AI岛模型、额度、llm-gateway 路由（需要 sso） |
+| `ZHIYE_FIVESTAR_PROJECT_ID` | `zhiye` | 发往 llm-gateway 的来源项目标识 |
 | `ZHIYE_OPENCLAW_INTERNAL_TOKEN`* | — | 调 openclaw 内部接口的服务令牌（api 和 site 都要） |
+| `ZHIYE_SKILLHUB_ENABLED`、`ZHIYE_SKILLHUB_URL`、`ZHIYE_SKILLHUB_FILE_URL`、`ZHIYE_SKILLHUB_PORTAL`、`ZHIYE_SKILLHUB_ORG` | `false` / — / — / 测试详情页 / 31 | 公司 SkillHub 浏览、安装和发布 |
 | `ZHIYE_SOURCES_ALLOWED_HOSTS` | 空 | 数据源代理允许访问的主机（逗号分隔，支持 `*.域名`） |
+| `ZHIYE_AGW_ENABLED`、`ZHIYE_AGW_BASE_URL`、`ZHIYE_AGW_PUBLIC_URL`、`ZHIYE_AGW_TENANT_ID` | `false` / 测试网关 / 同 base / `31` | API 网关目录导入与签名调用；目录需要 SSO，业务调用凭证由各工作空间导入时填写 |
+
+独立集群部署时，上述外部服务地址必须使用织页集群可访问的平台网关 / Ingress，不能填对方集群的 `*.svc` 地址。后台模型调用只向 openclaw 传工号并换取个人虚拟密钥，平台 accessToken 不进沙箱或 llm-gateway；完整身份链路和待确认请求头见 `docs/fivestar-integration.md`。
+
+`deploy/k8s/overlays/{test,prod}` 中的 `<...>` 是部署前必须替换的环境参数，不是未完成的功能代码；`application-mock.yml` 和 `controller/mock/` 中的地址、模型、凭证只用于本地模拟，不应配置成真实生产值。业务常量（如分页大小、校验正则、能力上限）不需要全部配置化，只有环境地址、密钥、资源和确需按环境调整的限额才放到 ConfigMap / Secret。
 
 \* 放 Secret `zhiye-secrets`。
 

@@ -1,12 +1,15 @@
 # 织页开发备忘
 
 ## 本地环境
-- 一键启动：`bash scripts/dev-up.sh`（PostgreSQL 5433 → 前端构建 → api 8080 + site 8083）；停止：`bash scripts/dev-down.sh`
+- 一键启动：`bash scripts/dev-up.sh`（PostgreSQL 5433 → 前端构建 → api 8080 + site 8083）；停止：`bash scripts/dev-down.sh`（`--all` 连数据库一起停）
+- **跨平台适配（macOS / Windows Git Bash）**：`scripts/env.sh` 和 `server/run-dev.sh` 已做平台自动适配；Windows（Git Bash）默认用 `C:\Users\yangkai37\.jdks\ms-17.0.16`、`C:\Users\yangkai37\.local\nodejs\node-v22.20.0-win-x64` 和 `D:\tools\postgresql-16\pgsql\bin`（数据目录仍在 `runtime/pg`），`runtime/local.env` 可放 `ZHIYE_NODE_BINARY` / `ZHIYE_CHROME_PATH`；macOS 默认用 Homebrew OpenJDK 21、`~/.nvm/versions/node/v24.14.1` 和 Homebrew PostgreSQL 16。代码级 Windows 适配也已合入：runner 子进程 PATH 用 `;` 分隔并继承系统 PATH、临时文件删除重试 5 次（`GitService.deleteWithRetry`）、沙箱转发 `ZHIYE_MODEL_DEF` 给 runner、`verify.mjs` 把 `ZHIYE_LOC_PLUGIN` 统一转 `file://` URL（Windows 原生路径 `D:\...` 不能被 ESM `import()`）、提示信息里的路径分隔符统一成 `/`。Windows 打包前先停服务（运行中的 api 会锁住 jar 无法 repackage）。
+- Git Bash 里 `pg_ctl -w start` 会因为子进程继承管道而不返回，属正常现象；重启数据目录直接用 `bash scripts/dev-up.sh`（它会先 pg_isready 探测，已跑就跳过）。
+- 健康检查可探 `http://127.0.0.1:8080/` 或 `/api/meta`；无工作空间的 `/api/meta` 返回 200 且不创建 cookie，便于登录页读取认证配置。
 - 只启动数据库：`pg_ctl -D runtime/pg -o "-p 5433 -k /tmp -c listen_addresses=127.0.0.1" -l runtime/pg.log -w start`
-- 仓库已納入 Git 管理（`main` 分支）并配置了 GitHub Actions（`.github/workflows/ci.yml`）；改动保持小步提交、通过全量测试门禁。
+- 仓库已纳入 Git 管理（本地 `main` 跟踪 GitHub `origin/main`）；改动保持小步提交，通过 `bash scripts/ci.sh` 全量测试门禁。远端已停用 GitHub Actions 自动构建。
 - 两个模板各有一份依赖缓存：React `packages/app-template` → `runtime/template-cache`，Vue `packages/vue-template` → `runtime/vue-template-cache`。锁文件在 `deploy/docker/{template-cache,vue-template-cache}/package-lock.json`，`dev-up.sh` 发现 package.json 或锁文件变化时用它 `npm ci`，runner 镜像也用同一份。
 - 改模板的 package.json 后重新生成锁文件：空目录放入 package.json，`npm install --package-lock-only --before=<7 天前的日期>`（传递依赖也只取发布满 7 天的版本），拷回 `deploy/docker/...`。新增依赖写死版本号。vite 固定 7.3.7（7.3.6 及以前有安全公告）。
-- 模型上游：`scripts/env.sh` 按 `ZHIYE_MODEL`（kimi / deepseek）设置网关上游、模型和密钥文件；本机选择写在 `runtime/local.env`（目前 `ZHIYE_MODEL=deepseek`，只放非密钥配置，命令行显式设置的变量优先）。DeepSeek 用 `deepseek-flash`（V4.1 Flash，支持图片，Pi 内置 `deepseek/deepseek-flash`），密钥在 `/tmp/claude-501/zhiye-secrets/deepseek.env`（`DEEPSEEK_API_KEY`，`/tmp` 重启电脑会被清掉）。临时切回 Kimi：`ZHIYE_MODEL=kimi bash scripts/dev-up.sh`。
+- 模型上游：`scripts/env.sh` 按 `ZHIYE_MODEL`（kimi / deepseek / glm）设置网关上游、模型和密钥文件；本机选择写在 `runtime/local.env`（只放非密钥配置，命令行显式设置的变量优先）。glm = 公司中转 GLM-5.3-Flash（同本机 Kimi Code 的 coding-infra 配置）：直连 `https://llm.csot.tcl.com/v1`，密钥在 `runtime/secrets/coding-infra.env`（`CODING_INFRA_API_KEY`），Pi 侧用 `ZHIYE_MODEL_DEF` 写整条自定义模型定义（`runner/src/agent.mjs` 的 `modelDefFromEnv`，借 Pi 内置 `deepseek` provider 承载，`ZHIYE_MODEL_ID` 必须和中转路由名一致）。DeepSeek 用 `deepseek-flash`，密钥默认取 `runtime/secrets/deepseek.env`（不存在时回退 `/tmp/claude-501/zhiye-secrets/deepseek.env`）。临时切回 Kimi：`ZHIYE_MODEL=kimi bash scripts/dev-up.sh`。
 - 重启服务前先确认没有进行中的任务（用户可能正在用本地环境）：`psql -h 127.0.0.1 -p 5433 -U zhiye -d zhiye -tAc "select id,type from task where status in ('QUEUED','RUNNING')"`，重启会让进行中的任务失败。
 
 ## 验证命令
@@ -16,16 +19,19 @@
 - 前端类型检查：`cd web && npx tsc --noEmit -p .`；构建：`npm run build -w web`
 - 服务端是 Maven 多模块（`server/pom.xml` 父工程 = spring-boot-starter-parent，模块 `zhiye-common` / `zhiye-api` / `zhiye-server`，包名 `com.tcl.csot.zhiye`，Java 17）。织页独立部署、不注册到平台服务，**不依赖 metis**；只参照五星AI岛的模块划分、配置和国际化写法。jar 在 `server/zhiye-server/target/zhiye-server.jar`。
 - 服务端测试（需要数据库）：
-  `cd server && JAVA_HOME=/opt/homebrew/opt/openjdk@21 JAVA_TOOL_OPTIONS="-DsocksNonProxyHosts=127.0.0.1|localhost|*.localhost" mvn -o test`
-  这台机器有系统级 SOCKS 代理，不加 `socksNonProxyHosts` 时 JDBC 连 127.0.0.1 会报 UnknownHostException。
+  `cd server && JAVA_HOME=/c/Users/yangkai37/.jdks/ms-17.0.16 mvn -o test`
+  （原交接环境的命令是 `JAVA_HOME=/opt/homebrew/opt/openjdk@21` + `socksNonProxyHosts`，那是 mac 上系统级 SOCKS 代理的规避，本机不需要。）
 - 端到端（需要先 dev-up）：`cd e2e && npx playwright test tests/api-import.spec.ts`
 
 ## 测试注意
 - 取消任务会把中断前的工作区自动保存成一个版本（不设为当前版本），续做再产生一个正常版本；相关断言已按这个行为写。
 - `GenerationViewTest.todosSteerAndLiveFiles` 在全量并发跑时偶尔因时序拿到 409 `NOT_STEERABLE`，单独跑通过。
+- `QuotaTest.tenAppsPerPerson` 偶发在计划已快速完成后读不到 `activeTask`，`Client.createApp` 随后请求 `/api/tasks/` 得到 404；单独跑通过。这是测试辅助方法的竞态，不是任务接口随机失效。
+- 本机全仓测试显式用 `ZHIYE_MODEL=kimi KIMI_API_KEY=test-key INCLUDE_INTRANET=1 bash scripts/ci.sh`，避免读取本机 DeepSeek 选择但未加载密钥；重复全量前使用干净的 `zhiye_test`。
 
 ## 数据源 / 技能 / 构建归属（2026 后续开发）
 - 数据源：`server/.../source/`（登记、绑定、代理），设计与安全规则见 `docs/data-sources.md`；SDK 在 `web/public/cloud/sdk.js`（`zhiye.source.query`）。测试 `DataSourceTest` 用 `support/FakeSourceController` 作为假接口；UI 用例 `e2e/tests/ui-sources.spec.ts`。
+- API 网关数据源：`AgwCatalogService` 用 SSO 令牌读取 `agw-admin` 的已启用/已上架目录，导入保存 `provider=agw + external_id`（V28），运行时使用调用项目 AppKey/AppSecret 做 `x-agw-*` SHA-256 签名；**不要保存 SSO 令牌当运行时凭证**。前端 `components/AgwCatalog.tsx`，测试 `AgwCatalogTest`，本地模拟 `MockAgwController`（项目 `project-demo` / `demo-secret`）。
 - 内置技能在 `packages/builtin-skills/*/SKILL.md`（Docker 镜像已复制）；问答里模型用 `read_skill` 读取，编码时按需读取。技能上限 5 个。创建应用时选的技能挂在应用上（`app.skill_app_ids`），作为之后修改任务的默认；工作台里选的技能**按消息生效**（`sendMessage` 的 `skillAppIds`），发送成功后从输入框清空，不再写回应用（TaskExecutor 对没带技能的消息回落到应用级技能，兼容老数据）。
 - 构建按应用隔离（`build.app_id`，V15 迁移）：预览地址 `/p/{buildId}/` 靠它找到应用再注入令牌，不要再按 `version.build_id` 反查。
 - 创造页输入框下的推荐需求固定一行 4 个、不折行（窄屏左右滑动），不要改回 5 个折行。
@@ -67,9 +73,13 @@
 
 ## 五星AI岛：统一登录、模型与额度（2026-11）
 - 设计、配置、需要 openclaw 新增的接口和内网联调清单见 `docs/fivestar-integration.md`。开关 `zhiye.fivestar.enabled`（默认关，走 `zhiye.llm` 本地上游）。
+- 租户/组织 ID：测试和正式都是 **31**（`zhiye.fivestar.organization-id` / `zhiye.skillhub.organization-id`，可用 `ZHIYE_SKILLHUB_ORG` 覆盖）；测试环境网关 `http://testmetis.csot.tcl.com`，五星AI岛门户 `http://testmetis.csot.tcl.com/fivestar-front`。
+- **对方接口信封是 metis Result**：成功 `{code:"ok", data, success:true}`；业务异常是 **HTTP 200 + `{code, message, type}`**（GlobalExceptionHandler 对 CommonException 的返回，HTTP 状态不可靠），织页客户端按 `success` 标志 + 业务异常体判别（`HttpSkillHubClient` / `OpenclawClient`）。
+- SkillHub 真实接口在 fivestar-service `/{org}/aiToolbox/skills/**`（网关前缀 `/fivestar-new`），分类是 `/{org}/skillCategory/category/queryAll`（不是 /aiSkill/categories）；发布 /add /edit 的 `fileId`/`fileUrl` 是必填但允许空串——直接传 zip 文件走 `file` 字段即可，**/edit 必须带 `draftJson`**（技能元数据 JSON 串，见 `HttpSkillHubClient.publish`）。
 - 所有模型调用都经 `service/llm/LlmRouter` 取 `LlmRoute`（本地上游，或员工在 llm-gateway 上的路由：虚拟密钥 + `X-User-Id` 工号 + `X-Project-Id: zhiye`），再用 `UpstreamClient.send(route, …)`。新增模型调用不要直接用 `upstream.send(...)` 的本地重载。任务按「消息指定的模型 → 应用上的模型」取路由，模型标识是 `auto` 或 `供应商ID:模型ID`。
 - 不设任务级 token 上限（`token_budget` 列保留但不再使用）。额度用完统一成 `PROVIDER_QUOTA`，文案在 `QuotaText`；重试会接着做（`TaskService.retry` 的 continueWork 包含它）。
 - 前端：平台令牌存 `lib/platformToken.ts`，`api/client.ts` 对 `/api/*` 自动带 `Authorization`；模型菜单 `ComposerPopovers.useModelList / QuotaRow`（`meta.fivestar` 为真时取 `/api/llm/models`、`/api/llm/quota`）。
+- SkillHub 前端入口在技能选择器的「SkillHub 技能市场」（搜索 / 分类 / 安装），安装记录按工作空间共享并进入「我的技能」；发布走 `/api/skillhub/apps/{id}/publish`。本地模拟 `controller/mock/MockSkillHubController` 提供真实形状的 zip 包。测试 `SkillHubTest`、`SkillHubEnabledTest`。
 - 外网模拟：`ZHIYE_MOCK_INTRANET=1 bash scripts/dev-up.sh`（profile `mock`）。模拟统一认证 `controller/mock/MockSsoController`（路径同真实网关，令牌 `tok-{工号}`），模拟 openclaw + llm-gateway `controller/mock/MockFivestarController`。测试 `FivestarQuotaTest`。
 
 ## 云服务、访问控制、云函数、应用内 AI
@@ -95,7 +105,7 @@
 - **草稿不丢**（`lib/drafts.ts`，localStorage 前缀 `zhiye.draft.`）：创造页表单（含是否选了类型）、工作台聊天草稿（按应用）、代码未保存修改（按应用，记 `base` 版本；版本变了保存按钮显示「覆盖保存」并说明）。发送/保存成功后清掉。
 - **回答流必须收到 `event: done`** 才算完成；断开就提示「回答中断」，会话页给「重试」（原文、技能、附件原样重发），也不会据此自动建应用。会话页回答中可以「停止回答」。
 - **错误边界**：`components/ErrorBoundary.tsx`。整页一层（按路由重置），代码面板、代码编辑器各一层；按需加载用 `retryableLazy`，重试会重新下载模块。
-- **应用阶段 `stopped`**：生成时被主动停止且还没有任何版本 → `stopped`（「已停止」，可继续/重新生成），和 `failed` 分开。任务成功或重试开始时，旧的「生成失败」和「被用户取消」系统提示一起清掉（`MessageRepository.deleteFailures`）。
+- **应用阶段 `stopped`**：生成时被主动停止且还没有任何版本 → `stopped`（「已停止」，可继续/重新生成），和 `failed` 分开。新任务开始（含从失败计划的默认方案直接生成、重试）或任务成功时，旧的「生成失败」「创造计划生成失败」和「被用户取消」系统提示一起清掉（`TaskService.createLocked` / `MessageRepository.deleteFailures`）。
 - **弹窗**：`Modal`、版本抽屉、代码导入用 `hooks/useDialogFocus`（焦点进弹窗、Tab 循环、背景 inert、关闭回焦）；`useEscape` 是栈，Esc 只关最上层。
 - **工作台**：手机（≤760px）对话和工作区二选一，顶部多一个「对话」页签；≤1100px 时代码页文件树在上、编辑区占满宽；页签支持左右方向键 / Home / End；预览刷新先探测地址，打不开不报「已刷新」；代码标题按实际显示「可编辑 / 历史版本只读 / 生成中只读 / 修改中」。
 - **输入框底部工具**统一 `.composer-tools`：30px 高、8px 圆角、12px 字。
@@ -103,7 +113,7 @@
 - **不用 `window.confirm`**：用户在 Chrome 里勾过「阻止此页面再弹出对话框」后它会静默返回 false，按钮像点了没反应（「关闭云服务」就踩过）。统一用 `components/ConfirmDialog.tsx` 的 `await confirmDialog({ title, message, confirmLabel, danger })`。
 
 ## 能力上限（一次能做多大、哪些做不到）
-- 唯一来源 `server/.../common/Capabilities.java`：`LIMITS`（页面数量不限、云表 ≤50（`CloudService.MAX_TABLES` 引用同一个常量，表结构校验硬限制）、角色 ≤3、每条流程状态 ≤6；执行步数不限）和 `UNSUPPORTED`（原生 App/小程序、直连生产库或写 MES/ERP、自建后端/定时任务、支付短信、实时协同/音视频/3D、训练模型、非统一登录账号体系，每条都带替代做法）。调上限只改这里。
+- 唯一来源 `server/.../constants/Capabilities.java`：`LIMITS`（页面数量不限、云表 ≤50（`CloudService.MAX_TABLES` 引用同一个常量，表结构校验硬限制）、角色和每条流程状态数量不限；执行步数不限）和 `UNSUPPORTED`（原生 App/小程序、直连生产库或写 MES/ERP、自建后端/定时任务、支付短信、实时协同/音视频/3D、训练模型、非统一登录账号体系，每条都带替代做法）。调上限只改这里。
 - 引用处：计划（`TaskExecutor.runPlan` 追加 `PLAN`：超限只写第一期，加「## 分期计划」表格，JSON `scale: phased`；有做不到的加「## 做不到的部分」）、创造页会话（`AskService` 追加 `CHAT`：先说做不到 / 一次做不完，建议第一期，用户同意再 [[build]]）、生成（`Prompts.generate` 追加 `GENERATE`：只实现第一期）、修改（`MODIFY`：超量先做核心部分并在「需要注意」里写剩余）、小织（`HelpPrompt` 追加 `HELP`；离线 FAQ `helpFaq.ts` 的 `scope` 条目要同步）。
 - 计划卡（`PlanCard.tsx`）检测需求文档里的「## 分期计划」「## 做不到的部分」两个标题，显示 `.plan-scope-note` 说明；用户手改文档也按标题判断。
 - 运行时兜底：runner 每段撞到步数上限返回 `error: {code: 'TURN_LIMIT'}`，服务端**不判失败**，发「要继续吗？」确认卡（见下一条）。失败重试时 `PAUSED` / `TIMEOUT` / `PROVIDER_QUOTA`（以及旧数据的 `TOO_LARGE`）`resume.continueWork=true`，发 `Prompts.resume`（接着做、不重做），其他失败原样重发。测试 `CapabilityLimitTest`、`ContinueCheckpointTest`（假上游 `[big]` 返回分期计划，假 runner `[turnlimit]` 撞一次检查点）。
@@ -111,7 +121,7 @@
 
 
 ## 文档索引
-- 总体设计 `docs/architecture.md`、能力边界与待办 `docs/capabilities.md`、部署与配置项 `docs/deployment.md`、测试与黄金评测 `docs/testing.md`。接口改动先改 `docs/api-contract.md`（末节是继续检查点 / 额度 / 停止回答 / 登录失效）。
+- 总体设计 `docs/architecture.md`、能力边界与待办 `docs/capabilities.md`、部署与配置项 `docs/deployment.md`、测试与黄金评测 `docs/testing.md`、最近一次结果 `docs/test-report.md`。接口改动先改 `docs/api-contract.md`（末节是继续检查点 / 额度 / 停止回答 / 登录失效）。
 
 ## 多实例（base 部署 api 2 副本）
 - 不要只靠进程内存传「用户对正在执行的任务的操作」：停止走 `CANCELLING` 状态；确认卡和补充要求在本实例没有这个任务时写 `task_signal`（V25），执行实例的 `TaskWorker.heartbeat` 取走交给 agent（`TaskController.confirm/steer`、测试 `TaskSignalRelayTest`）。新增类似操作照这个做。

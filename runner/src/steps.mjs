@@ -45,7 +45,7 @@ export function sanitizeText(cwd, text, { home = process.env.HOME } = {}) {
   for (const r of roots(cwd)) s = s.split(r + '/').join('./').split(r).join('.')
   if (home && home.length > 1) s = s.split(home).join('~')
   s = s.replace(/\/Users\/[^/\s'"`]+/g, '~').replace(/\/home\/[^/\s'"`]+/g, '~')
-  return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
+  return s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\\/g, '/')
 }
 
 const countLines = (s) => (s === '' ? 0 : s.split('\n').length - (s.endsWith('\n') ? 1 : 0))

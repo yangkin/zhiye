@@ -109,7 +109,15 @@ public record ZhiyeProperties(
 
     public String nodeBinary() {
         String n = sandbox.nodeBinary();
-        return n == null || n.isBlank() ? System.getProperty("user.home") + "/.nvm/versions/node/v24.14.1/bin/node" : n;
+        if (n != null && !n.isBlank()) return n;
+        String env = System.getenv("ZHIYE_NODE_BINARY");
+        if (env != null && !env.isBlank()) return env;
+        if (java.io.File.pathSeparatorChar == ';') {
+            Path winNode = Path.of(System.getProperty("user.home"), ".local", "nodejs", "node-v22.20.0-win-x64", "node.exe");
+            return Files.isRegularFile(winNode) ? winNode.toString() : "node";
+        }
+        Path nvm = Path.of(System.getProperty("user.home"), ".nvm", "versions", "node", "v24.14.1", "bin", "node");
+        return Files.isRegularFile(nvm) ? nvm.toString() : "node";
     }
 
     public Path resolveFromRoot(String p) {

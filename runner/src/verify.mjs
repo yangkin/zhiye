@@ -12,7 +12,9 @@ export const PUBLISH_DIR = '.zhiye/dist-publish'
 const SKIPPED = '前面的检查没有通过，已跳过'
 
 export function locPluginPath(env = process.env) {
-  return env.ZHIYE_LOC_PLUGIN || path.resolve(here, '../../packages/vite-plugin-loc/index.mjs')
+  const p = env.ZHIYE_LOC_PLUGIN || path.resolve(here, '../../packages/vite-plugin-loc/index.mjs')
+  // Windows 原生路径（D:\...）不是合法 ESM 标识符，统一转成 file:// URL 再让 vite.config.ts 动态 import
+  return p.startsWith('file:') ? p : pathToFileURL(p).href
 }
 
 function check(name, ok, detail = '', extra = {}) { return { name, ok, detail: ok ? detail : summarize(detail), ...extra } }
@@ -100,7 +102,7 @@ export function templateLint(cwd) {
       if (st.isDirectory()) walk(abs)
       else if (st.isFile() && /\.(tsx?|jsx?)$/.test(name)) {
         const src = readFileSync(abs, 'utf8')
-        if (/\b(BrowserRouter|createBrowserRouter)\b/.test(src)) problems.push(`${path.relative(cwd, abs)}：预览和发布地址可能在子路径下，路由请改用 HashRouter（或 createHashRouter），不要用 BrowserRouter`)
+        if (/\b(BrowserRouter|createBrowserRouter)\b/.test(src)) problems.push(`${path.relative(cwd, abs).split(path.sep).join('/') }：预览和发布地址可能在子路径下，路由请改用 HashRouter（或 createHashRouter），不要用 BrowserRouter`)
       }
     }
   }
@@ -145,8 +147,8 @@ export function vueLint(cwd) {
       if (st.isDirectory()) walk(abs)
       else if (st.isFile() && /\.(vue|ts|js)$/.test(name)) {
         const src = readFileSync(abs, 'utf8')
-        if (/\bcreateWebHistory\b/.test(src)) problems.push(`${path.relative(cwd, abs)}：预览和发布地址可能在子路径下，路由请改用 createWebHashHistory，不要用 createWebHistory`)
-        if (/from\s+['"](react|react-dom|lucide-react|recharts|react-router)['"]/.test(src)) problems.push(`${path.relative(cwd, abs)}：这是 Vue 项目，不能引入 React 相关的库`)
+        if (/\bcreateWebHistory\b/.test(src)) problems.push(`${path.relative(cwd, abs).split(path.sep).join('/')}：预览和发布地址可能在子路径下，路由请改用 createWebHashHistory，不要用 createWebHistory`)
+        if (/from\s+['"](react|react-dom|lucide-react|recharts|react-router)['"]/.test(src)) problems.push(`${path.relative(cwd, abs).split(path.sep).join('/')}：这是 Vue 项目，不能引入 React 相关的库`)
       }
     }
   }

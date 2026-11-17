@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequestMapping("/test-upstream/v1")
 public class FakeUpstreamController {
     public static final AtomicInteger CALLS = new AtomicInteger();
+    public static final AtomicInteger TRUNCATED_CALLS = new AtomicInteger();
     public static volatile int failNext = 0;
     public static volatile JsonNode lastBody;
     /** 最近的请求体（并发跑测试时按内容找自己那一条，不依赖 lastBody） */
@@ -33,6 +34,16 @@ public class FakeUpstreamController {
             return;
         }
         String user = userText(body.path("messages").get(body.path("messages").size() - 1));
+        if (user.contains("[truncated]") && user.contains("用户需求") && TRUNCATED_CALLS.getAndIncrement() == 0) {
+            int maxTokens = body.path("max_tokens").asInt();
+            var n = Json.obj();
+            n.putArray("choices").addObject().putObject("message").put("role", "assistant").put("content", "").put("reasoning_content", "思考尚未完成");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) n.path("choices").get(0)).put("finish_reason", "length");
+            n.putObject("usage").put("prompt_tokens", 100).put("completion_tokens", maxTokens);
+            res.setContentType("application/json");
+            res.getOutputStream().write(Json.write(n).getBytes(StandardCharsets.UTF_8));
+            return;
+        }
         if (user.contains("[slow]") && user.contains("用户需求")) Thread.sleep(3000); // 让计划任务保持进行中一会儿
         // 带 [vue] 的需求：计划给出 Vue 形态
         String shape = user.contains("[vue]") && user.contains("用户需求") ? "\"shape\": \"vue\", " : "";

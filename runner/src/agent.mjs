@@ -32,13 +32,37 @@ export function writeModelsJson(agentDir, provider, baseUrl, model) {
 }
 
 /**
+ * 模型定义里的运行时字段（provider / baseUrl）写进 models.json 会互相打架，剥掉后再落盘。
+ * 深拷贝一份，避免改动传入的内置定义。
+ */
+export function stripRuntimeFields(model) {
+  const { provider: _provider, baseUrl: _baseUrl, ...definition } = JSON.parse(JSON.stringify(model))
+  return definition
+}
+
+/**
+ * 解析 ZHIYE_MODEL_DEF：一整条自定义模型定义（JSON），用于上游模型不在 Pi 内置清单里的情况
+ * （例如公司中转的 Coding-Infra-pd-router/... 路由名）。未配置时返回 null；配置但不合法直接报错，
+ * 防止悄悄退回内置默认定义（maxTokens / reasoning 静默丢失）。
+ */
+export function modelDefFromEnv(raw) {
+  if (!raw || !raw.trim()) return null
+  let def
+  try { def = JSON.parse(raw) } catch {
+    throw new RunnerError('BAD_REQUEST', 'ZHIYE_MODEL_DEF 不是合法 JSON')
+  }
+  if (!def || typeof def.id !== 'string' || typeof def.api !== 'string')
+    throw new RunnerError('BAD_REQUEST', 'ZHIYE_MODEL_DEF 必须是含 id / api 的模型定义')
+  return stripRuntimeFields(def)
+}
+
+/**
  * 把模型定义里的 contextWindow 改成 want。
  * models.json 的自定义条目会整体替换内置定义，所以先拷一份内置定义再改这一个字段，
  * 否则 reasoning / maxTokens / thinkingLevelMap 会退回默认值（推理和思考档位会一起丢）。
  */
 export function contextWindowOverride(model, want) {
-  const { provider: _provider, baseUrl: _baseUrl, ...definition } = JSON.parse(JSON.stringify(model))
-  return { ...definition, contextWindow: want }
+  return { ...stripRuntimeFields(model), contextWindow: want }
 }
 
 function classifyError(msg) {
@@ -83,6 +107,9 @@ export class Agent {
     const sessionsDir = path.join(agentDir, 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
     writeModelsJson(agentDir, provider, gateway)
+    // 自定义模型定义（ZHIYE_MODEL_DEF）：上游模型名不在 Pi 内置清单时整条覆写 providers[provider].models
+    const customDef = modelDefFromEnv(env.ZHIYE_MODEL_DEF)
+    if (customDef) writeModelsJson(agentDir, provider, gateway, customDef)
 
     const createRuntime = () => ModelRuntime.create({ authPath: path.join(agentDir, 'auth.json'), modelsPath: path.join(agentDir, 'models.json') })
     let modelRuntime = await createRuntime()

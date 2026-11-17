@@ -15,6 +15,8 @@ zhiye:
     script: server/dev/fake-runner.mjs
   sandbox:
     seatbelt: false
+    # 留空时由 ZhiyeProperties.nodeBinary() 按系统自动解析（可用 ZHIYE_NODE_BINARY 覆盖）
+    node-binary: ${ZHIYE_NODE_BINARY:}
   llm:
     upstream-base-url: "{self}/test-upstream/v1"
     max-retries: 1

@@ -83,6 +83,8 @@ public class TaskService {
             if (again.isPresent()) return again.get();
             throw ApiException.busy();
         }
+        // 从失败计划的默认方案直接开始生成时，也要清掉上一轮失败提示
+        messages.deleteFailures(appId);
         events.status(id, "QUEUED", "排队中", 0);
         signals.wakeWorker();
         return tasks.findById(id).orElseThrow();
@@ -157,8 +159,6 @@ public class TaskService {
         }
         TaskRow t = create(ws, app.id(), old.type(), base, input, idemKey, old.attempt() + 1, old.id());
         if (cp.isPresent()) tasks.deleteCheckpoint(old.id());
-        // 重试已经开始：上一轮的「生成失败」提示留着会挂在进行中的卡片下面，像是这次也失败了；这次再失败会重新写一条
-        messages.deleteFailures(app.id());
         onRestart(app, old, t);
         return t;
     }

@@ -110,6 +110,13 @@ class CloudAccessTest extends IntegrationTest {
         assertThat(agg.path("rows").get(0).path("sum_qty").asInt()).isEqualTo(6);
         assertThat(c.ok(c.send("GET", db + "stock?qty__gte=3", null, member)).path("total").asInt()).isEqualTo(1);
 
+        // 排序：支持多列（逗号分隔、每列可单独带 '-'），未知列仍 400
+        JsonNode byQty = c.ok(c.send("GET", db + "orders?order=-qty,code", null, admin));
+        assertThat(byQty.path("rows").get(0).path("code").asText()).isEqualTo("A1");
+        assertThat(byQty.path("rows").get(1).path("code").asText()).isEqualTo("M1");
+        assertThat(c.ok(c.send("GET", db + "orders?order=qty,code", null, admin)).path("rows").get(0).path("code").asText()).isEqualTo("M1");
+        assertThat(c.send("GET", db + "orders?order=nosuch", null, admin).status()).isEqualTo(400);
+
         // 发布：orders 需要登录、应用却是内网公开 → 拦下；免登录环境不能选员工登录
         var blocked = c.post("/api/apps/" + id + "/publish", Map.of());
         assertThat(blocked.status()).isEqualTo(409);

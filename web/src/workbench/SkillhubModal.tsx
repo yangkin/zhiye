@@ -141,7 +141,7 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
           </button>
           <button className="primary-button" aria-label="确认发布到 SkillHub" disabled={!canPublish || busy} onClick={() => void publish()}>
             {busy ? '正在发布…' : '发布到 SkillHub'}
-            {comingSoon ? <em className="soon-badge">即将接入</em> : null}
+            {comingSoon ? <em className="soon-badge">未配置</em> : null}
           </button>
         </>
       }
@@ -196,19 +196,25 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
           </button>
         ))}
       </div>
-      <label className="field-label" htmlFor="skill-changelog">
-        更新说明
-      </label>
-      <textarea
-        id="skill-changelog"
-        className="text-input"
-        aria-label="更新说明"
-        rows={3}
-        maxLength={2000}
-        placeholder="这一版改了什么，例如：新增 PDF 表格提取脚本"
-        value={changelog}
-        onChange={(e) => setChangelog(e.target.value)}
-      />
+      {app.skillhub?.lastPublishedAt ? (
+        <>
+          <label className="field-label" htmlFor="skill-changelog">
+            更新说明
+          </label>
+          <textarea
+            id="skill-changelog"
+            className="text-input"
+            aria-label="更新说明"
+            rows={3}
+            maxLength={2000}
+            placeholder="这一版改了什么，例如：新增 PDF 表格提取脚本"
+            value={changelog}
+            onChange={(e) => setChangelog(e.target.value)}
+          />
+        </>
+      ) : (
+        <p className="muted-note">首次发布将创建技能并提交审核；再次发布时可以填写更新说明。</p>
+      )}
       {info ? (
         <p className="notice-box skillhub-info" role="status">
           {info}

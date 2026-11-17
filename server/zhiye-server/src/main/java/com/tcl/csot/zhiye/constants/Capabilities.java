@@ -7,16 +7,16 @@ package com.tcl.csot.zhiye.constants;
 public final class Capabilities {
     private Capabilities() {}
 
-    /** 云数据库表的上限（与 CloudService 的表结构校验一致）；页面数量不限 */
-    public static final int MAX_TABLES = 50, MAX_ROLES = 3, MAX_STATES = 6;
+    /** 云数据库表的上限（与 CloudService 的表结构校验一致）；页面、角色和流程状态数量不限 */
+    public static final int MAX_TABLES = 50;
 
     /** 规模上限 */
     public static final String LIMITS = """
             规模要求：
             - 页面数量不限，按业务需要设计
-            - 云数据库表不超过 %d 张；角色不超过 %d 种，每条业务流程的状态不超过 %d 个
+            - 云数据库表不超过 %d 张；角色数量和每条业务流程的状态数量不限，按业务需要设计
             - 不限制执行步数：内容多时按优先级把核心流程先完整做通，再做其余部分；每做一段平台会暂停问用户要不要继续，不要因为内容多就偷工减料或留半成品
-            """.formatted(MAX_TABLES, MAX_ROLES, MAX_STATES);
+            """.formatted(MAX_TABLES);
 
     /** 平台做不到的事和替代做法 */
     public static final String UNSUPPORTED = """

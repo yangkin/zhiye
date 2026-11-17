@@ -26,7 +26,7 @@ sequenceDiagram
   W->>B: 回到登录前的页面
 ```
 
-- 网关令牌只用来查询一次用户信息，**不保存**、不放进 localStorage；之后用织页自己的会话 cookie（服务端只存哈希，默认 7 天）。
+- 服务端用网关令牌查询用户信息，**不在服务端保存令牌**；前端按平台前端的方式把 accessToken 保存在 localStorage，之后调用 `/api` 时通过 `Authorization` 转发，用于查询五星AI岛模型、额度和 SkillHub。织页自己的会话 cookie 只存哈希，默认 7 天。
 - 用户第一次登录时，当前浏览器里免登录创建的工作空间会归入该账号；之后换设备登录同一账号，看到的是同一个工作空间。
 - 退出登录：侧边栏「我的工作空间」→「退出登录」。
 
@@ -59,12 +59,12 @@ zhiye:
 |---|---|
 | `web/src/pages/LoginPage.tsx` | 登录页 `/login`、回调页 `/access_token`、路由守卫 `AuthGate` |
 | `web/src/components/LightLayout.tsx` | 侧边栏显示登录用户、退出登录 |
-| `server/src/main/java/com/zhiye/auth/` | 配置、网关客户端、会话、过滤器、接口 |
-| `server/src/main/resources/db/migration/V2__auth.sql` | `app_user`、`user_session` 表 |
+| `server/zhiye-server/src/main/java/com/tcl/csot/zhiye/service/auth/`、`client/SsoClient.java`、`controller/AuthController.java` | 配置、网关客户端、会话、过滤器、接口 |
+| `server/zhiye-server/src/main/resources/db/migration/V2__auth.sql` | `app_user`、`user_session` 表 |
 
-## 尚未验证
+## 真实环境验证状态
 
-外网无法访问统一认证网关，所以「网关登录 → 回调 → 查询用户」这一段没有实测过；用户信息字段按 metis 脚手架的 `UserSelfVo`（`id`、`loginName`、`realName`、`email`、`tenantNum`）解析，同时兼容 `{code, data}` 包装。第一次在内网开启时，请先用一个测试账号走一遍。
+已验证平台测试网关的 `/oauth/csot/login` 返回 302，并跳转到公司测试 SSO；完整「网关登录 → 织页回调 → 查询用户」仍需在登记织页回调地址后，用有效测试账号走一遍。用户信息字段按 metis 脚手架的 `UserSelfVo`（`id`、`loginName`、`realName`、`email`、`tenantNum`）解析，同时兼容 `{code, data}` 包装。
 
 ## 应用级登录（发布站点）
 

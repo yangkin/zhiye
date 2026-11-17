@@ -64,9 +64,11 @@ public class SkillHubInstallService {
         this.jdbc = jdbc;
     }
 
-    public static final String ID_PREFIX = "hub:";
+    public static final String ID_PREFIX = "hub_";
 
-    public static boolean isHubId(String id) { return id != null && id.startsWith(ID_PREFIX); }
+    public static boolean isHubId(String id) {
+        return id != null && (id.startsWith(ID_PREFIX) || id.startsWith("hub:") || id.startsWith("hi_"));
+    }
 
     public static String installId(String platformSkillId) { return ID_PREFIX + platformSkillId; }
 
@@ -128,7 +130,7 @@ public class SkillHubInstallService {
         if (same.isPresent()) return same.get();
         if (count >= MAX_INSTALLS)
             throw ApiException.validation("最多安装 " + MAX_INSTALLS + " 个 SkillHub 技能，请先卸载不用的");
-        Install inst = new Install(Ids.newId("hi"), ws, String.valueOf(skillId), ex.slug == null ? "skill-" + skillId : ex.slug,
+        Install inst = new Install(ID_PREFIX + Ids.newId("hi"), ws, String.valueOf(skillId), ex.slug == null ? "skill-" + skillId : ex.slug,
                 ex.title, ex.description, version == null ? "" : version, pkg.bytes().length, ex.files, Instant.now(), Instant.now());
         Path target = Install.dir(props, ws, inst.id());
         try {

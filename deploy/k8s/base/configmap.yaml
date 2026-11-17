@@ -29,9 +29,20 @@ data:
   ZHIYE_SSO_REDIRECT_URL: https://zhiye.example.com/access_token
   # 五星AI岛：模型列表 / 默认模型 / 个人额度 / llm-gateway 路由（需要 sso，见 docs/fivestar-integration.md）
   ZHIYE_FIVESTAR_ENABLED: "false"
-  ZHIYE_FIVESTAR_ORG: "0"
-  ZHIYE_OPENCLAW_BASE_URL: http://openclaw-service.fivestar.svc:9060/openclaw-service
-  ZHIYE_LLM_GATEWAY_URL: http://llm-gateway.example.svc
+  ZHIYE_FIVESTAR_ORG: "31"
+  ZHIYE_FIVESTAR_PROJECT_ID: zhiye
+  # 独立集群部署时使用平台网关 / Ingress 地址，不能使用对方集群的 *.svc 地址
+  ZHIYE_OPENCLAW_BASE_URL: http://testmetis.csot.tcl.com/openclaw-service
+  ZHIYE_LLM_GATEWAY_URL: http://testmetis.csot.tcl.com/llm-gateway
+  ZHIYE_SKILLHUB_ENABLED: "false"
+  ZHIYE_SKILLHUB_URL: http://testmetis.csot.tcl.com/fivestar-new
+  ZHIYE_SKILLHUB_FILE_URL: http://testmetis.csot.tcl.com/fivestar-new
+  ZHIYE_SKILLHUB_PORTAL: "http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}"
+  ZHIYE_SKILLHUB_ORG: "31"
+  ZHIYE_AGW_ENABLED: "false"
+  ZHIYE_AGW_BASE_URL: http://testmetis.csot.tcl.com
+  ZHIYE_AGW_PUBLIC_URL: http://testmetis.csot.tcl.com
+  ZHIYE_AGW_TENANT_ID: "31"
   # 沙箱：生产默认使用公司 OpenSandbox；site 进程在 site.yaml 里显式设为 local。
   # 回滚 legacy k8s provider：把 ZHIYE_SANDBOX_PROVIDER 改成 k8s（见 README 第 10 节）。
   ZHIYE_SANDBOX_PROVIDER: opensandbox

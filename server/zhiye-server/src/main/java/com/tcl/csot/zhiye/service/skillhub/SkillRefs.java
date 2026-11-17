@@ -80,7 +80,7 @@ public class SkillRefs {
 
     /** 已安装的 SkillHub 技能（给「我的技能」列表和技能名解析用） */
     public List<Map<String, Object>> hubList(String ws) {
-        if (installs == null || ws == null) return List.of();
+        if (installs == null) return List.of();
         List<Map<String, Object>> out = new ArrayList<>();
         for (SkillHubInstallService.Install i : installs.list(ws)) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -142,11 +142,12 @@ public class SkillRefs {
     public static String catalogInstruction(List<Builtin> builtins) {
         if (builtins.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("\n\n## 可用技能（按需加载）\n下面是织页内置的技能，任务涉及其中的场景时，先用 read 读取对应的 SKILL.md 再动手；不相关的不用读：\n");
-        for (Builtin b : builtins) sb.append("- ").append(b.name()).append("：").append(b.description()).append("（").append(b.dir().resolve("SKILL.md")).append("）\n");
+        for (Builtin b : builtins) sb.append("- ").append(b.name()).append("：").append(b.description()).append("（")
+                .append(b.dir().resolve("SKILL.md").toString().replace('\\', '/')).append("）\n");
         return sb.toString();
     }
 
-    /** 校验 skillAppIds：最多 MAX_SKILLS 个；「开发skill」应用要属于当前工作空间且已生成，SkillHub 安装（hub: 前缀）要属于当前工作空间 */
+    /** 校验 skillAppIds：最多 MAX_SKILLS 个；「开发skill」应用要属于当前工作空间且已生成，SkillHub 安装（hub_ 前缀）要属于当前工作空间 */
     public List<String> validate(String ws, JsonNode ids) {
         if (ids == null || ids.isNull()) return List.of();
         if (!ids.isArray()) throw ApiException.validation("skillAppIds 必须是数组");
@@ -407,7 +408,7 @@ public class SkillRefs {
         for (int i = 0; i < placed.size(); i++) {
             Placed p = placed.get(i);
             if (i > 0) sb.append("；");
-            sb.append(p.name()).append("（说明见 ").append(p.dir().resolve("SKILL.md")).append("）");
+            sb.append(p.name()).append("（说明见 ").append(p.dir().resolve("SKILL.md").toString().replace('\\', '/')).append("）");
         }
         sb.append("\n先读取这些 SKILL.md（以及其中引用的 references/、scripts/ 文件），再开始工作。这些文件只读，不要复制进项目，除非任务要求。\n");
         return sb.toString();

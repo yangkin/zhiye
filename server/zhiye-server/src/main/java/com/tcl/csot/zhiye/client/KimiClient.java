@@ -12,14 +12,18 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tcl.csot.zhiye.util.Json;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
 import com.tcl.csot.zhiye.service.dev.FaultState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
 import java.net.http.HttpResponse;
 
-/** Java 侧的单次模型调用（生成计划等），非流式。 */
+/** Java 侧的非流式模型调用（生成计划等）；长度截断且正文为空时提高预算重试一次。 */
 @Component
 public class KimiClient {
+    private static final Logger log = LoggerFactory.getLogger(KimiClient.class);
+    private static final int MAX_RETRY_TOKENS = 32000;
     private final UpstreamClient upstream;
     private final UsageService usage;
     private final FaultState faults;
@@ -49,36 +53,51 @@ public class KimiClient {
         }
         ObjectNode body = Json.obj();
         body.put("model", route.model());
-        body.put("max_tokens", maxTokens);
         body.put("reasoning_effort", "low");
         var msgs = body.putArray("messages");
         if (system != null) msgs.addObject().put("role", "system").put("content", system);
         msgs.add(userMessage);
-        try {
-            HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes());
-            String text;
-            try (InputStream in = res.body()) { text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8); }
-            if (res.statusCode() >= 400) {
-                // 上游错误体里才有配额/预算的依据（例如 exceeded_current_quota_error / insufficient_quota），
-                // 截断后带上，并按与 runner 相同的一套规则给出错误码
-                String detail = text.length() > 300 ? text.substring(0, 300) + "…" : text;
-                String code = codeFor(res.statusCode(), text);
-                if ("PROVIDER_QUOTA".equals(code)) throw new LlmException(code, QuotaText.exhausted(router.fivestar(), text));
-                throw new LlmException(code, "模型服务返回错误（HTTP " + res.statusCode() + "）：" + detail);
+        for (int attempt = 0; attempt < 2; attempt++) {
+            int budget = attempt == 0 ? maxTokens : Math.min(MAX_RETRY_TOKENS, Math.max(maxTokens + 1, maxTokens * 2));
+            body.put("max_tokens", budget);
+            try {
+                HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes());
+                String text;
+                try (InputStream in = res.body()) { text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8); }
+                if (res.statusCode() >= 400) {
+                    // 上游错误体里才有配额/预算的依据（例如 exceeded_current_quota_error / insufficient_quota），
+                    // 截断后带上，并按与 runner 相同的一套规则给出错误码
+                    String detail = text.length() > 300 ? text.substring(0, 300) + "…" : text;
+                    String code = codeFor(res.statusCode(), text);
+                    if ("PROVIDER_QUOTA".equals(code)) throw new LlmException(code, QuotaText.exhausted(router.fivestar(), text));
+                    throw new LlmException(code, "模型服务返回错误（HTTP " + res.statusCode() + "）：" + detail);
+                }
+                JsonNode n = Json.read(text);
+                JsonNode used = UsageService.findUsage(n);
+                usage.record(taskId, route.provider(), route.model(), used);
+                JsonNode choice = n.path("choices").path(0);
+                JsonNode content = choice.path("message").path("content");
+                if (content.isMissingNode() || content.isNull() || content.asText().isBlank()) {
+                    int outputTokens = used == null ? 0 : used.path("completion_tokens").asInt(used.path("output_tokens").asInt(0));
+                    boolean truncated = "length".equals(choice.path("finish_reason").asText()) || outputTokens >= budget;
+                    if (attempt == 0 && truncated && budget < MAX_RETRY_TOKENS) {
+                        log.warn("模型输出达到长度上限且正文为空，task={}，将预算从 {} 提高到 {} 后重试一次", taskId, budget,
+                                Math.min(MAX_RETRY_TOKENS, Math.max(maxTokens + 1, maxTokens * 2)));
+                        continue;
+                    }
+                    throw new LlmException(truncated ? "模型输出达到长度上限，仍未返回正文" : "模型没有返回内容");
+                }
+                return content.asText();
+            } catch (LlmException e) {
+                throw e;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new LlmException("模型调用被中断", e);
+            } catch (Exception e) {
+                throw new LlmException("模型服务暂不可用：" + e.getMessage(), e);
             }
-            JsonNode n = Json.read(text);
-            usage.record(taskId, route.provider(), route.model(), UsageService.findUsage(n));
-            JsonNode content = n.path("choices").path(0).path("message").path("content");
-            if (content.isMissingNode() || content.isNull() || content.asText().isBlank()) throw new LlmException("模型没有返回内容");
-            return content.asText();
-        } catch (LlmException e) {
-            throw e;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new LlmException("模型调用被中断", e);
-        } catch (Exception e) {
-            throw new LlmException("模型服务暂不可用：" + e.getMessage(), e);
         }
+        throw new LlmException("模型没有返回内容");
     }
 
     /** 与 runner/src/agent.mjs 的 classifyError 保持同一套判断。织页不设任务级上限，额度类错误都来自上游（五星AI岛 / 供应商）。 */

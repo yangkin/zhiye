@@ -1,6 +1,6 @@
 # 能力边界、已知限制与可优化 / 扩展项
 
-产品能力的**唯一来源**是 `server/.../constants/Capabilities.java`：计划、创造页会话、生成、修改、小织的提示词都引用它，调上限只改这一处（离线 FAQ `web/src/lib/helpFaq.ts` 的 `scope` 条目要同步）。本文是给人看的汇总，数字以代码为准。
+生成规模能力的**唯一来源**是 `server/.../constants/Capabilities.java`：计划、创造页会话、生成、修改、小织的提示词都引用它；数据源绑定上限在 `DataSourceService.MAX_PER_APP`。调整后同步本文和离线 FAQ `web/src/lib/helpFaq.ts`。本文是给人看的汇总，数字以代码为准。
 
 ## 一、一次能做多大
 
@@ -8,7 +8,8 @@
 |---|---|---|
 | 页面数量 | 不限 | `Capabilities.LIMITS` |
 | 云数据库表 | 每个应用 ≤ 50 张（表结构校验硬限制） | `Capabilities.MAX_TABLES`、`CloudService` |
-| 角色 / 每条流程的状态 | ≤ 3 种 / ≤ 6 个 | `Capabilities.MAX_ROLES / MAX_STATES` |
+| 角色 / 每条流程的状态 | 不限，按业务需要设计 | `Capabilities.LIMITS` |
+| 应用绑定的数据源 | 每个应用 ≤ 100 个 | `DataSourceService.MAX_PER_APP` |
 | 执行步数 | 不限；每 60 步弹「要继续吗？」 | `zhiye.task.max-agent-turns` |
 | 任务 token | 不设上限；只受五星AI岛个人额度约束 | `LlmRouter`、`QuotaText` |
 | 一段运行时长 | 60 分钟（防卡死，继续后重新计时） | `zhiye.task.max-duration-minutes` |
@@ -57,16 +58,16 @@
 
 **P0：上内网前**
 
-1. 内网联调：统一认证（真实网关、回调地址登记）、五星AI岛模型和额度、llm-gateway 个人路由、额度用完的 429 文案；按 `fivestar-integration.md` 的清单逐项打勾。
-2. openclaw 提供 `/internal/zhiye/llm/route`（服务间令牌，按工号 + 模型返回网关地址、模型名、虚拟密钥）。
-3. 生产配置：`ZHIYE_CLOUD_SECRET`、`ZHIYE_SSO_REDIRECT_URL`、站点域名与证书、OpenSandbox 地址和 PVC、Ingress 的 SSE 超时（≥ 10 分钟，关闭缓冲）。
+1. 内网联调：统一认证（真实网关、回调地址登记）、五星AI岛模型和额度、llm-gateway 个人路由、额度用完的 429 文案；SkillHub 真实市场 / 安装 / 发布审核、API 网关目录导入与授权调用也按 `fivestar-integration.md` 和 `data-sources.md` 逐项验证。上述功能代码与本地 Mock 已完成，待真实环境验收。
+2. openclaw 提供 `/internal/zhiye/llm/route`（服务间令牌，按工号 + 模型返回网关地址、模型名、虚拟密钥），并确认 llm-gateway 的个人身份与项目来源请求头语义。
+3. 生产配置：`ZHIYE_CLOUD_SECRET`、`ZHIYE_SSO_REDIRECT_URL`、站点域名与证书、OpenSandbox 地址和 PVC、Ingress 的 SSE 超时（≥ 10 分钟，关闭缓冲）。独立集群部署时，外部服务地址必须走可跨集群访问的平台网关 / Ingress，不能填对方集群的 `*.svc` 地址。
 
 **P1：功能补齐**
 
-4. SkillHub：按 `fivestar-new` 的真实接口浏览 / 详情 / 下载 / 分类 / 可见范围 / 发布与审批状态，以员工本人身份调用；本地模拟接口先行。
-5. 星claw 飞书多维表格只读数据源：经星claw `feishu/tool-proxy` 以员工飞书身份读取，织页侧只放行多维表格只读接口；缓存、限流，默认仅自己可见；飞书令牌刷新以星claw 为准。
-6. 错误信息国际化：业务异常改成 messageKey + `i18n/messages*.properties`（对齐五星AI岛写法），前端仍展示中文。
-7. 看板模板的真实生成抽测与调优（9 个模板逐个生成，检查联动筛选、下钻、导出、结论文字）。
+4. 星claw 飞书多维表格只读数据源：经星claw `feishu/tool-proxy` 以员工飞书身份读取，织页侧只放行多维表格只读接口；缓存、限流，默认仅自己可见；飞书令牌刷新以星claw 为准。
+5. 错误信息国际化：业务异常改成 messageKey + `i18n/messages*.properties`（对齐五星AI岛写法），前端仍展示中文。
+6. 看板模板的真实生成抽测与调优（9 个模板逐个生成，检查联动筛选、下钻、导出、结论文字）。
+7. 数据源访问者身份透传：当前运行时固定使用应用身份；需要按员工隔离上游数据时，再与 API 网关定义并验证员工身份传递。
 
 **P2：体验与运维**
 
@@ -76,3 +77,4 @@
 11. 监控：任务耗时 / 失败码分布、沙箱冷启动时间、模型调用延迟与额度错误率（Micrometer + 平台监控）。
 12. 沙箱预热池、构建缓存，缩短首个版本的等待时间。
 13. 多人协作（同一应用多人编辑）、应用级审批流模板、更多领域模板。
+14. 测试稳定性：`Client.createApp` 不应假设计划任务在创建响应里仍是 `activeTask`；快速完成时 `QuotaTest.tenAppsPerPerson` 会请求 `/api/tasks/` 得到 404，单独重跑通过。

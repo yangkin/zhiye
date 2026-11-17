@@ -71,17 +71,19 @@ public class MockFivestarController {
         return LocalDate.now(ZoneOffset.UTC).with(TemporalAdjusters.next(DayOfWeek.MONDAY)).atStartOfDay().toInstant(ZoneOffset.UTC).toString();
     }
 
+    /** 与真实 fivestar/openclaw 的 metis 信封一致：成功 {code:"ok", data, success:true} */
     private static ResponseEntity<Map<String, Object>> ok(Object data) {
         Map<String, Object> r = new LinkedHashMap<>();
-        r.put("code", 200);
-        r.put("message", "success");
+        r.put("code", "ok");
         r.put("data", data);
+        r.put("success", true);
         r.put("timestamp", System.currentTimeMillis());
         return ResponseEntity.ok(r);
     }
 
+    /** 业务异常：HTTP 200 + {code, message, type}（metis GlobalExceptionHandler 的形态） */
     private static ResponseEntity<Map<String, Object>> fail(int code, String message) {
-        return ResponseEntity.ok(Map.of("code", code, "message", message, "timestamp", System.currentTimeMillis()));
+        return ResponseEntity.ok(Map.of("code", String.valueOf(code), "message", message, "type", "ERROR", "timestamp", System.currentTimeMillis()));
     }
 
     /** 平台令牌 → 工号；无效返回 null（真实环境由平台网关鉴权） */

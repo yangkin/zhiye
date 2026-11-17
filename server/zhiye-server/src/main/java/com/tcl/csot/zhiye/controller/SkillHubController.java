@@ -144,9 +144,6 @@ public class SkillHubController {
         }
     }
 
-    @GetMapping("/apps/{id}/publications")
-    public List<Map<String, Object>> publicationsLegacy(@PathVariable String id) { return service.publications(ws(), id); }
-
     /** 「我的技能」：自己的「开发skill」应用（已生成）+ 已安装的 SkillHub 技能，技能选择器用 */
     @GetMapping("/my-skills")
     public List<Map<String, Object>> mySkills() {

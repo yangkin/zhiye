@@ -14,8 +14,14 @@ set -euo pipefail
 
 SERVER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export ZHIYE_ROOT="${ZHIYE_ROOT:-$(cd "$SERVER_DIR/.." && pwd)}"
-export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
-export ZHIYE_NODE_DIR="${ZHIYE_NODE_DIR:-$HOME/.nvm/versions/node/v24.14.1/bin}"
+# 工具链路径：Windows（Git Bash）与 macOS（交接环境）自动适配
+if [[ "$(uname -s)" == MINGW64_NT* || "$(uname -s)" == MINGW32_NT* || "$(uname -s)" == MSYS* ]]; then
+  export JAVA_HOME="${ZHIYE_JAVA_HOME:-/c/Users/yangkai37/.jdks/ms-17.0.16}"
+  export ZHIYE_NODE_DIR="${ZHIYE_NODE_DIR:-/c/Users/yangkai37/.local/nodejs/node-v22.20.0-win-x64}"
+else
+  export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
+  export ZHIYE_NODE_DIR="${ZHIYE_NODE_DIR:-$HOME/.nvm/versions/node/v24.14.1/bin}"
+fi
 export PATH="$ZHIYE_NODE_DIR:$JAVA_HOME/bin:$PATH"
 # 仓库路径含中文，Java 需要 UTF-8 区域设置
 export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
@@ -89,8 +95,9 @@ wait_http() { # name url pidfile
 # api 先启动（执行数据库迁移），再启动 site
 # ZHIYE_MOCK_INTRANET=1：模拟内网（统一认证 + 五星AI岛 + llm-gateway），见 application-mock.yml
 MOCK_PROFILE=""; [ "${ZHIYE_MOCK_INTRANET:-0}" = "1" ] && MOCK_PROFILE=",mock"
+# /api/meta 对没带 zhiye_ws cookie 的请求返回 401（匿名工作空间有意不在这条接口发 cookie，见 AnonymousWorkspaceFilter），健康检查用不受鉴权影响的 /（SpaController 托管 index.html）
 start api "api,${ZHIYE_PROFILES_EXTRA:-dev}${MOCK_PROFILE}"
-wait_http api "http://127.0.0.1:8080/api/meta" || exit 1
+wait_http api "http://127.0.0.1:8080/" || exit 1
 echo "✓ api  http://127.0.0.1:8080   （日志 runtime/logs/api.log，runner：${ZHIYE_RUNNER_SCRIPT}）"
 start site "site${MOCK_PROFILE}"
 wait_http site "http://127.0.0.1:8083/" || exit 1

@@ -5,7 +5,10 @@ import com.tcl.csot.zhiye.util.Json;
 import com.tcl.csot.zhiye.support.Client;
 import com.tcl.csot.zhiye.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +19,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** 数据源：登记（凭证不外泄）→ 试调用 → 绑定应用 → 预览带令牌调用 → 发布站点同源调用 → 编码指令。 */
 class DataSourceTest extends IntegrationTest {
+
+    @Autowired JdbcClient jdbc;
+
+    @Test
+    void allowsOneHundredSourcesPerApp() {
+        Client c = client();
+        String run = java.util.UUID.randomUUID().toString().replace("-", "");
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            String id = "src_limit_" + run + "_" + i;
+            jdbc.sql("insert into data_source (id, key, name, url) values (?, ?, ?, ?)")
+                    .params(id, "source_" + run + "_" + i, "数据源 " + i, "http://127.0.0.1/test-source").update();
+            if (i < 100) ids.add(id);
+        }
+        JsonNode app = c.ok(c.post("/api/apps", Map.of("type", "开发网站", "prompt", "做一个数据查询看板", "mode", "快速", "model", "auto",
+                "assetIds", List.of(), "sourceIds", ids)));
+        String appId = app.path("id").asText();
+        assertThat(c.waitTask(app.path("activeTask").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(c.ok(c.get("/api/apps/" + appId + "/sources")).size()).isEqualTo(100);
+        var over = c.post("/api/apps/" + appId + "/sources", Map.of("sourceId", "src_limit_" + run + "_100"));
+        assertThat(over.status()).isEqualTo(400);
+        assertThat(over.body()).contains("一个应用最多绑定 100 个数据源");
+    }
 
     Map<String, Object> daily(String key) {
         Map<String, Object> m = new HashMap<>();

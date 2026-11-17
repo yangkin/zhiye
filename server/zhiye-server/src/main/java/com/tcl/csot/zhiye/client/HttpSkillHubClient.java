@@ -25,16 +25,18 @@ import java.util.List;
 
 /**
  * SkillHub（fivestar-service aiToolbox）HTTP 客户端。
- * 接口：/{org}/aiToolbox/skills/market/query、/market/detail/{skillId}、/my/skill/page、/my/skill、
- * /{skillId}/versions/{versionId}/package、/visible-scope/options、/add、/edit、/review/{skillId}/{versionId}；
- * 分类：/{org}/aiSkill/categories。
+ * 接口：/{org}/aiToolbox/skills/market/query、/market/{skillId}、/my/query、/market/{skillId}/package/download、
+ * /{skillId}/versions/{versionId}/package/download、/visible-scope/options、/add、/edit（edit 必带 draftJson）、
+ * /{skillId}/versions/{versionId}/withdraw-review、/starClaw/review-state；
+ * 分类：/{org}/skillCategory/category/queryAll。
+ * 响应信封是 metis Result{code:"ok", data, success:true}；业务异常是 HTTP 200 + {code, message, type}。
  */
 @Component
 @ConditionalOnProperty(name = "zhiye.skillhub.enabled", havingValue = "true")
 public class HttpSkillHubClient implements SkillHubClient {
     private static final Logger log = LoggerFactory.getLogger(HttpSkillHubClient.class);
     private static final String SKILLS = "/aiToolbox/skills";
-    private static final String CATEGORIES = "/aiSkill/categories";
+    private static final String CATEGORIES = "/skillCategory/category/queryAll";
     private static final int MAX_PACKAGE = 50 * 1024 * 1024;
 
     private final SkillHubProperties props;
@@ -203,8 +205,22 @@ public class HttpSkillHubClient implements SkillHubClient {
             if (in.tags() != null) for (String t : in.tags()) field(body, boundary, "tags", t);
             field(body, boundary, "version", in.version());
             field(body, boundary, "subReview", Boolean.toString(in.submitReview()));
-            if (in.skillId() != null && in.skillId() > 0) field(body, boundary, "skillId", String.valueOf(in.skillId()));
-            if (in.changeLog() != null && !in.changeLog().isBlank()) field(body, boundary, "changeLog", in.changeLog());
+            // 服务端必填参数：直接传 zip 时可为空串（service 优先用 file，fileUrl 只作记录）
+            field(body, boundary, "fileId", "");
+            field(body, boundary, "fileUrl", "");
+            if (in.skillId() != null && in.skillId() > 0) {
+                field(body, boundary, "skillId", String.valueOf(in.skillId()));
+                // /edit 必填：与 fivestar-front 一致，传技能元数据 JSON 串
+                var draft = Json.obj()
+                        .put("displayName", in.displayName() == null ? "" : in.displayName())
+                        .put("summary", in.summary() == null ? "" : in.summary())
+                        .put("categoryId", in.categoryId() == null ? "" : in.categoryId())
+                        .put("version", in.version() == null ? "" : in.version())
+                        .put("changelog", in.changeLog() == null ? "" : in.changeLog())
+                        .put("owner", in.owner() == null ? "" : in.owner());
+                field(body, boundary, "draftJson", Json.write(draft));
+            }
+            if (in.skillId() != null && in.changeLog() != null && !in.changeLog().isBlank()) field(body, boundary, "changeLog", in.changeLog());
             body.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + safe(zipName) + "\"\r\nContent-Type: application/zip\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             body.write(zip);
             body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
@@ -252,7 +268,7 @@ public class HttpSkillHubClient implements SkillHubClient {
         return send(req, "查询 SkillHub");
     }
 
-    /** fivestar-service 返回 Result{code, message, data}，code=200 为成功；401/403 表示平台令牌失效 */
+    /** fivestar-service 返回 metis Result{code:"ok", data, success:true}；CommonException 走 HTTP 200 + {code, message, type}（HTTP 状态不可靠）；401/403 表示平台令牌失效 */
     private JsonNode send(HttpRequest req, String what) {
         HttpResponse<String> res;
         try {
@@ -274,10 +290,13 @@ public class HttpSkillHubClient implements SkillHubClient {
             log.warn("{}返回非 JSON（HTTP {}）", what, res.statusCode());
             throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_ERROR", "SkillHub 返回了无法识别的内容（HTTP " + res.statusCode() + "）");
         }
-        if (res.statusCode() >= 400 || root.path("code").asInt(200) != 200) {
+        // 业务异常：HTTP 200 + ExceptionResult{code, message, type}（metis GlobalExceptionHandler 对 CommonException 的返回）
+        boolean businessError = root.hasNonNull("type") && root.hasNonNull("message") && !root.has("success");
+        boolean ok = root.path("success").asBoolean(false);
+        if (businessError || res.statusCode() >= 400 || !ok) {
             String msg = root.path("message").asText("");
             if (msg.isBlank()) msg = root.path("msg").asText("");
-            log.warn("{}失败：HTTP {} code={} message={}", what, res.statusCode(), root.path("code").asInt(), cut(msg));
+            log.warn("{}失败：HTTP {} code={} message={}", what, res.statusCode(), root.path("code").asText(""), cut(msg));
             if (msg.contains("skill.slug.exists")) throw new ApiException(HttpStatus.CONFLICT, "SKILL_SLUG_EXISTS", "这个技能的英文标识已被占用，请改一下技能名称后重试");
             if (msg.contains("not.owner")) throw new ApiException(HttpStatus.FORBIDDEN, "SKILL_NOT_OWNER", "只有技能的发布者能修改它");
             String shown = msg.isBlank() ? "HTTP " + res.statusCode() : cut(msg);

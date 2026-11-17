@@ -7,12 +7,13 @@ import { Icon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
 import { confirmDialog } from './ConfirmDialog';
+import { AgwCatalog } from './AgwCatalog';
 
 const TYPES: DataSourceParam['type'][] = ['string', 'number', 'integer', 'boolean', 'date'];
 const TYPE_LABEL: Record<DataSourceParam['type'], string> = { string: '文本', number: '数字', integer: '整数', boolean: '是/否', date: '日期' };
-const AUTH_LABEL: Record<DataSourceInfo['authType'], string> = { none: '无需鉴权', bearer: 'Bearer 令牌', header: '自定义请求头', basic: 'Basic（用户名:密码）' };
+const AUTH_LABEL: Record<DataSourceInfo['authType'], string> = { none: '无需鉴权', bearer: 'Bearer 令牌', header: '自定义请求头', basic: 'Basic（用户名:密码）', agw: 'API 网关签名' };
 
-type View = { kind: 'list' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
+type View = { kind: 'list' } | { kind: 'agw' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
 
 export function useSources(enabled = true) {
   return useQuery({ queryKey: qk.sources, queryFn: api.sources, enabled, staleTime: 30_000 });
@@ -28,13 +29,15 @@ export function DataSourceDialog() {
     setOpen(false);
     setView({ kind: 'list' });
   };
-  const title = view.kind === 'edit' ? (view.source ? '编辑数据源' : '登记数据源') : view.kind === 'test' ? `试调用 · ${view.source.name}` : '数据源';
+  const title = view.kind === 'edit' ? (view.source ? '编辑数据源' : '登记数据源') : view.kind === 'test' ? `试调用 · ${view.source.name}` : view.kind === 'agw' ? 'API 网关' : '数据源';
   return (
     <Modal title={title} overline="DATA SOURCES" onClose={close} className="source-modal">
       {view.kind === 'list' ? (
-        <SourceList onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} />
+        <SourceList onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} onAgw={() => setView({ kind: 'agw' })} />
       ) : view.kind === 'edit' ? (
         <SourceForm source={view.source} onDone={(s) => setView(s ? { kind: 'test', source: s } : { kind: 'list' })} />
+      ) : view.kind === 'agw' ? (
+        <AgwCatalog onBack={() => setView({ kind: 'list' })} onDone={(source) => setView({ kind: 'test', source })} />
       ) : (
         <SourceTest source={view.source} onBack={() => setView({ kind: 'list' })} />
       )}
@@ -42,7 +45,7 @@ export function DataSourceDialog() {
   );
 }
 
-function SourceList({ onEdit, onTest }: { onEdit: (s: DataSourceInfo | null) => void; onTest: (s: DataSourceInfo) => void }) {
+function SourceList({ onEdit, onTest, onAgw }: { onEdit: (s: DataSourceInfo | null) => void; onTest: (s: DataSourceInfo) => void; onAgw: () => void }) {
   const qc = useQueryClient();
   const list = useSources();
   const remove = async (s: DataSourceInfo) => {
@@ -63,9 +66,12 @@ function SourceList({ onEdit, onTest }: { onEdit: (s: DataSourceInfo | null) => 
       </p>
       <div className="source-list-head">
         <span>{list.data ? `共 ${list.data.length} 个` : ''}</span>
-        <button type="button" className="primary-button" onClick={() => onEdit(null)}>
-          <Icon name="plus" /> 登记数据源
-        </button>
+        <div className="source-list-buttons">
+          <button type="button" className="subtle-button" onClick={onAgw}>从 API 网关添加</button>
+          <button type="button" className="primary-button" onClick={() => onEdit(null)}>
+            <Icon name="plus" /> 登记数据源
+          </button>
+        </div>
       </div>
       {list.isLoading ? <p className="muted-note">正在读取…</p> : null}
       {list.error ? <p className="inline-error">{errorMessage(list.error)}</p> : null}
@@ -86,6 +92,7 @@ function SourceList({ onEdit, onTest }: { onEdit: (s: DataSourceInfo | null) => 
               <b>
                 {s.name}
                 {s.platform ? <em className="source-badge">平台</em> : null}
+                {s.provider === 'agw' ? <em className="source-badge">API网关</em> : null}
               </b>
               <small>
                 <code>{s.key}</code> · {s.method} · {s.params.length ? `${s.params.length} 个参数` : '无参数'} · {AUTH_LABEL[s.authType]}
@@ -142,7 +149,7 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
     setBusy(true);
     setError('');
     const body: DataSourceInput = { ...f, params: params.filter((p) => p.name.trim()), secret: f.secret || undefined };
-    if (body.authType !== 'header') delete body.authHeader;
+    if (body.authType !== 'header' && body.authType !== 'agw') delete body.authHeader;
     try {
       const saved = source ? await api.updateSource(source.id, body) : await api.createSource(body);
       await qc.invalidateQueries({ queryKey: qk.sources });
@@ -252,17 +259,23 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
             <input className="field mono" required value={f.authHeader ?? ''} placeholder="X-Api-Key" onChange={(e) => set({ authHeader: e.target.value })} />
           </label>
         ) : null}
+        {f.authType === 'agw' ? (
+          <label>
+            <span className="field-label">调用项目 AppKey</span>
+            <input className="field mono" required value={f.authHeader ?? ''} placeholder="项目 AppKey" onChange={(e) => set({ authHeader: e.target.value })} />
+          </label>
+        ) : null}
       </div>
       {f.authType !== 'none' ? (
         <label>
-          <span className="field-label">凭证{source?.hasSecret ? '（已保存，留空表示不修改）' : ''}</span>
+          <span className="field-label">{f.authType === 'agw' ? 'AppSecret' : '凭证'}{source?.hasSecret ? '（已保存，留空表示不修改）' : ''}</span>
           <input
             className="field mono"
             type="password"
             autoComplete="new-password"
             required={!source?.hasSecret}
             value={f.secret ?? ''}
-            placeholder={f.authType === 'basic' ? '用户名:密码' : '令牌'}
+            placeholder={f.authType === 'basic' ? '用户名:密码' : f.authType === 'agw' ? '项目 AppSecret' : '令牌'}
             onChange={(e) => set({ secret: e.target.value })}
           />
           <small className="muted-note">凭证加密保存在平台，只在代理请求时使用，不会返回给浏览器。</small>

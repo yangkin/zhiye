@@ -612,6 +612,24 @@ fieldset.ze-edit-body:disabled{opacity:.6}
 .skill-picker-auto{font-style:normal;font-size:12px;color:#6f52d4;background:#efeafb;border-radius:6px;padding:1px 6px;flex:none}
 .skill-picker-more{display:block;width:100%;text-align:left;margin-top:4px;padding:9px 8px;border-top:1px solid #f0edf5;font-size:12px;color:#5a3fbf;border-radius:0 0 8px 8px}
 .skill-picker-more:hover{background:#f7f4fe}
+.skillhub-market .modal-body{display:flex;flex-direction:column;gap:12px}
+.skillhub-market-tools{display:flex;align-items:center;gap:8px}
+.skillhub-market-search{display:flex;align-items:center;gap:8px;flex:1;min-width:160px;height:36px;padding:0 10px;border:1px solid #e6e2ee;border-radius:9px}
+.skillhub-market-search .icon{width:15px;height:15px;color:#6c667d}
+.skillhub-market-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#1f1c29;font-size:12px}
+.skillhub-market-tools .zy-select{min-width:128px}
+.skillhub-market-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-height:120px;max-height:430px;overflow:auto}
+.skillhub-market-item{display:flex;align-items:flex-start;gap:10px;padding:14px;border:1px solid #e6e2ee;border-radius:12px;background:#fff}
+.skillhub-market-item-icon{display:grid;place-items:center;width:32px;height:32px;flex:none;border-radius:9px;background:#f4f1fa;color:#5a3fbf}
+.skillhub-market-item-main{flex:1;min-width:0}
+.skillhub-market-item-main h3{margin:0 0 5px;color:#1f1c29;font-size:13px;font-weight:600}
+.skillhub-market-item-main p{display:-webkit-box;margin:0 0 7px;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;color:#5e586e;font-size:12px;line-height:1.6}
+.skillhub-market-item-main small{color:#6c667d;font-size:12px}
+.skillhub-market-item .subtle-button{flex:none;padding:6px 9px;font-size:12px;white-space:nowrap}
+.skillhub-market-empty{padding:28px 8px;text-align:center;color:#6c667d;font-size:12px}
+.skillhub-market-footer{display:flex;align-items:center;justify-content:space-between;color:#6c667d;font-size:12px}
+.skillhub-market-footer>div{display:flex;align-items:center;gap:8px}
+@media(max-width:760px){.skillhub-market-tools{align-items:stretch;flex-wrap:wrap}.skillhub-market-search{flex-basis:100%}.skillhub-market-list{grid-template-columns:1fr}.skillhub-market-item{flex-wrap:wrap}}
 .skill-chip{display:inline-flex;align-items:center;gap:5px}
 .msg-skills{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
 .msg-skills .skill-chip{font-size:11px;padding:2px 7px;border-radius:6px;background:#efeafc;color:#5a3fbf;border:1px solid #d3c6f5}
@@ -670,6 +688,17 @@ a.skill-chip{text-decoration:none}
 .source-intro b{color:#4a3b78;font-weight:600}
 .source-list-head{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;font-size:12px;color:#8f8c9c}
 .source-list-head .primary-button{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:8px 12px}
+.source-list-buttons{display:flex;align-items:center;gap:8px}
+.source-list-buttons .subtle-button{font-size:12px;padding:8px 12px}
+.agw-catalog{display:flex;flex-direction:column;gap:12px}
+.agw-catalog-tools{display:flex;align-items:center;gap:8px}
+.agw-catalog-tools .skillhub-market-search{flex:1}
+.agw-api-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:390px;overflow:auto}
+.agw-credential{display:flex;flex-direction:column;gap:10px;border:1px solid #e6deef;border-radius:12px;padding:14px;background:#fcfaff}
+.agw-credential h3{margin:0;color:#1f1c29;font-size:14px}
+.agw-credential p{margin:0;color:#5e586e;font-size:12px;line-height:1.6}
+.agw-credential label{display:flex;flex-direction:column;gap:5px}
+.agw-credential .field{height:38px;padding:0 11px;border:1px solid #e6deef;border-radius:9px;background:#fff;color:#1f1c29;font-size:12px}
 .source-list ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .source-row{display:flex;gap:12px;align-items:flex-start;border:1px solid #eeeaf4;border-radius:12px;padding:12px}
 .source-row-icon{width:32px;height:32px;border-radius:9px;background:#e9f5f1;color:#23735a;display:inline-flex;align-items:center;justify-content:center;flex:none}

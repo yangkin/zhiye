@@ -15,56 +15,93 @@ import java.util.zip.ZipInputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** SkillHub 开启：调用（测试桩）SkillHub，记录发布结果。 */
+/**
+ * SkillHub 开启：按 fivestar-service 真实契约（/{org}/aiToolbox/skills/add|edit、metis Result 信封）
+ * 调用测试桩，记录并校验发布请求。
+ */
 @TestPropertySource(properties = {
         // 配置不同的测试上下文各用一个 schema：否则各上下文的任务工作进程会领走彼此的任务（配置不同，会失败）
         "spring.datasource.url=jdbc:postgresql://127.0.0.1:5433/zhiye_test?currentSchema=ctx_skillhub", "spring.flyway.schemas=ctx_skillhub",
-        "zhiye.skillhub.enabled=true", "zhiye.skillhub.base-url={self}/test-skillhub",
-        "zhiye.skillhub.token-env=ZHIYE_TEST_SKILLHUB_TOKEN"})
+        "logging.level.com.tcl.csot.zhiye.handler.GlobalExceptionHandler=DEBUG",
+        "zhiye.auth.sso.user-info-url={self}/test-skillhub/self",
+        "zhiye.skillhub.enabled=true", "zhiye.skillhub.base-url={self}/test-skillhub"})
 class SkillHubEnabledTest extends IntegrationTest {
-    static { System.setProperty("ZHIYE_TEST_SKILLHUB_TOKEN", "tok-123"); }
 
     @Test
     void publishRecordsResult() throws Exception {
+        FakeSkillHubController.reset();
         Client c = client();
         JsonNode app = SkillHubTest.skillApp(c);
         String id = app.path("id").asText();
         assertThat(app.path("skillhub").path("enabled").asBoolean()).isTrue();
 
-        JsonNode r = c.ok(c.post("/api/apps/" + id + "/skillhub/publish", Map.of("visibility", "public", "changelog", "首次发布")));
-        assertThat(r.path("skillId").asText()).isEqualTo("sk_123");
-        assertThat(r.path("skillVersion").asText()).isEqualTo("1.0.0");
-        assertThat(r.path("url").asText()).isEqualTo("https://skillhub.example/skills/sk_123");
+        // 非法可见范围在调 SkillHub 之前就被拦下
+        assertThat(c.send("POST", "/api/skillhub/apps/" + id + "/publish", Map.of("visibility", "everyone"), SkillHubTest.bearer()).status()).isEqualTo(400);
+
+        // 首次发布 → fivestar /add：直传 zip（fileId/fileUrl 空串）、无 draftJson；/add 不接收更新说明
+        JsonNode r = c.ok(c.send("POST", "/api/skillhub/apps/" + id + "/publish",
+                Map.of("visibility", "public", "changelog", "首次发布"), SkillHubTest.bearer()));
+        assertThat(r.path("skillId").asText()).isEqualTo("12345");
+        assertThat(r.path("skillVersion").asText()).startsWith("v");
+        assertThat(r.path("url").asText()).contains("12345");
         assertThat(r.path("versionId").asText()).isEqualTo(app.path("currentVersion").path("id").asText());
         assertThat(r.path("publishedAt").asText()).isNotBlank();
+        assertThat(r.path("status").asText()).isNotBlank();
 
-        assertThat(FakeSkillHubController.lastAuth).isEqualTo("Bearer tok-123");
-        JsonNode meta = Json.read(FakeSkillHubController.lastMetadata);
-        assertThat(meta.path("name").asText()).isEqualTo("weekly-report");
-        assertThat(meta.path("visibility").asText()).isEqualTo("public");
-        assertThat(meta.path("changelog").asText()).isEqualTo("首次发布");
+        assertThat(FakeSkillHubController.lastAuth).isEqualTo("Bearer tok-tester");
+        assertThat(FakeSkillHubController.lastPath).isEqualTo("/add");
+        Map<String, String> f = FakeSkillHubController.lastFields;
+        assertThat(f.get("displayName")).isEqualTo(app.path("name").asText());
+        assertThat(f.get("owner")).isEqualTo("测试用户");
+        assertThat(f.get("categoryId")).isEqualTo("c1");
+        assertThat(f.get("subReview")).isEqualTo("true");
+        assertThat(f).doesNotContainKeys("changeLog", "draftJson");
+        assertThat(f.get("fileId")).isEmpty();
+        assertThat(f.get("fileUrl")).isEmpty();
         Set<String> tops = new HashSet<>();
         try (ZipInputStream z = new ZipInputStream(new ByteArrayInputStream(FakeSkillHubController.lastPackage))) {
             for (ZipEntry e; (e = z.getNextEntry()) != null; ) tops.add(e.getName().split("/")[0]);
         }
         assertThat(tops).containsExactly("weekly-report");
 
-        JsonNode pubs = c.ok(c.get("/api/apps/" + id + "/skillhub/publications"));
-        assertThat(pubs.size()).isEqualTo(1);
-        assertThat(pubs.get(0).path("versionNumber").asInt()).isEqualTo(1);
-        JsonNode after = c.ok(c.get("/api/apps/" + id));
-        assertThat(after.path("skillhub").path("url").asText()).isEqualTo("https://skillhub.example/skills/sk_123");
-        assertThat(after.path("skillhub").path("lastPublishedAt").asText()).isEqualTo(r.path("publishedAt").asText());
+        // 再次发布 → fivestar /edit：带上次 skillId、draftJson 和 changeLog
+        JsonNode r2 = c.ok(c.send("POST", "/api/skillhub/apps/" + id + "/publish",
+                Map.of("visibility", "public", "changelog", "第二次发布"), SkillHubTest.bearer()));
+        assertThat(r2.path("skillId").asText()).isEqualTo("12345");
+        assertThat(FakeSkillHubController.lastPath).isEqualTo("/edit");
+        assertThat(FakeSkillHubController.lastFields.get("skillId")).isEqualTo("12345");
+        assertThat(FakeSkillHubController.lastFields.get("changeLog")).isEqualTo("第二次发布");
+        JsonNode draft = Json.read(FakeSkillHubController.lastFields.get("draftJson"));
+        assertThat(draft.path("displayName").asText()).isEqualTo(app.path("name").asText());
+        assertThat(draft.path("categoryId").asText()).isEqualTo("c1");
 
-        // SKILL.md 头部不合法 → 400
-        String v1 = after.path("currentVersion").path("id").asText();
-        JsonNode save = c.ok(c.post("/api/apps/" + id + "/code", Map.of("baseVersionId", v1,
-                "files", List.of(Map.of("path", "SKILL.md", "content", "---\nname: Weekly Report\ndescription: x\n---\n")))));
-        assertThat(c.waitTask(save.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
-        var bad = c.post("/api/apps/" + id + "/skillhub/publish", Map.of());
-        assertThat(bad.status()).isEqualTo(400);
-        assertThat(bad.json().path("message").asText()).contains("name");
-        // 旧版本仍可指定发布
-        assertThat(c.post("/api/apps/" + id + "/skillhub/publish", Map.of("versionId", v1)).status()).isEqualTo(200);
+        assertThat(c.ok(c.get("/api/skillhub/apps/" + id + "/publications")).size()).isEqualTo(2);
+    }
+
+    @Test
+    void marketInstallAndSelect() {
+        Client c = client();
+        JsonNode categories = c.ok(c.send("GET", "/api/skillhub/categories", null, SkillHubTest.bearer()));
+        assertThat(categories.at("/0/id").asText()).isEqualTo("c1");
+        JsonNode market = c.ok(c.send("GET", "/api/skillhub/market", null, SkillHubTest.bearer()));
+        assertThat(market.path("total").asInt()).isEqualTo(1);
+        assertThat(market.at("/items/0/name").asText()).isEqualTo("周报助手");
+
+        JsonNode installed = c.ok(c.send("POST", "/api/skillhub/installs", Map.of("skillId", "101", "versionId", "678"), SkillHubTest.bearer()));
+        String installId = installed.path("id").asText();
+        assertThat(installId).startsWith("hub_");
+        assertThat(installed.path("installed").asBoolean()).isTrue();
+        assertThat(c.ok(c.send("POST", "/api/skillhub/installs", Map.of("skillId", "101", "versionId", "678"), SkillHubTest.bearer()))
+                .path("id").asText()).isEqualTo(installId);
+
+        JsonNode meta = c.ok(c.get("/api/meta"));
+        assertThat(meta.path("skillhub").asBoolean()).isTrue();
+        assertThat(meta.path("hubSkills").toString()).contains(installId).contains("周报助手");
+        assertThat(c.ok(c.get("/api/skillhub/my-skills")).toString()).contains(installId).contains("周报助手");
+        JsonNode app = c.ok(c.post("/api/apps", Map.of("type", "开发skill", "prompt", "使用周报技能生成会议纪要 skill",
+                "mode", "快速", "model", "auto", "assetIds", List.of(), "skillAppIds", List.of(installId))));
+        assertThat(c.waitTask(app.path("activeTask").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(c.delete("/api/skillhub/installs/" + installId).status()).isEqualTo(204);
+        assertThat(c.ok(c.get("/api/meta")).path("hubSkills").size()).isZero();
     }
 }

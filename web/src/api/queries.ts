@@ -21,6 +21,8 @@ export const qk = {
   assets: ['assets'] as const,
   sources: ['sources'] as const,
   appSources: (appId: string) => ['appSources', appId] as const,
+  skillhubCategories: ['skillhub', 'categories'] as const,
+  skillhubMarket: (q: string, categoryId: string, page: number) => ['skillhub', 'market', q, categoryId, page] as const,
 };
 
 export const useMeta = () => useQuery({ queryKey: qk.meta, queryFn: api.meta, staleTime: 5 * 60_000 });

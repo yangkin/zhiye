@@ -47,6 +47,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
             MissingServletRequestPartException.class, IllegalArgumentException.class, HttpMediaTypeNotSupportedException.class})
     public ResponseEntity<Map<String, String>> bad(Exception e) {
+        log.debug("请求参数解析失败", e);
         return body(HttpStatus.BAD_REQUEST, "VALIDATION", msg("zhiye.error.validation", "请求格式不正确"));
     }
 

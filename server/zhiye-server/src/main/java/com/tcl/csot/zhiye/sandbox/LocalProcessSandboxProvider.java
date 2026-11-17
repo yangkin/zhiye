@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -86,16 +87,30 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
         env.put("ZHIYE_CHROME_PATH", props.sandbox().chromePath());
         env.put("ZHIYE_TASK_ID", spec.taskId());
         env.put("HOME", spec.agentDir().toString());
-        env.put("PATH", nodeDir + ":/usr/bin:/bin");
+        // Windows 的 PATH 分隔符是 ;，且 npm.cmd 等依赖系统 PATH；mac 上保持最小集
+        if (File.pathSeparator.equals(";")) {
+            String sysPath = System.getenv("PATH");
+            env.put("PATH", nodeDir + ";" + (sysPath == null ? "" : sysPath));
+        } else {
+            env.put("PATH", nodeDir + ":/usr/bin:/bin");
+        }
         env.put("LANG", "en_US.UTF-8");
         if (spec.allowNet()) {
             env.put("ALLOW_NET", "1");
-            // 导入任务安装依赖：共享 npm 缓存（沙箱允许写 /private/tmp），可用 ZHIYE_NPM_REGISTRY 指定镜像
-            env.put("npm_config_cache", "/private/tmp/zhiye-npm-cache");
+            // 导入任务安装依赖：共享 npm 缓存，可用 ZHIYE_NPM_REGISTRY 指定镜像
+            String npmCache = File.pathSeparator.equals(";")
+                    ? root.resolve("runtime/npm-cache").toString()
+                    : "/private/tmp/zhiye-npm-cache";
+            env.put("npm_config_cache", npmCache);
             String registry = System.getenv("ZHIYE_NPM_REGISTRY");
             if (registry != null && !registry.isBlank()) env.put("npm_config_registry", registry);
         }
+        // 自定义模型定义（glm 中转等不在 Pi 内置清单的模型）：服务端从环境变量转发给 runner
+        String modelDef = System.getenv("ZHIYE_MODEL_DEF");
+        if (modelDef != null && !modelDef.isBlank()) env.put("ZHIYE_MODEL_DEF", modelDef);
         env.put("TMPDIR", spec.agentDir().resolve("tmp").toString());
+        env.put("TEMP", spec.agentDir().resolve("tmp").toString());
+        env.put("TMP", spec.agentDir().resolve("tmp").toString());
         Files.createDirectories(spec.agentDir().resolve("tmp"));
 
         PrintWriter logWriter = new PrintWriter(new OutputStreamWriter(

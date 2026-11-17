@@ -90,10 +90,10 @@ zhiye:
   fivestar:
     enabled: ${ZHIYE_FIVESTAR_ENABLED:false}
     mock: ${ZHIYE_FIVESTAR_MOCK:false}
-    organization-id: ${ZHIYE_FIVESTAR_ORG:0}
+    organization-id: ${ZHIYE_FIVESTAR_ORG:31}
     openclaw-base-url: ${ZHIYE_OPENCLAW_BASE_URL:{self}/mock/openclaw}
     llm-gateway-base-url: ${ZHIYE_LLM_GATEWAY_URL:{self}/mock/llm-gateway}
-    project-id: zhiye
+    project-id: ${ZHIYE_FIVESTAR_PROJECT_ID:zhiye}
     internal-token-env: ZHIYE_OPENCLAW_INTERNAL_TOKEN
   storage:
     type: local
@@ -103,12 +103,19 @@ zhiye:
   sources:
     allow-loopback: ${ZHIYE_SOURCES_ALLOW_LOOPBACK:true}
     file: ${ZHIYE_SOURCES_FILE:}
+  # API 网关：浏览已启用且已上架的 API，导入为数据源后用调用项目 AppKey/AppSecret 签名访问
+  agw:
+    enabled: ${ZHIYE_AGW_ENABLED:false}
+    base-url: ${ZHIYE_AGW_BASE_URL:http://testmetis.csot.tcl.com}
+    public-base-url: ${ZHIYE_AGW_PUBLIC_URL:}
+    tenant-id: ${ZHIYE_AGW_TENANT_ID:31}
+    timeout-seconds: 10
   # 公司 SkillHub（fivestar-service 的 Skill 市场）：浏览 / 安装 / 发布技能。默认关闭；mock=true 用内置模拟。
   skillhub:
     enabled: ${ZHIYE_SKILLHUB_ENABLED:false}
     mock: ${ZHIYE_SKILLHUB_MOCK:false}
     base-url: ${ZHIYE_SKILLHUB_URL:}
     file-base-url: ${ZHIYE_SKILLHUB_FILE_URL:}
-    portal-url: ${ZHIYE_SKILLHUB_PORTAL:}
-    organization-id: ${ZHIYE_SKILLHUB_ORG:0}
+    portal-url: ${ZHIYE_SKILLHUB_PORTAL:http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}}
+    organization-id: ${ZHIYE_SKILLHUB_ORG:31}
     timeout-seconds: 60

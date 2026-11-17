@@ -23,6 +23,8 @@ cd server && JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
 mvn -o test -pl zhiye-server -Dtest='ContinueCheckpointTest,TaskSignalRelayTest' -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
+本机全仓重跑建议显式隔离本机模型选择：`ZHIYE_MODEL=kimi KIMI_API_KEY=test-key INCLUDE_INTRANET=1 bash scripts/ci.sh`。测试全部使用假上游，不会消耗真实模型额度；如果不固定这两个变量，`runtime/local.env` 里的 DeepSeek 选择可能让测试因本机未加载对应密钥而返回 503。测试库会保留数据，重复全量运行前应使用干净的 `zhiye_test`，不要直接在日常业务库上运行。
+
 - 这台机器有系统级 SOCKS 代理，不加 `socksNonProxyHosts` 时 JDBC 连 127.0.0.1 会失败。
 - 配置不同的测试类（`@TestPropertySource`：`FivestarQuotaTest`、`CloudSiteLoginTest`、`SkillHubEnabledTest`）会各起一个 Spring 上下文；它们用 `currentSchema=ctx_*` 各用一个 schema，否则各上下文的任务工作进程会领走彼此的任务（配置不同，会随机失败）。新增这类测试时照抄。
 - 假上游 / 假 runner 的指令开关：需求里带 `[big]`（返回分期计划）、`[turnlimit]`（撞一次步数检查点）、`[confirm]`（申请启用云服务）、`[slowstream]`（会话慢速流）、`[doc]`（会话返回文件块）、`[vue]`（计划返回 Vue 形态）等，见 `support/FakeUpstreamController.java`、`server/dev/fake-runner.mjs`。

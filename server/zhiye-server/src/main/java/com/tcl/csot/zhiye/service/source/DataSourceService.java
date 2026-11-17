@@ -47,18 +47,29 @@ public class DataSourceService {
     static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z_][A-Za-z0-9_]{0,47})}");
     static final Pattern HEADER = Pattern.compile("[A-Za-z0-9-]{1,64}");
     static final Pattern ENV = Pattern.compile("[A-Z_][A-Z0-9_]{0,63}");
+    static final Pattern APP_KEY = Pattern.compile("[A-Za-z0-9._-]{1,128}");
     static final Pattern DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}([T ][0-9:.+\\-Z]{0,20})?");
     static final Set<String> TYPES = Set.of("string", "number", "integer", "boolean", "date");
-    static final Set<String> AUTH = Set.of("none", "bearer", "header", "basic");
+    static final Set<String> AUTH = Set.of("none", "bearer", "header", "basic", "agw");
     static final Set<String> RESERVED_HEADERS = Set.of("host", "content-length", "connection", "content-type", "transfer-encoding", "upgrade", "expect");
-    static final int MAX_PER_APP = 10;
+    static final int MAX_PER_APP = 100;
     static final int MAX_PER_WORKSPACE = 50;
 
-    public record Param(String name, String type, boolean required, String description, String example) {}
+    public record Param(String name, String type, boolean required, String description, String example, String position) {
+        public Param(String name, String type, boolean required, String description, String example) {
+            this(name, type, required, description, example, null);
+        }
+    }
 
     public record Source(String id, String workspaceId, String key, String name, String description, String method, String url,
                          List<Param> params, String sample, String authType, String authHeader, String secretEnc, String secretEnv,
-                         String createdAt) {
+                         String createdAt, String provider, String externalId) {
+        public Source(String id, String workspaceId, String key, String name, String description, String method, String url,
+                      List<Param> params, String sample, String authType, String authHeader, String secretEnc, String secretEnv,
+                      String createdAt) {
+            this(id, workspaceId, key, name, description, method, url, params, sample, authType, authHeader, secretEnc, secretEnv,
+                    createdAt, "manual", null);
+        }
         boolean platform() { return workspaceId == null; }
     }
 
@@ -254,6 +265,8 @@ public class DataSourceService {
 
     HttpRequest buildRequest(Source s, JsonNode params, String appId) throws Exception {
         Map<String, String> values = checkParams(s, params);
+        Map<String, Param> defs = new HashMap<>();
+        for (Param p : s.params()) defs.put(p.name(), p);
         Set<String> inPath = new HashSet<>();
         Matcher m = PLACEHOLDER.matcher(s.url());
         StringBuilder url = new StringBuilder();
@@ -263,14 +276,15 @@ public class DataSourceService {
         }
         m.appendTail(url);
         boolean post = "POST".equals(s.method());
-        if (!post) {
-            StringBuilder qs = new StringBuilder();
-            for (var e : values.entrySet()) {
-                if (inPath.contains(e.getKey())) continue;
+        StringBuilder qs = new StringBuilder();
+        for (var e : values.entrySet()) {
+            if (inPath.contains(e.getKey())) continue;
+            Param p = defs.get(e.getKey());
+            String position = p.position() == null ? (post ? "body" : "query") : p.position();
+            if ("query".equals(position))
                 qs.append(qs.isEmpty() ? "" : "&").append(encode(e.getKey())).append('=').append(encode(e.getValue()));
-            }
-            if (!qs.isEmpty()) url.append(url.indexOf("?") >= 0 ? "&" : "?").append(qs);
         }
+        if (!qs.isEmpty()) url.append(url.indexOf("?") >= 0 ? "&" : "?").append(qs);
         URI uri = URI.create(url.toString());
         checkHost(uri);
         HttpRequest.Builder b = HttpRequest.newBuilder(uri)
@@ -278,21 +292,38 @@ public class DataSourceService {
                 .header("Accept", "application/json, text/plain;q=0.8, */*;q=0.5")
                 .header("User-Agent", "zhiye-source/1");
         if (appId != null) b.header("X-Zhiye-App", appId);
+        for (var e : values.entrySet()) {
+            Param p = defs.get(e.getKey());
+            if (!"header".equals(p.position())) continue;
+            if (!HEADER.matcher(p.name()).matches() || RESERVED_HEADERS.contains(p.name().toLowerCase(Locale.ROOT)))
+                throw ApiException.validation("数据源 Header 参数 " + p.name() + " 不允许使用");
+            b.header(p.name(), e.getValue());
+        }
         String secret = secret(s);
         switch (s.authType()) {
             case "bearer" -> b.header("Authorization", "Bearer " + secret);
             case "header" -> b.header(s.authHeader(), secret);
             case "basic" -> b.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8)));
+            case "agw" -> {
+                String timestamp = Long.toString(System.currentTimeMillis());
+                String raw = String.join(";", s.authHeader(), secret, timestamp);
+                String signature = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(raw.getBytes(StandardCharsets.UTF_8)));
+                b.header("x-agw-app-key", s.authHeader());
+                b.header("x-agw-time-stamp", timestamp);
+                b.header("x-agw-signature", signature);
+                b.header("x-agw-request-id", UUID.randomUUID().toString());
+            }
             default -> { }
         }
         if (post) {
             ObjectNode json = Json.obj();
-            Map<String, Param> defs = new HashMap<>();
-            for (Param p : s.params()) defs.put(p.name(), p);
             for (var e : values.entrySet()) {
                 if (inPath.contains(e.getKey())) continue;
-                String type = defs.get(e.getKey()).type();
-                switch (type) {
+                Param p = defs.get(e.getKey());
+                String position = p.position() == null ? "body" : p.position();
+                if (!"body".equals(position)) continue;
+                switch (p.type()) {
                     case "number" -> json.put(e.getKey(), Double.parseDouble(e.getValue()));
                     case "integer" -> json.put(e.getKey(), Long.parseLong(e.getValue()));
                     case "boolean" -> json.put(e.getKey(), Boolean.parseBoolean(e.getValue()));
@@ -477,11 +508,11 @@ public class DataSourceService {
         List<Param> params = new ArrayList<>();
         for (JsonNode p : Json.read(rs.getString("params")))
             params.add(new Param(p.path("name").asText(), p.path("type").asText("string"), p.path("required").asBoolean(false),
-                    p.path("description").asText(""), p.path("example").asText("")));
+                    p.path("description").asText(""), p.path("example").asText(""), p.path("position").asText(null)));
         return new Source(rs.getString("id"), rs.getString("workspace_id"), rs.getString("key"), rs.getString("name"),
                 rs.getString("description"), rs.getString("method"), rs.getString("url"), params, rs.getString("sample"),
                 rs.getString("auth_type"), rs.getString("auth_header"), rs.getString("secret_enc"), rs.getString("secret_env"),
-                Db.iso(Db.ts(rs, "created_at")));
+                Db.iso(Db.ts(rs, "created_at")), rs.getString("provider"), rs.getString("external_id"));
     }
 
     private Map<String, Object> view(Source s, String ws) {
@@ -500,6 +531,8 @@ public class DataSourceService {
         m.put("hasSecret", s.secretEnc() != null || s.secretEnv() != null);
         m.put("platform", s.platform());
         m.put("editable", !s.platform() && Objects.equals(s.workspaceId(), ws));
+        m.put("provider", s.provider());
+        m.put("externalId", s.externalId());
         m.put("createdAt", s.createdAt());
         return m;
     }
@@ -522,9 +555,11 @@ public class DataSourceService {
                 : old == null ? null : old.sample();
         if (sample != null && sample.length() > 20000) throw ApiException.validation("返回示例最多 20000 字");
         String auth = text(b, "authType", old == null ? "none" : old.authType()).trim();
-        if (!AUTH.contains(auth)) throw ApiException.validation("鉴权方式只能是 none / bearer / header / basic");
-        String header = "header".equals(auth) ? text(b, "authHeader", old == null ? null : old.authHeader()).trim() : null;
-        if (header != null && (!HEADER.matcher(header).matches() || RESERVED_HEADERS.contains(header.toLowerCase(Locale.ROOT))))
+        if (!AUTH.contains(auth)) throw ApiException.validation("鉴权方式只能是 none / bearer / header / basic / agw");
+        String header = "header".equals(auth) || "agw".equals(auth) ? text(b, "authHeader", old == null ? null : old.authHeader()).trim() : null;
+        if ("agw".equals(auth) && (header == null || !APP_KEY.matcher(header).matches()))
+            throw ApiException.validation("API 网关调用项目的 AppKey 不合法");
+        if ("header".equals(auth) && header != null && (!HEADER.matcher(header).matches() || RESERVED_HEADERS.contains(header.toLowerCase(Locale.ROOT))))
             throw ApiException.validation("请求头名称不合法");
         String enc = old == null ? null : old.secretEnc();
         if (b.hasNonNull("secret") && !b.get("secret").asText().isEmpty()) {
@@ -582,7 +617,12 @@ public class DataSourceService {
                 String d = p.path("description").asText("").trim();
                 String ex = p.path("example").asText("").trim();
                 if (d.length() > 200 || ex.length() > 200) throw ApiException.validation("参数说明和示例最多 200 字");
-                out.add(new Param(name, type, p.path("required").asBoolean(false), d, ex));
+                String position = p.path("position").asText(null);
+                if (position != null && !Set.of("query", "path", "header", "body").contains(position))
+                    throw ApiException.validation("参数 " + name + " 的位置不合法");
+                if ("header".equals(position) && (!HEADER.matcher(name).matches() || RESERVED_HEADERS.contains(name.toLowerCase(Locale.ROOT))))
+                    throw ApiException.validation("参数 " + name + " 不能作为 Header 传递");
+                out.add(new Param(name, type, p.path("required").asBoolean(false), d, ex, position));
             }
         }
         Matcher m = PLACEHOLDER.matcher(url);
@@ -637,6 +677,38 @@ public class DataSourceService {
         } catch (Exception e) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SOURCE_SECRET_INVALID", "数据源凭证无法解密（平台密钥可能已更换），请重新填写凭证");
         }
+    }
+
+    // ---------------- 外部目录导入（API 网关） ----------------
+
+    public String importedId(String ws, String provider, String externalId) {
+        return jdbc.sql("select id from data_source where workspace_id = ? and provider = ? and external_id = ? and deleted_at is null")
+                .params(ws, provider, externalId).query(String.class).optional().orElse(null);
+    }
+
+    /** 以目录 ID 幂等导入；再次导入更新公开契约，AppSecret 留空时保留原值。 */
+    public synchronized Map<String, Object> importExternal(String ws, String provider, String externalId, JsonNode body) {
+        Source old = jdbc.sql("select * from data_source where workspace_id = ? and provider = ? and external_id = ? and deleted_at is null")
+                .params(ws, provider, externalId).query((rs, i) -> row(rs)).optional().orElse(null);
+        Source s = parse(body, old, ws);
+        if (keyTaken(ws, s.key(), old == null ? null : old.id()))
+            throw ApiException.conflict("SOURCE_KEY_TAKEN", "调用名「" + s.key() + "」已经被使用，请换一个");
+        if (old == null) {
+            String id = Ids.newId("src");
+            jdbc.sql("""
+                    insert into data_source (id, workspace_id, key, name, description, method, url, params, sample,
+                        auth_type, auth_header, secret_enc, provider, external_id)
+                    values (?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?)
+                    """).params(id, ws, s.key(), s.name(), s.description(), s.method(), s.url(), Json.write(s.params()), s.sample(),
+                    s.authType(), s.authHeader(), s.secretEnc(), provider, externalId).update();
+        } else {
+            jdbc.sql("""
+                    update data_source set key = ?, name = ?, description = ?, method = ?, url = ?, params = ?::jsonb, sample = ?,
+                        auth_type = ?, auth_header = ?, secret_enc = ?, updated_at = now() where id = ?
+                    """).params(s.key(), s.name(), s.description(), s.method(), s.url(), Json.write(s.params()), s.sample(),
+                    s.authType(), s.authHeader(), s.secretEnc(), old.id()).update();
+        }
+        return get(ws, importedId(ws, provider, externalId));
     }
 
     // ---------------- 平台登记（配置文件同步） ----------------

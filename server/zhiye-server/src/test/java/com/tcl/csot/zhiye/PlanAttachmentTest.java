@@ -36,4 +36,18 @@ class PlanAttachmentTest extends IntegrationTest {
         assertThat(parts.get(2).path("type").asText()).isEqualTo("image_url");
         assertThat(parts.get(2).path("image_url").path("url").asText()).startsWith("data:image/png;base64,");
     }
+
+    @Test
+    void truncatedPlanRetriesWithLargerBudget() {
+        FakeUpstreamController.TRUNCATED_CALLS.set(0);
+        Client c = client();
+        JsonNode app = c.ok(c.post("/api/apps", Map.of("type", "日常开发", "prompt", "做一个研发项目看板 [truncated] PLAN-TRUNC-1",
+                "mode", "快速", "model", "auto", "assetIds", List.of())));
+        assertThat(c.waitTask(app.path("activeTask").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+
+        List<Integer> budgets = FakeUpstreamController.BODIES.stream()
+                .filter(b -> b.toString().contains("PLAN-TRUNC-1") && b.toString().contains("用户需求"))
+                .map(b -> b.path("max_tokens").asInt()).toList();
+        assertThat(budgets).containsExactly(16000, 32000);
+    }
 }

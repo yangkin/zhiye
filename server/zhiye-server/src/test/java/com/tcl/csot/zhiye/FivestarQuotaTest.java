@@ -42,6 +42,11 @@ class FivestarQuotaTest extends IntegrationTest {
 
     @Test
     void modelsAndQuotaComeFromFivestar() {
+        Client anonymous = new Client(port);
+        JsonNode anonymousMeta = anonymous.ok(anonymous.get("/api/meta"));
+        assertThat(anonymousMeta.at("/auth/mode").asText()).isEqualTo("sso");
+        assertThat(anonymousMeta.at("/auth/user").isNull()).isTrue();
+        assertThat(anonymousMeta.path("hubSkills").isEmpty()).isTrue();
         Client c = login("fs-alice");
         mock.setUsed("fs-alice", 1234);
         assertThat(c.ok(c.get("/api/meta")).path("fivestar").asBoolean()).isTrue();

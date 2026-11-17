@@ -9,6 +9,8 @@ import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.treewalk.TreeWalk;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -25,6 +27,7 @@ import java.util.zip.ZipOutputStream;
  */
 @Service
 public class GitService {
+    private static final Logger log = LoggerFactory.getLogger(GitService.class);
     public record CommitResult(String commit, String tree) {}
     public record FileEntry(String path, long size) {}
 
@@ -73,7 +76,9 @@ public class GitService {
             }
             return head(appId).orElseThrow();
         } finally {
-            deleteRecursively(tmp);
+            // Windows 上 .git/objects 里的文件可能还被刚写完的句柄/索引器短暂锁住；
+            // 清理失败不该让建应用失败（bare 仓库已推好），残留由系统临时目录清理兜底
+            try { deleteRecursively(tmp); } catch (IOException e) { log.warn("清理模板临时目录失败（不影响已创建的仓库）：{}", tmp, e); }
         }
     }
 
@@ -298,10 +303,26 @@ public class GitService {
 
     public static void deleteRecursively(Path p) throws IOException {
         if (p == null || !Files.exists(p, LinkOption.NOFOLLOW_LINKS)) return;
-        if (Files.isSymbolicLink(p) || !Files.isDirectory(p)) { Files.deleteIfExists(p); return; }
+        if (Files.isSymbolicLink(p) || !Files.isDirectory(p)) { deleteWithRetry(p); return; }
         try (Stream<Path> s = Files.list(p)) {
             for (Path c : s.toList()) deleteRecursively(c);
         }
-        Files.deleteIfExists(p);
+        deleteWithRetry(p);
+    }
+
+    /** Windows 下新写入的文件常被句柄/杀毒/索引短暂锁住，删除失败稍等重试，避免误伤主流程。 */
+    private static void deleteWithRetry(Path p) throws IOException {
+        IOException last = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            try { Files.deleteIfExists(p); return; }
+            catch (IOException e) {
+                last = e;
+                if (attempt < 5) {
+                    try { Thread.sleep(200); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }
+                }
+            }
+        }
+        throw last;
     }
 }

@@ -13,6 +13,7 @@ zhiye:
   fivestar:
     enabled: true
     mock: true
+    organization-id: "31"
     openclaw-base-url: http://127.0.0.1:8080/mock/openclaw
     llm-gateway-base-url: http://127.0.0.1:8080/mock/llm-gateway
     mock-limit-tokens: ${ZHIYE_MOCK_QUOTA:5000000}
@@ -21,5 +22,10 @@ zhiye:
     mock: true
     base-url: "{self}/mock/fivestar-service"
     file-base-url: "{self}/mock/fivestar-service"
-    portal-url: "{self}/mock/fivestar-service/portal"
-    organization-id: "0"
+    portal-url: "http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}"
+    organization-id: "31"
+  agw:
+    enabled: true
+    base-url: "{self}/mock/agw"
+    public-base-url: "{self}"
+    tenant-id: "31"

@@ -21,15 +21,9 @@ public class RequestPrincipal implements CurrentPrincipal {
 
     @Override
     public String workspaceId() {
-        String ws = workspaceIdOrNull();
-        if (ws == null) throw new ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "请先登录");
-        return ws;
-    }
-
-    @Override
-    public String workspaceIdOrNull() {
         Object ws = req().getAttribute(ATTR_WS);
-        return ws == null || ((String) ws).isEmpty() ? null : (String) ws;
+        if (ws == null || ((String) ws).isEmpty()) throw new ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "请先登录");
+        return (String) ws;
     }
 
     @Override

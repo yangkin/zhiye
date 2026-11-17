@@ -13,7 +13,7 @@ public record FivestarProperties(
         @DefaultValue("false") boolean enabled,
         @DefaultValue("false") boolean mock,
         /** 平台租户（organizationId），五星AI岛的接口路径都带它 */
-        @DefaultValue("0") String organizationId,
+        @DefaultValue("31") String organizationId,
         /** openclaw-service 根地址（含 context-path），例如 http://网关/openclaw-service；{self} 表示本服务 */
         @DefaultValue("{self}/mock/openclaw") String openclawBaseUrl,
         /** 模拟 openclaw 下发路由时用的 llm-gateway 地址；真实环境由 openclaw 返回 */

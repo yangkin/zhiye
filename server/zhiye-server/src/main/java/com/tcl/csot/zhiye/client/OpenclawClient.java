@@ -23,7 +23,7 @@ import java.time.Duration;
  * 五星AI岛 openclaw-service 客户端。
  * - 用户接口（模型列表、默认模型、额度）：带前端传来的平台令牌，身份由平台网关认定；
  * - 内部接口（取某个员工的模型路由）：带服务间令牌。这个接口需要 openclaw 新增，见 docs/fivestar-integration.md。
- * 返回体都是 openclaw 的 Result{code, message, data}，code=200 为成功。
+ * 返回体是 metis Result{code:"ok", data, success:true}；业务异常可能仍使用 HTTP 200。
  */
 @Component
 public class OpenclawClient {
@@ -57,7 +57,7 @@ public class OpenclawClient {
     public JsonNode userInfo(String platformToken) {
         if (platformToken == null || platformToken.isBlank())
             throw new ApiException(HttpStatus.UNAUTHORIZED, "PLATFORM_TOKEN_MISSING", "请先用公司统一账号登录");
-        String url = auth.sso().userInfoUrl();
+        String url = auth.sso().resolvedUserInfoUrl().replace("{self}", port.selfBase());
         HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(props.timeoutSeconds()))
                 .header("Authorization", "Bearer " + platformToken).header("Accept", "application/json").GET().build();
         HttpResponse<String> res;
@@ -134,10 +134,13 @@ public class OpenclawClient {
         }
         JsonNode root;
         try { root = Json.read(res.body()); } catch (RuntimeException e) { throw unavailable(); }
-        int code = root.path("code").asInt(200);
-        if (code != 200 && code != 0) {
-            log.warn("{}失败：code={} message={}", what, code, root.path("message").asText(""));
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "FIVESTAR_ERROR", "五星AI岛返回错误：" + cut(root.path("message").asText("未知错误")));
+        // metis 信封：成功 {code:"ok", data, success:true}；CommonException 走 HTTP 200 + {code, message, type}
+        boolean businessError = root.hasNonNull("type") && root.hasNonNull("message") && !root.has("success");
+        if (businessError || !root.path("success").asBoolean(false)) {
+            String msg = root.path("message").asText("");
+            if (msg.isBlank()) msg = root.path("msg").asText("未知错误");
+            log.warn("{}失败：HTTP {} code={} message={}", what, s, root.path("code").asText(""), cut(msg));
+            throw new ApiException(businessError ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY, "FIVESTAR_ERROR", "五星AI岛返回错误：" + cut(msg));
         }
         return root.path("data");
     }

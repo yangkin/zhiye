@@ -92,9 +92,9 @@ public class KubernetesSandboxProvider implements SandboxProvider {
 
     /** 工作进程上的目录 → 共享卷内的 subPath */
     String subPathOf(Path dir) {
-        String abs = dir.toAbsolutePath().normalize().toString();
+        String abs = dir.toAbsolutePath().normalize().toString().replace('\\', '/');
         for (var e : cfg.subPathRewrites().entrySet()) {
-            String from = e.getKey().endsWith("/") ? e.getKey().substring(0, e.getKey().length() - 1) : e.getKey();
+            String from = Path.of(e.getKey()).toAbsolutePath().normalize().toString().replace('\\', '/');
             if (abs.equals(from) || abs.startsWith(from + "/")) {
                 String to = e.getValue() == null ? "" : e.getValue().replaceAll("^/+|/+$", "");
                 String rest = abs.substring(from.length()).replaceAll("^/+", "");
@@ -111,7 +111,7 @@ public class KubernetesSandboxProvider implements SandboxProvider {
     private static String validSubPath(String s, String abs) {
         if (s.isEmpty() || s.startsWith("/") || s.equals("..") || s.startsWith("../") || s.contains("/../") || s.endsWith("/.."))
             throw new IllegalStateException("无法把 " + abs + " 映射到共享卷子目录");
-        return s;
+        return s.replace('\\', '/');
     }
 
     long deadlineSeconds() { return props.task().sandboxMaxHours() * 3600L + cfg.deadlineMarginSeconds(); }

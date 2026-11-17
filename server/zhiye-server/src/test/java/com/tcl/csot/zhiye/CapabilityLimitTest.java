@@ -24,7 +24,9 @@ class CapabilityLimitTest extends IntegrationTest {
         JsonNode plan = FakeUpstreamController.BODIES.stream()
                 .filter(b -> b.toString().contains("CAP-PLAN-1")).reduce((a, b) -> b).orElseThrow();
         String system = plan.path("messages").get(0).path("content").asText();
-        assertThat(system).contains("# 能力范围").contains("页面数量不限").contains("云数据库表不超过 50 张").contains("## 分期计划").contains("做不到的需求");
+        assertThat(system).contains("# 能力范围").contains("页面数量不限").contains("云数据库表不超过 50 张")
+                .contains("角色数量和每条业务流程的状态数量不限").doesNotContain("角色不超过", "状态不超过")
+                .contains("## 分期计划").contains("做不到的需求");
 
         JsonNode task = c.ok(c.get("/api/apps/" + app.path("id").asText() + "/tasks")).get(0);
         assertThat(c.events(task.path("id").asText(), 0, Map.of()).toString()).contains("先做第一期");

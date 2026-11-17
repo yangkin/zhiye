@@ -46,7 +46,7 @@ interface AppSummary {
   hasDraft: boolean;                   // 是否有未保存的可视化编辑
   visualEditable: boolean;             // 是否支持可视化编辑（Vite/React 生成应用、静态 HTML 支持）
   activeTask: TaskRef | null;
-  skillhub: { enabled: boolean; lastPublishedAt: string | null; url: string | null } | null;   // 只有 skill 应用有；enabled=false 时界面显示「即将接入」          // 进行中的任务
+  skillhub: { enabled: boolean; lastPublishedAt: string | null; url: string | null } | null;   // 只有 skill 应用有；enabled=false 表示未配置
 }
 
 interface AppDetail extends AppSummary {
@@ -182,13 +182,30 @@ interface Meta {
 | DELETE | `/api/apps/{id}` | 删除应用 → 204。同时下线（站点地址随即 404），从列表、历史、汇总中消失；有进行中的任务 → 409 `APP_BUSY`（先停止任务） |
 | GET | `/api/apps/summary` | → `AppsSummary`：当前工作空间的应用数（不含未完成的导入）、已发布数、总访问量 |
 | GET | `/api/apps/{id}/stats?range=all\|today\|7d\|3d` | → `AppStats`（默认 7d）。`daily` 按天补零：today=1 天；3d/7d=含今天的最近 N 天；all=从第一天有数据或首次发布那天到今天（最多 180 天）。未发布的应用返回 0 |
-| POST | `/api/apps/{id}/skillhub/publish` | 发布 skill 包到公司 SkillHub（预留）：`{ versionId?, visibility?: 'private'\|'team'\|'public', changelog? }`（默认当前版本、team）→ `{ skillId, skillVersion, url, versionId, publishedAt }`。非 skill 应用 → 400 `NOT_A_SKILL`；SKILL.md 头部 name/description 不合法 → 400 `VALIDATION`；未开启 → 503 `SKILLHUB_NOT_CONFIGURED`「SkillHub 发布即将接入，现在可以先下载技能包使用」 |
-| GET | `/api/apps/{id}/skillhub/publications` | → `{ id, versionId, versionNumber, skillId, skillVersion, url, visibility, publishedAt }[]`（时间降序） |
+| POST | `/api/skillhub/apps/{id}/publish` | 发布 skill 包到公司 SkillHub：`{ versionId?, categoryId?, displayName?, summary?, slug?, tags?, version?, visibility?: 'private'\|'team'\|'public', changelog?, submitReview? }`（默认当前版本、private、提交审核）→ `{ skillId, skillVersion, url, versionId, publishedAt, status }`。非 skill 应用 → 400 `NOT_A_SKILL`；SKILL.md 头部 name/description 不合法 → 400；未开启 → 503 `SKILLHUB_NOT_CONFIGURED`。平台 /add 不接收更新说明，/edit 使用 `changeLog` |
+| GET | `/api/skillhub/apps/{id}/publications` | → `{ id, versionId, versionNumber, skillId, skillVersion, url, visibility, status, reviewStatus, publishedAt }[]`（时间降序） |
 | POST | `/api/apps/{id}/generate` | 按当前计划执行生成 → `Task`。phase 必须是 plan 或 failed |
 | GET | `/api/apps/{id}/messages` | → `Message[]`（时间升序） |
 | POST | `/api/apps/{id}/messages` | `{ content, elementContext?, assetIds?, skillAppIds? }` → `{ message: Message, task: Task }`，创建 modify 任务。存在草稿时任务会先应用草稿再修改。`elementContext.appId` 不等于路径 id → 400。`assetIds`：当前工作空间的素材（最多 20 个），复制到项目 `public/assets/`（skill 应用为 `references/assets/`）并写进指令；`skillAppIds`：同上，最多 5 个，技能文件放在 agent 目录 `skills/{name}/`（不进入项目）。不属于自己 → 400 |
 | GET | `/api/apps/{id}/tasks?active=true` | → `Task[]` |
 | POST | `/api/apps/{id}/code` | 代码页编辑：`{ baseVersionId, files: [{ path, content?, delete?: true }] }` → `Task`（code_save）。不经过 agent：写入/删除文件 → 校验（按 projectKind）→ 新版本（source=code，标题「代码编辑 · N 个文件」）；校验失败 → 任务 FAILED（「检查没有通过，修改未保存：…」），不产生版本。路径只能是相对路径，不能含 `..`、反斜杠，不能在 `.git/`、`node_modules/`、`.zhiye/` 下；最多 50 个文件，每个 ≤1 MB 文本。`baseVersionId` 不是当前版本 → 409 `VERSION_MISMATCH`；有草稿 → 409 `DRAFT_PENDING`；有进行中任务 → 409 `APP_BUSY`；支持 `Idempotency-Key`。所有项目类型可用 |
+
+### SkillHub（公司技能市场）
+以下浏览、安装和发布接口都需要 `Authorization: Bearer <平台令牌>`；织页只转发，不保存令牌。未配置 SkillHub 时返回 503 `SKILLHUB_NOT_CONFIGURED`，令牌失效返回 401 `PLATFORM_TOKEN_INVALID`。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/skillhub/categories` | → `{ id, name, description, count }[]` |
+| GET | `/api/skillhub/market?q=&categoryId=&page=1&limit=20` | → `{ items, total, pageNo, limit }`，市场技能含 `skillId/slug/name/summary/owner/version` |
+| GET | `/api/skillhub/market/{skillId}` | 技能详情、版本和文件列表 |
+| GET | `/api/skillhub/market/{skillId}/package?versionId=` | 下载技能 zip |
+| GET | `/api/skillhub/installs` | 当前工作空间已安装技能 |
+| POST | `/api/skillhub/installs` | `{ skillId, versionId? }` → 安装记录，id 以 `hub_` 开头（Windows 路径安全）；同版本同内容重复安装幂等 |
+| DELETE | `/api/skillhub/installs/{id}` | 卸载 → 204 |
+| GET | `/api/skillhub/my-skills` | 自己的「开发skill」应用 + 已安装 SkillHub 技能，供技能选择器使用 |
+| GET | `/api/skillhub/mine?q=` / `/published?q=` | 当前平台账号发布的技能及审核状态 |
+| POST | `/api/skillhub/apps/{id}/publications/refresh` | 刷新某个应用在平台上的审核状态 |
+| POST | `/api/skillhub/published/{skillId}/withdraw` | `{ versionId, submissionKey? }`，撤回审核 |
 
 ### 任务
 | 方法 | 路径 | 说明 |
@@ -210,10 +227,12 @@ interface Meta {
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET/POST | `/api/sources` | 列出本工作空间可见的数据源（含平台登记）/ 登记：`{ key, name, description, method, url, params, sample, authType, authHeader?, secret? }` → `DataSource`（不返回凭证，只有 `hasSecret`）。规则见 docs/data-sources.md |
+| GET/POST | `/api/sources` | 列出本工作空间可见的数据源（含平台登记）/ 登记：`{ key, name, description, method, url, params, sample, authType, authHeader?, secret? }` → `DataSource`（不返回凭证，只有 `hasSecret`）。`authType` 还支持 `agw`（此时 `authHeader` 为调用项目 AppKey，`secret` 为 AppSecret）。规则见 docs/data-sources.md |
+| GET | `/api/sources/agw/apis?q=&page=0&size=20` | 需平台令牌。查询 API 网关已启用且已上架的目录 → `{items,totalElements,totalPages,number,size}`；每项含公开名称、方法、路径、提供方、参数数、可导入状态和 `importedSourceId` |
+| POST | `/api/sources/agw/apis/{apiId}/import` | 需平台令牌。`{ appKey?, appSecret? }`；首次导入必填，再次导入留空保留原凭证。服务端重新读取 API 详情并幂等写入当前工作空间数据源 |
 | PATCH/DELETE | `/api/sources/{id}` | 修改（不传 `secret` 保留原凭证）/ 删除（同时解绑）；平台登记的数据源 → 403 |
 | POST | `/api/sources/{id}/test` | `{ params }` → `{ data, status }`；`GET /api/sources/{id}/calls` 最近 20 次调用 |
-| GET/POST/DELETE | `/api/apps/{id}/sources[/{sourceId}]` | 应用绑定的数据源；POST `{ sourceId }` 绑定（最多 10 个，调用名不能重复）。创建应用 / 会话转应用时也可带 `sourceIds` |
+| GET/POST/DELETE | `/api/apps/{id}/sources[/{sourceId}]` | 应用绑定的数据源；POST `{ sourceId }` 绑定（最多 100 个，调用名不能重复）。创建应用 / 会话转应用时也可带 `sourceIds` |
 | POST | `/cloud/{appId}/source/{key}`、站点 `/__zhiye/source/{key}` | 应用运行时调用：`{ params }` → `{ data, status }`。预览带应用令牌；发布站点同源、只接受 JSON |
 | POST | `/api/chat/ask` | `{ content, skillAppIds? }` → SSE：`delta`（`{text}`）/ `done` / `error`（`{message}`）。只是回答问题，不创建应用、不落库；`skillAppIds` 是自己的工作空间里已生成的 skill 应用（最多 5 个），会把技能包里的 Markdown/脚本内容作为上下文带给模型；同时带上织页内置技能目录，模型可用只读工具 `read_skill` 读取内置技能后再回答。资源不可用 → 503 `ASK_UNAVAILABLE`。创造页在识别到「这是一句问题」时调用它 |
 
@@ -230,7 +249,7 @@ interface Meta {
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/cloud/{appId}/db/{table}?limit=&offset=&order=&<字段>=` | → `{ rows, total }`，最多 200 行；未知字段 → 400 |
+| GET | `/cloud/{appId}/db/{table}?limit=&offset=&order=&<字段>=` | → `{ rows, total }`，最多 200 行；未知字段 → 400。`order` 单列 `-col` 倒序，多列逗号分隔、每列可单独加 `-`（如 `-report_date,line`） |
 | POST | `/cloud/{appId}/db/{table}` | 插入一行 → 该行（含 id） |
 | PATCH | `/cloud/{appId}/db/{table}/{id}` | 更新 → 该行 |
 | DELETE | `/cloud/{appId}/db/{table}/{id}` | 删除 → 204 |

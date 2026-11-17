@@ -172,6 +172,23 @@ class TaskLifecycleTest extends IntegrationTest {
     }
 
     @Test
+    void generateFromFallbackPlanClearsOldFailure() {
+        Client c = client();
+        faults.set("error", null);
+        JsonNode created = c.ok(c.post("/api/apps", Map.of("type", "开发网站", "prompt", "做一个项目看板",
+                "mode", "快速", "model", "auto", "assetIds", List.of())));
+        String id = created.path("id").asText();
+        JsonNode failed = c.waitTask(created.path("activeTask").path("id").asText());
+        faults.set("none", null);
+        assertThat(failed.path("status").asText()).isEqualTo("FAILED");
+        assertThat(c.ok(c.get("/api/apps/" + id + "/messages")).toString()).contains("创造计划生成失败：");
+
+        JsonNode generate = c.ok(c.post("/api/apps/" + id + "/generate", Map.of()));
+        assertThat(c.ok(c.get("/api/apps/" + id + "/messages")).toString()).doesNotContain("创造计划生成失败：");
+        assertThat(c.waitTask(generate.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
     void generateRequiresPlanPhaseAndTaskListing() {
         Client c = client();
         JsonNode app = c.createApp("做一个计数器");

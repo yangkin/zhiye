@@ -149,6 +149,6 @@ public class AppController {
 
     @GetMapping("/{id}/skillhub/publications")
     public List<Map<String, Object>> skillhubPublications(@PathVariable String id) {
-        return skillHub.publicationsLegacy(id);
+        return skillHub.publications(null, id);
     }
 }

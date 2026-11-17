@@ -6,10 +6,14 @@ import type {
   DataSourceCall,
   DataSourceInfo,
   DataSourceInput,
+  AgwApiPage,
   FileChange,
   ActiveTaskInfo,
   SkillVisibility,
   SkillhubPublication,
+  SkillHubCategory,
+  SkillHubInstall,
+  SkillHubMarket,
   AppStats,
   AppsSummary,
   StatsRange,
@@ -142,7 +146,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return (raw ? JSON.parse(raw) : undefined) as T;
 }
 
-const qs = (params: Record<string, string | boolean | undefined | null>) => {
+const qs = (params: Record<string, string | number | boolean | undefined | null>) => {
   const s = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === '') continue;
@@ -317,6 +321,10 @@ export const api = {
 
   // 数据源
   sources: () => request<DataSourceInfo[]>('/api/sources'),
+  agwApis: (input: { q?: string; page?: number; size?: number } = {}) =>
+    request<AgwApiPage>('/api/sources/agw/apis' + qs(input)),
+  importAgwApi: (apiId: string, input: { appKey: string; appSecret: string }) =>
+    request<DataSourceInfo>(`/api/sources/agw/apis/${enc(apiId)}/import`, { method: 'POST', body: input }),
   createSource: (input: DataSourceInput) => request<DataSourceInfo>('/api/sources', { method: 'POST', body: input }),
   updateSource: (id: string, input: Partial<DataSourceInput>) => request<DataSourceInfo>(`/api/sources/${enc(id)}`, { method: 'PATCH', body: input }),
   deleteSource: (id: string) => request<void>(`/api/sources/${enc(id)}`, { method: 'DELETE' }),
@@ -437,10 +445,15 @@ export const api = {
     idempotencyKey?: string,
   ) => request<Task>(`/api/apps/${enc(appId)}/code`, { method: 'POST', body: input, idempotencyKey }),
 
-  // SkillHub（预留）
+  // SkillHub
   skillhubPublish: (appId: string, input: { versionId: string; visibility: SkillVisibility; changelog: string }, idempotencyKey?: string) =>
-    request<SkillhubPublication>(`/api/apps/${enc(appId)}/skillhub/publish`, { method: 'POST', body: input, idempotencyKey }),
-  skillhubPublications: (appId: string) => request<SkillhubPublication[]>(`/api/apps/${enc(appId)}/skillhub/publications`),
+    request<SkillhubPublication>(`/api/skillhub/apps/${enc(appId)}/publish`, { method: 'POST', body: input, idempotencyKey }),
+  skillhubPublications: (appId: string) => request<SkillhubPublication[]>(`/api/skillhub/apps/${enc(appId)}/publications`),
+  skillhubCategories: () => request<SkillHubCategory[]>('/api/skillhub/categories'),
+  skillhubMarket: (input: { q?: string; categoryId?: string; page?: number; limit?: number } = {}) =>
+    request<SkillHubMarket>('/api/skillhub/market' + qs(input)),
+  skillhubInstall: (skillId: string, versionId?: string) =>
+    request<SkillHubInstall>('/api/skillhub/installs', { method: 'POST', body: { skillId, versionId } }),
 
   // 发布
   publish: (appId: string, versionId?: string) =>

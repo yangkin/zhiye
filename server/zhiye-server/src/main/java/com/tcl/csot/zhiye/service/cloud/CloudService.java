@@ -606,9 +606,22 @@ public class CloudService {
         scope(CloudPolicy.readFilter(CloudPolicy.preset(policyOf(t)), who), who, where, params);
         filters(query, types, where, params);
         String orderRaw = query.getOrDefault("order", "-id");
-        boolean desc = orderRaw.startsWith("-");
-        String orderCol = desc ? orderRaw.substring(1) : orderRaw;
-        if (!types.containsKey(orderCol)) throw ApiException.validation("不能按「" + orderCol + "」排序：没有这个字段");
+        // 支持多列排序：逗号分隔，每列可单独带 '-' 前缀表示倒序（如 "-report_date,line"）；
+        // AI 生成的应用常把多列写成逗号串，单列用法与之前完全一致
+        List<String> orderCols = new ArrayList<>();
+        List<String> orderDirs = new ArrayList<>();
+        for (String token : orderRaw.split(",")) {
+            String tok = token.trim();
+            if (tok.isEmpty()) continue;
+            boolean d = tok.startsWith("-");
+            String col = d ? tok.substring(1).trim() : tok;
+            if (!types.containsKey(col)) throw ApiException.validation("不能按「" + col + "」排序：没有这个字段");
+            orderCols.add(col);
+            orderDirs.add(d ? "desc" : "asc");
+        }
+        if (orderCols.isEmpty()) { orderCols.add("id"); orderDirs.add("desc"); }
+        String firstCol = orderCols.get(0);
+        boolean desc = orderDirs.get(0).equals("desc");
         if (query.containsKey("after")) {
             where.append(" and id ").append(desc ? "<" : ">").append(" ?::bigint");
             params.add(query.get("after"));
@@ -619,13 +632,16 @@ public class CloudService {
         List<Object> p2 = new ArrayList<>(params);
         p2.add(limit);
         p2.add(offset);
-        List<Map<String, Object>> rows = jdbc.sql("select * from " + qt(c, table) + where + " order by \"" + orderCol + "\" " + (desc ? "desc" : "asc")
-                        + (orderCol.equals("id") ? "" : ", id desc") + " limit ? offset ?")
+        StringBuilder orderBy = new StringBuilder();
+        for (int i = 0; i < orderCols.size(); i++)
+            orderBy.append(i == 0 ? " order by " : ", ").append("\"").append(orderCols.get(i)).append("\" ").append(orderDirs.get(i));
+        if (!firstCol.equals("id")) orderBy.append(", \"id\" desc");
+        List<Map<String, Object>> rows = jdbc.sql("select * from " + qt(c, table) + where + orderBy + " limit ? offset ?")
                 .params(p2.toArray()).query((rs, i) -> rowToMap(rs)).list();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("rows", rows);
         out.put("total", total);
-        if (!rows.isEmpty() && orderCol.equals("id")) out.put("next", rows.get(rows.size() - 1).get("id"));
+        if (!rows.isEmpty() && firstCol.equals("id")) out.put("next", rows.get(rows.size() - 1).get("id"));
         return out;
     }
 

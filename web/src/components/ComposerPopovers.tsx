@@ -6,6 +6,7 @@ import { qk, useMeta } from '../api/queries';
 import type { Meta, Mode } from '../api/types';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
+import { SkillHubMarket } from './SkillHubMarket';
 
 export interface SkillRef {
   id: string;
@@ -13,14 +14,18 @@ export interface SkillRef {
 }
 export const MAX_SKILLS = 5;
 
-/** 用户自己的技能包（有版本的「开发skill」应用）。 */
+/** 自己的技能包和当前工作空间已安装的 SkillHub 技能。 */
 export function useMySkills(enabled = true) {
+  const hub = useMeta().data?.hubSkills ?? [];
   return useQuery({
     queryKey: qk.apps({ type: '开发skill', sort: 'updated' }),
     queryFn: () => api.listApps({ type: '开发skill', sort: 'updated' }),
     enabled,
     staleTime: 30_000,
-    select: (list) => list.filter((a) => a.currentVersion).map((a) => ({ id: a.id, name: a.name, desc: a.description })),
+    select: (list) => [
+      ...list.filter((a) => a.currentVersion).map((a) => ({ id: a.id, name: a.name, desc: a.description })),
+      ...hub.map((s) => ({ id: s.id, name: s.title || s.name, desc: s.description })),
+    ],
   });
 }
 
@@ -91,12 +96,14 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<'mine' | 'builtin' | 'album'>('mine');
   const [active, setActive] = useState(0);
+  const [hubOpen, setHubOpen] = useState(false);
   const skills = useMySkills(open);
-  const builtin = useMeta().data?.builtinSkills ?? [];
+  const meta = useMeta().data;
+  const builtin = meta?.builtinSkills ?? [];
   const query = (mentionQuery ?? q).trim().toLowerCase();
   const list = useMemo(() => (skills.data ?? []).filter((s) => !query || s.name.toLowerCase().includes(query)), [skills.data, query]);
   const pos = useAnchoredPosition(anchor, open, 320, 340);
-  useOutside(open, [box, anchor], onClose);
+  useOutside(open && !hubOpen, [box, anchor], onClose);
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +144,7 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
 
   if (!open) return null;
   return createPortal(
-    <div className="skill-picker" role="dialog" aria-label="技能" ref={box} style={pos}>
+    <div className="skill-picker" role="dialog" aria-label="技能" ref={box} style={{ ...pos, visibility: hubOpen ? 'hidden' : 'visible' }}>
       {mentionQuery === null ? (
         <label className="skill-picker-search">
           <Icon name="search" />
@@ -220,9 +227,14 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
           );
         })}
       </ul>
-      <button type="button" className="skill-picker-more" aria-disabled="true" onClick={() => toast('SkillHub 还在规划中，先把技能做成「开发skill」应用即可复用')}>
-        SkillHub（规划中）
+      <button
+        type="button"
+        className="skill-picker-more"
+        onClick={() => meta?.skillhub ? setHubOpen(true) : toast('SkillHub 还没有配置服务地址，当前可以先使用自己的技能包。')}
+      >
+        SkillHub 技能市场
       </button>
+      {hubOpen ? <SkillHubMarket picked={picked} onPick={onPick} onClose={() => setHubOpen(false)} /> : null}
     </div>,
     document.body,
   );

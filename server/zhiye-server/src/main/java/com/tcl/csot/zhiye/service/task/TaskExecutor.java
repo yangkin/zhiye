@@ -364,7 +364,7 @@ public class TaskExecutor {
         if (!planAssets.isEmpty()) user += "\n\n用户附上了下面的素材（截图请按图里的界面理解需求，计划里不要再写「未提供截图」）：";
         String content;
         try {
-            content = kimi.chat(ctx.id(), system, com.tcl.csot.zhiye.service.chat.AskService.userMessage(user, planAssets), 6000);
+            content = kimi.chat(ctx.id(), system, com.tcl.csot.zhiye.service.chat.AskService.userMessage(user, planAssets), 16000);
         } catch (LlmException e) {
             ctx.checkCancelled();
             // 与生成阶段一致：供应商配额 / 任务预算要分开，否则用户会被提示「简化需求」

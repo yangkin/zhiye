@@ -55,7 +55,9 @@ export function run(cmd, args, { cwd, env, timeoutMs = 300000, onLine, input, si
     let timedOut = false
     let child
     try {
-      child = spawn(cmd, args, { cwd, env: env || process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' })
+      const needsShell = process.platform === 'win32' && ['npm', 'npm.cmd', 'npx', 'npx.cmd', 'pnpm', 'pnpm.cmd', 'yarn', 'yarn.cmd'].includes(cmd)
+      const executable = process.platform === 'win32' && cmd === 'python3' ? 'python' : cmd
+      child = spawn(executable, args, { cwd, env: env || process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', shell: needsShell })
     } catch (e) {
       resolve({ code: -1, out: String(e.message), timedOut: false })
       return

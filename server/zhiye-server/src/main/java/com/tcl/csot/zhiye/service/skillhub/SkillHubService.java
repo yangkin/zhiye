@@ -217,12 +217,12 @@ public class SkillHubService {
         if (meta.description().length() > 1024) throw ApiException.validation("SKILL.md 的 description 最多 1024 字");
 
         token = requireToken(token);
-        String account = account(token);
-        String realName = realName(token).orElse(account);
 
         // 分类：必须是 SkillHub 里的分类
         String categoryId = req == null ? null : req.categoryId();
         List<SkillHubClient.Category> cats = client.categories(token);
+        String account = account(token);
+        String realName = realName(token).orElse(account);
         String wantedCategory = categoryId;
         if (wantedCategory == null || wantedCategory.isBlank()) {
             categoryId = cats.stream().filter(c -> c.name() != null && c.name().contains("其他")).map(SkillHubClient.Category::id).findFirst()
@@ -567,6 +567,7 @@ public class SkillHubService {
     String portal(String skillId) {
         String base = props.portalUrl();
         if (base == null || base.isBlank()) return null;
+        if (base.contains("{id}")) return base.replace("{id}", skillId);
         return base.replaceAll("/+$", "") + "/" + skillId;
     }
 

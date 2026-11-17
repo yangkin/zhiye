@@ -29,7 +29,8 @@ class BuiltinSkillsTest extends IntegrationTest {
         assertThat(placed).extracting(SkillRefs.Builtin::name).doesNotContain("forms-and-tables").contains("charts-dashboard");
         assertThat(Files.isRegularFile(agentDir.resolve("skills/charts-dashboard/SKILL.md"))).isTrue();
         String ins = SkillRefs.catalogInstruction(placed);
-        assertThat(ins).contains("按需加载").contains("charts-dashboard").contains(agentDir.resolve("skills/charts-dashboard/SKILL.md").toString());
+        assertThat(ins).contains("按需加载").contains("charts-dashboard")
+                .contains(agentDir.resolve("skills/charts-dashboard/SKILL.md").toString().replace('\\', '/'));
         assertThat(SkillRefs.catalogInstruction(java.util.List.of())).isEmpty();
 
         assertThat(refs.readBuiltin("charts-dashboard", null)).startsWith("---");

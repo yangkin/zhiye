@@ -12,14 +12,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record SkillHubProperties(
         @DefaultValue("false") boolean enabled,
         @DefaultValue("false") boolean mock,
-        /** fivestar-service 网关根地址（context-path 为 /fivestar-service），例如 http://网关/fivestar-service；{self} 表示本服务 */
+        /** fivestar-service 网关根地址（网关前缀为 /fivestar-new），例如 http://网关/fivestar-new；{self} 表示本服务 */
         String baseUrl,
         /** 技能包文件地址所在的服务根地址（fivestar-service 调平台文件服务取回 skillPackageUrl 后返回）；通常与 baseUrl 相同 */
         String fileBaseUrl,
-        /** SkillHub 页面地址（发布结果里给用户看的链接） */
+        /** SkillHub 详情页地址，{id} 会替换为技能 ID */
         String portalUrl,
         /** 平台租户（organizationId），接口路径都带它 */
-        @DefaultValue("0") String organizationId,
+        @DefaultValue("31") String organizationId,
         /** OSS 上传用的 bucket / storageCode（预留：目前直接把包作为 multipart 传给 fivestar） */
         @DefaultValue("") String bucketName,
         @DefaultValue("") String storageCode,

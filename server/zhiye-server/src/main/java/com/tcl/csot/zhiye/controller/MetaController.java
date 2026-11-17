@@ -25,6 +25,8 @@ public class MetaController {
     private final com.tcl.csot.zhiye.service.skillhub.SkillRefs skillRefs;
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.config.FivestarProperties fivestar;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.tcl.csot.zhiye.config.SkillHubProperties skillhub;
 
     public MetaController(ZhiyeProperties props, CurrentPrincipal principal, WorkspaceService workspaces,
                           com.tcl.csot.zhiye.service.auth.AuthService authService, com.tcl.csot.zhiye.service.skillhub.SkillRefs skillRefs) {
@@ -51,10 +53,12 @@ public class MetaController {
         m.put("auth", authService.describe(request));
         // 五星模式：模型列表与额度改从 /api/llm/models、/api/llm/quota 取（以五星AI岛为准）
         m.put("fivestar", fivestar.enabled());
+        m.put("skillhub", skillhub.enabled());
         // 内置技能：编码与问答时由模型按需加载，这里只用于在技能选择器里展示
         m.put("builtinSkills", skillRefs.builtinList());
-        // 已安装的 SkillHub 技能（技能选择器的「我的技能」里和「开发skill」应用并列）
-        m.put("hubSkills", skillRefs.hubList(principal.workspaceIdOrNull()));
+        // 登录页也会读取 meta；此时没有工作空间，不能因为查询安装列表返回 401
+        Object ws = request.getAttribute(com.tcl.csot.zhiye.util.RequestPrincipal.ATTR_WS);
+        m.put("hubSkills", ws instanceof String id && !id.isEmpty() ? skillRefs.hubList(id) : List.of());
         return m;
     }
 

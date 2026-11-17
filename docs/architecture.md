@@ -58,7 +58,7 @@ server/                          Maven 多模块（父工程 spring-boot-starter
     ├── client/                  外部调用：UpstreamClient（模型）、OpenclawClient、SsoClient、SkillHub
     ├── filter/                  SsoAuthFilter（登录）、SiteFilter（预览/站点/同源 /__zhiye/*）
     ├── config/ constants/ exception/ handler/ storage/ util/
-    └── resources/db/migration   Flyway V1…V27
+    └── resources/db/migration   Flyway V1…V28
 web/        React 19 + TypeScript + Vite + TanStack Query；路由按需分包，pages/ 页面，workbench/ 工作台，editor/ 可视化编辑
 runner/     AI 编码代理（Node 22，Pi），verify（tsc / 双路并行构建 / 多视口与沙箱 Chromium 冒烟）、screenshot（内存 Vite Dev Server 免写盘截图）、visual AST 写回、import
 packages/   生成项目的模板（React / Vue / 静态 / 脚本 / 技能）、内置技能、编辑桥、云函数宿主
@@ -115,14 +115,14 @@ e2e/        Playwright 端到端用例与页面巡检脚本（见 docs/testing.m
 ## 7. 云服务、数据源、技能、模板
 
 - **云服务**（`cloud-services.md`）：每个应用一个 PostgreSQL schema（最多 50 张表，`cloud/schema.sql` 声明，任务成功后自动建表补列）、对象存储前缀、Deno 云函数（`packages/fn-runtime`）、应用内 AI（扣作者的额度）。由 agent 用 `request_confirm` 申请，用户在确认卡上同意才启用。
-- **数据源**（`data-sources.md`）：工作空间登记 HTTP 接口（凭证只存服务端），应用通过 `zhiye.source.query` 调用，服务端代理、限制主机白名单和响应大小。
-- **技能**：内置技能（`packages/builtin-skills`）+ 用户自己做的技能应用（projectKind=skill）；按消息选用，放进 agent 目录供模型读取。SkillHub 对接见 `capabilities.md` 待办。
+- **数据源**（`data-sources.md`）：工作空间登记 HTTP 接口（凭证只存服务端），每个应用最多绑定 100 个；应用通过 `zhiye.source.query` 调用，服务端代理、限制主机白名单和响应大小。支持从 API 网关导入公开契约。
+- **技能**：内置技能（`packages/builtin-skills`）+ 用户自己做的技能应用（projectKind=skill）+ 公司 SkillHub 安装的技能；按消息选用，放进 agent 目录供模型读取。SkillHub 真实接口与联调事项见 `fivestar-integration.md`。
 - **模板与社区**：创造页场景模板（`web/src/lib/templates.ts`，含 9 个看板模板）；社区作品可「使用模板」复刻成自己的应用（clone 任务）。
 - **小织**：右下角帮助助手（`HelpService` + 离线 FAQ），产品知识两处同步（`HelpPrompt.java`、`helpFaq.ts`）。
 
 ## 8. 数据库
 
-Flyway 迁移 `V1…V27`，控制面的表：工作空间与应用 `workspace`、`app`、`version`、`build`、`deployment`、`draft`、`checkpoint`、`asset`、`upload`；任务 `task`、`task_event`、`task_token`、`task_signal`、`task_message_queue`、`message`、`model_usage`；会话 `conversation`、`conversation_message`（含 `stop_requested`）、`conversation_file`、`app_conversation`；登录 `app_user`、`user_session`；站点 `app_site_access`、`site_session`、`site_sso_code`、`app_pageview_daily`；云服务 `app_cloud`、`app_cloud_table`、`app_fn_log`（每个应用的数据另在独立 schema 里）；数据源 `data_source`、`app_data_source`、`data_source_call`；技能与社区 `skill_publication`、`template`、`template_like`；小织 `help_conversation`、`help_message`、`help_feedback`；限流 `rate_limit_hit`。约定：snake_case 列，JSON 用 jsonb，时间 timestamptz；新表只加迁移，不改老迁移。
+Flyway 迁移 `V1…V28`（V28 为 API 网关数据源导入），控制面的表：工作空间与应用 `workspace`、`app`、`version`、`build`、`deployment`、`draft`、`checkpoint`、`asset`、`upload`；任务 `task`、`task_event`、`task_token`、`task_signal`、`task_message_queue`、`message`、`model_usage`；会话 `conversation`、`conversation_message`（含 `stop_requested`）、`conversation_file`、`app_conversation`；登录 `app_user`、`user_session`；站点 `app_site_access`、`site_session`、`site_sso_code`、`app_pageview_daily`；云服务 `app_cloud`、`app_cloud_table`、`app_fn_log`（每个应用的数据另在独立 schema 里）；数据源 `data_source`、`app_data_source`、`data_source_call`；技能与社区 `skill_publication`、`template`、`template_like`；小织 `help_conversation`、`help_message`、`help_feedback`；限流 `rate_limit_hit`。约定：snake_case 列，JSON 用 jsonb，时间 timestamptz；新表只加迁移，不改老迁移。
 
 ## 9. 安全要点
 

@@ -75,7 +75,7 @@ export interface AppSummary {
   /** 项目形态：template=生成的 Web 项目；static/vite=导入项目；skill=技能包（只有文件，不能预览和发布） */
   projectKind?: 'template' | 'vue' | 'static' | 'vite' | 'script' | 'skill';
   activeTask: TaskRef | null;
-  /** SkillHub 发布状态（仅技能包；预留） */
+  /** SkillHub 发布状态（仅技能包） */
   skillhub?: { enabled: boolean; lastPublishedAt: string | null; url: string | null } | null;
 }
 
@@ -311,6 +311,10 @@ export interface Meta {
   auth?: AuthInfo;
   /** 织页内置技能（编码、问答时按需自动加载） */
   builtinSkills?: { name: string; title: string; description: string }[];
+  /** 当前工作空间已安装的 SkillHub 技能 */
+  hubSkills?: { id: string; skillId: string; name: string; title: string; description: string; version: string; source: 'skillhub' }[];
+  /** 是否已配置公司 SkillHub */
+  skillhub?: boolean;
   /** 模型与额度以五星AI岛为准：模型列表改用 /api/llm/models，并显示个人额度 */
   fivestar?: boolean;
 }
@@ -428,7 +432,7 @@ export interface AppStats {
   daily: { date: string; pv: number }[];
 }
 
-// ---- SkillHub（预留） ----
+// ---- SkillHub ----
 export type SkillVisibility = 'private' | 'team' | 'public';
 export interface SkillhubPublication {
   id?: string;
@@ -437,6 +441,35 @@ export interface SkillhubPublication {
   changelog?: string;
   url: string;
   publishedAt?: string;
+}
+export interface SkillHubCategory {
+  id: string;
+  name: string;
+  description?: string;
+  count?: number;
+}
+export interface SkillHubMarketItem {
+  skillId: string;
+  slug: string;
+  name: string;
+  summary?: string;
+  owner?: string;
+  version?: string;
+  updatedAt?: string;
+}
+export interface SkillHubMarket {
+  items: SkillHubMarketItem[];
+  total: number;
+  pageNo: number;
+  limit: number;
+}
+export interface SkillHubInstall {
+  id: string;
+  skillId: string;
+  name: string;
+  description?: string;
+  version: string;
+  installed: boolean;
 }
 
 /** GET /api/tasks/active：当前用户进行中的任务（每人同时 1 个） */
@@ -472,6 +505,7 @@ export interface DataSourceParam {
   required: boolean;
   description: string;
   example: string;
+  position?: 'query' | 'path' | 'header' | 'body' | null;
 }
 
 /** 登记的数据源（凭证永远不会返回，只有 hasSecret） */
@@ -484,13 +518,38 @@ export interface DataSourceInfo {
   url: string;
   params: DataSourceParam[];
   sample: string | null;
-  authType: 'none' | 'bearer' | 'header' | 'basic';
+  authType: 'none' | 'bearer' | 'header' | 'basic' | 'agw';
   authHeader: string | null;
   hasSecret: boolean;
   /** 平台登记（全员可用，只读） */
   platform: boolean;
   editable: boolean;
+  provider: 'manual' | 'agw' | string;
+  externalId: string | null;
   createdAt: string;
+}
+
+export interface AgwApiItem {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  method: string;
+  path: string;
+  appName: string | null;
+  appCode: string | null;
+  dataSourceName: string | null;
+  paramCount: number;
+  supported: boolean;
+  unsupportedReason: string | null;
+  importedSourceId: string | null;
+}
+export interface AgwApiPage {
+  items: AgwApiItem[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
 }
 
 export interface DataSourceInput {
