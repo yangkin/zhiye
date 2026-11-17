@@ -2,6 +2,7 @@ import { clearPlatformToken, getPlatformToken } from '../lib/platformToken';
 import type {
   AdminFeedbackStatus,
   AdminOverview,
+  ClusterOverviewResponse,
   TemplateItem,
   TemplateDetail,
   TemplateQuery,
@@ -24,11 +25,16 @@ import type {
   OpsFunctionLogItem,
   OpsLogFileView,
   OpsLogRange,
+  OpsPlatformEventsResponse,
   OpsRuntimeResponse,
+  OpsSandboxLogsResponse,
+  OpsSchemasResponse,
   OpsSourceCallItem,
   OpsTaskDetailResponse,
   OpsTaskEventsDeltaResponse,
   OpsTasksResponse,
+  SandboxInventorySummary,
+  SandboxItem,
   StatsRange,
   AppDetail,
   AppSummary,
@@ -382,7 +388,7 @@ export const api = {
     request<OpsTaskDetailResponse>(`/api/logs/tasks/${enc(id)}` + qs({ tailLines })),
   opsTaskEvents: (id: string, after = 0) =>
     request<OpsTaskEventsDeltaResponse>(`/api/logs/tasks/${enc(id)}/events` + qs({ after })),
-  opsRunnerLog: (id: string, opts: { tail?: number; offset?: number; q?: string } = {}) =>
+  opsRunnerLog: (id: string, opts: { tail?: number; offset?: number; q?: string; level?: string } = {}) =>
     request<OpsLogFileView>(`/api/logs/tasks/${enc(id)}/runner-log` + qs(opts)),
   opsRunnerLogDownloadUrl: (id: string) => `/api/logs/tasks/${enc(id)}/runner-log/download`,
   opsFunctionLogs: (opts: { q?: string; appId?: string; ok?: boolean; range?: OpsLogRange; limit?: number; offset?: number } = {}) =>
@@ -393,7 +399,30 @@ export const api = {
     request<{ range: OpsLogRange; total: number; errorCount: number; items: OpsSourceCallItem[]; limit: number; offset: number }>(
       '/api/logs/sources' + qs(opts),
     ),
-  opsRuntime: (opts: { target?: 'api' | 'site' | 'web-build'; tail?: number; q?: string } = {}) =>
+  opsEvents: (opts: {
+    category?: string;
+    level?: string;
+    appId?: string;
+    taskId?: string;
+    ok?: boolean;
+    q?: string;
+    range?: OpsLogRange;
+    limit?: number;
+    offset?: number;
+  } = {}) => request<OpsPlatformEventsResponse>('/api/logs/events' + qs(opts)),
+  opsSchemas: (opts: { q?: string; ok?: boolean; range?: OpsLogRange; limit?: number; offset?: number } = {}) =>
+    request<OpsSchemasResponse>('/api/logs/schemas' + qs(opts)),
+  opsSandboxes: (opts: {
+    range?: OpsLogRange;
+    state?: string;
+    provider?: string;
+    workspaceId?: string;
+    onlyErrors?: boolean;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => request<OpsSandboxLogsResponse>('/api/logs/sandboxes' + qs(opts)),
+  opsRuntime: (opts: { target?: 'api' | 'site' | 'web-build'; tail?: number; q?: string; level?: string } = {}) =>
     request<OpsRuntimeResponse>('/api/logs/runtime' + qs(opts)),
   getApp: (id: string) => request<AppDetail>(`/api/apps/${enc(id)}`),
   patchApp: (
@@ -562,6 +591,30 @@ export const api = {
     ),
   adminClearRateLimits: (bucket?: string) =>
     request<{ clearedCount: number; bucket: string }>('/api/admin/rate-limits/clear', { method: 'POST', body: bucket ? { bucket } : {} }),
+  adminCluster: (withUsage = true) =>
+    request<ClusterOverviewResponse>('/api/admin/cluster' + qs({ withUsage })),
+  adminSandboxes: (opts: { kind?: string; provider?: string; workspaceId?: string; q?: string; withUsage?: boolean } = {}) =>
+    request<{ ok: boolean; replicaId: string; provider: string; summary: SandboxInventorySummary; items: SandboxItem[] }>(
+      '/api/admin/sandboxes' + qs(opts),
+    ),
+  adminSandboxDetail: (ref: string) => request<SandboxItem>(`/api/admin/sandboxes/${enc(ref)}`),
+  adminDestroySandbox: (ref: string, opts: { force?: boolean; reason?: string } = {}) =>
+    request<{
+      ok: boolean;
+      status: string;
+      path: string;
+      sandboxId: string;
+      taskId: string | null;
+      killedRuntime: boolean;
+      cancelledTask: boolean;
+      operator: string;
+      reason: string;
+    }>(`/api/admin/sandboxes/${enc(ref)}` + qs(opts), { method: 'DELETE' }),
+  adminReapSandboxes: () =>
+    request<{ ok: boolean; ghostsSettled: number; orphansKilled: number; operator: string }>('/api/admin/sandboxes/reap', {
+      method: 'POST',
+      body: {},
+    }),
 };
 
 export const errorMessage = (error: unknown, fallback = '操作未完成，请重试。') =>

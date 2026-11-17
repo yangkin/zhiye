@@ -9,6 +9,7 @@ import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
+import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import {
   BreakdownBars,
@@ -27,7 +28,7 @@ import {
   type SeriesPoint,
 } from '../components/DashboardCharts';
 
-type SectionTab = 'all' | 'growth' | 'apps' | 'agent' | 'llm' | 'infra' | 'admin';
+type SectionTab = 'all' | 'cluster' | 'growth' | 'apps' | 'agent' | 'llm' | 'infra' | 'admin';
 type TrendMetric = 'tasks' | 'tokens' | 'cost' | 'pv' | 'apps' | 'versions' | 'activity' | 'calls' | 'modelCalls';
 
 const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
@@ -40,6 +41,7 @@ const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
 
 const SECTION_TABS: [SectionTab, string][] = [
   ['all', '全部维度'],
+  ['cluster', '集群与沙箱'],
   ['growth', '增长与空间排行'],
   ['apps', '应用资产与流量'],
   ['agent', 'Agent 编排与质检'],
@@ -601,7 +603,7 @@ export function DashboardPage() {
 
       {/* 维度导航页签 */}
       <nav className="dash-nav-bar" role="tablist" aria-label="管理维度分组">
-        {SECTION_TABS.filter(([id]) => isAdmin || id !== 'admin').map(([id, label]) => (
+        {SECTION_TABS.filter(([id]) => isAdmin || (id !== 'admin' && id !== 'cluster')).map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -611,6 +613,9 @@ export function DashboardPage() {
             onClick={() => setSection(id)}
           >
             <span>{label}</span>
+            {id === 'cluster' && (data?.system.cluster?.activeSandboxes ?? 0) > 0 ? (
+              <em className="dash-tab-badge ok">{data?.system.cluster?.activeSandboxes}</em>
+            ) : null}
             {id === 'admin' && (adminQ.data?.feedbackOpenCount ?? 0) > 0 ? (
               <em className="dash-tab-badge">{adminQ.data?.feedbackOpenCount}</em>
             ) : null}
@@ -749,6 +754,12 @@ export function DashboardPage() {
               />
             </div>
           </section>
+
+          {/* 集群与沙箱全景（在「全部」显示高密度摘要条，在「集群与沙箱」页签展开完整节点拓扑与沙箱控制台） */}
+          {isAdmin && section === 'all' ? (
+            <ClusterSandboxPanel compact onOpenClusterTab={() => setSection('cluster')} />
+          ) : null}
+          {isAdmin && section === 'cluster' ? <ClusterSandboxPanel /> : null}
 
           {/* 2. 转化漏斗 + 多维每日趋势 + 24h 时段 + 空间生产力排行 */}
           {show('growth') ? (
@@ -1970,20 +1981,32 @@ export function DashboardPage() {
               <div className="dash-panel">
                 <header className="dash-panel-head compact">
                   <div>
-                    <h3>API 实例 JVM 运行期监控与跨实例控制</h3>
-                    <p>来自 RuntimeMetricsService（本次进程启动以来）、PostgreSQL 原子滑窗限流及跨实例任务信号</p>
+                    <h3>集群运行期持久化监控与跨实例控制</h3>
+                    <p>
+                      汇总自集群 {Math.max(1, data.system.runtime.instances?.length ?? 1)} 个实例（PostgreSQL 持久化遥测）、滑窗限流与跨实例信号
+                    </p>
                   </div>
+                  {isAdmin ? (
+                    <button type="button" className="dash-link" onClick={() => setSection('cluster')}>
+                      进入集群节点拓扑与沙箱控制 →
+                    </button>
+                  ) : null}
                 </header>
                 <div className="dash-mini-stats">
                   <div>
                     <span>沙箱冷启动</span>
                     <b>{fmtNum(data.system.runtime.sandbox?.count ?? 0)} 次</b>
-                    <small>均 {data.system.runtime.sandbox?.avgMs ?? 0}ms / 峰值 {data.system.runtime.sandbox?.maxMs ?? 0}ms</small>
+                    <small>
+                      均 {data.system.runtime.sandbox?.avgMs ?? 0}ms / P95 {data.system.runtime.sandbox?.p95Ms ?? 0}ms
+                    </small>
                   </div>
                   <div>
                     <span>上游 LLM 调用</span>
                     <b>{fmtNum(data.system.runtime.llm?.count ?? 0)} 次</b>
-                    <small>均 {data.system.runtime.llm?.avgMs ?? 0}ms / 重试 {data.system.runtime.llm?.retries ?? 0}</small>
+                    <small>
+                      均 {data.system.runtime.llm?.avgMs ?? 0}ms / P95 {data.system.runtime.llm?.p95Ms ?? 0}ms · 重试{' '}
+                      {data.system.runtime.llm?.retries ?? 0}
+                    </small>
                   </div>
                   <div>
                     <span>额度错误率</span>
@@ -2001,9 +2024,12 @@ export function DashboardPage() {
                     <small>待消费 {fmtNum(data.system.taskSignals.pending)}</small>
                   </div>
                   <div>
-                    <span>本实例启动后任务</span>
+                    <span>集群累计任务 (7d)</span>
                     <b>{fmtNum(data.system.runtime.tasks?.total ?? 0)}</b>
-                    <small>成 {data.system.runtime.tasks?.succeeded ?? 0} / 败 {data.system.runtime.tasks?.failed ?? 0}</small>
+                    <small>
+                      成 {data.system.runtime.tasks?.succeeded ?? 0} / 败 {data.system.runtime.tasks?.failed ?? 0} · P95{' '}
+                      {fmtDurationMs(data.system.runtime.tasks?.p95Ms)}
+                    </small>
                   </div>
                 </div>
               </div>

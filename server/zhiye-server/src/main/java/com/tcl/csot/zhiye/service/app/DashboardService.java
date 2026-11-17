@@ -48,6 +48,9 @@ public class DashboardService {
     @Autowired(required = false)
     private OpenclawClient openclaw;
 
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.ClusterSandboxService clusterSandbox;
+
     public DashboardService(JdbcClient jdbc, QuotaService quota, SkillRefs skillRefs,
                             FivestarProperties fivestar, SkillHubProperties skillhub) {
         this.jdbc = jdbc;
@@ -1597,6 +1600,7 @@ public class DashboardService {
                 "activeTasks", 0L,
                 "totalVersions", 0L,
                 "totalPv", 0L));
+        m.put("cluster", Map.of());
         return m;
     }
 
@@ -1648,6 +1652,26 @@ public class DashboardService {
             p.put("totalPv", rs.getLong("total_pv"));
             return p;
         }).single());
+        if (clusterSandbox != null) {
+            try {
+                var nodes = clusterSandbox.listNodes();
+                long online = nodes.stream().filter(n -> "online".equals(n.get("status"))).count();
+                long slotsTotal = nodes.stream().filter(n -> !"offline".equals(n.get("status")))
+                        .mapToLong(n -> ((Number) n.getOrDefault("workerConcurrency", 0)).longValue()).sum();
+                long activeSbx = count("select count(*) from sandbox_instance where state in ('creating', 'active')");
+                long queued = count("select count(*) from task where status = 'QUEUED'");
+                long expired = count("select count(*) from task where status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING') and (lease_until is null or lease_until < now())");
+                m.put("cluster", Map.of(
+                        "totalNodes", nodes.size(),
+                        "onlineNodes", online,
+                        "workerSlotsTotal", slotsTotal,
+                        "activeSandboxes", activeSbx,
+                        "queuedTasks", queued,
+                        "expiredLeases", expired));
+            } catch (Exception ignored) {
+                m.put("cluster", Map.of());
+            }
+        }
         return m;
     }
 

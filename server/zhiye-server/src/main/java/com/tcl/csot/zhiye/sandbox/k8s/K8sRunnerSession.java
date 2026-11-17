@@ -59,16 +59,24 @@ class K8sRunnerSession implements RunnerSession {
     private final PathMapper paths;
     private final AtomicBoolean ended = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final SandboxDescriptor descriptor;
     private volatile String endReason;
 
     K8sRunnerSession(String taskId, Exec exec, PodOps pod, Consumer<JsonNode> onEvent, PrintWriter logWriter,
                      PathMapper paths, Duration monitorInterval) {
+        this(taskId, exec, pod, onEvent, logWriter, paths, monitorInterval,
+                new SandboxDescriptor("k8s", pod == null ? "" : pod.name(), null, "zhiye-runner", null, null));
+    }
+
+    K8sRunnerSession(String taskId, Exec exec, PodOps pod, Consumer<JsonNode> onEvent, PrintWriter logWriter,
+                     PathMapper paths, Duration monitorInterval, SandboxDescriptor descriptor) {
         this.taskId = taskId;
         this.exec = exec;
         this.pod = pod;
         this.onEvent = onEvent;
         this.logWriter = logWriter;
         this.paths = paths;
+        this.descriptor = descriptor;
         this.stdin = new BufferedWriter(new OutputStreamWriter(exec.stdin(), StandardCharsets.UTF_8));
         Threads.start("k8s-runner-out-" + taskId, this::readLoop);
         Threads.start("k8s-runner-err-" + taskId, this::errLoop);
@@ -203,6 +211,9 @@ class K8sRunnerSession implements RunnerSession {
         exec.close();
         pod.delete();
     }
+
+    @Override
+    public SandboxDescriptor descriptor() { return descriptor; }
 
     @Override
     public boolean alive() { return !ended.get() && !exec.exitCode().isDone(); }

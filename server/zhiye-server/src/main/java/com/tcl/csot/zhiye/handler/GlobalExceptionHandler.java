@@ -1,9 +1,15 @@
 package com.tcl.csot.zhiye.handler;
 
+import com.tcl.csot.zhiye.entity.SsoUser;
 import com.tcl.csot.zhiye.exception.ApiException;
+import com.tcl.csot.zhiye.filter.SsoAuthFilter;
+import com.tcl.csot.zhiye.service.ops.PlatformLogService;
+import com.tcl.csot.zhiye.util.RequestPrincipal;
+import jakarta.servlet.http.HttpServletRequest;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +33,8 @@ import java.util.Map;
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
     private final MessageSource messages;
+    @Autowired(required = false)
+    private PlatformLogService platformLogs;
 
     public GlobalExceptionHandler(MessageSource messages) { this.messages = messages; }
 
@@ -40,19 +48,25 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ApiException.class)
-    public ResponseEntity<Map<String, String>> api(ApiException e) {
-        return body(e.status(), e.code(), e.messageKey() == null ? e.getMessage() : msg(e.messageKey(), e.getMessage(), e.args()));
+    public ResponseEntity<Map<String, String>> api(ApiException e, HttpServletRequest req) {
+        String resolved = e.messageKey() == null ? e.getMessage() : msg(e.messageKey(), e.getMessage(), e.args());
+        if (e.status().is5xxServerError() || (e.status().is4xxClientError() && e.status() != HttpStatus.NOT_FOUND)) {
+            recordHttpError(req, e.status(), e.code(), resolved, e.status().is5xxServerError() ? e : null);
+        }
+        return body(e.status(), e.code(), resolved);
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
             MissingServletRequestPartException.class, IllegalArgumentException.class, HttpMediaTypeNotSupportedException.class})
-    public ResponseEntity<Map<String, String>> bad(Exception e) {
+    public ResponseEntity<Map<String, String>> bad(Exception e, HttpServletRequest req) {
         log.debug("请求参数解析失败", e);
+        recordHttpError(req, HttpStatus.BAD_REQUEST, "VALIDATION", e.getMessage(), null);
         return body(HttpStatus.BAD_REQUEST, "VALIDATION", msg("zhiye.error.validation", "请求格式不正确"));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<Map<String, String>> tooLarge(Exception e) {
+    public ResponseEntity<Map<String, String>> tooLarge(Exception e, HttpServletRequest req) {
+        recordHttpError(req, HttpStatus.BAD_REQUEST, "IMPORT_INVALID", "上传文件超过限制：" + e.getMessage(), null);
         return body(HttpStatus.BAD_REQUEST, "IMPORT_INVALID", msg("zhiye.error.upload-too-large", "文件太大：最多 50 MB，请删减后重新选择"));
     }
 
@@ -70,8 +84,24 @@ public class GlobalExceptionHandler {
     public void gone(Exception e) { /* 客户端断开 */ }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, String>> other(Exception e) {
+    public ResponseEntity<Map<String, String>> other(Exception e, HttpServletRequest req) {
         log.error("未处理的异常", e);
+        recordHttpError(req, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", e.getMessage(), e);
         return body(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", msg("zhiye.error.internal", "服务暂时出错了，请稍后重试"));
+    }
+
+    private void recordHttpError(HttpServletRequest req, HttpStatus status, String code, String message, Throwable err) {
+        if (platformLogs == null || req == null) return;
+        String uri = req.getRequestURI();
+        if (uri != null && uri.startsWith("/api/logs/")) return;
+        Object wsAttr = req.getAttribute(RequestPrincipal.ATTR_WS);
+        String ws = wsAttr instanceof String s ? s : null;
+        Object userAttr = req.getAttribute(SsoAuthFilter.ATTR_USER);
+        String userId = userAttr instanceof SsoUser u ? u.id() : null;
+        String level = status.is5xxServerError() ? "ERROR" : "WARN";
+        String summary = req.getMethod() + " " + uri + " → " + status.value() + " " + code + (message != null ? " · " + message : "");
+        String detail = err != null ? PlatformLogService.stackTrace(err) : null;
+        platformLogs.record("api_error", level, code, ws, userId, null, null, false, status.value(), null,
+                summary, detail, Map.of("method", req.getMethod(), "uri", uri == null ? "" : uri));
     }
 }

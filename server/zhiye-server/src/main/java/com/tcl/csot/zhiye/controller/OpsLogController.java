@@ -75,10 +75,11 @@ public class OpsLogController {
                                          @RequestParam(required = false) Integer tail,
                                          @RequestParam(required = false) Integer offset,
                                          @RequestParam(required = false) String q,
+                                         @RequestParam(required = false) String level,
                                          HttpServletRequest req) {
         String ws = principal.workspaceId();
         adminAuth.requireTaskAccess(req, ws, id);
-        return opsLogs.runnerLog(id, tail, offset, q);
+        return opsLogs.runnerLog(id, tail, offset, q, level);
     }
 
     @GetMapping("/tasks/{id}/runner-log/download")
@@ -123,12 +124,56 @@ public class OpsLogController {
         return opsLogs.listSourceCalls(q, appId, scopeWs, ok, origin, range, limit, offset);
     }
 
+    @GetMapping("/events")
+    public Map<String, Object> events(@RequestParam(defaultValue = "ALL") String category,
+                                      @RequestParam(defaultValue = "ALL") String level,
+                                      @RequestParam(required = false) String appId,
+                                      @RequestParam(required = false) String taskId,
+                                      @RequestParam(required = false) Boolean ok,
+                                      @RequestParam(required = false) String q,
+                                      @RequestParam(defaultValue = "7d") String range,
+                                      @RequestParam(defaultValue = "50") int limit,
+                                      @RequestParam(defaultValue = "0") int offset,
+                                      HttpServletRequest req) {
+        String ws = principal.workspaceId();
+        String scopeWs = adminAuth.authorizeAppLogWorkspace(req, ws, appId);
+        return opsLogs.listPlatformEvents(category, level, scopeWs, appId, taskId, ok, q, range, limit, offset);
+    }
+
+    @GetMapping("/schemas")
+    public Map<String, Object> schemas(@RequestParam(required = false) String q,
+                                       @RequestParam(required = false) Boolean ok,
+                                       @RequestParam(defaultValue = "7d") String range,
+                                       @RequestParam(defaultValue = "50") int limit,
+                                       @RequestParam(defaultValue = "0") int offset,
+                                       HttpServletRequest req) {
+        String ws = principal.workspaceId();
+        String scopeWs = adminAuth.isAdmin(req, ws) ? null : ws;
+        return opsLogs.listCloudSchemas(scopeWs, q, ok, range, limit, offset);
+    }
+
+    @GetMapping("/sandboxes")
+    public Map<String, Object> sandboxes(@RequestParam(defaultValue = "7d") String range,
+                                         @RequestParam(required = false) String state,
+                                         @RequestParam(required = false) String provider,
+                                         @RequestParam(required = false) String workspaceId,
+                                         @RequestParam(required = false) Boolean onlyErrors,
+                                         @RequestParam(required = false) String q,
+                                         @RequestParam(defaultValue = "40") int limit,
+                                         @RequestParam(defaultValue = "0") int offset,
+                                         HttpServletRequest req) {
+        String ws = principal.workspaceId();
+        String scopeWs = adminAuth.authorizeTaskLogWorkspace(req, ws, workspaceId, null);
+        return opsLogs.listSandboxLogs(scopeWs, range, state, provider, onlyErrors, q, limit, offset);
+    }
+
     @GetMapping("/runtime")
     public Map<String, Object> runtime(@RequestParam(defaultValue = "api") String target,
                                        @RequestParam(defaultValue = "400") int tail,
                                        @RequestParam(required = false) String q,
+                                       @RequestParam(required = false) String level,
                                        HttpServletRequest req) {
         adminAuth.requireAdminActor(req, principal.workspaceId());
-        return opsLogs.runtimeOverview(target, tail, q);
+        return opsLogs.runtimeOverview(target, tail, q, level);
     }
 }

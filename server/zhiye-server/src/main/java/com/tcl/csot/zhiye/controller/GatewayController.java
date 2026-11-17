@@ -43,6 +43,8 @@ public class GatewayController {
     private final FaultState faults;
     private final LlmRouter router;
     private final ZhiyeProperties props;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
 
     public GatewayController(TaskTokenService tokens, UpstreamClient upstream, UsageService usage, FaultState faults,
                              LlmRouter router, ZhiyeProperties props) {
@@ -59,6 +61,11 @@ public class GatewayController {
         try {
             return router.forTask(taskId);
         } catch (ApiException e) {
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "GATEWAY_ROUTE_FAILED", null, null, null, taskId,
+                        e.status().value(), null, "模型路由解析失败：" + e.code() + " · " + e.getMessage(), null,
+                        java.util.Map.of("code", e.code()));
+            }
             error(res, e.status().value(), "invalid_request_error", e.code(), e.getMessage());
             return null;
         }
@@ -92,10 +99,25 @@ public class GatewayController {
 
     @PostMapping("/chat/completions")
     public void chat(HttpServletRequest req, HttpServletResponse res) throws Exception {
+        long t0 = System.currentTimeMillis();
         Optional<String> taskId = auth(req);
-        if (taskId.isEmpty()) { error(res, 401, "invalid_request_error", "UNAUTHORIZED", "网关令牌无效或任务已结束"); return; }
+        if (taskId.isEmpty()) {
+            if (platformLogs != null) {
+                platformLogs.warn("llm_gateway", "GATEWAY_UNAUTHORIZED", null, null, null, null,
+                        401, null, "模型网关鉴权失败：任务令牌无效或已结束", null, java.util.Map.of());
+            }
+            error(res, 401, "invalid_request_error", "UNAUTHORIZED", "网关令牌无效或任务已结束");
+            return;
+        }
         String tid = taskId.get();
-        if (faults.llmError()) { error(res, 500, "server_error", "MODEL_ERROR", "模型服务暂不可用（注入的故障）"); return; }
+        if (faults.llmError()) {
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "GATEWAY_FAULT_INJECTED", null, null, null, tid,
+                        500, null, "模型网关返回注入故障 500", null, java.util.Map.of());
+            }
+            error(res, 500, "server_error", "MODEL_ERROR", "模型服务暂不可用（注入的故障）");
+            return;
+        }
         byte[] body = req.getInputStream().readAllBytes();
         JsonNode parsed;
         try { parsed = Json.M.readTree(body); } catch (Exception e) { error(res, 400, "invalid_request_error", "VALIDATION", "请求体不是 JSON"); return; }
@@ -114,6 +136,13 @@ public class GatewayController {
         try {
             up = upstream.send(route, "POST", "/chat/completions", body);
         } catch (IOException e) {
+            int ms = (int) Math.max(0L, System.currentTimeMillis() - t0);
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "GATEWAY_UPSTREAM_IO", null, null, null, tid,
+                        502, ms, "连接上游模型服务失败：" + e.getMessage(),
+                        com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e),
+                        java.util.Map.of("provider", route.provider(), "model", model, "stream", stream));
+            }
             error(res, 502, "server_error", "MODEL_ERROR", "模型服务暂不可用：" + e.getMessage());
             return;
         }
@@ -122,6 +151,8 @@ public class GatewayController {
         if (stream) res.setHeader("Cache-Control", "no-cache");
         OutputStream out = res.getOutputStream();
         JsonNode lastUsage = null;
+        String errBody = null;
+        String streamErr = null;
         try (InputStream in = up.body()) {
             if (stream && up.statusCode() < 400) {
                 byte[] buf = new byte[8192];
@@ -146,14 +177,27 @@ public class GatewayController {
                 if (up.statusCode() < 400) {
                     try { lastUsage = UsageService.findUsage(Json.M.readTree(all)); } catch (Exception ignored) { }
                 } else {
-                    log.warn("上游模型错误 {}：{}", up.statusCode(), new String(all, 0, Math.min(all.length, 500), StandardCharsets.UTF_8));
+                    errBody = new String(all, 0, Math.min(all.length, 4000), StandardCharsets.UTF_8);
+                    log.warn("上游模型错误 {}：{}", up.statusCode(), errBody.substring(0, Math.min(errBody.length(), 500)));
                     if (up.statusCode() == 401 && !route.local()) router.evict(route.account());
                 }
             }
         } catch (IOException e) {
+            streamErr = e.getMessage();
             log.info("网关流中断（任务 {}）：{}", tid, e.getMessage());
         } finally {
             if (lastUsage != null) usage.record(tid, route.provider(), model, lastUsage);
+            if (platformLogs != null) {
+                int ms = (int) Math.max(0L, System.currentTimeMillis() - t0);
+                boolean ok = up.statusCode() < 400 && streamErr == null;
+                String action = !ok ? (streamErr != null ? "GATEWAY_STREAM_BROKEN" : "GATEWAY_UPSTREAM_ERROR") : "GATEWAY_CHAT";
+                String summary = ok
+                        ? String.format("%s / %s · HTTP %d · %dms", route.provider(), model, up.statusCode(), ms)
+                        : String.format("%s / %s · 异常 HTTP %d · %s", route.provider(), model, up.statusCode(), streamErr != null ? streamErr : "上游报错");
+                platformLogs.record("llm_gateway", ok ? "INFO" : "ERROR", action, null, null, null, tid, ok,
+                        up.statusCode(), ms, summary, errBody != null ? errBody : streamErr,
+                        java.util.Map.of("provider", route.provider(), "model", model, "stream", stream, "local", route.local()));
+            }
         }
     }
 

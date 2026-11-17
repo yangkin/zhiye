@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
+import { useMeta } from '../api/queries';
 import type {
   OpsLogActor,
   OpsLogFileView,
@@ -9,6 +10,7 @@ import type {
   OpsTaskDetailResponse,
   OpsTaskEventRow,
   OpsTaskSummary,
+  SandboxItem,
 } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText, downloadUrl } from '../lib/format';
@@ -17,9 +19,10 @@ import { toast } from '../lib/store';
 import { fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 
-type MainTab = 'tasks' | 'functions' | 'sources' | 'runtime';
+type MainTab = 'tasks' | 'sandboxes' | 'schemas' | 'events' | 'functions' | 'sources' | 'runtime';
 type DetailTab = 'events' | 'runner' | 'resources' | 'app';
 type EventFilter = 'all' | 'tool' | 'log' | 'verify' | 'thinking' | 'status' | 'collab';
+type LogLevelFilter = 'ALL' | 'ERROR' | 'WARN' | 'INFO';
 
 const RANGES: [OpsLogRange, string][] = [
   ['1h', '近 1 小时'],
@@ -151,11 +154,40 @@ function downloadJson(filename: string, data: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function HighlightText({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const low = text.toLowerCase();
+  const qLow = q.toLowerCase();
+  const parts: (string | { hit: string; k: number })[] = [];
+  let idx = 0;
+  let pos = low.indexOf(qLow, idx);
+  let k = 0;
+  while (pos !== -1) {
+    if (pos > idx) parts.push(text.slice(idx, pos));
+    parts.push({ hit: text.slice(pos, pos + q.length), k: k++ });
+    idx = pos + q.length;
+    pos = low.indexOf(qLow, idx);
+  }
+  if (idx < text.length) parts.push(text.slice(idx));
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === 'string' ? p : <mark key={p.k + '-' + i} className="logs-hl">{p.hit}</mark>,
+      )}
+    </>
+  );
+}
+
 export function LogsPage() {
+  const metaQ = useMeta();
+  const isAdmin = Boolean(metaQ.data?.auth?.admin);
   const [params, setParams] = useSearchParams();
   const rawTab = params.get('tab');
   const mainTab: MainTab =
-    rawTab === 'functions' || rawTab === 'sources' || rawTab === 'runtime' ? rawTab : 'tasks';
+    rawTab === 'sandboxes' || rawTab === 'schemas' || rawTab === 'events' || rawTab === 'functions' || rawTab === 'sources' || (rawTab === 'runtime' && isAdmin)
+      ? rawTab
+      : 'tasks';
 
   const setMainTab = (tab: MainTab) => {
     const next = new URLSearchParams(params);
@@ -164,33 +196,36 @@ export function LogsPage() {
     setParams(next, { replace: true });
   };
 
+  const tabs: [MainTab, string][] = [
+    ['tasks', 'AI 任务全链路 Trace'],
+    ['sandboxes', '沙箱生命周期日志'],
+    ['events', '模型网关与异常追踪'],
+    ['schemas', '云库 Schema / DDL'],
+    ['functions', '云函数执行日志'],
+    ['sources', '数据源调用日志'],
+    ...(isAdmin ? ([['runtime', '集群服务日志与审计']] as [MainTab, string][]) : []),
+  ];
+
   return (
     <div className="content-page logs-page">
       <header className="dash-header-top">
         <div className="dash-title-block">
-          <span className="overline">OBSERVABILITY · DEVELOPMENT &amp; RUNTIME TROUBLESHOOTING</span>
+          <span className="overline">OBSERVABILITY · TRACE WATERFALL, SANDBOX LIFECYCLE &amp; LOG EXPLORER</span>
           <div className="dash-title-row">
-            <h1>开发与运行日志排查中心</h1>
-            <span className="dash-scope-badge platform">
+            <h1>全链路日志与 Trace 排查中心</h1>
+            <span className={`dash-scope-badge ${isAdmin ? 'platform' : 'workspace'}`}>
               <i className="dash-pulse-dot" aria-hidden="true" />
-              全链路开发过程诊断
+              {isAdmin ? '全平台跨空间可观测视角' : '当前工作空间隔离视角'}
             </span>
           </div>
           <p>
-            跨工作空间检索每次 AI 开发任务的思考步骤、工具入参/报错、质检门禁命令行输出与沙箱 Runner 底层日志，联动云函数、数据源代理与服务端指标，快速定位用户开发阻塞。
+            按全链路 Trace 视图透视任务排队、沙箱冷启动、AI 推理/工具调用、质检门禁耗时瀑布，联动沙箱生命周期台账、Runner 终端分级检索与集群多节点服务日志。
           </p>
         </div>
       </header>
 
       <nav className="dash-nav-bar logs-tabs" role="tablist" aria-label="日志排查模块">
-        {(
-          [
-            ['tasks', 'AI 开发过程日志'],
-            ['functions', '云函数执行日志'],
-            ['sources', '数据源调用日志'],
-            ['runtime', '服务端日志与 Prometheus 指标'],
-          ] as [MainTab, string][]
-        ).map(([id, label]) => (
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -204,10 +239,13 @@ export function LogsPage() {
         ))}
       </nav>
 
-      {mainTab === 'tasks' ? <TaskLogsWorkbench /> : null}
+      {mainTab === 'tasks' ? <TaskLogsWorkbench onJumpSandboxes={() => setMainTab('sandboxes')} /> : null}
+      {mainTab === 'sandboxes' ? <SandboxLogsView /> : null}
+      {mainTab === 'schemas' ? <SchemasView /> : null}
+      {mainTab === 'events' ? <PlatformEventsView /> : null}
       {mainTab === 'functions' ? <FunctionLogsView /> : null}
       {mainTab === 'sources' ? <SourceCallsView /> : null}
-      {mainTab === 'runtime' ? <RuntimeLogsView /> : null}
+      {mainTab === 'runtime' && isAdmin ? <RuntimeLogsView /> : null}
     </div>
   );
 }
@@ -216,7 +254,7 @@ export function LogsPage() {
 // 1. AI 开发过程日志分栏工作台
 // ==========================================================================
 
-function TaskLogsWorkbench() {
+function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const selectedTaskId = params.get('taskId') ?? '';
@@ -486,7 +524,7 @@ function TaskLogsWorkbench() {
           {!selectedTaskId ? (
             <EmptyState icon="terminal" title="选择一条任务查看开发日志" desc="从左侧挑选任意任务，或在管理看板点击失败任务跳转至此。" />
           ) : (
-            <TaskDiagnosticPane taskId={selectedTaskId} onOpenApp={(appId) => navigate('/apps/' + appId)} />
+            <TaskDiagnosticPane taskId={selectedTaskId} onOpenApp={(appId) => navigate('/apps/' + appId)} onJumpSandboxes={onJumpSandboxes} />
           )}
         </section>
       </div>
@@ -539,7 +577,15 @@ function TaskListCard({ item, selected, onSelect }: { item: OpsTaskSummary; sele
 // 2. 单任务全链路诊断详情面板（支持进行中任务实时追踪）
 // ==========================================================================
 
-function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: (appId: string) => void }) {
+function TaskDiagnosticPane({
+  taskId,
+  onOpenApp,
+  onJumpSandboxes,
+}: {
+  taskId: string;
+  onOpenApp: (appId: string) => void;
+  onJumpSandboxes?: () => void;
+}) {
   const [subTab, setSubTab] = useState<DetailTab>('events');
   const [liveFollow, setLiveFollow] = useState<boolean>(true);
   const [liveEvents, setLiveEvents] = useState<OpsTaskEventRow[] | null>(null);
@@ -550,11 +596,15 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
   const [onlyEvErrors, setOnlyEvErrors] = useState<boolean>(false);
   const [evQuery, setEvQuery] = useState<string>('');
   const [expandAllEvents, setExpandAllEvents] = useState<boolean>(false);
+  const [compactStream, setCompactStream] = useState<boolean>(true);
 
   const [runnerTail, setRunnerTail] = useState<number>(800);
   const [runnerQuery, setRunnerQuery] = useState<string>('');
+  const [runnerLevel, setRunnerLevel] = useState<LogLevelFilter>('ALL');
+  const [runnerWrap, setRunnerWrap] = useState<boolean>(true);
   const [autoScrollRunner, setAutoScrollRunner] = useState<boolean>(true);
   const runnerScrollRef = useRef<HTMLDivElement>(null);
+  const eventListRef = useRef<HTMLDivElement>(null);
 
   const debouncedRunnerQuery = useDebounced(runnerQuery.trim(), 250);
 
@@ -572,6 +622,7 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
     setOnlyEvErrors(false);
     setEvFilter('all');
     setRunnerQuery('');
+    setRunnerLevel('ALL');
   }, [taskId]);
 
   const baseDetail: OpsTaskDetailResponse | undefined = detailQ.data;
@@ -581,14 +632,21 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
     return liveTaskPatch ? { ...baseDetail.task, ...liveTaskPatch } : baseDetail.task;
   }, [baseDetail?.task, liveTaskPatch]);
 
-  // 单独拉取或搜索 Runner 日志（当搜索条件或行数变化时）
+  // 单独拉取或搜索 Runner 日志（当搜索条件、级别或行数变化时）
   const runnerQ = useQuery({
-    queryKey: ['ops-runner-log', taskId, runnerTail, debouncedRunnerQuery],
-    queryFn: () => api.opsRunnerLog(taskId, { tail: runnerTail, q: debouncedRunnerQuery || undefined }),
-    enabled: subTab === 'runner' && (runnerTail !== 800 || !!debouncedRunnerQuery),
+    queryKey: ['ops-runner-log', taskId, runnerTail, debouncedRunnerQuery, runnerLevel],
+    queryFn: () =>
+      api.opsRunnerLog(taskId, {
+        tail: runnerTail,
+        q: debouncedRunnerQuery || undefined,
+        level: runnerLevel === 'ALL' ? undefined : runnerLevel,
+      }),
+    enabled: subTab === 'runner' && (runnerTail !== 800 || !!debouncedRunnerQuery || runnerLevel !== 'ALL'),
   });
 
-  const runnerLog = liveRunnerLog ?? (subTab === 'runner' && (runnerTail !== 800 || !!debouncedRunnerQuery) ? runnerQ.data : baseDetail?.runnerLog);
+  const runnerLog =
+    liveRunnerLog ??
+    (subTab === 'runner' && (runnerTail !== 800 || !!debouncedRunnerQuery || runnerLevel !== 'ALL') ? runnerQ.data : baseDetail?.runnerLog);
 
   // 任务活跃时 1.5s 实时增量拉取 task_event + runner.log
   const lastSeqRef = useRef<number>(0);
@@ -602,7 +660,11 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
       try {
         const [delta, rlog] = await Promise.all([
           api.opsTaskEvents(taskId, lastSeqRef.current),
-          api.opsRunnerLog(taskId, { tail: runnerTail, q: debouncedRunnerQuery || undefined }),
+          api.opsRunnerLog(taskId, {
+            tail: runnerTail,
+            q: debouncedRunnerQuery || undefined,
+            level: runnerLevel === 'ALL' ? undefined : runnerLevel,
+          }),
         ]);
         if (cancelled) return;
         if (delta.events.length > 0) {
@@ -649,8 +711,45 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
 
   const filteredEvents = useMemo(() => {
     const q = evQuery.trim();
-    return events.filter((e) => eventMatchesFilter(e, evFilter, onlyEvErrors, q));
-  }, [events, evFilter, onlyEvErrors, evQuery]);
+    const matched = events.filter((e) => eventMatchesFilter(e, evFilter, onlyEvErrors, q));
+    if (!compactStream || evFilter !== 'all' || onlyEvErrors || q) return matched;
+    // 结构化 Trace 模式下：将连续高频 agent_text 碎片合并为单条紧凑卡片，突出工具与门禁主干
+    const merged: OpsTaskEventRow[] = [];
+    let textAcc: string[] = [];
+    let firstTextEv: OpsTaskEventRow | null = null;
+    const flushTextAcc = () => {
+      if (!firstTextEv) return;
+      merged.push({
+        ...firstTextEv,
+        payload: { ...firstTextEv.payload, delta: textAcc.join('') },
+      });
+      textAcc = [];
+      firstTextEv = null;
+    };
+    for (const ev of matched) {
+      if (ev.type === 'agent_text') {
+        if (!firstTextEv) firstTextEv = ev;
+        textAcc.push(String(ev.payload?.delta ?? ''));
+      } else {
+        flushTextAcc();
+        merged.push(ev);
+      }
+    }
+    flushTextAcc();
+    return merged;
+  }, [events, evFilter, onlyEvErrors, evQuery, compactStream]);
+
+  const jumpFirstErrorEvent = () => {
+    const el = eventListRef.current?.querySelector('.logs-ev-card.is-err');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    else toast('当前筛选视图下未包含错误事件');
+  };
+
+  const jumpFirstRunnerError = () => {
+    const el = runnerScrollRef.current?.querySelector('.logs-term-line.is-err');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    else toast('当前展示的日志行中未发现 ERROR');
+  };
 
   const eventStats = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -762,6 +861,15 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
           </div>
         ) : null}
 
+        {/* 执行阶段耗时瀑布图（Trace Waterfall） */}
+        <TraceWaterfallBar
+          task={task}
+          events={events}
+          sandbox={baseDetail.sandboxes?.[0] ?? null}
+          onJumpSandboxes={onJumpSandboxes}
+          onJumpTab={setSubTab}
+        />
+
         {fullPrompt || baseDetail.messages.length > 0 ? (
           <details className="logs-prompt-box" open={task.status === 'FAILED'}>
             <summary>
@@ -787,12 +895,12 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
           <small>{runnerLog?.exists ? fmtBytes(runnerLog.sizeBytes) : '无文件'}</small>
         </button>
         <button type="button" role="tab" aria-selected={subTab === 'resources'} className={subTab === 'resources' ? 'active' : ''} onClick={() => setSubTab('resources')}>
-          <span>模型调用与上下文</span>
-          <small>{baseDetail.modelUsages.length}</small>
+          <span>模型网关与链路事件</span>
+          <small>{baseDetail.modelUsages.length + (baseDetail.platformEvents?.length ?? 0)}</small>
         </button>
         <button type="button" role="tab" aria-selected={subTab === 'app'} className={subTab === 'app' ? 'active' : ''} onClick={() => setSubTab('app')}>
-          <span>应用云函数与数据源</span>
-          <small>{baseDetail.fnLogs.length + baseDetail.sourceCalls.length}</small>
+          <span>云库 Schema · 云函数 · 数据源</span>
+          <small>{(baseDetail.cloudTables?.length ?? 0) + baseDetail.fnLogs.length + baseDetail.sourceCalls.length}</small>
         </button>
       </nav>
 
@@ -849,13 +957,26 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
                 <button type="button" className="logs-chip" onClick={() => setExpandAllEvents((v) => !v)}>
                   {expandAllEvents ? '全部收起' : '全部展开'}
                 </button>
+                <button
+                  type="button"
+                  className={`logs-chip ${compactStream ? 'active' : ''}`}
+                  onClick={() => setCompactStream((v) => !v)}
+                  title="开启后会折叠连续打字碎片，高亮工具与门禁"
+                >
+                  {compactStream ? 'Trace 合并视图' : '原始流'}
+                </button>
+                {eventStats.errors > 0 ? (
+                  <button type="button" className="logs-chip err" onClick={jumpFirstErrorEvent}>
+                    定位首个报错
+                  </button>
+                ) : null}
               </div>
             </div>
 
             {filteredEvents.length === 0 ? (
               <EmptyState title="当前筛选下无过程事件" desc="尝试切换事件类型或取消「仅看报错」过滤。" />
             ) : (
-              <div className="logs-event-list">
+              <div className="logs-event-list" ref={eventListRef}>
                 {filteredEvents.map((ev) => (
                   <EventCard key={`${ev.seq}-${expandAllEvents ? 'o' : 'c'}`} ev={ev} defaultOpen={expandAllEvents || isEventError(ev)} />
                 ))}
@@ -868,10 +989,30 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
           <>
             <div className="logs-event-toolbar">
               <div className="logs-filter-left">
-                <label className="logs-search-box" style={{ minWidth: 220, maxWidth: 320, height: 32 }}>
+                <div className="logs-chip-row" role="group" aria-label="日志级别过滤">
+                  {(
+                    [
+                      ['ALL', '全部', runnerLog?.totalLines ?? 0, ''],
+                      ['ERROR', 'ERROR', runnerLog?.errorLines ?? 0, 'err'],
+                      ['WARN', 'WARN', runnerLog?.warnLines ?? 0, 'warn'],
+                      ['INFO', 'INFO', undefined, ''],
+                    ] as [LogLevelFilter, string, number | undefined, string][]
+                  ).map(([lvl, label, cnt, cls]) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      className={`logs-chip ${cls} ${runnerLevel === lvl ? 'active' : ''}`}
+                      onClick={() => setRunnerLevel(lvl)}
+                    >
+                      <span>{label}</span>
+                      {cnt !== undefined ? <b>{fmtNum(cnt)}</b> : null}
+                    </button>
+                  ))}
+                </div>
+                <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 300, height: 32 }}>
                   <Icon name="search" />
                   <input
-                    placeholder="检索 Runner 日志关键字（如 error / 401 / timeout）"
+                    placeholder="检索 Runner 日志关键字（自动高亮）…"
                     value={runnerQuery}
                     onChange={(e) => setRunnerQuery(e.target.value)}
                   />
@@ -894,13 +1035,25 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
                 </select>
                 {runnerLog?.exists ? (
                   <span style={{ fontSize: 12, color: '#6b647d' }}>
-                    共 {fmtNum(runnerLog.totalLines)} 行 · 匹配 {fmtNum(runnerLog.matchedLines)} 行 · {fmtBytes(runnerLog.sizeBytes)}
+                    匹配 {fmtNum(runnerLog.matchedLines)} / {fmtNum(runnerLog.totalLines)} 行 · {fmtBytes(runnerLog.sizeBytes)}
                     {runnerLog.updatedAt ? ` · 更新于 ${fmtDateTime(runnerLog.updatedAt)}` : ''}
                   </span>
                 ) : null}
               </div>
 
               <div className="logs-filter-right">
+                {(runnerLog?.errorLines ?? 0) > 0 ? (
+                  <button type="button" className="logs-chip err" onClick={jumpFirstRunnerError}>
+                    定位首个 ERROR
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={`logs-chip ${runnerWrap ? 'active' : ''}`}
+                  onClick={() => setRunnerWrap((v) => !v)}
+                >
+                  {runnerWrap ? '自动换行' : '单行滚动'}
+                </button>
                 <button
                   type="button"
                   className={`logs-chip ${autoScrollRunner ? 'active' : ''}`}
@@ -943,14 +1096,16 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
                 desc="该任务可能仍在排队、属于轻量任务（如需求规划/手动微调），或运行期共享日志卷尚未落盘。"
               />
             ) : runnerLog.lines.length === 0 ? (
-              <EmptyState title="没有匹配的日志行" desc="请尝试清空或更换搜索关键字。" />
+              <EmptyState title="没有匹配的日志行" desc="请尝试切换日志级别或更换搜索关键字。" />
             ) : (
-              <div className="logs-terminal">
+              <div className={`logs-terminal ${runnerWrap ? 'wrap' : 'nowrap'}`}>
                 <div className="logs-terminal-scroll" ref={runnerScrollRef}>
                   {runnerLog.lines.map((line) => (
                     <div key={line.no} className={`logs-term-line ${classifyTermLine(line.text)}`}>
                       <span className="logs-term-no">{line.no}</span>
-                      <span className="logs-term-text">{line.text}</span>
+                      <span className="logs-term-text">
+                        <HighlightText text={line.text} query={runnerQuery} />
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -961,6 +1116,45 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
 
         {subTab === 'resources' ? (
           <>
+            {(baseDetail.sandboxes?.length ?? 0) > 0 ? (
+              <div className="logs-json-block">
+                <h4>关联沙箱生命周期台账（sandbox_instance · {baseDetail.sandboxes!.length} 条）</h4>
+                <div className="dash-table-wrap">
+                  <table className="dash-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">沙箱 ID</th>
+                        <th scope="col">引擎 / 外部标识</th>
+                        <th scope="col">状态</th>
+                        <th scope="col">冷启动</th>
+                        <th scope="col">资源采样 (CPU/内存)</th>
+                        <th scope="col">归属节点</th>
+                        <th scope="col">销毁原因 / 操作人</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {baseDetail.sandboxes!.map((sb) => (
+                        <tr key={sb.sandboxId}>
+                          <td className="logs-mono"><b>{sb.sandboxId}</b></td>
+                          <td>
+                            <span className="dash-tag">{sb.provider}</span>{' '}
+                            <span className="logs-mono">{sb.externalRef || '—'}</span>
+                          </td>
+                          <td><span className={`logs-status ${sb.state === 'failed' ? 'err' : sb.state === 'active' ? 'run' : 'ok'}`}>{sb.state}</span></td>
+                          <td>{sb.startupMs != null ? `${sb.startupMs} ms` : '—'}</td>
+                          <td>
+                            {sb.memoryUsedBytes != null ? fmtBytes(sb.memoryUsedBytes) : '—'}
+                            {sb.cpuPercent != null ? ` · ${sb.cpuPercent}%` : ''}
+                          </td>
+                          <td className="logs-mono">{sb.ownerInstance}</td>
+                          <td>{sb.destroyReason || '—'}{sb.destroyedBy ? ` (${sb.destroyedBy})` : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
             <div className="logs-json-block">
               <h4>模型调用记账明细（model_usage · 共 {baseDetail.modelUsages.length} 次）</h4>
               {baseDetail.modelUsages.length === 0 ? (
@@ -995,6 +1189,48 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
               )}
             </div>
 
+            {(baseDetail.platformEvents?.length ?? 0) > 0 ? (
+              <div className="logs-json-block">
+                <h4>关联平台链路事件（模型网关 HTTP / Schema DDL / 沙箱 / 异常 · {baseDetail.platformEvents!.length} 条）</h4>
+                <div className="dash-table-wrap">
+                  <table className="dash-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">时间</th>
+                        <th scope="col">类别 / 动作</th>
+                        <th scope="col">状态</th>
+                        <th scope="col">耗时</th>
+                        <th scope="col">摘要与详情</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {baseDetail.platformEvents!.map((pe) => (
+                        <tr key={pe.id}>
+                          <td className="dash-nowrap">{fmtDateTime(pe.createdAt)}</td>
+                          <td>
+                            <span className="dash-tag">{pe.category}</span>{' '}
+                            <span className="logs-mono">{pe.action}</span>
+                          </td>
+                          <td>
+                            <span className={`logs-status ${pe.ok ? 'ok' : 'err'}`}>
+                              {pe.statusCode ?? (pe.ok ? 'OK' : pe.level)}
+                            </span>
+                          </td>
+                          <td>{pe.durationMs != null ? `${pe.durationMs} ms` : '—'}</td>
+                          <td style={{ maxWidth: 460 }}>
+                            <div>{pe.summary}</div>
+                            {pe.detail ? (
+                              <pre className="logs-term-inline" style={{ margin: '6px 0 0', maxHeight: 160 }}>{pe.detail}</pre>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
             {baseDetail.checkpoint ? (
               <div className="logs-json-block">
                 <h4>断点检查点（checkpoint）</h4>
@@ -1025,6 +1261,41 @@ function TaskDiagnosticPane({ taskId, onOpenApp }: { taskId: string; onOpenApp: 
 
         {subTab === 'app' ? (
           <>
+            <div className="logs-json-block">
+              <h4>
+                云数据库 Schema 与表结构
+                {baseDetail.cloudStatus
+                  ? `（${baseDetail.cloudStatus.schemaName} · ${baseDetail.cloudStatus.status === 'on' ? '已启用' : '已关闭'}）`
+                  : '（未启用云服务）'}
+              </h4>
+              {!baseDetail.cloudStatus ? (
+                <p className="dash-empty">该应用尚未创建云数据库 Schema</p>
+              ) : (baseDetail.cloudTables?.length ?? 0) === 0 ? (
+                <p className="dash-empty">Schema 已创建，当前暂无注册表</p>
+              ) : (
+                <div className="dash-table-wrap">
+                  <table className="dash-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">表名</th>
+                        <th scope="col">字段定义</th>
+                        <th scope="col">权限策略</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {baseDetail.cloudTables!.map((tbl) => (
+                        <tr key={tbl.name}>
+                          <td className="logs-mono"><b>{tbl.name}</b></td>
+                          <td className="logs-mono" style={{ fontSize: 11 }}>{formatJson(tbl.columns)}</td>
+                          <td className="logs-mono" style={{ fontSize: 11 }}>{tbl.policy ? String((tbl.policy as { preset?: string }).preset ?? 'custom') : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             <div className="logs-json-block">
               <h4>该应用近期云函数执行记录（最新 {baseDetail.fnLogs.length} 条）</h4>
               {baseDetail.fnLogs.length === 0 ? (
@@ -1613,12 +1884,21 @@ function SourceCallsView() {
 function RuntimeLogsView() {
   const [target, setTarget] = useState<'api' | 'site' | 'web-build'>('api');
   const [tail, setTail] = useState<number>(400);
+  const [level, setLevel] = useState<LogLevelFilter>('ALL');
+  const [wrapLines, setWrapLines] = useState<boolean>(true);
   const [q, setQ] = useState<string>('');
   const debouncedQ = useDebounced(q.trim(), 260);
+  const termRef = useRef<HTMLDivElement>(null);
 
   const rtQ = useQuery({
-    queryKey: ['ops-runtime-logs', target, tail, debouncedQ],
-    queryFn: () => api.opsRuntime({ target, tail, q: debouncedQ || undefined }),
+    queryKey: ['ops-runtime-logs', target, tail, level, debouncedQ],
+    queryFn: () =>
+      api.opsRuntime({
+        target,
+        tail,
+        q: debouncedQ || undefined,
+        level: level === 'ALL' ? undefined : level,
+      }),
     placeholderData: keepPreviousData,
   });
 
@@ -1630,10 +1910,14 @@ function RuntimeLogsView() {
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>运行期指标与 Prometheus 抓取接入</h3>
+            <h3>集群运行期指标、节点心跳与 Prometheus 接入</h3>
             <p>
-              当前沙箱模式：<b className="logs-mono">{data?.sandboxProvider ?? '—'}</b> · 实例：
-              <b className="logs-mono">{(data?.metrics?.instances ?? []).join(', ') || '—'}</b>
+              沙箱引擎：<b className="logs-mono">{data?.sandboxProvider ?? '—'}</b> · 在线实例：
+              <b className="logs-mono">
+                {data?.clusterNodes?.length
+                  ? data.clusterNodes.map((n) => `${n.instanceId}(${n.status})`).join(', ')
+                  : (data?.metrics?.instances ?? []).join(', ') || '—'}
+              </b>
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1661,17 +1945,17 @@ function RuntimeLogsView() {
           <div>
             <span>沙箱冷启动</span>
             <b>{fmtNum(data?.metrics?.sandbox?.count ?? 0)} 次</b>
-            <small>均 {data?.metrics?.sandbox?.avgMs ?? 0}ms / 峰值 {data?.metrics?.sandbox?.maxMs ?? 0}ms</small>
+            <small>均 {data?.metrics?.sandbox?.avgMs ?? 0}ms / P95 {data?.metrics?.sandbox?.p95Ms ?? 0}ms</small>
           </div>
           <div>
             <span>上游 LLM 调用</span>
             <b>{fmtNum(data?.metrics?.llm?.count ?? 0)} 次</b>
-            <small>均 {data?.metrics?.llm?.avgMs ?? 0}ms / 重试 {data?.metrics?.llm?.retries ?? 0}</small>
+            <small>均 {data?.metrics?.llm?.avgMs ?? 0}ms / P95 {data?.metrics?.llm?.p95Ms ?? 0}ms</small>
           </div>
           <div>
             <span>额度错误率</span>
             <b>{(((data?.metrics?.llm?.quotaErrorRate ?? 0) * 100)).toFixed(2)}%</b>
-            <small>额度错 {data?.metrics?.llm?.quotaErrors ?? 0} 次</small>
+            <small>额度错 {data?.metrics?.llm?.quotaErrors ?? 0} 次 · 重试 {data?.metrics?.llm?.retries ?? 0}</small>
           </div>
           <div>
             <span>活跃告警</span>
@@ -1689,7 +1973,7 @@ function RuntimeLogsView() {
       <div className="logs-info-banner">
         说明：Prometheus 负责抓取时序指标（如任务失败率、沙箱耗时、LLM 延迟）；Java 后端进程日志在本地启动模式下写入{' '}
         <code className="logs-mono">runtime/logs/{'{api,site}'}.log</code>，在 Kubernetes 部署下输出到容器标准输出（stdout）由集群日志系统采集，而每个用户任务的开发过程日志始终沉淀在数据库{' '}
-        <code className="logs-mono">task_event</code> 与共享卷 <code className="logs-mono">logs/tasks/{'{taskId}'}.log</code> 中，可在第一个页签直接排查。
+        <code className="logs-mono">task_event</code> 与共享卷 <code className="logs-mono">logs/tasks/{'{taskId}'}.log</code> 中。
       </div>
 
       <div className="logs-filter-bar">
@@ -1698,9 +1982,9 @@ function RuntimeLogsView() {
             <div className="logs-chip-row">
               {(
                 [
-                  ['api', 'api.log (主服务与任务)'],
+                  ['api', 'api.log (主服务)'],
                   ['site', 'site.log (站点网关)'],
-                  ['web-build', 'web-build.log (前端构建)'],
+                  ['web-build', 'web-build.log (构建)'],
                 ] as ['api' | 'site' | 'web-build', string][]
               ).map(([k, label]) => (
                 <button key={k} type="button" className={`logs-chip ${target === k ? 'active' : ''}`} onClick={() => setTarget(k)}>
@@ -1708,9 +1992,29 @@ function RuntimeLogsView() {
                 </button>
               ))}
             </div>
-            <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 320 }}>
+            <div className="logs-chip-row" role="group" aria-label="日志级别过滤">
+              {(
+                [
+                  ['ALL', '全部', data?.file.totalLines ?? 0, ''],
+                  ['ERROR', 'ERROR', data?.file.errorLines ?? 0, 'err'],
+                  ['WARN', 'WARN', data?.file.warnLines ?? 0, 'warn'],
+                  ['INFO', 'INFO', undefined, ''],
+                ] as [LogLevelFilter, string, number | undefined, string][]
+              ).map(([lvl, label, cnt, cls]) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  className={`logs-chip ${cls} ${level === lvl ? 'active' : ''}`}
+                  onClick={() => setLevel(lvl)}
+                >
+                  <span>{label}</span>
+                  {cnt !== undefined ? <b>{fmtNum(cnt)}</b> : null}
+                </button>
+              ))}
+            </div>
+            <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 300 }}>
               <Icon name="search" />
-              <input placeholder="筛选服务日志关键字…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <input placeholder="筛选服务日志关键字（自动高亮）…" value={q} onChange={(e) => setQ(e.target.value)} />
               {q ? (
                 <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
                   <Icon name="close" />
@@ -1725,6 +2029,21 @@ function RuntimeLogsView() {
             </select>
           </div>
           <div className="logs-filter-right">
+            {(data?.file.errorLines ?? 0) > 0 ? (
+              <button
+                type="button"
+                className="logs-chip err"
+                onClick={() => {
+                  const el = termRef.current?.querySelector('.logs-term-line.is-err');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+              >
+                定位首个 ERROR
+              </button>
+            ) : null}
+            <button type="button" className={`logs-chip ${wrapLines ? 'active' : ''}`} onClick={() => setWrapLines((v) => !v)}>
+              {wrapLines ? '自动换行' : '单行滚动'}
+            </button>
             <button type="button" className="dash-action-btn" onClick={() => void rtQ.refetch()} disabled={rtQ.isFetching}>
               <Icon name="refresh" className={rtQ.isFetching ? 'spinning' : ''} />
               <span>刷新</span>
@@ -1745,20 +2064,736 @@ function RuntimeLogsView() {
             desc="若服务运行在 Kubernetes / 容器中，后端进程日志直接输出到容器 stdout（由集群采集），请使用第一个页签排查单个任务的过程与沙箱日志。"
           />
         ) : data.file.lines.length === 0 ? (
-          <EmptyState title="没有匹配的日志行" desc="请更换过滤关键字。" />
+          <EmptyState title="没有匹配的日志行" desc="请尝试切换日志级别或更换过滤关键字。" />
         ) : (
-          <div className="logs-terminal">
-            <div className="logs-terminal-scroll">
+          <div className={`logs-terminal ${wrapLines ? 'wrap' : 'nowrap'}`}>
+            <div className="logs-terminal-scroll" ref={termRef}>
               {data.file.lines.map((line) => (
                 <div key={line.no} className={`logs-term-line ${classifyTermLine(line.text)}`}>
                   <span className="logs-term-no">{line.no}</span>
-                  <span className="logs-term-text">{line.text}</span>
+                  <span className="logs-term-text">
+                    <HighlightText text={line.text} query={q} />
+                  </span>
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      <div className="dash-grid-2">
+        <div className="dash-panel">
+          <header className="dash-panel-head compact">
+            <div>
+              <h3>限流触发流水（rate_limit_hit · 最新 50 条）</h3>
+              <p>记录滑窗限流命中的 bucket 与触发时间，排查 429 频繁请求</p>
+            </div>
+          </header>
+          {!data?.rateLimitHits?.length ? (
+            <p className="dash-empty">近期无限流触发记录</p>
+          ) : (
+            <div className="dash-scroll-list">
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">触发时间</th>
+                      <th scope="col">限流 Bucket</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rateLimitHits.map((r, i) => (
+                      <tr key={i}>
+                        <td className="dash-nowrap">{fmtDateTime(r.createdAt)}</td>
+                        <td className="logs-mono">{r.bucket}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="dash-panel">
+          <header className="dash-panel-head compact">
+            <div>
+              <h3>平台管理操作审计（admin_audit_log · 最新 50 条）</h3>
+              <p>强停任务、配额调整、应用下线恢复、社区置顶等操作留痕</p>
+            </div>
+          </header>
+          {!data?.auditLogs?.length ? (
+            <p className="dash-empty">暂无管理操作审计记录</p>
+          ) : (
+            <div className="dash-scroll-list">
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">时间</th>
+                      <th scope="col">操作者</th>
+                      <th scope="col">动作 / 目标</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.auditLogs.map((a) => (
+                      <tr key={a.id}>
+                        <td className="dash-nowrap">{fmtDateTime(a.createdAt)}</td>
+                        <td>{a.actor}</td>
+                        <td>
+                          <span className="dash-tag">{a.action}</span>{' '}
+                          <span className="logs-mono">{a.targetType}:{a.targetId}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 7. 云库 Schema / DDL 创建与变更日志视图
+// ==========================================================================
+
+function SchemasView() {
+  const [range, setRange] = useState<OpsLogRange>('7d');
+  const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
+  const [q, setQ] = useState<string>('');
+  const [openId, setOpenId] = useState<number | null>(null);
+  const debouncedQ = useDebounced(q.trim(), 260);
+
+  const schemaQ = useQuery({
+    queryKey: ['ops-schemas', range, onlyErrors, debouncedQ],
+    queryFn: () =>
+      api.opsSchemas({
+        range,
+        ok: onlyErrors ? false : undefined,
+        q: debouncedQ || undefined,
+        limit: 50,
+      }),
+    placeholderData: keepPreviousData,
+  });
+
+  const data = schemaQ.data;
+  const items = data?.items ?? [];
+  const schemas = data?.schemas ?? [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="logs-filter-bar">
+        <div className="logs-filter-row">
+          <div className="logs-filter-left">
+            <label className="logs-search-box">
+              <Icon name="search" />
+              <input
+                placeholder="搜 Schema 名 (app_xxx) / 应用名 / 表名 / DDL SQL…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              {q ? (
+                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </label>
+            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+              {RANGES.map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
+              onClick={() => setOnlyErrors((v) => !v)}
+            >
+              <span>仅看建表/Schema 报错</span>
+              <b>{fmtNum(data?.errorCount ?? 0)}</b>
+            </button>
+          </div>
+          <div className="logs-filter-right">
+            <span style={{ fontSize: 12, color: '#6b647d' }}>
+              已建 Schema {fmtNum(schemas.length)} 个 · 变更日志 {fmtNum(data?.total ?? 0)} 条
+            </span>
+            <button type="button" className="dash-action-btn" onClick={() => void schemaQ.refetch()} disabled={schemaQ.isFetching}>
+              <Icon name="refresh" className={schemaQ.isFetching ? 'spinning' : ''} />
+              <span>刷新</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="dash-panel">
+        <header className="dash-panel-head compact">
+          <div>
+            <h3>Schema / DDL 执行与变更日志（create schema / create table / alter table / drop）</h3>
+            <p>完整记录每次启用云服务或任务提交后执行的 PostgreSQL DDL 语句与失败堆栈</p>
+          </div>
+        </header>
+        {schemaQ.isLoading ? (
+          <LoadingState label="正在读取 Schema DDL 执行日志…" />
+        ) : schemaQ.error ? (
+          <ErrorState message={errorMessage(schemaQ.error)} onRetry={() => void schemaQ.refetch()} />
+        ) : items.length === 0 ? (
+          <EmptyState title="暂无 Schema 创建/变更日志" desc="当用户启用云服务或任务同步 cloud/schema.sql 时，执行的 DDL 会实时记录于此。" />
+        ) : (
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">应用 / 作者</th>
+                  <th scope="col">动作</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">耗时</th>
+                  <th scope="col">摘要</th>
+                  <th scope="col">DDL / 堆栈</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <Fragment key={item.id}>
+                    <tr>
+                      <td className="dash-nowrap">{fmtDateTime(item.createdAt)}</td>
+                      <td>
+                        <b>{item.appName || item.appId || '—'}</b>
+                        <div style={{ fontSize: 11, color: '#7c7491' }}>{item.ownerName || item.workspaceId || '—'}</div>
+                      </td>
+                      <td><span className="dash-tag">{item.action}</span></td>
+                      <td><span className={`logs-status ${item.ok ? 'ok' : 'err'}`}>{item.ok ? '成功' : '失败'}</span></td>
+                      <td>{item.durationMs != null ? `${item.durationMs} ms` : '—'}</td>
+                      <td style={{ maxWidth: 360 }}>{item.summary}</td>
+                      <td>
+                        {item.detail ? (
+                          <button type="button" className="dash-link" onClick={() => setOpenId(openId === item.id ? null : item.id)}>
+                            {openId === item.id ? '收起 SQL' : '查看执行 DDL'}
+                          </button>
+                        ) : (
+                          <span className="dash-muted">无</span>
+                        )}
+                      </td>
+                    </tr>
+                    {openId === item.id && item.detail ? (
+                      <tr>
+                        <td colSpan={7}>
+                          <pre className="logs-term-inline" style={{ margin: 0 }}>{item.detail}</pre>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="dash-panel">
+        <header className="dash-panel-head compact">
+          <div>
+            <h3>当前库内应用 Schema 注册清单（app_cloud）</h3>
+            <p>实时反映各应用独立的 PostgreSQL Schema、启用状态与当前已建表名</p>
+          </div>
+        </header>
+        {schemas.length === 0 ? (
+          <p className="dash-empty">当前筛选下暂无已注册的云数据库 Schema</p>
+        ) : (
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">Schema 名称</th>
+                  <th scope="col">应用 / 作者</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">表数量</th>
+                  <th scope="col">已建表清单</th>
+                  <th scope="col">最近更新时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schemas.map((s) => (
+                  <tr key={s.appId}>
+                    <td className="logs-mono"><b>{s.schemaName}</b></td>
+                    <td>
+                      <b>{s.appName}</b>
+                      <div style={{ fontSize: 11, color: '#7c7491' }}>{s.ownerName || s.workspaceId || s.appId}</div>
+                    </td>
+                    <td><span className={`logs-status ${s.status === 'on' ? 'ok' : 'muted'}`}>{s.status === 'on' ? '已启用' : '已关闭'}</span></td>
+                    <td>{fmtNum(s.tableCount)}</td>
+                    <td className="logs-mono" style={{ fontSize: 11 }}>{(s.tableNames ?? []).join(', ') || '—'}</td>
+                    <td className="dash-nowrap">{fmtDateTime(s.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 8. 模型网关与全平台异常追踪视图
+// ==========================================================================
+
+const CATEGORY_LABELS: Record<string, string> = {
+  ALL: '全部链路事件',
+  llm_gateway: '模型网关与问答 (llm_gateway)',
+  api_error: '接口异常与堆栈 (api_error)',
+  cloud_schema: '云库 Schema (cloud_schema)',
+  sandbox: '沙箱与调度异常 (sandbox)',
+  lifecycle: '应用发布与生命周期 (lifecycle)',
+};
+
+function PlatformEventsView() {
+  const navigate = useNavigate();
+  const [range, setRange] = useState<OpsLogRange>('7d');
+  const [category, setCategory] = useState<string>('ALL');
+  const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
+  const [q, setQ] = useState<string>('');
+  const [openId, setOpenId] = useState<number | null>(null);
+  const debouncedQ = useDebounced(q.trim(), 260);
+
+  const evQ = useQuery({
+    queryKey: ['ops-platform-events', range, category, onlyErrors, debouncedQ],
+    queryFn: () =>
+      api.opsEvents({
+        range,
+        category,
+        ok: onlyErrors ? false : undefined,
+        q: debouncedQ || undefined,
+        limit: 60,
+      }),
+    placeholderData: keepPreviousData,
+  });
+
+  const data = evQ.data;
+  const items = data?.items ?? [];
+
+  return (
+    <>
+      <div className="logs-filter-bar">
+        <div className="logs-filter-row">
+          <div className="logs-filter-left">
+            <label className="logs-search-box">
+              <Icon name="search" />
+              <input
+                placeholder="搜接口路径 / 错误码 / 模型 / taskId / 异常堆栈…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              {q ? (
+                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </label>
+            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+              {RANGES.map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
+              onClick={() => setOnlyErrors((v) => !v)}
+            >
+              <span>仅看失败与异常</span>
+              <b>{fmtNum(data?.errorCount ?? 0)}</b>
+            </button>
+          </div>
+          <div className="logs-filter-right">
+            <span style={{ fontSize: 12, color: '#6b647d' }}>共 {fmtNum(data?.total ?? 0)} 条</span>
+            <button type="button" className="dash-action-btn" onClick={() => void evQ.refetch()} disabled={evQ.isFetching}>
+              <Icon name="refresh" className={evQ.isFetching ? 'spinning' : ''} />
+              <span>刷新</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="logs-chip-row">
+          {Object.entries(CATEGORY_LABELS).map(([k, label]) => {
+            const stat = data?.byCategory?.find((c) => c.category === k);
+            const cnt = k === 'ALL' ? data?.total ?? 0 : stat?.count ?? 0;
+            return (
+              <button
+                key={k}
+                type="button"
+                className={`logs-chip ${category === k ? 'active' : ''}`}
+                onClick={() => setCategory(k)}
+              >
+                <span>{label}</span>
+                <b>{fmtNum(cnt)}</b>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="dash-panel">
+        {evQ.isLoading ? (
+          <LoadingState label="正在读取全链路网关与异常日志…" />
+        ) : evQ.error ? (
+          <ErrorState message={errorMessage(evQ.error)} onRetry={() => void evQ.refetch()} />
+        ) : items.length === 0 ? (
+          <EmptyState title="暂无匹配的网关或异常事件" desc="尝试切换事件类别或时间范围。" />
+        ) : (
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">类别 / 动作</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">耗时</th>
+                  <th scope="col">关联任务 / 应用</th>
+                  <th scope="col">摘要</th>
+                  <th scope="col">详情</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => (
+                  <Fragment key={item.id}>
+                    <tr>
+                      <td className="dash-nowrap">{fmtDateTime(item.createdAt)}</td>
+                      <td>
+                        <span className="dash-tag">{item.category}</span>{' '}
+                        <span className="logs-mono">{item.action}</span>
+                      </td>
+                      <td>
+                        <span className={`logs-status ${item.ok ? 'ok' : item.level === 'WARN' ? 'muted' : 'err'}`}>
+                          {item.statusCode ?? (item.ok ? 'OK' : item.level)}
+                        </span>
+                      </td>
+                      <td>{item.durationMs != null ? `${item.durationMs} ms` : '—'}</td>
+                      <td>
+                        {item.taskId ? (
+                          <button type="button" className="dash-link logs-mono" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(item.taskId!))}>
+                            {item.taskId}
+                          </button>
+                        ) : item.appName ? (
+                          <span>{item.appName}</span>
+                        ) : (
+                          <span className="dash-muted">{item.workspaceId || '—'}</span>
+                        )}
+                      </td>
+                      <td style={{ maxWidth: 380, wordBreak: 'break-word' }}>{item.summary}</td>
+                      <td>
+                        {item.detail ? (
+                          <button type="button" className="dash-link" onClick={() => setOpenId(openId === item.id ? null : item.id)}>
+                            {openId === item.id ? '收起' : '堆栈/报文'}
+                          </button>
+                        ) : (
+                          <span className="dash-muted">无</span>
+                        )}
+                      </td>
+                    </tr>
+                    {openId === item.id && item.detail ? (
+                      <tr>
+                        <td colSpan={7}>
+                          <pre className="logs-term-inline" style={{ margin: 0 }}>{item.detail}</pre>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ==========================================================================
+// 9. 全链路执行阶段耗时瀑布图（Trace Waterfall）
+// ==========================================================================
+
+function TraceWaterfallBar({
+  task,
+  events,
+  sandbox,
+  onJumpSandboxes,
+  onJumpTab,
+}: {
+  task: OpsTaskSummary;
+  events: OpsTaskEventRow[];
+  sandbox: SandboxItem | null;
+  onJumpSandboxes?: () => void;
+  onJumpTab: (tab: DetailTab) => void;
+}) {
+  const createdMs = new Date(task.createdAt).getTime();
+  const startedMs = task.startedAt ? new Date(task.startedAt).getTime() : createdMs;
+  const finishedMs = task.finishedAt ? new Date(task.finishedAt).getTime() : Date.now();
+  const queueWaitMs = Math.max(0, startedMs - createdMs);
+  const runMs = Math.max(0, finishedMs - startedMs);
+  const startupMs = Math.max(0, sandbox?.startupMs ?? 0);
+  const effectiveStartupMs = Math.min(runMs, startupMs);
+  const workMs = Math.max(0, runMs - effectiveStartupMs);
+  const totalMs = Math.max(1, queueWaitMs + runMs);
+
+  const toolCalls = events.filter((e) => e.type === 'tool');
+  const toolErrs = toolCalls.filter((e) => e.payload?.ok === false);
+  const verifyEvents = events.filter((e) => e.type === 'verify');
+  const verifyBad = verifyEvents.filter((e) => isEventError(e)).length;
+
+  const queuePct = Math.round((queueWaitMs / totalMs) * 100);
+  const bootPct = Math.round((effectiveStartupMs / totalMs) * 100);
+  const workPct = Math.max(1, 100 - queuePct - bootPct);
+
+  return (
+    <div className="logs-waterfall-card">
+      <div className="logs-wf-top">
+        <div className="logs-wf-title">
+          <b>全链路 Trace 阶段瀑布图</b>
+          <span>
+            排队 {fmtDurationMs(queueWaitMs)} → 沙箱启动 {fmtDurationMs(startupMs)} → Agent/工具执行 {fmtDurationMs(workMs)}
+          </span>
+        </div>
+        <div className="logs-wf-badges">
+          <button type="button" className="logs-wf-pill" onClick={() => onJumpTab('events')}>
+            工具 <b>{toolCalls.length}</b>
+            {toolErrs.length > 0 ? <em className="err">错 {toolErrs.length}</em> : null}
+          </button>
+          <button type="button" className="logs-wf-pill" onClick={() => onJumpTab('events')}>
+            质检门禁 <b>{verifyEvents.length}</b>
+            {verifyBad > 0 ? <em className="err">挂 {verifyBad}</em> : null}
+          </button>
+          {sandbox ? (
+            <button
+              type="button"
+              className="logs-wf-pill"
+              onClick={() => (onJumpSandboxes ? onJumpSandboxes() : onJumpTab('resources'))}
+              title={`归属副本 ${sandbox.ownerInstance} · 点击查看沙箱台账`}
+            >
+              沙箱 <code>{sandbox.sandboxId}</code> · {sandbox.provider}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="logs-wf-track" role="img" aria-label={`排队 ${queuePct}%，启动 ${bootPct}%，执行 ${workPct}%`}>
+        {queuePct > 0 ? (
+          <div className="logs-wf-seg queue" style={{ width: `${Math.max(2, queuePct)}%` }} title={`排队等待 ${fmtDurationMs(queueWaitMs)}`} />
+        ) : null}
+        {bootPct > 0 ? (
+          <div className="logs-wf-seg boot" style={{ width: `${Math.max(2, bootPct)}%` }} title={`沙箱冷启动 ${fmtDurationMs(startupMs)}`} />
+        ) : null}
+        <div className={`logs-wf-seg work ${task.status === 'FAILED' ? 'err' : ''}`} style={{ width: `${workPct}%` }} title={`编码与校验 ${fmtDurationMs(workMs)}`} />
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 10. 沙箱全生命周期日志视图
+// ==========================================================================
+
+function SandboxLogsView() {
+  const navigate = useNavigate();
+  const [range, setRange] = useState<OpsLogRange>('7d');
+  const [state, setState] = useState<string>('ALL');
+  const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
+  const [q, setQ] = useState<string>('');
+  const debouncedQ = useDebounced(q.trim(), 260);
+
+  const sbxQ = useQuery({
+    queryKey: ['ops-sbx-logs', range, state, onlyErrors, debouncedQ],
+    queryFn: () =>
+      api.opsSandboxes({
+        range,
+        state: state === 'ALL' ? undefined : state,
+        onlyErrors: onlyErrors ? true : undefined,
+        q: debouncedQ || undefined,
+        limit: 60,
+      }),
+    placeholderData: keepPreviousData,
+  });
+
+  const data = sbxQ.data;
+  const items = data?.items ?? [];
+  const events = data?.events ?? [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="logs-sbx-summary">
+        <div><span>沙箱总创建数</span><b>{fmtNum(data?.summary.total ?? 0)}</b></div>
+        <div><span>当前活跃</span><b>{fmtNum(data?.summary.active ?? 0)}</b></div>
+        <div><span>启动失败</span><b className={(data?.summary.failed ?? 0) > 0 ? 'dash-err' : ''}>{fmtNum(data?.summary.failed ?? 0)}</b></div>
+        <div><span>已销毁回收</span><b>{fmtNum(data?.summary.destroyed ?? 0)}</b></div>
+        <div><span>冷启动均耗时</span><b>{fmtDurationMs(data?.summary.avgStartupMs)}</b></div>
+        <div><span>冷启动 P95</span><b>{fmtDurationMs(data?.summary.p95StartupMs)}</b></div>
+      </div>
+
+      <div className="logs-filter-bar">
+        <div className="logs-filter-row">
+          <div className="logs-filter-left">
+            <label className="logs-search-box">
+              <Icon name="search" />
+              <input
+                placeholder="搜 sandboxId / taskId / PID / Pod / 副本 / 销毁原因…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              {q ? (
+                <button type="button" className="logs-search-clear" onClick={() => setQ('')}>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </label>
+            <select className="logs-select" value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="ALL">全部状态</option>
+              <option value="active">活跃 (active)</option>
+              <option value="creating">创建中 (creating)</option>
+              <option value="destroyed">已销毁 (destroyed)</option>
+              <option value="failed">启动失败 (failed)</option>
+            </select>
+            <select className="logs-select" value={range} onChange={(e) => setRange(e.target.value as OpsLogRange)}>
+              {RANGES.map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
+              onClick={() => setOnlyErrors((v) => !v)}
+            >
+              <span>仅看失败与强杀</span>
+            </button>
+          </div>
+          <div className="logs-filter-right">
+            <span style={{ fontSize: 12, color: '#6b647d' }}>共 {fmtNum(data?.total ?? 0)} 条</span>
+            <button type="button" className="dash-action-btn" onClick={() => void sbxQ.refetch()} disabled={sbxQ.isFetching}>
+              <Icon name="refresh" className={sbxQ.isFetching ? 'spinning' : ''} />
+              <span>刷新</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="dash-panel">
+        <header className="dash-panel-head compact">
+          <div>
+            <h3>沙箱全生命周期台账（creating → active → destroyed/failed）</h3>
+            <p>完整记录每个沙箱的冷启动耗时、归属副本、进程/Pod 引用、峰值资源采样及销毁操刀人/原因</p>
+          </div>
+        </header>
+        {sbxQ.isLoading ? (
+          <LoadingState label="正在读取沙箱生命周期日志…" />
+        ) : sbxQ.error ? (
+          <ErrorState message={errorMessage(sbxQ.error)} onRetry={() => void sbxQ.refetch()} />
+        ) : items.length === 0 ? (
+          <EmptyState title="暂无沙箱生命周期记录" desc="运行任意 AI 开发任务后，沙箱创建与销毁轨迹会自动归档于此。" />
+        ) : (
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">创建时间</th>
+                  <th scope="col">沙箱 ID / 引擎</th>
+                  <th scope="col">关联任务 / 应用</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">冷启动 / 存活</th>
+                  <th scope="col">归属副本 / 作者</th>
+                  <th scope="col">销毁原因 / 操刀人</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((sb) => (
+                  <tr key={sb.sandboxId}>
+                    <td className="dash-nowrap">{fmtDateTime(sb.createdAt)}</td>
+                    <td>
+                      <div className="logs-mono"><b>{sb.sandboxId}</b></div>
+                      <div style={{ fontSize: 11, color: '#7c7491' }}>
+                        {sb.provider} · {sb.externalRef || '—'}
+                      </div>
+                    </td>
+                    <td>
+                      {sb.taskId ? (
+                        <button type="button" className="dash-link logs-mono" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(sb.taskId!))}>
+                          {sb.taskId}
+                        </button>
+                      ) : '—'}
+                      <div style={{ fontSize: 11, color: '#7c7491' }}>{sb.appName || sb.appId || '—'}</div>
+                    </td>
+                    <td>
+                      <span className={`logs-status ${sb.state === 'failed' ? 'err' : sb.state === 'active' || sb.state === 'creating' ? 'run' : 'ok'}`}>
+                        {sb.state}
+                      </span>
+                    </td>
+                    <td className="dash-nowrap">
+                      <div>启 {sb.startupMs != null ? `${sb.startupMs}ms` : '—'}</div>
+                      <small style={{ color: '#7c7491' }}>共 {sb.durationSeconds != null ? `${sb.durationSeconds}s` : '—'}</small>
+                    </td>
+                    <td>
+                      <div className="logs-mono" style={{ fontSize: 11 }}>{sb.ownerInstance}</div>
+                      <div style={{ fontSize: 11, color: '#7c7491' }}>{sb.ownerName || sb.workspaceId || '—'}</div>
+                    </td>
+                    <td>
+                      <div>{sb.destroyReason || '—'}</div>
+                      {sb.destroyedBy ? <small style={{ color: '#7c7491' }}>操刀人: {sb.destroyedBy}</small> : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {events.length > 0 ? (
+        <div className="dash-panel">
+          <header className="dash-panel-head compact">
+            <div>
+              <h3>沙箱控制面事件流水（就绪 / 销毁 / 对账清理 / 启动异常 · {events.length} 条）</h3>
+              <p>来自 platform_event_log (category = sandbox)</p>
+            </div>
+          </header>
+          <div className="dash-table-wrap">
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">动作</th>
+                  <th scope="col">级别</th>
+                  <th scope="col">任务 ID</th>
+                  <th scope="col">摘要</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((ev) => (
+                  <tr key={ev.id}>
+                    <td className="dash-nowrap">{fmtDateTime(ev.createdAt)}</td>
+                    <td className="logs-mono">{ev.action}</td>
+                    <td><span className={`logs-status ${ev.ok ? 'ok' : ev.level === 'WARN' ? 'muted' : 'err'}`}>{ev.level}</span></td>
+                    <td>
+                      {ev.taskId ? (
+                        <button type="button" className="dash-link logs-mono" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(ev.taskId!))}>
+                          {ev.taskId}
+                        </button>
+                      ) : '—'}
+                    </td>
+                    <td>{ev.summary}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -101,6 +101,9 @@ class AdminGovernanceTest extends IntegrationTest {
                 """).params(queuedId, wsId, app2Id).update();
         JsonNode cancelled = c.ok(c.send("POST", "/api/admin/tasks/" + queuedId + "/cancel", Map.of(), ADMIN_HEADERS));
         assertThat(cancelled.path("status").asText()).isIn("CANCELLED", "CANCELLING");
+        if (!"CANCELLED".equals(cancelled.path("status").asText())) {
+            c.waitTask(queuedId);
+        }
 
         jdbc.sql("update task set status = 'FAILED', error_code = 'TEST_ERR', error_message = '模拟失败', finished_at = now() where id = ?")
                 .param(genTaskId).update();
@@ -184,5 +187,71 @@ class AdminGovernanceTest extends IntegrationTest {
         assertThatThrownBy(() -> anonGuard.requireAdminActor((SsoUser) null, "ws_random_guest"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("管理员权限");
+    }
+
+    @Test
+    void clusterTopologyAndSandboxReconciliationAndDestroyGuard() throws Exception {
+        Client guest = client();
+        Client c = guest;
+        JsonNode app = guest.createApp("集群沙箱演练应用");
+        String appId = app.path("id").asText();
+        String wsId = guest.ok(guest.get("/api/workspace")).path("id").asText();
+
+        // 非管理员访问集群拓扑 / 沙箱运维接口一律 403
+        assertThat(guest.get("/api/admin/cluster").status()).isEqualTo(403);
+        assertThat(guest.get("/api/admin/sandboxes").status()).isEqualTo(403);
+        assertThat(guest.post("/api/admin/sandboxes/reap", Map.of()).status()).isEqualTo(403);
+        assertThat(guest.send("DELETE", "/api/admin/sandboxes/sbx_any", null, Map.of()).status()).isEqualTo(403);
+
+        // 构造一个已失联副本下的“账面幽灵沙箱”，以及一个关联进行中任务的活跃沙箱
+        jdbc.sql("""
+                insert into cluster_node (instance_id, role, hostname, port, sandbox_provider, worker_concurrency, status, heartbeat_at)
+                values ('dead-replica-1', 'api', 'node-dead', 8080, 'local', 4, 'online', now() - interval '10 minutes')
+                on conflict (instance_id) do update set heartbeat_at = excluded.heartbeat_at
+                """).update();
+
+        String activeTaskId = "task_sbx_guard_" + System.nanoTime();
+        try {
+            jdbc.sql("""
+                    insert into task (id, app_id, workspace_id, type, status, phase_label, progress, lease_owner, lease_until)
+                    values (?, ?, ?, 'generate', 'RUNNING', '正在编写代码', 40, 'worker-live', now() + interval '5 minutes')
+                    """).params(activeTaskId, appId, wsId).update();
+
+            jdbc.sql("""
+                    insert into sandbox_instance (sandbox_id, provider, task_id, app_id, workspace_id, owner_instance, state, external_ref, startup_ms)
+                    values ('sbx_ghost_1', 'local', null, ?, ?, 'dead-replica-1', 'active', 'pid-dead-1', 350),
+                           ('sbx_running_1', 'local', ?, ?, ?, 'live-replica-1', 'active', 'pid-live-1', 510)
+                    on conflict (sandbox_id) do update set state = excluded.state, task_id = excluded.task_id
+                    """).params(appId, wsId, activeTaskId, appId, wsId).update();
+
+            JsonNode cluster = c.ok(c.send("GET", "/api/admin/cluster", null, ADMIN_HEADERS));
+            assertThat(cluster.path("nodes").size()).isGreaterThanOrEqualTo(1);
+            assertThat(cluster.path("nodes").toString()).contains("dead-replica-1");
+            assertThat(cluster.path("queue").path("running").asLong()).isGreaterThanOrEqualTo(1);
+            assertThat(cluster.path("sandboxes").path("summary").path("ghostCount").asLong()).isGreaterThanOrEqualTo(1);
+
+            // 1. 进行中任务的沙箱，未传 force=true -> 409 冲突保护
+            var conflict = c.send("DELETE", "/api/admin/sandboxes/sbx_running_1", null, ADMIN_HEADERS);
+            assertThat(conflict.status()).isEqualTo(409);
+
+            // 2. force=true 强行销毁 -> 200 且记录审计、取消关联任务
+            JsonNode forced = c.ok(c.send("DELETE", "/api/admin/sandboxes/sbx_running_1?force=true&reason=qa-force-kill", null, ADMIN_HEADERS));
+            assertThat(forced.path("status").asText()).isEqualTo("destroyed");
+            assertThat(forced.path("cancelledTask").asBoolean()).isTrue();
+            assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = 'sbx_running_1'").query(String.class).single())
+                    .isEqualTo("destroyed");
+
+            // 3. 一键对账清理幽灵账本行
+            JsonNode reaped = c.ok(c.send("POST", "/api/admin/sandboxes/reap", Map.of(), ADMIN_HEADERS));
+            assertThat(reaped.path("ghostsSettled").asInt()).isGreaterThanOrEqualTo(1);
+            assertThat(jdbc.sql("select state from sandbox_instance where sandbox_id = 'sbx_ghost_1'").query(String.class).single())
+                    .isEqualTo("destroyed");
+
+            JsonNode auditOverview = c.ok(c.send("GET", "/api/admin/overview", null, ADMIN_HEADERS));
+            assertThat(auditOverview.path("auditLogs").toString()).contains("SANDBOX_DESTROY", "SANDBOX_REAP");
+        } finally {
+            jdbc.sql("update task set status = 'CANCELLED', finished_at = now(), lease_owner = null, lease_until = null where id = ?")
+                    .param(activeTaskId).update();
+        }
     }
 }

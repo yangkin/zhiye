@@ -35,6 +35,8 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   TEMPLATE_DELETE: '下架社区作品',
   FEEDBACK_TRIAGE: '分诊用户反馈',
   RATE_LIMIT_CLEAR: '清理限流窗口',
+  SANDBOX_DESTROY: '销毁沙箱实例',
+  SANDBOX_REAP: '幽灵沙箱对账清理',
 };
 
 export interface QuotaModalTarget {

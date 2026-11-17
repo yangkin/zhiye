@@ -31,6 +31,8 @@ public class VersionController {
     private final GitService git;
     private final PageExporter pages;
     private final CurrentPrincipal principal;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
 
     public VersionController(VersionService versions, VersionRepository repo, GitService git, PageExporter pages, CurrentPrincipal principal) {
         this.versions = versions;
@@ -59,7 +61,17 @@ public class VersionController {
     }
 
     @PostMapping("/versions/{id}/restore")
-    public Map<String, Object> restore(@PathVariable String id) throws Exception { return versions.restore(ws(), id); }
+    public Map<String, Object> restore(@PathVariable String id) throws Exception {
+        String workspaceId = ws();
+        Map<String, Object> res = versions.restore(workspaceId, id);
+        if (platformLogs != null) {
+            String appId = res.get("appId") instanceof String s ? s : null;
+            platformLogs.info("lifecycle", "VERSION_RESTORE", workspaceId, null, appId, null,
+                    "从历史版本 " + id + " 恢复为新版本 V" + res.getOrDefault("number", ""), null,
+                    Map.of("restoredFromId", id, "newVersionId", String.valueOf(res.getOrDefault("id", ""))));
+        }
+        return res;
+    }
 
     /** 查看改动：与上一个版本（parent）比较；第一个版本与空树比较（base 为 null） */
     @GetMapping("/apps/{appId}/versions/{versionId}/changes")

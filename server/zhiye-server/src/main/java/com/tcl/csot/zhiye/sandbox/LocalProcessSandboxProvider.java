@@ -139,8 +139,9 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
             synchronized (logWriter) { logWriter.close(); }
             throw new IllegalStateException("runner 没有报告监听端口（见任务日志）");
         }
+        String descCmd = props.sandbox().seatbelt() ? "sandbox-exec + node runner" : "node runner";
         HttpRunnerSession session = new HttpRunnerSession("http://127.0.0.1:" + port, Map.of(), controlToken,
-                new ProcessBackend(p), spec.onEvent(), logWriter);
+                new ProcessBackend(p, descCmd), spec.onEvent(), logWriter);
         try {
             session.waitReady(Duration.ofSeconds(30));
         } catch (Exception e) {
@@ -183,8 +184,17 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
     /** 本机 runner 进程的生命周期。 */
     private static final class ProcessBackend implements HttpRunnerBackend {
         private final Process process;
+        private final String imageOrCmd;
 
-        ProcessBackend(Process process) { this.process = process; }
+        ProcessBackend(Process process, String imageOrCmd) {
+            this.process = process;
+            this.imageOrCmd = imageOrCmd;
+        }
+
+        @Override
+        public RunnerSession.SandboxDescriptor descriptor() {
+            return new RunnerSession.SandboxDescriptor("local", "pid-" + process.pid(), process.pid(), imageOrCmd, null, null);
+        }
 
         @Override
         public boolean alive() { return process.isAlive(); }

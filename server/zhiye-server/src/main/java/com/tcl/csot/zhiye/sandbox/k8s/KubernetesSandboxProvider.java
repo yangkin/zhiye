@@ -186,7 +186,10 @@ public class KubernetesSandboxProvider implements SandboxProvider {
             PodOps ops = new PodOps(res, name);
             PathMapper mapper = new PathMapper(spec.workspace().toAbsolutePath().normalize().toString(),
                     spec.agentDir().toAbsolutePath().normalize().toString(), SandboxPodFactory.POD_WORKSPACE, SandboxPodFactory.POD_AGENT);
-            return new K8sRunnerSession(spec.taskId(), new FabricExec(watch), ops, spec.onEvent(), logWriter, mapper, monitorInterval);
+            var resCfg = cfg.resources();
+            return new K8sRunnerSession(spec.taskId(), new FabricExec(watch), ops, spec.onEvent(), logWriter, mapper, monitorInterval,
+                    new RunnerSession.SandboxDescriptor("k8s", cfg.namespace() + "/" + name, null, cfg.image(),
+                            resCfg == null ? null : resCfg.cpuLimit(), resCfg == null ? null : resCfg.memoryLimit()));
         } catch (Exception e) {
             logWriter.println("[java] " + e.getMessage());
             logWriter.close();

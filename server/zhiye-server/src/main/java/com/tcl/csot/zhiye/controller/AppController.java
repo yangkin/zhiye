@@ -22,6 +22,8 @@ public class AppController {
     private final StatsService stats;
     private final com.tcl.csot.zhiye.service.workspace.QuotaService quota;
     private final com.tcl.csot.zhiye.config.ZhiyeProperties props;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
 
     public AppController(AppService apps, CurrentPrincipal principal, StatsService stats,
                          com.tcl.csot.zhiye.service.workspace.QuotaService quota, com.tcl.csot.zhiye.config.ZhiyeProperties props) {
@@ -75,7 +77,11 @@ public class AppController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable String id) {
-        apps.delete(ws(), id);
+        String workspaceId = ws();
+        apps.delete(workspaceId, id);
+        if (platformLogs != null) {
+            platformLogs.info("lifecycle", "APP_DELETE", workspaceId, null, id, null, "删除应用（移入回收站）", null, Map.of());
+        }
         return ResponseEntity.noContent().build();
     }
 
@@ -129,13 +135,24 @@ public class AppController {
 
     @PostMapping("/{id}/publish")
     public Map<String, Object> publish(@PathVariable String id, @RequestBody(required = false) JsonNode body) {
+        String workspaceId = ws();
         String v = body == null ? null : body.path("versionId").asText(null);
-        return apps.publish(ws(), id, v);
+        Map<String, Object> res = apps.publish(workspaceId, id, v);
+        if (platformLogs != null) {
+            platformLogs.info("lifecycle", "APP_PUBLISH", workspaceId, null, id, null,
+                    "发布应用版本 " + res.getOrDefault("versionId", "") + " → " + res.getOrDefault("siteUrl", ""),
+                    null, res);
+        }
+        return res;
     }
 
     @PostMapping("/{id}/unpublish")
     public ResponseEntity<Void> unpublish(@PathVariable String id) {
-        apps.unpublish(ws(), id);
+        String workspaceId = ws();
+        apps.unpublish(workspaceId, id);
+        if (platformLogs != null) {
+            platformLogs.info("lifecycle", "APP_UNPUBLISH", workspaceId, null, id, null, "取消发布应用站点", null, Map.of());
+        }
         return ResponseEntity.noContent().build();
     }
 

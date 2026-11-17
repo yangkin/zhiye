@@ -964,16 +964,23 @@ export interface DashboardData {
   };
   system: {
     runtime: {
+      scope?: string;
+      instances?: string[];
       tasks?: {
         total: number;
         succeeded: number;
         failed: number;
         cancelled: number;
-        byType?: Record<string, { count: number; errors: number; avgMs: number; maxMs: number }>;
+        avgMs?: number;
+        p95Ms?: number;
+        maxMs?: number;
+        byType?: Record<string, { count: number; errors: number; avgMs: number; p95Ms?: number; maxMs: number }>;
         failureCodes?: Record<string, number>;
       };
-      sandbox?: { count: number; errors: number; avgMs: number; maxMs: number };
-      llm?: { count: number; errors: number; avgMs: number; maxMs: number; retries: number; quotaErrors: number; quotaErrorRate: number };
+      sandbox?: { count: number; errors: number; avgMs: number; p95Ms?: number; maxMs: number };
+      llm?: { count: number; errors: number; avgMs: number; p95Ms?: number; maxMs: number; retries: number; quotaErrors: number; quotaErrorRate: number };
+      trend?: { hour: string; tasks: number; taskFailures: number; llmCalls: number; quotaErrors: number }[];
+      alerts?: { level?: string; code: string; message: string; value: number; threshold: number }[];
     };
     rateLimits: {
       hitsLast10Min: number;
@@ -990,7 +997,153 @@ export interface DashboardData {
       totalVersions: number;
       totalPv: number;
     };
+    cluster?: {
+      totalNodes?: number;
+      onlineNodes?: number;
+      workerSlotsTotal?: number;
+      activeSandboxes?: number;
+      queuedTasks?: number;
+      expiredLeases?: number;
+    };
   };
+}
+
+export interface ClusterNodeInfo {
+  instanceId: string;
+  isCurrent?: boolean;
+  role: string;
+  hostname: string;
+  port: number;
+  sandboxProvider: string;
+  workerOwner: string;
+  workerConcurrency: number;
+  activeTasks: number;
+  activeSandboxes: number;
+  cpuPercent: number | null;
+  heapUsedBytes: number;
+  heapMaxBytes: number;
+  heapPercent: number;
+  sysMemUsedBytes: number;
+  sysMemTotalBytes: number;
+  status: 'online' | 'degraded' | 'offline' | string;
+  heartbeatAgeSeconds: number;
+  startedAt: string | null;
+  heartbeatAt: string | null;
+}
+
+export interface ClusterQueueStats {
+  queued: number;
+  preparing: number;
+  running: number;
+  verifying: number;
+  committing: number;
+  cancelling: number;
+  activeTotal: number;
+  runningTotal: number;
+  expiredLeases: number;
+  oldestQueuedSeconds: number;
+}
+
+export interface SandboxItem {
+  sandboxId: string;
+  provider: string;
+  kind?: 'session' | 'unregistered' | 'ledger-ghost' | 'destroyed' | 'failed' | string;
+  state: string;
+  taskId: string | null;
+  taskStatus?: string | null;
+  taskProgress?: number | null;
+  taskPhase?: string | null;
+  appId: string | null;
+  appName?: string | null;
+  workspaceId: string | null;
+  userId?: string | null;
+  ownerName?: string | null;
+  ownerLoginName?: string | null;
+  ownerInstance: string;
+  ownerReplicaStatus?: string;
+  onThisReplica?: boolean;
+  taskRunning?: boolean;
+  workerOwner?: string;
+  externalRef: string;
+  imageOrCmd: string;
+  cpuLimit?: string | null;
+  memoryLimit?: string | null;
+  allowNet?: boolean;
+  pid?: number | null;
+  startupMs?: number | null;
+  cpuPercent?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryLimitBytes?: number | null;
+  memoryPercent?: number | null;
+  sampledAt?: string | null;
+  createdAt: string | null;
+  readyAt?: string | null;
+  lastActiveAt?: string | null;
+  destroyedAt?: string | null;
+  destroyedBy?: string | null;
+  destroyReason?: string | null;
+  ageSeconds?: number;
+  idleSeconds?: number;
+  durationSeconds?: number;
+  events?: OpsPlatformEvent[];
+}
+
+export interface SandboxInventorySummary {
+  total: number;
+  totalRows?: number;
+  onThisReplica: number;
+  runningTasks: number;
+  byKind: Record<string, number>;
+  byProvider: Record<string, number>;
+  ghostCount: number;
+  unregisteredCount: number;
+  memoryUsedBytesTotal: number;
+  memoryLimitBytesTotal: number;
+  cpuPercentAvg: number | null;
+  avgStartupMs: number;
+  controlPlaneAvailable: boolean;
+  controlPlaneMessage?: string;
+}
+
+export interface ClusterOverviewResponse {
+  generatedAt: string;
+  currentInstanceId: string;
+  sandboxProvider: string;
+  nodesSummary: {
+    total: number;
+    online: number;
+    degraded: number;
+    offline: number;
+    workerSlotsTotal: number;
+    workerSlotsUsed: number;
+  };
+  nodes: ClusterNodeInfo[];
+  queue: ClusterQueueStats;
+  sandboxes: {
+    ok: boolean;
+    replicaId: string;
+    provider: string;
+    summary: SandboxInventorySummary;
+    items: SandboxItem[];
+  };
+  runtimeMetrics: DashboardData['system']['runtime'];
+}
+
+export interface OpsSandboxLogsResponse {
+  range: OpsLogRange;
+  summary: {
+    total: number;
+    active: number;
+    failed: number;
+    destroyed: number;
+    avgStartupMs: number;
+    p95StartupMs: number;
+  };
+  total: number;
+  items: SandboxItem[];
+  events: OpsPlatformEvent[];
+  limit: number;
+  offset: number;
 }
 
 // ---- 日志排查中心 ----
@@ -1085,6 +1238,7 @@ export interface OpsTaskEventRow {
 
 export interface OpsLogFileLine {
   no: number;
+  level?: 'ERROR' | 'WARN' | 'INFO' | string;
   text: string;
 }
 
@@ -1095,6 +1249,8 @@ export interface OpsLogFileView {
   updatedAt: string | null;
   totalLines: number;
   matchedLines: number;
+  errorLines?: number;
+  warnLines?: number;
   truncated: boolean;
   lines: OpsLogFileLine[];
 }
@@ -1150,6 +1306,53 @@ export interface OpsSourceCallItem {
   createdAt: string;
 }
 
+export interface OpsPlatformEvent {
+  id: number;
+  category: 'cloud_schema' | 'llm_gateway' | 'api_error' | 'sandbox' | 'lifecycle' | string;
+  level: 'INFO' | 'WARN' | 'ERROR' | string;
+  action: string;
+  workspaceId: string | null;
+  userId: string | null;
+  appId: string | null;
+  appName: string | null;
+  ownerName: string;
+  taskId: string | null;
+  ok: boolean;
+  statusCode: number | null;
+  durationMs: number | null;
+  summary: string;
+  detail: string | null;
+  meta: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface OpsPlatformEventsResponse {
+  range: OpsLogRange;
+  total: number;
+  errorCount: number;
+  byCategory: { category: string; count: number; errors: number }[];
+  items: OpsPlatformEvent[];
+  limit: number;
+  offset: number;
+}
+
+export interface OpsCloudSchemaRow {
+  appId: string;
+  appName: string;
+  workspaceId: string | null;
+  ownerName: string;
+  status: string;
+  schemaName: string;
+  tableCount: number;
+  tableNames: string[];
+  enabledAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface OpsSchemasResponse extends OpsPlatformEventsResponse {
+  schemas: OpsCloudSchemaRow[];
+}
+
 export interface OpsTaskDetailResponse {
   task: OpsTaskDetail;
   eventCounts: Record<string, number>;
@@ -1163,8 +1366,23 @@ export interface OpsTaskDetailResponse {
     draftApplied: boolean;
   } | null;
   runnerLog: OpsLogFileView;
+  sandboxes?: SandboxItem[];
   fnLogs: OpsFunctionLogItem[];
   sourceCalls: OpsSourceCallItem[];
+  platformEvents?: OpsPlatformEvent[];
+  cloudStatus?: {
+    appId: string;
+    status: string;
+    schemaName: string;
+    storagePrefix: string;
+    enabledAt: string | null;
+    updatedAt: string | null;
+  } | null;
+  cloudTables?: {
+    name: string;
+    columns: Record<string, string>;
+    policy: Record<string, unknown> | null;
+  }[];
 }
 
 export interface OpsTaskEventsDeltaResponse {
@@ -1194,7 +1412,18 @@ export interface OpsRuntimeResponse {
     instances?: string[];
     alerts?: { code: string; level?: string; message: string; value: number; threshold: number }[];
   };
+  clusterNodes?: ClusterNodeInfo[];
   file: OpsLogFileView;
+  rateLimitHits?: { bucket: string; createdAt: string }[];
+  auditLogs?: {
+    id: string;
+    actor: string;
+    action: string;
+    targetType: string;
+    targetId: string;
+    detail: Record<string, unknown>;
+    createdAt: string;
+  }[];
 }
 
 export type AdminFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'ignored';

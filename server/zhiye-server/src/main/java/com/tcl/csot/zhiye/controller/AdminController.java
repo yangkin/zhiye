@@ -2,9 +2,11 @@ package com.tcl.csot.zhiye.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.tcl.csot.zhiye.service.admin.AdminService;
+import com.tcl.csot.zhiye.service.ops.ClusterSandboxService;
 import com.tcl.csot.zhiye.util.CurrentPrincipal;
 import com.tcl.csot.zhiye.util.Json;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
@@ -25,6 +28,9 @@ import java.util.Map;
 public class AdminController {
     private final AdminService admin;
     private final CurrentPrincipal principal;
+
+    @Autowired(required = false)
+    private ClusterSandboxService clusterSandbox;
 
     public AdminController(AdminService admin, CurrentPrincipal principal) {
         this.admin = admin;
@@ -101,5 +107,47 @@ public class AdminController {
     public Map<String, Object> clearRateLimits(@RequestBody(required = false) JsonNode body, HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());
         return admin.clearRateLimits(body == null ? Json.obj() : body, actor);
+    }
+
+    @GetMapping("/cluster")
+    public Map<String, Object> cluster(@RequestParam(defaultValue = "true") boolean withUsage, HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return clusterSandbox == null ? Map.of() : clusterSandbox.clusterOverview(withUsage);
+    }
+
+    @GetMapping("/sandboxes")
+    public Map<String, Object> sandboxes(@RequestParam(required = false) String kind,
+                                         @RequestParam(required = false) String provider,
+                                         @RequestParam(required = false) String workspaceId,
+                                         @RequestParam(required = false) String q,
+                                         @RequestParam(defaultValue = "true") boolean withUsage,
+                                         HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return clusterSandbox == null ? Map.of("ok", true, "items", java.util.List.of(), "summary", Map.of())
+                : clusterSandbox.listSandboxes(kind, provider, workspaceId, q, withUsage);
+    }
+
+    @GetMapping("/sandboxes/{ref}")
+    public Map<String, Object> sandboxDetail(@PathVariable String ref, HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        if (clusterSandbox == null) return Map.of();
+        return clusterSandbox.getSandboxDetail(ref);
+    }
+
+    @DeleteMapping("/sandboxes/{ref}")
+    public Map<String, Object> destroySandbox(@PathVariable String ref,
+                                              @RequestParam(defaultValue = "false") boolean force,
+                                              @RequestParam(required = false) String reason,
+                                              HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        if (clusterSandbox == null) return Map.of("ok", false);
+        return clusterSandbox.destroySandbox(ref, force, actor, reason);
+    }
+
+    @PostMapping("/sandboxes/reap")
+    public Map<String, Object> reapSandboxes(HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        if (clusterSandbox == null) return Map.of("ok", false);
+        return clusterSandbox.reapOrphansAndGhosts(actor);
     }
 }

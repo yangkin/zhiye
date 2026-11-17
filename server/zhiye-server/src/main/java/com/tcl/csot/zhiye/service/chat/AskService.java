@@ -161,6 +161,9 @@ public class AskService {
         this.faults = faults;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+
     public interface Sink {
         void event(String name, Object data) throws Exception;
     }
@@ -445,6 +448,10 @@ public class AskService {
         try {
             route = router.forWorkspace(ws, com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO);
         } catch (ApiException e) {
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "ASK_ROUTE_FAILED", ws, null, hasApp ? appId : null, null,
+                        e.status().value(), null, "对话/问答模型路由失败：" + e.getMessage(), null, java.util.Map.of());
+            }
             try { emit(sink, "error", Json.obj().put("message", e.getMessage())); } catch (Exception ignored) { }
             return;
         }
@@ -533,6 +540,11 @@ public class AskService {
             }
         } catch (Exception e) {
             log.warn("问答失败：{}", e.toString());
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "ASK_STREAM_FAILED", ws, null, hasApp ? appId : null, null,
+                        null, null, "工作台/会话问答调用失败：" + e.getMessage(),
+                        com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e), java.util.Map.of());
+            }
             try { emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR)); } catch (Exception ignored) { }
         }
     }
@@ -778,6 +790,10 @@ public class AskService {
     private String upstreamError(int status, byte[] all) {
         String raw = new String(all, StandardCharsets.UTF_8);
         log.warn("问答：上游返回 {}：{}", status, raw.length() > 300 ? raw.substring(0, 300) : raw);
+        if (platformLogs != null) {
+            platformLogs.error("llm_gateway", "ASK_UPSTREAM_ERROR", null, null, null, null, status, null,
+                    "对话/问答上游模型报错 HTTP " + status, raw.length() > 4000 ? raw.substring(0, 4000) : raw, java.util.Map.of());
+        }
         return "PROVIDER_QUOTA".equals(com.tcl.csot.zhiye.client.KimiClient.codeFor(status, raw))
                 ? com.tcl.csot.zhiye.service.llm.QuotaText.exhausted(router.fivestar(), raw) : UPSTREAM_ERROR;
     }
@@ -818,6 +834,10 @@ public class AskService {
             }
         } catch (Exception e) {
             log.warn("问答失败：{}", e.toString());
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "ASK_RUN_FAILED", null, null, null, null, null, null,
+                        "会话问答请求异常：" + e.getMessage(), com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e), java.util.Map.of());
+            }
             try { emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR)); } catch (Exception ignored) { }
         }
     }

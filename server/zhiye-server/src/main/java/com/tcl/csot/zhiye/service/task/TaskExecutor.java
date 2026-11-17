@@ -77,6 +77,10 @@ public class TaskExecutor {
     private com.tcl.csot.zhiye.service.llm.LlmRouter router;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.ClusterSandboxService clusterSandbox;
 
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
@@ -136,6 +140,9 @@ public class TaskExecutor {
             flushText(ctx, true);
             endThinking(ctx, null);
             if (ctx.runner != null) ctx.runner.close();
+            if (clusterSandbox != null && ctx.sandboxId != null) {
+                clusterSandbox.markClosed(ctx.sandboxId, task, ctx.cancelRequested ? "cancelled" : "task_finished");
+            }
             tokens.revoke(task.id());
             signals.remove(task.id());
             MDCish.clear();
@@ -296,17 +303,17 @@ public class TaskExecutor {
             tasks.saveCheckpoint(new TaskRepository.Checkpoint(t.id(), ctx.workspace.toString(),
                     ctx.agentDir == null ? null : ctx.agentDir.toString(), ctx.sessionFile, ctx.draftApplied));
         } else cleanup(ctx);
+        taskService.afterTerminal(t, "FAILED", code, message);
         tasks.finish(t.id(), "FAILED", "失败", currentProgress(t.id()), code, message, null, null);
         recordTaskMetric(t, "FAILED", code);
-        taskService.afterTerminal(t, "FAILED", code, message);
         events.emit(t.id(), "status", Map.of("status", "FAILED", "phaseLabel", "失败", "progress", currentProgress(t.id())));
         events.emit(t.id(), "finished", taskService.finishedPayload("FAILED", null, code, message));
     }
 
     private void succeed(TaskContext ctx, String versionId, JsonNode result) {
         tasks.finish(ctx.id(), "SUCCEEDED", "已完成", 100, null, null, versionId, result);
-        recordTaskMetric(ctx.task, "SUCCEEDED", null);
         taskService.afterTerminal(ctx.task, "SUCCEEDED", null, null);
+        recordTaskMetric(ctx.task, "SUCCEEDED", null);
         events.emit(ctx.id(), "status", Map.of("status", "SUCCEEDED", "phaseLabel", "已完成", "progress", 100));
         events.emit(ctx.id(), "finished", taskService.finishedPayload("SUCCEEDED", versionId, null, null));
         cleanup(ctx);
@@ -379,6 +386,12 @@ public class TaskExecutor {
             content = kimi.chat(ctx.id(), system, com.tcl.csot.zhiye.service.chat.AskService.userMessage(user, planAssets), 16000);
         } catch (LlmException e) {
             ctx.checkCancelled();
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "PLAN_LLM_FAILED", app.workspaceId(), null, app.id(), ctx.id(),
+                        null, null, "需求规划调用模型失败：" + e.code() + " · " + e.getMessage(),
+                        com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e),
+                        Map.of("code", e.code()));
+            }
             // 与生成阶段一致：供应商配额 / 任务预算要分开，否则用户会被提示「简化需求」
             throw modelFailure(ctx, e.code(), e.getMessage());
         }
@@ -697,8 +710,14 @@ public class TaskExecutor {
         if (hasSchema && cloud != null && !app.isSkill()) {
             try {
                 cloud.enable(app.workspaceId(), app.id());
+                events.emit(ctx.id(), "tool", Map.of("id", "cloud-schema", "name", "cloud",
+                        "summary", "复刻自动启用云服务并创建 Schema", "state", "end", "ok", true));
             } catch (Exception e) {
                 log.warn("复刻 {} 启用云服务失败：{}", app.id(), e.getMessage());
+                events.emit(ctx.id(), "tool", Map.of("id", "cloud-schema", "name", "cloud",
+                        "summary", "复刻启用云服务失败：" + e.getMessage(),
+                        "detail", com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e),
+                        "state", "end", "ok", false));
             }
         }
         jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
@@ -897,15 +916,34 @@ public class TaskExecutor {
         String gw = props.llm().gatewayUrl();
         if (gw == null || gw.isBlank()) gw = port.selfBase() + "/llm/v1";
         long startedMs = System.currentTimeMillis();
+        String sbxId = clusterSandbox == null ? null : clusterSandbox.registerCreating(ctx.task, allowNet);
+        ctx.sandboxId = sbxId;
         try {
             ctx.runner = sandbox.start(new SandboxProvider.Spec(ctx.id(), ctx.workspace, ctx.agentDir, allowNet, gw, token,
                     taskService.logFile(ctx.id()), ev -> onRunnerEvent(ctx, ev)));
-            if (metrics != null) metrics.recordSandboxStart(System.currentTimeMillis() - startedMs, true);
+            long dur = System.currentTimeMillis() - startedMs;
+            if (metrics != null) metrics.recordSandboxStart(dur, true);
+            if (clusterSandbox != null && sbxId != null) {
+                clusterSandbox.markReady(sbxId, ctx.task, ctx.runner, (int) Math.max(0L, dur));
+            }
         } catch (Exception e) {
-            if (metrics != null) metrics.recordSandboxStart(System.currentTimeMillis() - startedMs, false);
+            long dur = System.currentTimeMillis() - startedMs;
+            if (metrics != null) metrics.recordSandboxStart(dur, false);
+            if (clusterSandbox != null && sbxId != null) {
+                clusterSandbox.markFailed(sbxId, ctx.task, e.getMessage());
+            }
+            if (platformLogs != null) {
+                platformLogs.error("sandbox", "SANDBOX_START_FAILED", ctx.task.workspaceId(), null, ctx.task.appId(), ctx.id(),
+                        null, (int) Math.max(0L, dur), "沙箱启动失败：" + e.getMessage(),
+                        com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e), Map.of());
+            }
             throw new TaskContext.Fail("SANDBOX_FAILED", "沙箱启动失败：" + e.getMessage());
         }
-        if (ctx.cancelRequested) { ctx.runner.kill(); throw new TaskContext.Cancelled(); }
+        if (ctx.cancelRequested) {
+            ctx.runner.kill();
+            if (clusterSandbox != null && sbxId != null) clusterSandbox.markClosed(sbxId, ctx.task, "cancelled_before_run");
+            throw new TaskContext.Cancelled();
+        }
     }
 
     private JsonNode call(TaskContext ctx, String cmd, ObjectNode args) throws Exception {
@@ -1200,12 +1238,19 @@ public class TaskExecutor {
             return ctx.workspace != null && Files.isRegularFile(ctx.workspace.resolve("cloud/schema.sql")) ? CLOUD_OFF_NOTE : null;
         try {
             int n = cloud.applySchema(app.id());
-            if (n >= 0) events.emit(ctx.id(), "tool", Map.of("id", "cloud-schema", "name", "cloud",
-                    "summary", "更新云数据库表结构 · " + n + " 张表", "state", "end", "ok", true));
+            if (n >= 0) {
+                List<String> tnames = cloud.tables(app.id()).stream().map(m -> String.valueOf(m.get("name"))).toList();
+                events.emit(ctx.id(), "tool", Map.of("id", "cloud-schema", "name", "cloud",
+                        "summary", "更新云数据库表结构 · " + n + " 张表",
+                        "detail", "同步表：" + String.join(", ", tnames),
+                        "state", "end", "ok", true));
+            }
         } catch (Exception e) {
             log.warn("任务 {} 应用云表结构失败：{}", ctx.id(), e.getMessage());
             events.emit(ctx.id(), "tool", Map.of("id", "cloud-schema", "name", "cloud",
-                    "summary", "更新云数据库表结构失败：" + e.getMessage(), "state", "end", "ok", false));
+                    "summary", "更新云数据库表结构失败：" + e.getMessage(),
+                    "detail", com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e),
+                    "state", "end", "ok", false));
         }
         return null;
     }
@@ -1355,6 +1400,7 @@ public class TaskExecutor {
 
     // ================= runner 事件 → TaskEvent =================
     private void onRunnerEvent(TaskContext ctx, JsonNode ev) {
+        if (clusterSandbox != null && ctx.sandboxId != null) clusterSandbox.touchActivity(ctx.sandboxId);
         String type = ev.path("type").asText();
         if (!"thinking".equals(type) && !"thinking_end".equals(type)) endThinking(ctx, null);
         switch (type) {

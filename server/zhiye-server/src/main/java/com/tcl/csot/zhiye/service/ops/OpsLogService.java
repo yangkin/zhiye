@@ -49,6 +49,9 @@ public class OpsLogService {
     @Autowired(required = false)
     private RuntimeMetricsService runtimeMetrics;
 
+    @Autowired(required = false)
+    private ClusterSandboxService clusterSandbox;
+
     public OpsLogService(JdbcClient jdbc, TaskRepository tasks, TaskEventRepository eventRepo,
                          TaskService taskService, ZhiyeProperties props) {
         this.jdbc = jdbc;
@@ -313,6 +316,45 @@ public class OpsLogService {
 
         List<Map<String, Object>> fnLogs = queryFnLogs(null, appId, null, null, null, 30, 0);
         List<Map<String, Object>> sourceCalls = querySourceCalls(null, appId, null, null, null, null, 30, 0);
+        List<Map<String, Object>> platformEvents = jdbc.sql("""
+                select p.*, coalesce(a.name, p.app_id) as app_name,
+                       coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name
+                from platform_event_log p
+                left join app a on a.id = p.app_id
+                left join workspace w on w.id = p.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                where p.task_id = ?
+                   or (p.app_id = ? and p.category in ('cloud_schema', 'lifecycle')
+                       and p.created_at >= (select created_at - interval '10 minutes' from task where id = ?)
+                       and p.created_at <= coalesce((select finished_at + interval '2 minutes' from task where id = ?), now()))
+                order by p.created_at asc, p.id asc
+                limit 120
+                """)
+                .params(id, appId, id, id)
+                .query(OpsLogService::mapPlatformEvent)
+                .list();
+
+        Map<String, Object> cloudStatus = jdbc.sql("""
+                select app_id, status, schema_name, storage_prefix, enabled_at, updated_at
+                from app_cloud where app_id = ?
+                """)
+                .param(appId)
+                .query((rs, i) -> {
+                    Map<String, Object> c = new LinkedHashMap<>();
+                    c.put("appId", rs.getString("app_id"));
+                    c.put("status", rs.getString("status"));
+                    c.put("schemaName", rs.getString("schema_name"));
+                    c.put("storagePrefix", rs.getString("storage_prefix"));
+                    c.put("enabledAt", Db.iso(Db.ts(rs, "enabled_at")));
+                    c.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+                    return c;
+                }).optional().orElse(null);
+        List<Map<String, Object>> cloudTables = jdbc.sql("""
+                select name, columns, policy from app_cloud_table where app_id = ? order by name
+                """).param(appId).query((rs, i) -> Map.<String, Object>of(
+                "name", rs.getString("name"),
+                "columns", Json.read(rs.getString("columns")),
+                "policy", Json.read(rs.getString("policy")))).list();
 
         Map<String, Object> checkpoint = tasks.checkpoint(id).map(cp -> {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -323,7 +365,40 @@ public class OpsLogService {
             return m;
         }).orElse(null);
 
-        Map<String, Object> runnerLog = readLogFile(taskService.logFile(id), Math.max(50, Math.min(2000, tailLines)), null, null);
+        Map<String, Object> runnerLog = readLogFile(taskService.logFile(id), Math.max(50, Math.min(2000, tailLines)), null, null, null);
+
+        List<Map<String, Object>> sandboxes = jdbc.sql("""
+                select sandbox_id, provider, owner_instance, worker_owner, state, external_ref, image_or_cmd,
+                       cpu_limit, memory_limit, allow_net, pid, startup_ms, cpu_percent, memory_used_bytes,
+                       memory_limit_bytes, created_at, ready_at, last_active_at, destroyed_at, destroyed_by, destroy_reason
+                from sandbox_instance
+                where task_id = ?
+                order by created_at desc
+                """).param(id).query((rs, i) -> {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("sandboxId", rs.getString("sandbox_id"));
+            s.put("provider", rs.getString("provider"));
+            s.put("ownerInstance", rs.getString("owner_instance"));
+            s.put("workerOwner", rs.getString("worker_owner"));
+            s.put("state", rs.getString("state"));
+            s.put("externalRef", rs.getString("external_ref"));
+            s.put("imageOrCmd", rs.getString("image_or_cmd"));
+            s.put("cpuLimit", rs.getString("cpu_limit"));
+            s.put("memoryLimit", rs.getString("memory_limit"));
+            s.put("allowNet", rs.getBoolean("allow_net"));
+            s.put("pid", rs.getObject("pid"));
+            s.put("startupMs", rs.getObject("startup_ms"));
+            s.put("cpuPercent", rs.getObject("cpu_percent"));
+            s.put("memoryUsedBytes", rs.getObject("memory_used_bytes"));
+            s.put("memoryLimitBytes", rs.getObject("memory_limit_bytes"));
+            s.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            s.put("readyAt", Db.iso(Db.ts(rs, "ready_at")));
+            s.put("lastActiveAt", Db.iso(Db.ts(rs, "last_active_at")));
+            s.put("destroyedAt", Db.iso(Db.ts(rs, "destroyed_at")));
+            s.put("destroyedBy", rs.getString("destroyed_by"));
+            s.put("destroyReason", rs.getString("destroy_reason"));
+            return s;
+        }).list();
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("task", task);
@@ -333,8 +408,12 @@ public class OpsLogService {
         out.put("messages", messages);
         out.put("checkpoint", checkpoint);
         out.put("runnerLog", runnerLog);
+        out.put("sandboxes", sandboxes);
         out.put("fnLogs", fnLogs);
         out.put("sourceCalls", sourceCalls);
+        out.put("platformEvents", platformEvents);
+        out.put("cloudStatus", cloudStatus);
+        out.put("cloudTables", cloudTables);
         return out;
     }
 
@@ -364,9 +443,13 @@ public class OpsLogService {
     }
 
     public Map<String, Object> runnerLog(String taskId, Integer tail, Integer offset, String q) {
+        return runnerLog(taskId, tail, offset, q, null);
+    }
+
+    public Map<String, Object> runnerLog(String taskId, Integer tail, Integer offset, String q, String level) {
         tasks.findById(taskId).orElseThrow(() -> ApiException.notFound("任务"));
         int maxTail = tail == null ? 800 : Math.max(1, Math.min(5000, tail));
-        return readLogFile(taskService.logFile(taskId), maxTail, offset, clean(q));
+        return readLogFile(taskService.logFile(taskId), maxTail, offset, clean(q), clean(level));
     }
 
     public Path runnerLogFilePath(String taskId) {
@@ -432,7 +515,286 @@ public class OpsLogService {
         return Map.of("range", range, "total", total, "errorCount", errors, "items", items, "limit", limit, "offset", offset);
     }
 
+    public Map<String, Object> listPlatformEvents(String categoryParam, String levelParam, String scopeWs,
+                                                  String appIdParam, String taskIdParam, Boolean okParam,
+                                                  String qParam, String rangeParam, int limitParam, int offsetParam) {
+        String category = clean(categoryParam);
+        String level = clean(levelParam);
+        String ws = clean(scopeWs);
+        String appId = clean(appIdParam);
+        String taskId = clean(taskIdParam);
+        String q = clean(qParam);
+        String range = normalizeRange(rangeParam, "7d");
+        OffsetDateTime sinceTs = sinceTimestamp(range);
+        int limit = Math.max(1, Math.min(100, limitParam));
+        int offset = Math.max(0, offsetParam);
+
+        StringBuilder baseWhere = new StringBuilder(" where 1=1 ");
+        List<Object> baseParams = new ArrayList<>();
+        if (sinceTs != null) { baseWhere.append(" and p.created_at >= ? "); baseParams.add(sinceTs); }
+        if (ws != null) { baseWhere.append(" and coalesce(p.workspace_id, a.workspace_id) = ? "); baseParams.add(ws); }
+        if (appId != null) { baseWhere.append(" and p.app_id = ? "); baseParams.add(appId); }
+        if (taskId != null) { baseWhere.append(" and p.task_id = ? "); baseParams.add(taskId); }
+        if (okParam != null) { baseWhere.append(" and p.ok = ? "); baseParams.add(okParam); }
+        if (level != null && !"ALL".equalsIgnoreCase(level)) {
+            baseWhere.append(" and p.level = ? ");
+            baseParams.add(level.toUpperCase(Locale.ROOT));
+        }
+        if (q != null) {
+            String pat = "%" + escapeLike(q) + "%";
+            baseWhere.append("""
+                     and (
+                       p.action ilike ? escape '\\'
+                       or p.summary ilike ? escape '\\'
+                       or coalesce(p.detail, '') ilike ? escape '\\'
+                       or coalesce(p.app_id, '') ilike ? escape '\\'
+                       or coalesce(a.name, '') ilike ? escape '\\'
+                       or coalesce(p.task_id, '') ilike ? escape '\\'
+                       or coalesce(p.workspace_id, '') ilike ? escape '\\'
+                     )
+                    """);
+            for (int i = 0; i < 7; i++) baseParams.add(pat);
+        }
+
+        String fromSql = """
+                from platform_event_log p
+                left join app a on a.id = p.app_id
+                left join workspace w on w.id = coalesce(p.workspace_id, a.workspace_id)
+                left join app_user u on u.id = w.owner_user_id
+                """;
+
+        List<Map<String, Object>> byCategory = jdbc.sql("""
+                select p.category, count(*) as cnt, count(*) filter (where p.ok = false) as err_cnt
+                """ + fromSql + baseWhere + " group by p.category order by cnt desc")
+                .params(baseParams)
+                .query((rs, i) -> Map.<String, Object>of(
+                        "category", rs.getString("category"),
+                        "count", rs.getLong("cnt"),
+                        "errors", rs.getLong("err_cnt")))
+                .list();
+
+        StringBuilder fullWhere = new StringBuilder(baseWhere);
+        List<Object> fullParams = new ArrayList<>(baseParams);
+        if (category != null && !"ALL".equalsIgnoreCase(category)) {
+            fullWhere.append(" and p.category = ? ");
+            fullParams.add(category);
+        }
+
+        long total = jdbc.sql("select count(*) " + fromSql + fullWhere).params(fullParams).query(Long.class).single();
+        long errorCount = jdbc.sql("select count(*) " + fromSql + fullWhere + " and p.ok = false ").params(fullParams).query(Long.class).single();
+
+        List<Object> pageParams = new ArrayList<>(fullParams);
+        pageParams.add(limit);
+        pageParams.add(offset);
+        List<Map<String, Object>> items = jdbc.sql("""
+                select p.*, coalesce(a.name, p.app_id) as app_name,
+                       coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name
+                """ + fromSql + fullWhere + """
+                order by p.created_at desc, p.id desc
+                limit ? offset ?
+                """)
+                .params(pageParams)
+                .query(OpsLogService::mapPlatformEvent)
+                .list();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("range", range);
+        out.put("total", total);
+        out.put("errorCount", errorCount);
+        out.put("byCategory", byCategory);
+        out.put("items", items);
+        out.put("limit", limit);
+        out.put("offset", offset);
+        return out;
+    }
+
+    public Map<String, Object> listCloudSchemas(String scopeWs, String qParam, Boolean okParam,
+                                                String rangeParam, int limitParam, int offsetParam) {
+        Map<String, Object> events = listPlatformEvents("cloud_schema", null, scopeWs, null, null, okParam, qParam, rangeParam, limitParam, offsetParam);
+
+        String ws = clean(scopeWs);
+        String q = clean(qParam);
+        StringBuilder regWhere = new StringBuilder(" where 1=1 ");
+        List<Object> regParams = new ArrayList<>();
+        if (ws != null) { regWhere.append(" and a.workspace_id = ? "); regParams.add(ws); }
+        if (q != null) {
+            String pat = "%" + escapeLike(q) + "%";
+            regWhere.append(" and (c.app_id ilike ? escape '\\' or c.schema_name ilike ? escape '\\' or coalesce(a.name, '') ilike ? escape '\\') ");
+            regParams.add(pat); regParams.add(pat); regParams.add(pat);
+        }
+        List<Map<String, Object>> schemas = jdbc.sql("""
+                select c.app_id, c.status, c.schema_name, c.storage_prefix, c.enabled_at, c.updated_at,
+                       coalesce(a.name, c.app_id) as app_name, a.workspace_id,
+                       coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
+                       (select count(*) from app_cloud_table t where t.app_id = c.app_id) as table_count,
+                       (select coalesce(jsonb_agg(t.name order by t.name), '[]'::jsonb) from app_cloud_table t where t.app_id = c.app_id) as table_names
+                from app_cloud c
+                left join app a on a.id = c.app_id
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                """ + regWhere + """
+                order by c.updated_at desc
+                limit 50
+                """)
+                .params(regParams)
+                .query((rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("appId", rs.getString("app_id"));
+                    m.put("appName", rs.getString("app_name"));
+                    m.put("workspaceId", rs.getString("workspace_id"));
+                    m.put("ownerName", rs.getString("owner_name"));
+                    m.put("status", rs.getString("status"));
+                    m.put("schemaName", rs.getString("schema_name"));
+                    m.put("tableCount", rs.getLong("table_count"));
+                    m.put("tableNames", Json.read(rs.getString("table_names")));
+                    m.put("enabledAt", Db.iso(Db.ts(rs, "enabled_at")));
+                    m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+                    return m;
+                }).list();
+
+        Map<String, Object> out = new LinkedHashMap<>(events);
+        out.put("schemas", schemas);
+        return out;
+    }
+
+    public Map<String, Object> listSandboxLogs(String scopeWs, String rangeParam, String stateParam, String providerParam,
+                                             Boolean onlyErrors, String qParam, int limitParam, int offsetParam) {
+        String range = normalizeRange(rangeParam, "7d");
+        OffsetDateTime sinceTs = sinceTimestamp(range);
+        String ws = clean(scopeWs);
+        String state = clean(stateParam);
+        String provider = clean(providerParam);
+        String q = clean(qParam);
+        int limit = Math.max(1, Math.min(100, limitParam));
+        int offset = Math.max(0, offsetParam);
+
+        StringBuilder where = new StringBuilder(" where 1=1 ");
+        List<Object> params = new ArrayList<>();
+        if (sinceTs != null) { where.append(" and s.created_at >= ? "); params.add(sinceTs); }
+        if (ws != null) { where.append(" and s.workspace_id = ? "); params.add(ws); }
+        if (state != null && !"ALL".equalsIgnoreCase(state)) {
+            where.append(" and s.state = ? ");
+            params.add(state.toLowerCase(Locale.ROOT));
+        }
+        if (provider != null && !"ALL".equalsIgnoreCase(provider)) {
+            where.append(" and s.provider = ? ");
+            params.add(provider.toLowerCase(Locale.ROOT));
+        }
+        if (Boolean.TRUE.equals(onlyErrors)) {
+            where.append(" and (s.state = 'failed' or s.destroy_reason ilike '%kill%' or s.destroy_reason ilike '%destroy%' or s.destroy_reason ilike '%reap%') ");
+        }
+        if (q != null) {
+            String pat = "%" + escapeLike(q) + "%";
+            where.append("""
+                     and (
+                       s.sandbox_id ilike ? escape '\\'
+                       or coalesce(s.task_id, '') ilike ? escape '\\'
+                       or coalesce(s.external_ref, '') ilike ? escape '\\'
+                       or coalesce(s.workspace_id, '') ilike ? escape '\\'
+                       or coalesce(a.name, '') ilike ? escape '\\'
+                       or coalesce(s.owner_instance, '') ilike ? escape '\\'
+                       or coalesce(s.destroy_reason, '') ilike ? escape '\\'
+                       or coalesce(u.real_name, '') ilike ? escape '\\'
+                     )
+                    """);
+            for (int i = 0; i < 8; i++) params.add(pat);
+        }
+
+        String fromSql = """
+                from sandbox_instance s
+                left join app a on a.id = s.app_id
+                left join workspace w on w.id = s.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                left join task t on t.id = s.task_id
+                """;
+
+        Map<String, Object> summary = jdbc.sql("""
+                select
+                  count(*) as total,
+                  count(*) filter (where s.state in ('creating', 'active')) as active,
+                  count(*) filter (where s.state = 'failed') as failed,
+                  count(*) filter (where s.state = 'destroyed') as destroyed,
+                  coalesce(round(avg(s.startup_ms))::bigint, 0) as avg_startup_ms,
+                  coalesce(round(percentile_cont(0.95) within group (order by s.startup_ms))::bigint, 0) as p95_startup_ms
+                """ + fromSql + where)
+                .params(params)
+                .query((rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("total", rs.getLong("total"));
+                    m.put("active", rs.getLong("active"));
+                    m.put("failed", rs.getLong("failed"));
+                    m.put("destroyed", rs.getLong("destroyed"));
+                    m.put("avgStartupMs", rs.getLong("avg_startup_ms"));
+                    m.put("p95StartupMs", rs.getLong("p95_startup_ms"));
+                    return m;
+                }).single();
+
+        List<Object> pageParams = new ArrayList<>(params);
+        pageParams.add(limit);
+        pageParams.add(offset);
+
+        List<Map<String, Object>> items = jdbc.sql("""
+                select s.*,
+                       coalesce(a.name, s.app_id) as app_name,
+                       coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
+                       coalesce(u.login_name, '') as owner_login_name,
+                       t.status as task_status,
+                       extract(epoch from (coalesce(s.destroyed_at, now()) - s.created_at)) as duration_sec
+                """ + fromSql + where + """
+                order by s.created_at desc
+                limit ? offset ?
+                """)
+                .params(pageParams)
+                .query((rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("sandboxId", rs.getString("sandbox_id"));
+                    m.put("provider", rs.getString("provider"));
+                    m.put("state", rs.getString("state"));
+                    m.put("taskId", rs.getString("task_id"));
+                    m.put("taskStatus", rs.getString("task_status"));
+                    m.put("appId", rs.getString("app_id"));
+                    m.put("appName", rs.getString("app_name"));
+                    m.put("workspaceId", rs.getString("workspace_id"));
+                    m.put("ownerName", rs.getString("owner_name"));
+                    m.put("ownerLoginName", rs.getString("owner_login_name"));
+                    m.put("ownerInstance", rs.getString("owner_instance"));
+                    m.put("workerOwner", rs.getString("worker_owner"));
+                    m.put("externalRef", rs.getString("external_ref"));
+                    m.put("imageOrCmd", rs.getString("image_or_cmd"));
+                    m.put("allowNet", rs.getBoolean("allow_net"));
+                    m.put("pid", rs.getObject("pid"));
+                    m.put("startupMs", rs.getObject("startup_ms"));
+                    m.put("cpuPercent", rs.getObject("cpu_percent"));
+                    m.put("memoryUsedBytes", rs.getObject("memory_used_bytes"));
+                    m.put("memoryLimitBytes", rs.getObject("memory_limit_bytes"));
+                    m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+                    m.put("readyAt", Db.iso(Db.ts(rs, "ready_at")));
+                    m.put("destroyedAt", Db.iso(Db.ts(rs, "destroyed_at")));
+                    m.put("destroyedBy", rs.getString("destroyed_by"));
+                    m.put("destroyReason", rs.getString("destroy_reason"));
+                    m.put("durationSeconds", Math.round(Math.max(0.0, rs.getDouble("duration_sec")) * 10.0) / 10.0);
+                    return m;
+                }).list();
+
+        Map<String, Object> events = listPlatformEvents("sandbox", "ALL", ws, null, null,
+                Boolean.TRUE.equals(onlyErrors) ? Boolean.FALSE : null, q, range, 30, 0);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("range", range);
+        out.put("summary", summary);
+        out.put("total", summary.get("total"));
+        out.put("items", items);
+        out.put("events", events.getOrDefault("items", List.of()));
+        out.put("limit", limit);
+        out.put("offset", offset);
+        return out;
+    }
+
     public Map<String, Object> runtimeOverview(String targetParam, int tailParam, String qParam) {
+        return runtimeOverview(targetParam, tailParam, qParam, null);
+    }
+
+    public Map<String, Object> runtimeOverview(String targetParam, int tailParam, String qParam, String levelParam) {
         String target = (targetParam == null || targetParam.isBlank()) ? "api" : targetParam.trim().toLowerCase(Locale.ROOT);
         String filename = switch (target) {
             case "api" -> "api.log";
@@ -442,7 +804,28 @@ public class OpsLogService {
         };
         Path logPath = props.runtimePath().resolve("logs").resolve(filename);
         int tail = Math.max(20, Math.min(3000, tailParam));
-        Map<String, Object> fileView = readLogFile(logPath, tail, null, clean(qParam));
+        Map<String, Object> fileView = readLogFile(logPath, tail, null, clean(qParam), clean(levelParam));
+
+        List<Map<String, Object>> rateLimitHits = jdbc.sql("""
+                select bucket, created_at from rate_limit_hit order by created_at desc limit 50
+                """).query((rs, i) -> Map.<String, Object>of(
+                "bucket", rs.getString("bucket"),
+                "createdAt", Db.iso(Db.ts(rs, "created_at")))).list();
+
+        List<Map<String, Object>> auditLogs = jdbc.sql("""
+                select id, actor, action, target_type, target_id, detail, created_at
+                from admin_audit_log order by created_at desc limit 50
+                """).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", rs.getString("id"));
+            m.put("actor", rs.getString("actor"));
+            m.put("action", rs.getString("action"));
+            m.put("targetType", rs.getString("target_type"));
+            m.put("targetId", rs.getString("target_id"));
+            m.put("detail", Json.read(rs.getString("detail")));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).list();
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("target", target);
@@ -450,8 +833,33 @@ public class OpsLogService {
         out.put("runtimeDir", props.runtimePath().toString());
         out.put("prometheusEndpoint", "/api/meta/metrics/prometheus");
         out.put("metrics", runtimeMetrics == null ? Map.of() : runtimeMetrics.snapshot());
+        out.put("clusterNodes", clusterSandbox == null ? List.of() : clusterSandbox.listNodes());
         out.put("file", fileView);
+        out.put("rateLimitHits", rateLimitHits);
+        out.put("auditLogs", auditLogs);
         return out;
+    }
+
+    private static Map<String, Object> mapPlatformEvent(ResultSet rs, int idx) throws SQLException {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", rs.getLong("id"));
+        m.put("category", rs.getString("category"));
+        m.put("level", rs.getString("level"));
+        m.put("action", rs.getString("action"));
+        m.put("workspaceId", rs.getString("workspace_id"));
+        m.put("userId", rs.getString("user_id"));
+        m.put("appId", rs.getString("app_id"));
+        m.put("appName", rs.getString("app_name"));
+        m.put("ownerName", rs.getString("owner_name"));
+        m.put("taskId", rs.getString("task_id"));
+        m.put("ok", rs.getBoolean("ok"));
+        m.put("statusCode", rs.getObject("status_code"));
+        m.put("durationMs", rs.getObject("duration_ms"));
+        m.put("summary", rs.getString("summary"));
+        m.put("detail", rs.getString("detail"));
+        m.put("meta", Json.read(rs.getString("meta")));
+        m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+        return m;
     }
 
     // ================= 内部查询与工具方法 =================
@@ -705,8 +1113,12 @@ public class OpsLogService {
         return out;
     }
 
-    /** 读取日志文件（支持尾部 N 行、行偏移分页及关键字检索），流式遍历避免大文件 OOM。 */
+    /** 读取日志文件（支持尾部 N 行、行偏移分页、级别筛选及关键字检索），流式遍历避免大文件 OOM。 */
     static Map<String, Object> readLogFile(Path path, int tailLines, Integer offset, String query) {
+        return readLogFile(path, tailLines, offset, query, null);
+    }
+
+    static Map<String, Object> readLogFile(Path path, int tailLines, Integer offset, String query, String levelFilter) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("fileName", path.getFileName().toString());
         if (!Files.isRegularFile(path)) {
@@ -715,6 +1127,8 @@ public class OpsLogService {
             out.put("updatedAt", null);
             out.put("totalLines", 0);
             out.put("matchedLines", 0);
+            out.put("errorLines", 0);
+            out.put("warnLines", 0);
             out.put("truncated", false);
             out.put("lines", List.of());
             return out;
@@ -723,8 +1137,12 @@ public class OpsLogService {
             long size = Files.size(path);
             Instant mtime = Files.getLastModifiedTime(path).toInstant();
             String qLower = query == null ? null : query.toLowerCase(Locale.ROOT);
+            String lvl = levelFilter == null || levelFilter.isBlank() || "ALL".equalsIgnoreCase(levelFilter)
+                    ? null : levelFilter.trim().toUpperCase(Locale.ROOT);
             int totalLines = 0;
             int matchedLines = 0;
+            int errorLines = 0;
+            int warnLines = 0;
 
             List<Map<String, Object>> lines;
             boolean truncated = false;
@@ -735,10 +1153,14 @@ public class OpsLogService {
                     String line;
                     while ((line = br.readLine()) != null) {
                         totalLines++;
+                        String lineLvl = classifyLineLevel(line);
+                        if ("ERROR".equals(lineLvl)) errorLines++;
+                        else if ("WARN".equals(lineLvl)) warnLines++;
                         if (qLower != null && !line.toLowerCase(Locale.ROOT).contains(qLower)) continue;
+                        if (lvl != null && !lvl.equals(lineLvl)) continue;
                         int matchIdx = matchedLines++;
                         if (matchIdx >= offset && lines.size() < tailLines) {
-                            lines.add(Map.of("no", totalLines, "text", line));
+                            lines.add(Map.of("no", totalLines, "level", lineLvl, "text", line));
                         }
                     }
                 }
@@ -749,13 +1171,17 @@ public class OpsLogService {
                     String line;
                     while ((line = br.readLine()) != null) {
                         totalLines++;
+                        String lineLvl = classifyLineLevel(line);
+                        if ("ERROR".equals(lineLvl)) errorLines++;
+                        else if ("WARN".equals(lineLvl)) warnLines++;
                         if (qLower != null && !line.toLowerCase(Locale.ROOT).contains(qLower)) continue;
+                        if (lvl != null && !lvl.equals(lineLvl)) continue;
                         matchedLines++;
                         if (ring.size() >= tailLines) {
                             ring.removeFirst();
                             truncated = true;
                         }
-                        ring.addLast(Map.of("no", totalLines, "text", line));
+                        ring.addLast(Map.of("no", totalLines, "level", lineLvl, "text", line));
                     }
                 }
                 lines = new ArrayList<>(ring);
@@ -766,12 +1192,28 @@ public class OpsLogService {
             out.put("updatedAt", Db.iso(mtime));
             out.put("totalLines", totalLines);
             out.put("matchedLines", matchedLines);
+            out.put("errorLines", errorLines);
+            out.put("warnLines", warnLines);
             out.put("truncated", truncated);
             out.put("lines", lines);
             return out;
         } catch (IOException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL", "读取日志文件失败：" + e.getMessage());
         }
+    }
+
+    private static String classifyLineLevel(String line) {
+        String low = line.toLowerCase(Locale.ROOT);
+        if (low.contains(" error ") || low.startsWith("error") || low.contains("[error]")
+                || low.contains("exception") || low.contains("fatal") || low.contains("uncaught")
+                || low.contains("failed:") || low.contains(" 500 ")) {
+            return "ERROR";
+        }
+        if (low.contains(" warn ") || low.startsWith("warn") || low.contains("[warn]")
+                || low.contains("timeout") || low.contains("retry")) {
+            return "WARN";
+        }
+        return "INFO";
     }
 
     private static String normalizeRange(String raw, String def) {

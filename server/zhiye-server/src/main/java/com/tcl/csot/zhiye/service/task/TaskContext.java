@@ -14,6 +14,7 @@ class TaskContext {
     volatile Instant deadline;
     volatile boolean cancelRequested;
     volatile RunnerSession runner;
+    volatile String sandboxId;
     volatile String currentCommand;
     /** 等用户在确认卡上选择的请求（runner 的 request_confirm）：id 和类型 */
     volatile String pendingConfirmId;

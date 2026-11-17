@@ -306,6 +306,9 @@ public class HttpRunnerSession implements RunnerSession {
     }
 
     @Override
+    public SandboxDescriptor descriptor() { return backend.descriptor(); }
+
+    @Override
     public boolean alive() { return !closed && !dead && backend.alive(); }
 
     @Override

@@ -21,6 +21,13 @@ public interface RunnerSession extends AutoCloseable {
     /** 立即结束进程 */
     void kill();
 
+    record SandboxDescriptor(String provider, String externalRef, Long pid, String imageOrCmd, String cpuLimit,
+                             String memoryLimit) {}
+
+    default SandboxDescriptor descriptor() {
+        return null;
+    }
+
     boolean alive();
 
     @Override

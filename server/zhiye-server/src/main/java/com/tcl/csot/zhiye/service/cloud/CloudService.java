@@ -118,20 +118,52 @@ public class CloudService {
                 on conflict (app_id) do update set status='on', schema_name=excluded.schema_name,
                     storage_prefix=excluded.storage_prefix, token_hash=excluded.token_hash, enabled_at=now(), updated_at=now()
                 """).params(appId, schema, prefix, "").update();
-        log.info("云服务启用：app={} schema={} tables={}", appId, schema, defs.size());
-        Map<String, Object> out = status(ws, appId);
-        out.put("token", token); // 明文只在启用时返回一次；之后通过 /token 取（同工作空间）
-        return out;
+            log.info("云服务启用：app={} schema={} tables={}", appId, schema, defs.size());
+            recordSchemaEvent("CLOUD_ENABLE", ws, appId, schema, defs, ddlLog, t0, null);
+            Map<String, Object> out = status(ws, appId);
+            out.put("token", token); // 明文只在启用时返回一次；之后通过 /token 取（同工作空间）
+            return out;
+        } catch (Exception e) {
+            recordSchemaEvent("CLOUD_ENABLE_FAILED", ws, appId, schema, List.of(), ddlLog, t0, e);
+            throw e;
+        }
     }
 
     /** 任务成功后：已启用云服务的应用按新版本的 cloud/schema.sql 补建表/列；未启用返回 -1 */
     public synchronized int applySchema(String appId) {
         Cloud c = find(appId).orElse(null);
         if (c == null || !"on".equals(c.status)) return -1;
-        Schema sc = readSchema(appId);
-        for (TableDef t : sc.tables()) createTable(appId, c.schema, t, sc.policies().get(t.name()));
-        dropPlaceholder(appId, c.schema, sc);
-        return sc.tables().size();
+        long t0 = System.currentTimeMillis();
+        List<String> ddlLog = new ArrayList<>();
+        try {
+            Schema sc = readSchema(appId);
+            for (TableDef t : sc.tables()) createTable(appId, c.schema, t, sc.policies().get(t.name()), ddlLog);
+            dropPlaceholder(appId, c.schema, sc, ddlLog);
+            recordSchemaEvent("APPLY_SCHEMA", null, appId, c.schema, sc.tables(), ddlLog, t0, null);
+            return sc.tables().size();
+        } catch (Exception e) {
+            recordSchemaEvent("APPLY_SCHEMA_FAILED", null, appId, c.schema, List.of(), ddlLog, t0, e);
+            throw e;
+        }
+    }
+
+    private void recordSchemaEvent(String action, String wsHint, String appId, String schema, List<TableDef> defs,
+                                   List<String> ddlLog, long startMs, Exception err) {
+        if (platformLogs == null) return;
+        int ms = (int) Math.max(0L, System.currentTimeMillis() - startMs);
+        String wsId = wsHint != null ? wsHint : apps.findById(appId).map(AppRow::workspaceId).orElse(null);
+        if (err == null) {
+            List<String> tableNames = defs.stream().map(TableDef::name).toList();
+            String summary = ("CLOUD_ENABLE".equals(action) ? "启用云服务并同步 Schema " : "更新云数据库 Schema ")
+                    + schema + "（" + defs.size() + " 张表：" + String.join(", ", tableNames) + "）";
+            platformLogs.record("cloud_schema", "INFO", action, wsId, null, appId, null, true, null, ms,
+                    summary, String.join("\n", ddlLog), Map.of("schema", schema, "tables", tableNames));
+        } else {
+            String detail = (ddlLog.isEmpty() ? "" : "已执行 DDL:\n" + String.join("\n", ddlLog) + "\n\n")
+                    + "异常堆栈:\n" + com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(err);
+            platformLogs.error("cloud_schema", action, wsId, null, appId, null, null, ms,
+                    "Schema " + schema + " 操作失败：" + err.getMessage(), detail, Map.of("schema", schema));
+        }
     }
 
     /**

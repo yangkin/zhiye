@@ -97,7 +97,7 @@ public class OpenSandboxProvider implements SandboxProvider {
             PathMapper mapper = new PathMapper(workspace.toString(), agentDir.toString(),
                     sbx.workspaceMount(), sbx.agentMount());
             HttpRunnerSession session = new HttpRunnerSession(baseUrl, endpoint.getHeaders(), controlToken,
-                    new SandboxBackend(sandbox), spec.onEvent(), logWriter, mapper);
+                    new SandboxBackend(sandbox, sbx), spec.onEvent(), logWriter, mapper);
             session.waitReady(Duration.ofSeconds(sbx.startupTimeoutSeconds()));
             return session;
         } catch (Exception e) {
@@ -206,9 +206,18 @@ public class OpenSandboxProvider implements SandboxProvider {
     /** OpenSandbox 沙箱的生命周期。 */
     private static final class SandboxBackend implements HttpRunnerBackend {
         private final Sandbox sandbox;
+        private final OpenSandboxProperties sbx;
         private volatile boolean destroyed;
 
-        SandboxBackend(Sandbox sandbox) { this.sandbox = sandbox; }
+        SandboxBackend(Sandbox sandbox, OpenSandboxProperties sbx) {
+            this.sandbox = sandbox;
+            this.sbx = sbx;
+        }
+
+        @Override
+        public RunnerSession.SandboxDescriptor descriptor() {
+            return new RunnerSession.SandboxDescriptor("opensandbox", sandbox.getId(), null, sbx.image(), sbx.cpu(), sbx.memory());
+        }
 
         @Override
         public boolean alive() {

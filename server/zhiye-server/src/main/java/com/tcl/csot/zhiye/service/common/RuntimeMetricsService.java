@@ -75,6 +75,10 @@ public class RuntimeMetricsService {
         this.instanceId = (host != null && !host.isBlank()) ? host : "local-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
+    public String instanceId() {
+        return instanceId;
+    }
+
     public void recordTask(String type, String status, String errorCode, long durationMs) {
         String key = (type == null || type.isBlank()) ? "unknown" : type;
         boolean ok = "SUCCEEDED".equals(status);

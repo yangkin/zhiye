@@ -871,3 +871,168 @@
     min-width: 100%;
   }
 }
+
+/* Trace 阶段耗时瀑布图 */
+.logs-waterfall-card {
+  margin-top: 10px;
+  background: #faf9fd;
+  border: 1px solid #e8e3f3;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logs-wf-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.logs-wf-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.logs-wf-title b {
+  font-size: 12px;
+  color: #252034;
+}
+
+.logs-wf-title span {
+  font-size: 11.5px;
+  color: #6b647d;
+  font-variant-numeric: tabular-nums;
+}
+
+.logs-wf-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.logs-wf-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid #e4def0;
+  background: #ffffff;
+  font-size: 11.5px;
+  color: #4b445e;
+  cursor: pointer;
+}
+
+.logs-wf-pill:hover {
+  border-color: #7953dc;
+  color: #4c3399;
+}
+
+.logs-wf-pill em.err {
+  font-style: normal;
+  font-weight: 700;
+  color: #c22742;
+}
+
+.logs-wf-track {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #ede9f6;
+  gap: 2px;
+}
+
+.logs-wf-seg.queue {
+  background: #9aa0b8;
+}
+
+.logs-wf-seg.boot {
+  background: #d9822b;
+}
+
+.logs-wf-seg.work {
+  background: #7953dc;
+}
+
+.logs-wf-seg.work.err {
+  background: #d0465c;
+}
+
+/* 沙箱生命周期摘要条 */
+.logs-sbx-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.logs-sbx-summary > div {
+  background: #fff;
+  border: 1px solid #eae6f2;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.logs-sbx-summary > div > span {
+  font-size: 11.5px;
+  color: #6b647d;
+}
+
+.logs-sbx-summary > div > b {
+  font-size: 18px;
+  color: #1f1c29;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 终端级别 chip & 高亮 */
+.logs-chip.warn {
+  border-color: #f3d79b;
+  color: #965b06;
+  background: #fff9eb;
+}
+
+.logs-chip.warn.active {
+  background: #d9822b;
+  border-color: #d9822b;
+  color: #fff;
+}
+
+.logs-terminal.nowrap .logs-term-text {
+  white-space: pre;
+}
+
+.logs-terminal.wrap .logs-term-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+mark.logs-hl {
+  background: #ffd452;
+  color: #1a1426;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+@media (max-width: 960px) {
+  .logs-sbx-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .logs-sbx-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

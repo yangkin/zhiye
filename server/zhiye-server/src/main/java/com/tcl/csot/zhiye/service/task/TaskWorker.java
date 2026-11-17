@@ -36,6 +36,8 @@ public class TaskWorker {
     private final TaskService taskService;
     private final ZhiyeProperties props;
     private final String owner = "worker-" + ProcessHandle.current().pid() + "-" + Ids.random(6);
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
     private final Set<String> running = ConcurrentHashMap.newKeySet();
     private final Semaphore permits;
     private volatile boolean stopped;
@@ -127,6 +129,11 @@ public class TaskWorker {
                 String code = "FAILED".equals(status) ? "worker_lost" : null;
                 String msg = "FAILED".equals(status) ? "执行任务的工作进程已退出，请重试" : null;
                 tasks.finish(t.id(), status, "FAILED".equals(status) ? "失败" : "已停止", t.progress(), code, msg, null, null);
+                if (platformLogs != null && "FAILED".equals(status)) {
+                    platformLogs.error("sandbox", "WORKER_LOST", t.workspaceId(), null, t.appId(), t.id(), null, null,
+                            "任务租约过期（原执行节点 " + t.leaseOwner() + " 可能已重启/退出），已标记为 worker_lost",
+                            null, Map.of("leaseOwner", String.valueOf(t.leaseOwner()), "progress", t.progress()));
+                }
                 taskService.afterTerminal(t, status, code, msg);
                 events.emit(t.id(), "status", Map.of("status", status, "phaseLabel", "FAILED".equals(status) ? "失败" : "已停止", "progress", t.progress()));
                 events.emit(t.id(), "finished", taskService.finishedPayload(status, null, code, msg));
@@ -137,4 +144,6 @@ public class TaskWorker {
     }
 
     public String owner() { return owner; }
+
+    public int activeCount() { return running.size(); }
 }
