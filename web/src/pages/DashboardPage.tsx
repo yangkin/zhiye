@@ -15,6 +15,8 @@ import {
   BreakdownBars,
   CHART_PALETTE,
   ConversionFunnel,
+  DashEmptyBox,
+  DashPanelHead,
   DonutChart,
   HourlyBarChart,
   MultiTrendChart,
@@ -1657,13 +1659,15 @@ export function DashboardPage() {
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>版本来源与构建部署</h3>
-                      <p>共 {fmtNum(data.overview.versionsTotal)} 个版本 · {fmtNum(data.versions.buildsTotal)} 次构建</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="history"
+                    tone="indigo"
+                    title="版本来源与构建部署"
+                    sub={`共 ${fmtNum(data.overview.versionsTotal)} 个版本 · ${fmtNum(data.versions.buildsTotal)} 次构建`}
+                  />
                   <BreakdownBars
+                    emptyIcon="history"
+                    emptyText="暂无版本记录"
                     items={data.versions.bySource.map((v, i) => ({
                       key: v.key,
                       label: labelOf(VERSION_SOURCE_LABELS, v.key),
@@ -1682,14 +1686,16 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>云服务、数据表与访问控制</h3>
-                      <p>已启用 {fmtNum(data.cloud.enabledApps)} 个 · 云表 {fmtNum(data.cloud.tablesCount)} 张 · 站内会话 {fmtNum(data.cloud.activeSiteSessions)}</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="database"
+                    tone="teal"
+                    title="云服务、数据表与访问控制"
+                    sub={`已启用 ${fmtNum(data.cloud.enabledApps)} 个 · 云表 ${fmtNum(data.cloud.tablesCount)} 张 · 站内会话 ${fmtNum(data.cloud.activeSiteSessions)}`}
+                  />
                   <DonutChart
                     centerLabel="访问级别"
+                    emptyIcon="database"
+                    emptyText="暂无云服务与访问级别分布"
                     slices={data.cloud.siteAccessLevels.map((x, i) => ({
                       key: x.key,
                       label: labelOf(ACCESS_LABELS, x.key),
@@ -1713,12 +1719,12 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>数据源与 API 网关 (AGW)</h3>
-                      <p>已登记外部查询接口与绑定覆盖统计</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="globe"
+                    tone="violet"
+                    title="数据源与 API 网关 (AGW)"
+                    sub="已登记外部查询接口与绑定覆盖统计"
+                  />
                   <div className="dash-mini-stats compact-2" style={{ marginBottom: 14 }}>
                     <div><span>空间自建源</span><b>{fmtNum(data.dataSources.workspaceCount)}</b></div>
                     <div><span>平台公共源</span><b>{fmtNum(data.dataSources.platformCount)}</b></div>
@@ -1726,7 +1732,9 @@ export function DashboardPage() {
                     <div><span>绑定关系数</span><b>{fmtNum(data.dataSources.totalBindings)}</b></div>
                   </div>
                   <BreakdownBars
-                    emptyText="当前无活跃登记的数据源（历史调用见下方监控）"
+                    emptyIcon="globe"
+                    emptyText="当前无活跃登记的数据源"
+                    emptyHint="配置空间或公共数据源后将在此展示类型占比"
                     items={[
                       ...data.dataSources.byProvider.map((p, i) => ({
                         key: 'prov-' + p.key,
@@ -1747,16 +1755,14 @@ export function DashboardPage() {
 
               <div className="dash-grid-2">
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>云函数运行监控（Deno 宿主）</h3>
-                      <p>
-                        总调用 {fmtNum(data.cloud.functions.totalCalls)} · 成功率 {data.cloud.functions.successRate}% · 平均 {data.cloud.functions.avgDurationMs} ms · P95 {data.cloud.functions.p95DurationMs} ms
-                      </p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="code"
+                    tone="violet"
+                    title="云函数运行监控（Deno 宿主）"
+                    sub={`总调用 ${fmtNum(data.cloud.functions.totalCalls)} · 成功率 ${data.cloud.functions.successRate}% · 平均 ${data.cloud.functions.avgDurationMs} ms · P95 ${data.cloud.functions.p95DurationMs} ms`}
+                  />
                   {data.cloud.functions.byName.length === 0 ? (
-                    <p className="dash-empty">暂无云函数调用记录</p>
+                    <DashEmptyBox icon="code" title="暂无云函数调用记录" hint="应用启用 Deno 云函数并触发调用后，将实时统计耗时与报错" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -1798,14 +1804,12 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>数据源代理调用监控</h3>
-                      <p>
-                        总调用 {fmtNum(data.dataSources.calls.totalCalls)} · 成功率 {data.dataSources.calls.successRate}% · 平均耗时 {data.dataSources.calls.avgDurationMs} ms
-                      </p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="share"
+                    tone="indigo"
+                    title="数据源代理调用监控"
+                    sub={`总调用 ${fmtNum(data.dataSources.calls.totalCalls)} · 成功率 ${data.dataSources.calls.successRate}% · 平均耗时 ${data.dataSources.calls.avgDurationMs} ms`}
+                  />
                   {data.dataSources.calls.byOrigin.length > 0 ? (
                     <div className="dash-chip-grid" style={{ marginBottom: 12 }}>
                       {data.dataSources.calls.byOrigin.map((o) => (
@@ -1817,7 +1821,7 @@ export function DashboardPage() {
                     </div>
                   ) : null}
                   {data.dataSources.calls.topSources.length === 0 ? (
-                    <p className="dash-empty">暂无数据源调用记录</p>
+                    <DashEmptyBox icon="share" title="暂无数据源调用记录" hint="应用预览或线上站点发起数据源代理请求后展示调用排行" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -1847,12 +1851,12 @@ export function DashboardPage() {
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>创造页会话 &amp; 文档产出</h3>
-                      <p>会话到应用转化率 {data.interactions.conversations.conversionRate}%</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="spark"
+                    tone="violet"
+                    title="创造页会话 & 文档产出"
+                    sub={`会话到应用转化率 ${data.interactions.conversations.conversionRate}%`}
+                  />
                   <div className="dash-mini-stats compact-2">
                     <div><span>创造会话总数</span><b>{fmtNum(data.interactions.conversations.total)}</b></div>
                     <div><span>已转为应用</span><b>{fmtNum(data.interactions.conversations.convertedToApp)}</b></div>
@@ -1864,12 +1868,12 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>工作台协作 &amp; 小织帮助</h3>
-                      <p>共 {fmtNum(data.interactions.workbench.totalMessages)} 条工作台消息</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="agent"
+                    tone="indigo"
+                    title="工作台协作 & 小织帮助"
+                    sub={`共 ${fmtNum(data.interactions.workbench.totalMessages)} 条工作台消息`}
+                  />
                   <div className="dash-mini-stats compact-2">
                     <div><span>用户 / AI 消息</span><b>{fmtNum(data.interactions.workbench.userMessages)} / {fmtNum(data.interactions.workbench.assistantMessages)}</b></div>
                     <div><span>系统提示消息</span><b>{fmtNum(data.interactions.workbench.systemMessages)}</b></div>
@@ -1881,14 +1885,22 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>素材附件与代码导入</h3>
-                      <p>素材 {fmtNum(data.interactions.assets.total)} 个（{fmtBytes(data.interactions.assets.totalBytes)}）· 上传 {fmtNum(data.interactions.assets.uploadsTotal)} 次</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="image"
+                    tone="teal"
+                    title="素材附件与代码导入"
+                    sub={`素材 ${fmtNum(data.interactions.assets.total)} 个（${fmtBytes(data.interactions.assets.totalBytes)}）· 上传 ${fmtNum(data.interactions.assets.uploadsTotal)} 次`}
+                  />
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                    <div><span>上传素材总数</span><b>{fmtNum(data.interactions.assets.total)}</b></div>
+                    <div><span>总占用空间</span><b>{fmtBytes(data.interactions.assets.totalBytes)}</b></div>
+                    <div><span>代码导入次数</span><b>{fmtNum(data.interactions.assets.uploadsTotal)}</b></div>
+                    <div><span>文件分类数</span><b>{fmtNum(data.interactions.assets.byCategory.length)}</b></div>
+                  </div>
                   <BreakdownBars
+                    emptyIcon="image"
                     emptyText="暂无上传素材"
+                    emptyHint="支持图片、文档等附件用于对话建站"
                     items={data.interactions.assets.byCategory.map((c, i) => ({
                       key: 'cat-' + c.category,
                       label: c.category,
@@ -1915,14 +1927,18 @@ export function DashboardPage() {
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>用户问题上报反馈（最新 10 条）</h3>
-                      <p>来自小织「问题上报」的真实员工反馈</p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="help"
+                    tone="amber"
+                    title="用户问题上报反馈（最新 10 条）"
+                    sub="来自小织「问题上报」的真实员工反馈"
+                  />
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                    <div><span>小织咨询会话</span><b>{fmtNum(data.interactions.help.conversations)}</b></div>
+                    <div><span>累计问题上报</span><b>{fmtNum(data.interactions.help.feedbackCount)}</b></div>
+                  </div>
                   {data.interactions.help.recentFeedbacks.length === 0 ? (
-                    <p className="dash-empty">暂无问题上报反馈</p>
+                    <DashEmptyBox icon="help" title="暂无问题上报反馈" hint="来自小织助手「问题上报」的员工反馈会实时汇总于此" />
                   ) : (
                     <ul className="dash-feedback-list">
                       {data.interactions.help.recentFeedbacks.map((fb) => (
@@ -1936,17 +1952,20 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>技能资产与 SkillHub 市场</h3>
-                      <p>
-                        内置 {fmtNum(data.ecosystem.skills.builtinCount)} · 自建 {fmtNum(data.ecosystem.skills.selfBuiltCount)} · 市场安装 {fmtNum(data.ecosystem.skills.hubInstalledCount)}（{fmtBytes(data.ecosystem.skills.hubInstalledBytes)}）
-                      </p>
-                    </div>
-                  </header>
-                  <h4 className="dash-sub-h">SkillHub 发布记录（{fmtNum(data.ecosystem.skills.publicationsCount)} 次）</h4>
+                  <DashPanelHead
+                    icon="skill"
+                    tone="violet"
+                    title="技能资产与 SkillHub 市场"
+                    sub={`内置 ${fmtNum(data.ecosystem.skills.builtinCount)} · 自建 ${fmtNum(data.ecosystem.skills.selfBuiltCount)} · 市场安装 ${fmtNum(data.ecosystem.skills.hubInstalledCount)}（${fmtBytes(data.ecosystem.skills.hubInstalledBytes)}）`}
+                  />
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                    <div><span>内置官方技能</span><b>{fmtNum(data.ecosystem.skills.builtinCount)}</b></div>
+                    <div><span>空间自建技能</span><b>{fmtNum(data.ecosystem.skills.selfBuiltCount)}</b></div>
+                    <div><span>市场安装技能</span><b>{fmtNum(data.ecosystem.skills.hubInstalledCount)}</b></div>
+                    <div><span>SkillHub 发布</span><b>{fmtNum(data.ecosystem.skills.publicationsCount)}</b></div>
+                  </div>
                   {data.ecosystem.skills.publicationsCount === 0 ? (
-                    <p className="dash-empty">暂无发布到 SkillHub 的记录</p>
+                    <DashEmptyBox icon="skill" title="暂无发布到 SkillHub 的记录" hint="将空间自建技能发布至 SkillHub 后可追踪审核与可见范围" />
                   ) : (
                     <BreakdownBars
                       items={[
@@ -1968,16 +1987,20 @@ export function DashboardPage() {
                 </div>
 
                 <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>灵感社区贡献与热门作品</h3>
-                      <p>
-                        全社区 {fmtNum(data.ecosystem.platformCommunity.totalWorks)} 个作品（浏览 {fmtNum(data.ecosystem.platformCommunity.totalViews)} · 复刻 {fmtNum(data.ecosystem.platformCommunity.totalClones)} · 赞 {fmtNum(data.ecosystem.platformCommunity.totalLikes)}）
-                      </p>
-                    </div>
-                  </header>
+                  <DashPanelHead
+                    icon="community"
+                    tone="rose"
+                    title="灵感社区贡献与热门作品"
+                    sub={`全社区 ${fmtNum(data.ecosystem.platformCommunity.totalWorks)} 个作品（浏览 ${fmtNum(data.ecosystem.platformCommunity.totalViews)} · 复刻 ${fmtNum(data.ecosystem.platformCommunity.totalClones)} · 赞 ${fmtNum(data.ecosystem.platformCommunity.totalLikes)}）`}
+                  />
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                    <div><span>公开作品数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalWorks)}</b></div>
+                    <div><span>累计浏览 PV</span><b>{fmtNum(data.ecosystem.platformCommunity.totalViews)}</b></div>
+                    <div><span>模板复刻次数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalClones)}</b></div>
+                    <div><span>收获点赞数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalLikes)}</b></div>
+                  </div>
                   {data.ecosystem.platformCommunity.topWorks.length === 0 ? (
-                    <p className="dash-empty">灵感社区暂无公开作品</p>
+                    <DashEmptyBox icon="community" title="灵感社区暂无公开作品" hint="将优质应用分享到灵感社区后可实时查看浏览与复刻榜单" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -2008,29 +2031,29 @@ export function DashboardPage() {
               </div>
 
               <div className="dash-panel">
-                <header className="dash-panel-head compact">
-                  <div>
-                    <h3>集群运行期持久化监控与跨实例控制</h3>
-                    <p>
-                      固定窗口（7 天遥测 / 10 分钟滑窗 · 不受顶部空间与日期筛选影响）· 汇总 {Math.max(1, data.system.runtime.instances?.length ?? 1)} 个实例
-                    </p>
-                  </div>
-                  {isAdmin ? (
-                    <button type="button" className="dash-link" onClick={() => setSection('cluster')}>
-                      进入集群节点拓扑与沙箱控制 →
-                    </button>
-                  ) : null}
-                </header>
+                <DashPanelHead
+                  icon="terminal"
+                  tone="slate"
+                  title="集群运行期持久化监控与跨实例控制"
+                  sub={`固定窗口（7 天遥测 / 10 分钟滑窗 · 不受顶部空间与日期筛选影响）· 汇总 ${Math.max(1, data.system.runtime.instances?.length ?? 1)} 个实例`}
+                  right={
+                    isAdmin ? (
+                      <button type="button" className="dash-link" onClick={() => setSection('cluster')}>
+                        进入集群节点拓扑与沙箱控制 →
+                      </button>
+                    ) : undefined
+                  }
+                />
                 <div className="dash-mini-stats">
                   <div>
-                    <span>沙箱冷启动</span>
+                    <span className="dash-mini-label-icon"><Icon name="terminal" /><span>沙箱冷启动</span></span>
                     <b>{fmtNum(data.system.runtime.sandbox?.count ?? 0)} 次</b>
                     <small>
                       均 {data.system.runtime.sandbox?.avgMs ?? 0}ms / P95 {data.system.runtime.sandbox?.p95Ms ?? 0}ms
                     </small>
                   </div>
                   <div>
-                    <span>上游 LLM 调用</span>
+                    <span className="dash-mini-label-icon"><Icon name="spark" /><span>上游 LLM 调用</span></span>
                     <b>{fmtNum(data.system.runtime.llm?.count ?? 0)} 次</b>
                     <small>
                       均 {data.system.runtime.llm?.avgMs ?? 0}ms / P95 {data.system.runtime.llm?.p95Ms ?? 0}ms · 重试{' '}
@@ -2038,12 +2061,12 @@ export function DashboardPage() {
                     </small>
                   </div>
                   <div>
-                    <span>额度错误率</span>
+                    <span className="dash-mini-label-icon"><Icon name="alert" /><span>额度错误率</span></span>
                     <b>{((data.system.runtime.llm?.quotaErrorRate ?? 0) * 100).toFixed(2)}%</b>
                     <small>额度错 {data.system.runtime.llm?.quotaErrors ?? 0} 次</small>
                   </div>
                   <div>
-                    <span>近 10 分钟限流拦截</span>
+                    <span className="dash-mini-label-icon"><Icon name="lock" /><span>近 10 分钟限流拦截</span></span>
                     <b className={(data.system.rateLimits.rejectedLast10Min ?? data.system.rateLimits.hitsLast10Min) > 0 ? 'dash-warn-num' : ''}>
                       {fmtNum(data.system.rateLimits.rejectedLast10Min ?? data.system.rateLimits.hitsLast10Min)}
                     </b>
@@ -2053,12 +2076,12 @@ export function DashboardPage() {
                     </small>
                   </div>
                   <div>
-                    <span>跨实例任务信号</span>
+                    <span className="dash-mini-label-icon"><Icon name="share" /><span>跨实例任务信号</span></span>
                     <b>{fmtNum(data.system.taskSignals.consumed)} 已消费</b>
                     <small>待消费 {fmtNum(data.system.taskSignals.pending)}</small>
                   </div>
                   <div>
-                    <span>集群累计任务 (7d)</span>
+                    <span className="dash-mini-label-icon"><Icon name="chart" /><span>集群累计任务 (7d)</span></span>
                     <b>{fmtNum(data.system.runtime.tasks?.total ?? 0)}</b>
                     <small>
                       成 {data.system.runtime.tasks?.succeeded ?? 0} / 败 {data.system.runtime.tasks?.failed ?? 0} · P95{' '}

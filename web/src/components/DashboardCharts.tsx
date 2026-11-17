@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Icon, type IconName } from '../lib/icons';
 import { niceTicks } from './TrendChart';
 
 export interface SeriesPoint {
@@ -245,12 +246,71 @@ export function MultiTrendChart({
   );
 }
 
+export function DashPanelHead({
+  icon,
+  tone = 'violet',
+  title,
+  sub,
+  right,
+}: {
+  icon: IconName;
+  tone?: 'violet' | 'teal' | 'indigo' | 'amber' | 'rose' | 'slate';
+  title: ReactNode;
+  sub?: ReactNode;
+  right?: ReactNode;
+}) {
+  return (
+    <header className="dash-panel-head compact">
+      <div className="dash-head-with-icon">
+        <span className={`dash-head-icon ${tone}`} aria-hidden="true">
+          <Icon name={icon} />
+        </span>
+        <div className="dash-head-copy">
+          <h3>{title}</h3>
+          {sub ? <p>{sub}</p> : null}
+        </div>
+      </div>
+      {right ? <div className="dash-head-right">{right}</div> : null}
+    </header>
+  );
+}
+
+export function DashEmptyBox({
+  icon = 'chart',
+  title,
+  hint,
+}: {
+  icon?: IconName;
+  title: string;
+  hint?: string;
+}) {
+  return (
+    <div className="dash-empty-box">
+      <span className="dash-empty-icon" aria-hidden="true">
+        <Icon name={icon} />
+      </span>
+      <b>{title}</b>
+      {hint ? <small>{hint}</small> : null}
+    </div>
+  );
+}
+
 /** 环形分布图：SVG 圆环 + 中心总数 + 可悬停图例。 */
-export function DonutChart({ slices, centerLabel = '总计', emptyText = '暂无数据' }: { slices: DonutSlice[]; centerLabel?: string; emptyText?: string }) {
+export function DonutChart({
+  slices,
+  centerLabel = '总计',
+  emptyText = '暂无数据',
+  emptyIcon = 'chart',
+}: {
+  slices: DonutSlice[];
+  centerLabel?: string;
+  emptyText?: string;
+  emptyIcon?: IconName;
+}) {
   const [hover, setHover] = useState<string | null>(null);
   const total = slices.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
-    return <p className="dash-empty">{emptyText}</p>;
+    return <DashEmptyBox icon={emptyIcon} title={emptyText} />;
   }
   const r = 46;
   const c = 2 * Math.PI * r;
@@ -319,10 +379,20 @@ export function DonutChart({ slices, centerLabel = '总计', emptyText = '暂无
 }
 
 /** 水平比例条列表：展示维度分布、数量、占比与附加说明。 */
-export function BreakdownBars({ items, emptyText = '暂无记录' }: { items: BarItem[]; emptyText?: string }) {
+export function BreakdownBars({
+  items,
+  emptyText = '暂无记录',
+  emptyIcon = 'chart',
+  emptyHint,
+}: {
+  items: BarItem[];
+  emptyText?: string;
+  emptyIcon?: IconName;
+  emptyHint?: string;
+}) {
   const total = items.reduce((s, x) => s + x.value, 0);
   if (!items.length || total <= 0) {
-    return <p className="dash-empty">{emptyText}</p>;
+    return <DashEmptyBox icon={emptyIcon} title={emptyText} hint={emptyHint} />;
   }
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
