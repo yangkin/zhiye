@@ -75,6 +75,8 @@ public class TaskExecutor {
     private com.tcl.csot.zhiye.service.chat.AskAttachments attachments;
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.service.llm.LlmRouter router;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
 
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
@@ -279,6 +281,7 @@ public class TaskExecutor {
                     ctx.agentDir == null ? null : ctx.agentDir.toString(), ctx.sessionFile, ctx.draftApplied));
         } else cleanup(ctx);
         tasks.finish(t.id(), "CANCELLED", "已停止", currentProgress(t.id()), null, null, savedVersion, null);
+        recordTaskMetric(t, "CANCELLED", null);
         taskService.afterTerminal(t, "CANCELLED", null, null);
         events.emit(t.id(), "status", Map.of("status", "CANCELLED", "phaseLabel", "已停止", "progress", currentProgress(t.id())));
         events.emit(t.id(), "finished", taskService.finishedPayload("CANCELLED", null, null, null));
@@ -294,6 +297,7 @@ public class TaskExecutor {
                     ctx.agentDir == null ? null : ctx.agentDir.toString(), ctx.sessionFile, ctx.draftApplied));
         } else cleanup(ctx);
         tasks.finish(t.id(), "FAILED", "失败", currentProgress(t.id()), code, message, null, null);
+        recordTaskMetric(t, "FAILED", code);
         taskService.afterTerminal(t, "FAILED", code, message);
         events.emit(t.id(), "status", Map.of("status", "FAILED", "phaseLabel", "失败", "progress", currentProgress(t.id())));
         events.emit(t.id(), "finished", taskService.finishedPayload("FAILED", null, code, message));
@@ -301,10 +305,18 @@ public class TaskExecutor {
 
     private void succeed(TaskContext ctx, String versionId, JsonNode result) {
         tasks.finish(ctx.id(), "SUCCEEDED", "已完成", 100, null, null, versionId, result);
+        recordTaskMetric(ctx.task, "SUCCEEDED", null);
         taskService.afterTerminal(ctx.task, "SUCCEEDED", null, null);
         events.emit(ctx.id(), "status", Map.of("status", "SUCCEEDED", "phaseLabel", "已完成", "progress", 100));
         events.emit(ctx.id(), "finished", taskService.finishedPayload("SUCCEEDED", versionId, null, null));
         cleanup(ctx);
+    }
+
+    private void recordTaskMetric(TaskRow t, String status, String code) {
+        if (metrics == null || t == null) return;
+        Instant ref = t.startedAt() != null ? t.startedAt() : t.createdAt();
+        long ms = ref == null ? 0L : Math.max(0L, Duration.between(ref, Instant.now()).toMillis());
+        metrics.recordTask(t.type(), status, code, ms);
     }
 
     private int currentProgress(String id) { return tasks.findById(id).map(TaskRow::progress).orElse(0); }
@@ -884,10 +896,13 @@ public class TaskExecutor {
         String token = tokens.issue(ctx.id(), Duration.ofHours(24));
         String gw = props.llm().gatewayUrl();
         if (gw == null || gw.isBlank()) gw = port.selfBase() + "/llm/v1";
+        long startedMs = System.currentTimeMillis();
         try {
             ctx.runner = sandbox.start(new SandboxProvider.Spec(ctx.id(), ctx.workspace, ctx.agentDir, allowNet, gw, token,
                     taskService.logFile(ctx.id()), ev -> onRunnerEvent(ctx, ev)));
+            if (metrics != null) metrics.recordSandboxStart(System.currentTimeMillis() - startedMs, true);
         } catch (Exception e) {
+            if (metrics != null) metrics.recordSandboxStart(System.currentTimeMillis() - startedMs, false);
             throw new TaskContext.Fail("SANDBOX_FAILED", "沙箱启动失败：" + e.getMessage());
         }
         if (ctx.cancelRequested) { ctx.runner.kill(); throw new TaskContext.Cancelled(); }

@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { verify } from '../runner/src/verify.mjs'
+import { runLiveFlow } from '../runner/src/smoke.mjs'
 import { scoreWorkspace, summarizeResults } from './score.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -49,7 +50,7 @@ async function runOfflineCheck() {
     }
   }
 
-  // 验证评分器能正确抓出违例用例
+  // 验证评分器能正确抓出违例用例（包括「仅靠 README 文档关键词绕过」的作弊场景）
   const badDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-eval-bad-'))
   try {
     writeFileSync(path.join(badDir, 'App.tsx'), 'import { BrowserRouter } from "react-router-dom";')
@@ -57,6 +58,16 @@ async function runOfflineCheck() {
     assert.equal(bad.passed, false)
   } finally {
     rmSync(badDir, { recursive: true, force: true })
+  }
+
+  const fakeReadmeDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-eval-readme-'))
+  try {
+    writeFileSync(path.join(fakeReadmeDir, 'README.md'), '支持按容量筛选并导出 CSV。')
+    writeFileSync(path.join(fakeReadmeDir, 'App.tsx'), 'export default function App(){ return <main>空壳页面</main> }')
+    const readmeOnly = scoreWorkspace(fakeReadmeDir, cases.find((c) => c.id === 'incremental-modify'))
+    assert.equal(readmeOnly.passed, false, '仅靠 README 文档关键词不应通过增量修改评分')
+  } finally {
+    rmSync(fakeReadmeDir, { recursive: true, force: true })
   }
 
   console.log(JSON.stringify({ mode: 'offline-check', caseCount: cases.length, templateBaseline: summarizeResults(results) }, null, 2))
@@ -91,6 +102,7 @@ async function runLive() {
     throw new Error(`任务 ${id} 超时`)
   }
 
+  const chrome = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/chromium', process.env.ZHIYE_CHROME_PATH].find((p) => p && existsSync(p))
   const out = []
   for (const c of targetCases) {
     const started = Date.now()
@@ -99,6 +111,7 @@ async function runLive() {
     let tokenUsed = 0
     let contract = { passed: false, errors: [] }
     let previewOk = null
+    let liveFlow = null
     try {
       const created = await req('POST', '/api/apps', {
         type: c.type, mode: c.mode || '快速', prompt: c.prompt, model: 'auto', assetIds: [],
@@ -120,6 +133,16 @@ async function runLive() {
       const app = await req('GET', `/api/apps/${appId}`)
       const vid = app?.currentVersion?.id
       if (task?.status === 'SUCCEEDED' && vid) {
+        if (app.previewUrl) {
+          try {
+            const pr = await fetch(app.previewUrl)
+            const html = await pr.text()
+            previewOk = pr.ok && html.includes('<html')
+            if (previewOk && chrome && (c.liveFlow || ['template', 'vue'].includes(c.expect?.projectKind))) {
+              liveFlow = await runLiveFlow(app.previewUrl, c.liveFlow || { probeControls: true }, { chromePath: chrome })
+            }
+          } catch { previewOk = false }
+        }
         const fileList = await req('GET', `/api/versions/${vid}/files`)
         const tmp = mkdtempSync(path.join(os.tmpdir(), `zhiye-live-${c.id}-`))
         try {
@@ -130,16 +153,9 @@ async function runLive() {
             mkdirSync(path.dirname(dst), { recursive: true })
             writeFileSync(dst, content)
           }
-          contract = scoreWorkspace(tmp, c)
+          contract = scoreWorkspace(tmp, c, liveFlow ? { checks: [], liveFlow } : null)
         } finally {
           rmSync(tmp, { recursive: true, force: true })
-        }
-        if (app.previewUrl) {
-          try {
-            const pr = await fetch(app.previewUrl)
-            const html = await pr.text()
-            previewOk = pr.ok && html.includes('<html')
-          } catch { previewOk = false }
         }
       } else {
         contract = { passed: false, errors: [task?.error?.message || `任务状态 ${task?.status}`] }
@@ -155,6 +171,7 @@ async function runLive() {
       status: task?.status || 'ERROR',
       contractPassed: contract.passed,
       previewOk,
+      liveFlowOk: liveFlow ? liveFlow.ok : null,
       passed,
       durationMs: Date.now() - started,
       tokenUsed,

@@ -27,6 +27,8 @@ public class MetaController {
     private com.tcl.csot.zhiye.config.FivestarProperties fivestar;
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.config.SkillHubProperties skillhub;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
 
     public MetaController(ZhiyeProperties props, CurrentPrincipal principal, WorkspaceService workspaces,
                           com.tcl.csot.zhiye.service.auth.AuthService authService, com.tcl.csot.zhiye.service.skillhub.SkillRefs skillRefs) {
@@ -60,6 +62,12 @@ public class MetaController {
         Object ws = request.getAttribute(com.tcl.csot.zhiye.util.RequestPrincipal.ATTR_WS);
         m.put("hubSkills", ws instanceof String id && !id.isEmpty() ? skillRefs.hubList(id) : List.of());
         return m;
+    }
+
+    @GetMapping("/meta/metrics")
+    public Map<String, Object> metrics() {
+        principal.workspaceId();
+        return metrics == null ? Map.of() : metrics.snapshot();
     }
 
     @GetMapping("/workspace")

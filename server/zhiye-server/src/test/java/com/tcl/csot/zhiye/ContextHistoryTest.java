@@ -212,6 +212,52 @@ class ContextHistoryTest extends IntegrationTest {
     }
 
     @Test
+    void rateLimitEnforcesExactLimitUnderConcurrency() throws Exception {
+        String bucket = "test-concurrent-" + java.util.UUID.randomUUID();
+        int threads = 20;
+        int maxRequests = 5;
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        var ready = new java.util.concurrent.CountDownLatch(threads);
+        var go = new java.util.concurrent.CountDownLatch(1);
+        var allowed = new java.util.concurrent.atomic.AtomicInteger();
+        var rejected = new java.util.concurrent.atomic.AtomicInteger();
+        try {
+            List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    go.await();
+                    try {
+                        rateLimit.check(bucket, maxRequests, 60, "RATE_LIMITED", "限流");
+                        allowed.incrementAndGet();
+                    } catch (com.tcl.csot.zhiye.exception.ApiException e) {
+                        if (e.status() == org.springframework.http.HttpStatus.TOO_MANY_REQUESTS) rejected.incrementAndGet();
+                        else throw e;
+                    }
+                    return null;
+                }));
+            }
+            ready.await();
+            go.countDown();
+            for (var f : futures) f.get();
+            assertThat(allowed.get()).isEqualTo(maxRequests);
+            assertThat(rejected.get()).isEqualTo(threads - maxRequests);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void runtimeMetricsEndpointReportsTasksAndLlmStats() {
+        Client c = client();
+        c.createApp("做一个计数器");
+        JsonNode m = c.ok(c.get("/api/meta/metrics"));
+        assertThat(m.at("/tasks/total").asLong()).isGreaterThanOrEqualTo(1L);
+        assertThat(m.has("sandbox")).isTrue();
+        assertThat(m.at("/llm/count").asLong()).isGreaterThanOrEqualTo(1L);
+    }
+
+    @Test
     void crossInstanceStopAbortsStreamingConversation() throws Exception {
         Client c = client();
         String cid = c.ok(c.post("/api/conversations", Map.of())).path("id").asText();

@@ -209,6 +209,10 @@ export async function smokeTest(dir, { requireRoot = false, captureShot = false,
             checkRenderState(await readRenderState(page), requireRoot, errors, '输入搜索词后 ')
           }
         }
+        // 安全下拉框与非破坏性弹窗按钮探活：验证筛选切换与新建弹窗打开不崩溃
+        if (errors.length === 0) {
+          await probeSafeControls(page, requireRoot, errors)
+        }
       } catch (e) {
         errors.push(`交互切换检查失败：${String(e.message).split('\n')[0]}`)
       }
@@ -279,6 +283,84 @@ export async function smokeTest(dir, { requireRoot = false, captureShot = false,
   } finally {
     if (browser) await browser.close().catch(() => {})
     await srv.close().catch(() => {})
+    try { rmSync(userDataDir, { recursive: true, force: true }) } catch {}
+  }
+}
+
+const SAFE_MODAL_TRIGGER = /^(新增|新建|创建|添加|登记|筛选|详情|查看)/
+
+async function probeSafeControls(page, requireRoot, errors) {
+  const selects = page.locator('select')
+  const selCount = Math.min(2, await selects.count().catch(() => 0))
+  for (let i = 0; i < selCount && errors.length === 0; i++) {
+    const sel = selects.nth(i)
+    if (!(await sel.isVisible({ timeout: 200 }).catch(() => false))) continue
+    const vals = await sel.evaluate((el) => Array.from(el.options).filter((o) => !o.disabled).map((o) => o.value)).catch(() => [])
+    if (vals.length >= 2) {
+      await sel.selectOption(vals[1]).catch(() => {})
+      await page.waitForTimeout(100)
+      checkRenderState(await readRenderState(page), requireRoot, errors, '切换下拉筛选项后 ')
+      await sel.selectOption(vals[0]).catch(() => {})
+      await page.waitForTimeout(80)
+    }
+  }
+  if (errors.length === 0) {
+    const btns = await page.evaluate(() => Array.from(document.querySelectorAll('button')).map((b, idx) => {
+      const r = b.getBoundingClientRect()
+      const cs = getComputedStyle(b)
+      const label = (b.innerText || b.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ')
+      return { idx, label, ok: r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !b.disabled }
+    }).filter((x) => x.ok && x.label)).catch(() => [])
+    const target = btns.find((b) => SAFE_MODAL_TRIGGER.test(b.label) && !SAFE_TAB_SKIP.test(b.label))
+    if (target) {
+      await page.locator('button').nth(target.idx).click({ timeout: 1500 }).catch(() => {})
+      await page.waitForTimeout(150)
+      checkRenderState(await readRenderState(page), requireRoot, errors, `点击「${target.label.slice(0, 12)}」后 `)
+      await page.keyboard.press('Escape').catch(() => {})
+      await page.waitForTimeout(100)
+    }
+  }
+}
+
+/**
+ * 面向实盘评测与端到端校验的真实浏览器交互流验证：
+ * 验证页面在真实 Chromium 中渲染出预期业务文案，并执行无破坏交互探活。
+ */
+export async function runLiveFlow(url, flow = {}, { chromePath = process.env.ZHIYE_CHROME_PATH, timeoutMs = 30000 } = {}) {
+  if (!chromePath || !existsSync(chromePath)) return { ok: true, skipped: true, detail: '无 Chrome' }
+  const { chromium } = await import('playwright-core')
+  const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-flow-'))
+  let browser
+  const errors = []
+  const warnings = []
+  try {
+    browser = await chromium.launch({
+      executablePath: chromePath,
+      headless: true,
+      timeout: timeoutMs,
+      args: ['--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check'],
+      env: { ...process.env, HOME: process.env.HOME || userDataDir },
+    })
+    const origin = new URL(url).origin
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const page = await ctx.newPage()
+    await attachPageWatchers(page, { origin, blocked: new Set(), errors, warnings })
+    await page.goto(url, { waitUntil: 'load', timeout: timeoutMs })
+    await page.waitForTimeout(800)
+    checkRenderState(await readRenderState(page), true, errors, '', 1280)
+    const bodyText = await page.evaluate(() => document.body?.innerText || '')
+    for (const txt of flow.expectText || []) {
+      if (!bodyText.includes(txt)) errors.push(`浏览器实机页面未渲染预期业务内容：${txt}`)
+    }
+    if (flow.probeControls !== false && errors.length === 0) {
+      await probeSafeControls(page, true, errors)
+    }
+    await ctx.close().catch(() => {})
+    return { ok: errors.length === 0, detail: errors.join('；') }
+  } catch (e) {
+    return { ok: false, detail: `浏览器实机流程检查异常：${e.message}` }
+  } finally {
+    if (browser) await browser.close().catch(() => {})
     try { rmSync(userDataDir, { recursive: true, force: true }) } catch {}
   }
 }

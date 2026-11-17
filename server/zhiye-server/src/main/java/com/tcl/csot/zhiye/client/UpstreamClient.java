@@ -34,6 +34,8 @@ public class UpstreamClient {
     private final ZhiyeProperties props;
     private final FivestarProperties fivestar;
     private final ServerPort port;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20))
             .followRedirects(HttpClient.Redirect.NEVER).build();
 
@@ -80,8 +82,13 @@ public class UpstreamClient {
         int max = Math.max(0, retries);
         long backoff = props.llm().retryBackoffMillis();
         IOException lastIo = null;
+        long startedMs = System.currentTimeMillis();
+        int retried = 0;
         for (int attempt = 0; attempt <= max; attempt++) {
-            if (attempt > 0) Thread.sleep(backoff * (1L << (attempt - 1)));
+            if (attempt > 0) {
+                retried++;
+                Thread.sleep(backoff * (1L << (attempt - 1)));
+            }
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(route.baseUrl() + path))
                     .timeout(timeout)
                     .header("Authorization", "Bearer " + route.apiKey())
@@ -95,17 +102,21 @@ public class UpstreamClient {
                 if ((s == 429 || s >= 500) && attempt < max) {
                     byte[] all;
                     try (InputStream in = res.body()) { all = in.readAllBytes(); }
-                    if (s == 429 && "PROVIDER_QUOTA".equals(KimiClient.codeFor(s, new String(all, StandardCharsets.UTF_8))))
+                    if (s == 429 && "PROVIDER_QUOTA".equals(KimiClient.codeFor(s, new String(all, StandardCharsets.UTF_8)))) {
+                        if (metrics != null) metrics.recordLlmCall(System.currentTimeMillis() - startedMs, false, true, retried);
                         return new Buffered(res, all);
+                    }
                     log.warn("上游模型返回 {}，第 {} 次重试", s, attempt + 1);
                     continue;
                 }
+                if (metrics != null) metrics.recordLlmCall(System.currentTimeMillis() - startedMs, s < 400, s == 429, retried);
                 return res;
             } catch (IOException e) {
                 lastIo = e;
                 log.warn("上游模型连接失败：{}，第 {} 次重试", e.getMessage(), attempt + 1);
             }
         }
+        if (metrics != null) metrics.recordLlmCall(System.currentTimeMillis() - startedMs, false, false, retried);
         throw lastIo != null ? lastIo : new IOException("上游模型不可用");
     }
 

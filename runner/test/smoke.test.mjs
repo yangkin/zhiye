@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { smokeTest } from '../src/smoke.mjs'
+import { smokeTest, runLiveFlow, startStaticServer } from '../src/smoke.mjs'
 import { systemPrompt } from '../src/prompts.mjs'
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -165,5 +165,46 @@ test('smokeTest 能检出按钮控件重叠与损坏的本地图片', { skip: !H
     assert.match(r.detail, /损坏图标|missing\.png|资源加载失败/)
   } finally {
     rmSync(badImg, { recursive: true, force: true })
+  }
+})
+
+test('smokeTest 能检出切换下拉筛选框后的运行时崩溃，runLiveFlow 能验证实机渲染文本', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+  const badSel = makeSite(`<!doctype html><html><body>
+<div id="root">
+  <select onchange="throw new Error('filter crashed')">
+    <option value="all">全部容量</option>
+    <option value="large">大会议室</option>
+  </select>
+  <p>会议室预约看板</p>
+</div>
+</body></html>`)
+  try {
+    const r = await smokeTest(badSel, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, false)
+    assert.match(r.detail, /filter crashed|页面脚本错误/)
+  } finally {
+    rmSync(badSel, { recursive: true, force: true })
+  }
+
+  const goodFlow = makeSite(`<!doctype html><html><body>
+<div id="root">
+  <select onchange="document.getElementById('out').textContent='已选:'+this.value">
+    <option value="all">全部容量</option>
+    <option value="20">20人以上</option>
+  </select>
+  <button onclick="document.getElementById('out').textContent='导出完成'">导出今日日程</button>
+  <main id="out">会议室预约</main>
+</div>
+</body></html>`)
+  const srv = await startStaticServer(goodFlow)
+  try {
+    const ok = await runLiveFlow(`http://127.0.0.1:${srv.port}/index.html`, { expectText: ['会议室预约', '导出'], probeControls: true }, { chromePath: CHROME })
+    assert.equal(ok.ok, true, ok.detail)
+    const miss = await runLiveFlow(`http://127.0.0.1:${srv.port}/index.html`, { expectText: ['不存在的模块'] }, { chromePath: CHROME })
+    assert.equal(miss.ok, false)
+    assert.match(miss.detail, /未渲染预期业务内容/)
+  } finally {
+    await srv.close()
+    rmSync(goodFlow, { recursive: true, force: true })
   }
 })

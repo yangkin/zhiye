@@ -824,12 +824,12 @@ a.skill-chip{text-decoration:none}
 
 /* 模型弹层：五星AI岛个人额度 */
 .model-quota{margin:2px 0 4px;padding:9px 10px 10px;border-radius:9px;background:#f8f6fc;font-size:12px;color:#5c5670;display:grid;gap:6px}
-.model-quota.is-muted{color:#8d879c;line-height:1.6}
+.model-quota.is-muted{color:#68617a;line-height:1.6}
 .model-quota-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .model-quota-head b{font-weight:600;color:#33313f}
 .model-quota-bar{display:block;height:5px;border-radius:3px;background:#e8e3f2;overflow:hidden}
 .model-quota-bar em{display:block;height:100%;border-radius:3px;background:#7953dc}
-.model-quota small{font-size:11px;color:#8d879c}
+.model-quota small{font-size:11px;color:#68617a}
 .model-quota.is-low .model-quota-bar em{background:#d98a2b}
 .model-quota.is-out .model-quota-bar em{background:#c94f5d}
 .model-quota.is-out .model-quota-head b{color:#b2414f}

@@ -5,7 +5,8 @@
     "type": "日常开发",
     "mode": "标准",
     "prompt": "做一个产线设备点检台账应用，支持按车间筛选、搜索设备编号、新增与修改点检记录、导出 CSV，适配手机与桌面。",
-    "expect": { "projectKind": "template", "mustContainText": ["点检"], "minFiles": 2 }
+    "expect": { "projectKind": "template", "mustContainText": ["点检"], "mustContainAllCode": [".filter(", "Blob"], "requireInteractive": true, "minFiles": 2 },
+    "liveFlow": { "expectText": ["点检"], "probeControls": true }
   },
   {
     "id": "dashboard-charts",
@@ -13,7 +14,8 @@
     "type": "日常开发",
     "mode": "标准",
     "prompt": "做一个工厂良率看板：看板 · 展示今日良率、停机时长 KPI，按产线联动筛选的 Recharts 折线与柱状图，识别异常波动并支持导出。",
-    "expect": { "projectKind": "template", "mustContainCode": ["recharts"], "minFiles": 2 }
+    "expect": { "projectKind": "template", "mustContainCode": ["recharts"], "mustContainAllCode": ["recharts"], "requireInteractive": true, "minFiles": 2 },
+    "liveFlow": { "expectText": ["良率"], "probeControls": true }
   },
   {
     "id": "multipage-hash-router",
@@ -96,6 +98,7 @@
     "mode": "快速",
     "prompt": "做一个简洁的会议室预约看板，支持查看今日预约与快速新建预约。",
     "followUpModify": "保留现有预约列表和新建功能，额外增加「按会议室容量筛选」和「导出今日日程 CSV」两个按钮。",
-    "expect": { "projectKind": "template", "mustContainText": ["容量", "导出"] }
+    "expect": { "projectKind": "template", "mustContainText": ["预约", "容量", "导出"], "mustContainAllCode": [".filter(", "Blob"], "requireInteractive": true },
+    "liveFlow": { "expectText": ["预约", "容量", "导出"], "probeControls": true }
   }
 ]

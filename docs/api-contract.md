@@ -158,6 +158,7 @@ interface Meta {
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/meta` | → `Meta` |
+| GET | `/api/meta/metrics` | → `{ tasks, sandbox, llm }`（任务耗时/成功率/失败码分布、沙箱冷启动、模型延迟与额度错误率） |
 | GET | `/api/workspace` | → `{ id, createdAt, recoveryUrl }`，recoveryUrl 形如 `http://127.0.0.1:8080/recover#<token>` |
 | POST | `/api/workspace/recover` | `{ token }` → 设置 cookie 切换到该工作空间 → `{ id }` |
 
