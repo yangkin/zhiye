@@ -53,6 +53,35 @@ const NEW_APP_HINT = /(再|另外|另|重新|新)(帮我)?(做|写|建|开发|�
 /** 启用云服务后自动发给 AI 的那句话 */
 const CLOUD_DESIGN_PROMPT = '云服务已启用。请按这个应用现在的功能设计表结构和数据权限，把数据改成云端读写。';
 
+/** 任务有「继续 / 中途补充（steer）」消息时，把该任务的助手回复与版本卡放到最后一条补充消息之后 */
+export function orderMessagesWithSteers(list: Message[]): Message[] {
+  const lastSteerIdx = new Map<string, number>();
+  list.forEach((m, i) => {
+    if (m.role === 'user' && m.steer && m.taskId) lastSteerIdx.set(m.taskId, i);
+  });
+  if (!lastSteerIdx.size) return list;
+  const moveAfter = new Map<number, Message[]>();
+  const skip = new Set<number>();
+  list.forEach((m, i) => {
+    if (m.role !== 'assistant' || !m.taskId) return;
+    const target = lastSteerIdx.get(m.taskId);
+    if (target !== undefined && target > i) {
+      skip.add(i);
+      const bucket = moveAfter.get(target) ?? [];
+      bucket.push(m);
+      moveAfter.set(target, bucket);
+    }
+  });
+  if (!skip.size) return list;
+  const out: Message[] = [];
+  list.forEach((m, i) => {
+    if (!skip.has(i)) out.push(m);
+    const trailing = moveAfter.get(i);
+    if (trailing) out.push(...trailing);
+  });
+  return out;
+}
+
 export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted, onEnableCloud, onOpenCloud, onRestoreVersion, onPublish, onFocusPreview, skill = false, runningTaskId = null, otherBusy = null, beforeSend, pendingManual = 0, previewVisible = true }: Props) {
   const qc = useQueryClient();
   const { data: messages } = useMessages(app.id);
@@ -400,8 +429,10 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     }
   };
 
-  // 服务端消息里若已包含最初需求，就不再重复展示
-  const list = (messages ?? []).filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim()));
+  // 服务端消息里若已包含最初需求，就不再重复展示；同时把含 steer 的任务助手回复挂到任务结束处
+  const list = orderMessagesWithSteers(
+    (messages ?? []).filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim())),
+  );
   const phase = app.phase;
   const task = stream.task;
   const modelLabel = modelList.find((x) => x.id === app.model)?.label ?? (fivestarModels ? '五星默认' : 'Auto');
@@ -526,7 +557,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           const version = m.versionId
             ? (versions.find((v) => v.id === m.versionId) ?? (currentVersion?.id === m.versionId ? currentVersion : undefined))
             : undefined;
-          const versionNumber = version?.number ?? (m.versionId && app.currentVersion?.id === m.versionId ? app.currentVersion.number : undefined);
+          const versionNumber = version?.number ?? (m.versionId && app.currentVersion?.id === m.versionId ? app.currentVersion?.number : undefined);
           return (
             <MessageItem
               key={m.id}

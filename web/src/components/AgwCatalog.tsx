@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import type { AgwApiItem, DataSourceInfo } from '../api/types';
@@ -20,6 +20,16 @@ export function AgwCatalog({ onBack, onDone }: Props) {
   const [appSecret, setAppSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const credRef = useRef<HTMLFormElement>(null);
+  const selectItem = (item: AgwApiItem | null) => {
+    setSelected(item);
+    setAppKey('');
+    setAppSecret('');
+    setError('');
+  };
+  useEffect(() => {
+    if (selected) credRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selected]);
   const list = useQuery({
     queryKey: ['agw-apis', query, page],
     queryFn: () => api.agwApis({ q: query, page, size: 20 }),
@@ -68,7 +78,7 @@ export function AgwCatalog({ onBack, onDone }: Props) {
               {!item.supported ? <p className="inline-error">{item.unsupportedReason}</p> : null}
             </span>
             <span className="source-row-actions">
-              <button type="button" className="subtle-button" disabled={!item.supported} onClick={() => { setSelected(item); setError(''); }}>
+              <button type="button" className="subtle-button" disabled={!item.supported} onClick={() => selectItem(item)}>
                 {item.importedSourceId ? '更新' : '导入'}
               </button>
             </span>
@@ -84,12 +94,12 @@ export function AgwCatalog({ onBack, onDone }: Props) {
         </div>
       </div>
       {selected ? (
-        <form className="agw-credential" onSubmit={(e) => { e.preventDefault(); void importApi(); }}>
+        <form ref={credRef} className="agw-credential" onSubmit={(e) => { e.preventDefault(); void importApi(); }}>
           <h3>导入「{selected.name}」</h3>
           <p>填写已获得该 API 授权的<b>调用项目</b>凭证，不是提供方应用编码。</p>
           <label>
             <span className="field-label">调用项目 AppKey</span>
-            <input className="field mono" required={!selected.importedSourceId} value={appKey} placeholder={selected.importedSourceId ? '留空保留原 AppKey' : '项目 AppKey'} onChange={(e) => setAppKey(e.target.value)} />
+            <input autoFocus className="field mono" required={!selected.importedSourceId} value={appKey} placeholder={selected.importedSourceId ? '留空保留原 AppKey' : '项目 AppKey'} onChange={(e) => setAppKey(e.target.value)} />
           </label>
           <label>
             <span className="field-label">AppSecret</span>
@@ -98,7 +108,7 @@ export function AgwCatalog({ onBack, onDone }: Props) {
           <small className="muted-note">AppSecret 加密保存在服务端，不会返回浏览器或写入生成的应用。</small>
           {error ? <p className="inline-error" role="alert">{error}</p> : null}
           <div className="source-actions">
-            <button type="button" className="subtle-button" onClick={() => setSelected(null)}>取消</button>
+            <button type="button" className="subtle-button" onClick={() => selectItem(null)}>取消</button>
             <button type="submit" className="primary-button" disabled={busy}>{busy ? '正在导入…' : selected.importedSourceId ? '更新数据源' : '导入并试调用'}</button>
           </div>
         </form>

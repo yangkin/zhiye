@@ -279,6 +279,7 @@ export function ChatPage() {
       if (action.current === 'ask') action.current = null;
       setAsking(false);
       if (askAbort.current === ctrl) askAbort.current = null;
+      void qc.invalidateQueries({ queryKey: ['llm-quota'] });
     }
   };
 

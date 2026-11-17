@@ -40,6 +40,7 @@ export function ConfirmCard({ taskId, appId, confirm }: { taskId: string; appId:
 
   return (
     <ConfirmView
+      kind={confirm.kind}
       title={confirm.title}
       reason={confirm.reason}
       items={confirm.items}
@@ -53,6 +54,7 @@ export function ConfirmCard({ taskId, appId, confirm }: { taskId: string; appId:
 
 /** 确认卡的外观：agent 发起的确认和点「共享云服务」弹出的确认共用 */
 export function ConfirmView({
+  kind,
   title,
   reason,
   items,
@@ -61,6 +63,7 @@ export function ConfirmView({
   acceptLabel = '确认启用',
   declineLabel = '暂不启用',
 }: {
+  kind?: string;
   title?: string;
   reason?: string;
   items?: string[];
@@ -77,7 +80,7 @@ export function ConfirmView({
         <ul>
           {items.map((item, i) => (
             <li key={item}>
-              <Icon name={ITEM_ICONS[i] ?? 'check'} />
+              <Icon name={kind === 'continue' ? (i === 0 ? 'history' : 'check') : (ITEM_ICONS[i] ?? 'check')} />
               <span>{item}</span>
             </li>
           ))}

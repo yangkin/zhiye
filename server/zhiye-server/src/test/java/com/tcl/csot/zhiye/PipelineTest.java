@@ -133,7 +133,9 @@ class PipelineTest extends IntegrationTest {
         assertThat(app.path("currentVersion").path("number").asInt()).isEqualTo(3);
         assertThat(app.path("currentVersion").path("title").asText()).isEqualTo("可视化编辑 · 1 处修改");
         assertThat(app.path("hasDraft").asBoolean()).isFalse();
-        assertThat(c.get("/api/apps/" + appId + "/draft").status()).isEqualTo(404);
+        var emptyDraft = c.get("/api/apps/" + appId + "/draft");
+        assertThat(emptyDraft.status()).isEqualTo(200);
+        assertThat(emptyDraft.json().isNull()).isTrue();
         String v3 = app.path("currentVersion").path("id").asText();
         assertThat(c.get("/api/versions/" + v3 + "/file?path=src/App.tsx").body()).contains("灵感在这里发生");
 

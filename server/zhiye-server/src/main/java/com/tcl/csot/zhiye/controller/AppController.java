@@ -99,7 +99,12 @@ public class AppController {
     }
 
     @GetMapping("/{id}/draft")
-    public Map<String, Object> draft(@PathVariable String id) { return apps.draft(ws(), id); }
+    public ResponseEntity<String> draft(@PathVariable String id) {
+        Map<String, Object> d = apps.draft(ws(), id);
+        return ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .body(d == null ? "null" : Json.write(d));
+    }
 
     @PutMapping("/{id}/draft")
     public Map<String, Object> putDraft(@PathVariable String id, @RequestBody JsonNode body) { return apps.putDraft(ws(), id, body); }

@@ -347,7 +347,7 @@ public class AppService {
     // ---------- 草稿 ----------
     public Map<String, Object> draft(String ws, String id) {
         AppRow app = require(ws, id);
-        return views.draft(drafts.find(app.id()).orElseThrow(() -> ApiException.notFound("草稿")));
+        return drafts.find(app.id()).map(views::draft).orElse(null);
     }
 
     public Map<String, Object> putDraft(String ws, String id, JsonNode body) {

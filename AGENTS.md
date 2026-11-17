@@ -26,7 +26,7 @@
 ## 测试注意
 - 取消任务会把中断前的工作区自动保存成一个版本（不设为当前版本），续做再产生一个正常版本；相关断言已按这个行为写。
 - `GenerationViewTest.todosSteerAndLiveFiles` 在全量并发跑时偶尔因时序拿到 409 `NOT_STEERABLE`，单独跑通过。
-- `QuotaTest.tenAppsPerPerson` 偶发在计划已快速完成后读不到 `activeTask`，`Client.createApp` 随后请求 `/api/tasks/` 得到 404；单独跑通过。这是测试辅助方法的竞态，不是任务接口随机失效。
+- `Client.createApp` 已兼容计划任务在返回前秒完（`activeTask` 为空时直接回查应用状态），消除 `QuotaTest.tenAppsPerPerson` 的竞态。
 - 本机全仓测试显式用 `ZHIYE_MODEL=kimi KIMI_API_KEY=test-key INCLUDE_INTRANET=1 bash scripts/ci.sh`，避免读取本机 DeepSeek 选择但未加载密钥；重复全量前使用干净的 `zhiye_test`。
 
 ## 数据源 / 技能 / 构建归属（2026 后续开发）

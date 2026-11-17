@@ -219,7 +219,8 @@ public class AgwCatalogService {
                 throw new ApiException(HttpStatus.BAD_GATEWAY, "AGW_ERROR", "API 网关返回 HTTP " + res.statusCode());
             JsonNode root = Json.read(text);
             if (root.path("failed").asBoolean(false) || !root.path("success").asBoolean(false)) {
-                String message = root.path("message").asText("API 网关业务处理失败");
+                String message = root.path("message").asText("");
+                if (message.isBlank()) message = root.path("msg").asText("API 网关业务处理失败");
                 throw new ApiException(HttpStatus.BAD_GATEWAY, "AGW_ERROR", message);
             }
             return root.path("data");

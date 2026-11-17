@@ -279,7 +279,7 @@ interface Meta {
 ### 可视化编辑草稿
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/apps/{id}/draft` | → `Draft`，没有 → 404 |
+| GET | `/api/apps/{id}/draft` | → `Draft`，没有 → `null`（HTTP 200，应用不存在仍 404） |
 | PUT | `/api/apps/{id}/draft` | `{ baseVersionId, patches }` → `Draft`。`baseVersionId` 不是当前版本 → 409 |
 | DELETE | `/api/apps/{id}/draft` | 放弃草稿 → 204 |
 | POST | `/api/apps/{id}/draft/commit` | `{ title? }` → `Task`（visual_save） |

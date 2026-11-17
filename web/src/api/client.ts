@@ -423,10 +423,10 @@ export const api = {
   exportUrl: (id: string) => `/api/versions/${enc(id)}/export`,
   pageUrl: (id: string) => `/api/versions/${enc(id)}/page`,
 
-  // 草稿
+  // 草稿（没有草稿时后端返回 200 null，避免控制台 404 红字；兼容老版本 404）
   getDraft: async (appId: string): Promise<Draft | null> => {
     try {
-      return await request<Draft>(`/api/apps/${enc(appId)}/draft`);
+      return (await request<Draft | null>(`/api/apps/${enc(appId)}/draft`)) ?? null;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;

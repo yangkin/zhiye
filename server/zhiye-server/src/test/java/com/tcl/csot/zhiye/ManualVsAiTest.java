@@ -74,7 +74,9 @@ class ManualVsAiTest extends IntegrationTest {
         assertThat(manualSrc).contains("手动标题").doesNotContain("#2563eb");
         String finalSrc = c.get("/api/versions/" + versions.get(0).path("id").asText() + "/file?path=src/App.tsx").body();
         assertThat(finalSrc).contains("手动标题").contains("#2563eb");
-        assertThat(c.get("/api/apps/" + id + "/draft").status()).isEqualTo(404);
+        var emptyDraft = c.get("/api/apps/" + id + "/draft");
+        assertThat(emptyDraft.status()).isEqualTo(200);
+        assertThat(emptyDraft.json().isNull()).isTrue();
         JsonNode after = c.ok(c.get("/api/apps/" + id));
         assertThat(after.path("hasDraft").asBoolean()).isFalse();
         assertThat(after.path("draftBaseVersionId").isNull()).isTrue();
@@ -126,7 +128,9 @@ class ManualVsAiTest extends IntegrationTest {
         JsonNode versions = c.ok(c.get("/api/apps/" + id + "/versions"));
         assertThat(versions.size()).isEqualTo(2);
         assertThat(versions.get(0).path("source").asText()).isEqualTo("visual");
-        assertThat(c.get("/api/apps/" + id + "/draft").status()).isEqualTo(404);
+        var emptyDraft = c.get("/api/apps/" + id + "/draft");
+        assertThat(emptyDraft.status()).isEqualTo(200);
+        assertThat(emptyDraft.json().isNull()).isTrue();
         JsonNode msgs = c.ok(c.get("/api/apps/" + id + "/messages"));
         assertThat(msgs.get(msgs.size() - 1).path("content").asText()).startsWith("你的手动修改已保存为 V2；AI 修改没有完成：");
 

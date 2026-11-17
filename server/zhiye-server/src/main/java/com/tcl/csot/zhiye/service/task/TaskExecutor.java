@@ -959,6 +959,11 @@ public class TaskExecutor {
                 .put("title", "已经连续做了 " + ctx.turns + " 步，还没做完，要继续吗？")
                 .put("reason", "已做的部分都保留着。点「继续」，或者直接在输入框里说「继续」（也可以顺便补充要求），AI 会接着刚才的进度做。")
                 .put("acceptLabel", "继续").put("declineLabel", "先到这里");
+        List<String> progressItems = continueProgressItems(ctx.id());
+        if (!progressItems.isEmpty()) {
+            var arr = p.putArray("items");
+            progressItems.forEach(arr::add);
+        }
         events.emit(ctx.id(), "confirm", p);
         events.status(ctx.id(), "RUNNING", "等你确认是否继续", tasks.findById(ctx.id()).map(TaskRow::progress).orElse(50));
         java.util.Optional<String> answer;
@@ -984,6 +989,28 @@ public class TaskExecutor {
         ctx.deadline = Instant.now().plus(Duration.ofMinutes(props.task().maxDurationMinutes()));
         events.status(ctx.id(), "RUNNING", "AI 正在继续编写", tasks.findById(ctx.id()).map(TaskRow::progress).orElse(50));
         return answer.orElse("");
+    }
+
+    /** 从 task.todos 提取本段已完成/进行中摘要，放在「继续」确认卡上帮助用户判断是否继续。 */
+    private List<String> continueProgressItems(String taskId) {
+        String raw = jdbc.sql("select todos::text from task where id = ?").param(taskId).query(String.class).optional().orElse(null);
+        if (raw == null || raw.isBlank()) return List.of();
+        JsonNode todos = Json.read(raw);
+        if (!todos.isArray() || todos.isEmpty()) return List.of();
+        List<String> done = new ArrayList<>();
+        List<String> doing = new ArrayList<>();
+        for (JsonNode item : todos) {
+            String text = item.path("content").asText("").trim();
+            if (text.isEmpty()) continue;
+            String st = item.path("status").asText("");
+            if ("completed".equals(st)) done.add(text);
+            else if ("in_progress".equals(st)) doing.add(text);
+        }
+        List<String> out = new ArrayList<>();
+        out.add("当前进度：已完成 " + done.size() + " / " + todos.size() + " 项待办");
+        for (int i = Math.max(0, done.size() - 2); i < done.size(); i++) out.add("已完成：" + done.get(i));
+        if (!doing.isEmpty()) out.add("正在做：" + doing.get(0));
+        return out;
     }
 
     private TaskContext.Fail timeout() {

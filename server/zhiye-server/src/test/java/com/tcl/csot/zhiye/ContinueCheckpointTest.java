@@ -48,6 +48,7 @@ class ContinueCheckpointTest extends IntegrationTest {
         assertThat(card.path("title").asText()).contains("步").contains("要继续吗");
         assertThat(card.path("acceptLabel").asText()).isEqualTo("继续");
         assertThat(card.path("declineLabel").asText()).isEqualTo("先到这里");
+        assertThat(card.path("items").toString()).contains("待办");
         // 等待时任务仍在进行，不算失败
         assertThat(c.ok(c.get("/api/tasks/" + tid)).path("status").asText()).isEqualTo("RUNNING");
         // 别人的工作空间不能替他点

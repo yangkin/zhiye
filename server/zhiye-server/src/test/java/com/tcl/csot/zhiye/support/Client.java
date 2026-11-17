@@ -142,8 +142,22 @@ public class Client {
     /** 创建应用并等待计划完成 */
     public JsonNode createApp(String prompt) {
         JsonNode app = ok(post("/api/apps", Map.of("type", "开发网站", "prompt", prompt, "mode", "快速", "model", "auto", "assetIds", List.of())));
-        JsonNode t = waitTask(app.path("activeTask").path("id").asText());
-        if (!"SUCCEEDED".equals(t.path("status").asText())) throw new AssertionError("计划失败 " + t);
-        return ok(get("/api/apps/" + app.path("id").asText()));
+        String appId = app.path("id").asText();
+        String taskId = app.path("activeTask").path("id").asText("");
+        if (!taskId.isBlank()) {
+            JsonNode t = waitTask(taskId);
+            if (!"SUCCEEDED".equals(t.path("status").asText())) throw new AssertionError("计划失败 " + t);
+        }
+        JsonNode latest = ok(get("/api/apps/" + appId));
+        if ("failed".equals(latest.path("phase").asText())) throw new AssertionError("计划失败 " + latest);
+        if ("planning".equals(latest.path("phase").asText())) {
+            String pendingTask = latest.path("activeTask").path("id").asText("");
+            if (!pendingTask.isBlank()) {
+                JsonNode t = waitTask(pendingTask);
+                if (!"SUCCEEDED".equals(t.path("status").asText())) throw new AssertionError("计划失败 " + t);
+                latest = ok(get("/api/apps/" + appId));
+            }
+        }
+        return latest;
     }
 }

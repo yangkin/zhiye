@@ -213,6 +213,7 @@ function Workbench({ id }: { id: string }) {
       invalidate(id);
       void qc.invalidateQueries({ queryKey: ['files'] });
       void qc.invalidateQueries({ queryKey: qk.activeTask });
+      void qc.invalidateQueries({ queryKey: ['llm-quota'] });
       if (visualTaskRef.current?.id === task.id) {
         visualTaskRef.current.resolve(task);
         visualTaskRef.current = null;
