@@ -6,6 +6,7 @@ import type { DataSourceInfo, DataSourceInput, DataSourceParam } from '../api/ty
 import { Icon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
+import { Select } from './Select';
 import { confirmDialog } from './ConfirmDialog';
 import { AgwCatalog } from './AgwCatalog';
 
@@ -196,10 +197,16 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
       <div className="source-grid source-grid-url">
         <label>
           <span className="field-label">方法</span>
-          <select className="field zy-select" value={f.method} onChange={(e) => set({ method: e.target.value as 'GET' | 'POST' })}>
-            <option value="GET">GET</option>
-            <option value="POST">POST（查询）</option>
-          </select>
+          <Select
+            ariaLabel="请求方法"
+            className="field"
+            value={f.method}
+            options={[
+              { value: 'GET', label: 'GET' },
+              { value: 'POST', label: 'POST（查询）' },
+            ]}
+            onChange={(v) => set({ method: v as 'GET' | 'POST' })}
+          />
         </label>
         <label>
           <span className="field-label">接口地址（可用 {'{参数}'} 占位）</span>
@@ -222,13 +229,13 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
         {params.map((p, i) => (
           <div key={i} className="source-param">
             <input className="field mono" aria-label="参数名" placeholder="参数名" value={p.name} onChange={(e) => setParam(i, { name: e.target.value })} />
-            <select className="field zy-select" aria-label="类型" value={p.type} onChange={(e) => setParam(i, { type: e.target.value as DataSourceParam['type'] })}>
-              {TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {TYPE_LABEL[t]}
-                </option>
-              ))}
-            </select>
+            <Select
+              ariaLabel="类型"
+              className="field"
+              value={p.type}
+              options={TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))}
+              onChange={(v) => setParam(i, { type: v as DataSourceParam['type'] })}
+            />
             <input className="field" aria-label="参数说明" placeholder="说明" value={p.description} onChange={(e) => setParam(i, { description: e.target.value })} />
             <input className="field" aria-label="示例值" placeholder="示例" value={p.example} onChange={(e) => setParam(i, { example: e.target.value })} />
             <label className="source-required">
@@ -245,13 +252,13 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
       <div className="source-grid">
         <label>
           <span className="field-label">鉴权方式</span>
-          <select className="field zy-select" value={f.authType} onChange={(e) => set({ authType: e.target.value as DataSourceInfo['authType'] })}>
-            {(Object.keys(AUTH_LABEL) as DataSourceInfo['authType'][]).map((a) => (
-              <option key={a} value={a}>
-                {AUTH_LABEL[a]}
-              </option>
-            ))}
-          </select>
+          <Select
+            ariaLabel="鉴权方式"
+            className="field"
+            value={f.authType}
+            options={(Object.keys(AUTH_LABEL) as DataSourceInfo['authType'][]).map((a) => ({ value: a, label: AUTH_LABEL[a] }))}
+            onChange={(v) => set({ authType: v as DataSourceInfo['authType'] })}
+          />
         </label>
         {f.authType === 'header' ? (
           <label>

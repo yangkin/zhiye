@@ -8,6 +8,7 @@ import { Icon } from '../lib/icons';
 import { fmtTime, handleTabListKeyDown } from '../lib/format';
 import { toast } from '../lib/store';
 import { confirmDialog } from '../components/ConfirmDialog';
+import { Select } from '../components/Select';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
 import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
@@ -1074,17 +1075,15 @@ export function DashboardPage() {
                         onChange={(e) => setAppQuery(e.target.value)}
                       />
                     </label>
-                    <select
-                      aria-label="按类型筛选"
-                      className="dash-select"
+                    <Select
+                      ariaLabel="按类型筛选"
                       value={appTypeFilter}
-                      onChange={(e) => setAppTypeFilter(e.target.value)}
-                    >
-                      <option value="">全部类型</option>
-                      {data.apps.byType.map((t) => (
-                        <option key={t.key} value={t.key}>{t.key}</option>
-                      ))}
-                    </select>
+                      options={[
+                        { value: '', label: '全部类型' },
+                        ...data.apps.byType.map((t) => ({ value: t.key, label: t.key })),
+                      ]}
+                      onChange={setAppTypeFilter}
+                    />
                     <div className="seg-control unified" role="radiogroup" aria-label="排序维度">
                       {(
                         [

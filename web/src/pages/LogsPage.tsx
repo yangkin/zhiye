@@ -18,6 +18,7 @@ import { useDebounced } from '../lib/useDebounced';
 import { toast } from '../lib/store';
 import { fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
+import { Select } from '../components/Select';
 
 type MainTab = 'tasks' | 'sandboxes' | 'schemas' | 'events' | 'functions' | 'sources' | 'runtime';
 type DetailTab = 'events' | 'runner' | 'resources' | 'app';
@@ -31,6 +32,8 @@ const RANGES: [OpsLogRange, string][] = [
   ['30d', '近 30 天'],
   ['all', '全部时间'],
 ];
+
+const RANGE_OPTIONS = RANGES.map(([value, label]) => ({ value, label }));
 
 const TASK_TYPE_LABELS: Record<string, string> = {
   plan: '需求规划',
@@ -435,38 +438,28 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
               />
             ) : null}
 
-            <select
-              className="logs-select"
-              aria-label="筛选任务类型"
+            <Select
+              ariaLabel="筛选任务类型"
               value={type}
-              onChange={(e) => {
-                setType(e.target.value);
+              options={[
+                { value: 'ALL', label: '全部任务类型' },
+                ...Object.entries(TASK_TYPE_LABELS).map(([k, v]) => ({ value: k, label: v })),
+              ]}
+              onChange={(v) => {
+                setType(v);
                 setOffset(0);
               }}
-            >
-              <option value="ALL">全部任务类型</option>
-              {Object.entries(TASK_TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>
-                  {v}
-                </option>
-              ))}
-            </select>
+            />
 
-            <select
-              className="logs-select"
-              aria-label="筛选时间范围"
+            <Select
+              ariaLabel="筛选时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
           </div>
 
           <div className="logs-filter-right">
@@ -977,13 +970,20 @@ function TaskDiagnosticPane({
                   ) : null}
                 </label>
 
-                <select
-                  className="logs-select"
-                  aria-label="筛选事件类型"
-                  style={{ height: 32 }}
+                <Select
+                  ariaLabel="筛选事件类型"
                   value={onlyEvErrors ? '__errors__' : evFilter}
-                  onChange={(e) => {
-                    const val = e.target.value;
+                  options={[
+                    { value: 'all', label: `全部事件 (${events.length})` },
+                    { value: '__errors__', label: `仅看报错 (${eventStats.errors})` },
+                    { value: 'tool', label: `工具调用 (${eventStats.counts.tool ?? 0})` },
+                    { value: 'log', label: `命令输出 (${eventStats.counts.log ?? 0})` },
+                    { value: 'verify', label: `质检门禁 (${eventStats.counts.verify ?? 0})` },
+                    { value: 'thinking', label: `推理思考 (${eventStats.counts.thinking ?? 0})` },
+                    { value: 'status', label: `阶段状态 (${(eventStats.counts.status ?? 0) + (eventStats.counts.finished ?? 0)})` },
+                    { value: 'collab', label: `确认 / 补充 (${(eventStats.counts.confirm ?? 0) + (eventStats.counts.steer ?? 0) + (eventStats.counts.todo ?? 0)})` },
+                  ]}
+                  onChange={(val) => {
                     if (val === '__errors__') {
                       setEvFilter('all');
                       setOnlyEvErrors(true);
@@ -992,16 +992,7 @@ function TaskDiagnosticPane({
                       setEvFilter(val as EventFilter);
                     }
                   }}
-                >
-                  <option value="all">全部事件 ({events.length})</option>
-                  <option value="__errors__">仅看报错 ({eventStats.errors})</option>
-                  <option value="tool">工具调用 ({eventStats.counts.tool ?? 0})</option>
-                  <option value="log">命令输出 ({eventStats.counts.log ?? 0})</option>
-                  <option value="verify">质检门禁 ({eventStats.counts.verify ?? 0})</option>
-                  <option value="thinking">推理思考 ({eventStats.counts.thinking ?? 0})</option>
-                  <option value="status">阶段状态 ({(eventStats.counts.status ?? 0) + (eventStats.counts.finished ?? 0)})</option>
-                  <option value="collab">确认 / 补充 ({(eventStats.counts.confirm ?? 0) + (eventStats.counts.steer ?? 0) + (eventStats.counts.todo ?? 0)})</option>
-                </select>
+                />
               </div>
 
               <div className="logs-filter-right">
@@ -1073,17 +1064,17 @@ function TaskDiagnosticPane({
                     </button>
                   ) : null}
                 </label>
-                <select
-                  className="logs-select"
-                  style={{ height: 32 }}
-                  value={runnerTail}
-                  onChange={(e) => setRunnerTail(Number(e.target.value))}
-                >
-                  <option value={200}>尾部 200 行</option>
-                  <option value={800}>尾部 800 行</option>
-                  <option value={2000}>尾部 2000 行</option>
-                  <option value={5000}>尾部 5000 行</option>
-                </select>
+                <Select
+                  ariaLabel="显示 Runner 日志行数"
+                  value={String(runnerTail)}
+                  options={[
+                    { value: '200', label: '尾部 200 行' },
+                    { value: '800', label: '尾部 800 行' },
+                    { value: '2000', label: '尾部 2000 行' },
+                    { value: '5000', label: '尾部 5000 行' },
+                  ]}
+                  onChange={(v) => setRunnerTail(Number(v))}
+                />
                 {runnerLog?.exists ? (
                   <span style={{ fontSize: 12, color: '#6b647d' }}>
                     匹配 {fmtNum(runnerLog.matchedLines)} / {fmtNum(runnerLog.totalLines)} 行 · {fmtBytes(runnerLog.sizeBytes)}
@@ -1848,20 +1839,15 @@ function FunctionLogsView() {
                 </button>
               ) : null}
             </label>
-            <select
-              className="logs-select"
+            <Select
+              ariaLabel="云函数日志时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
@@ -2007,33 +1993,29 @@ function SourceCallsView() {
                 </button>
               ) : null}
             </label>
-            <select
-              className="logs-select"
+            <Select
+              ariaLabel="数据源调用来源"
               value={origin}
-              onChange={(e) => {
-                setOrigin(e.target.value);
+              options={[
+                { value: 'ALL', label: '全部来源' },
+                { value: 'preview', label: '预览环境 (preview)' },
+                { value: 'site', label: '线上站点 (site)' },
+                { value: 'test', label: '连通性测试 (test)' },
+              ]}
+              onChange={(v) => {
+                setOrigin(v);
                 setOffset(0);
               }}
-            >
-              <option value="ALL">全部来源</option>
-              <option value="preview">预览环境 (preview)</option>
-              <option value="site">线上站点 (site)</option>
-              <option value="test">连通性测试 (test)</option>
-            </select>
-            <select
-              className="logs-select"
+            />
+            <Select
+              ariaLabel="数据源调用时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
@@ -2256,12 +2238,17 @@ function RuntimeLogsView() {
                 </button>
               ) : null}
             </label>
-            <select className="logs-select" value={tail} onChange={(e) => setTail(Number(e.target.value))}>
-              <option value={200}>尾部 200 行</option>
-              <option value={400}>尾部 400 行</option>
-              <option value={1000}>尾部 1000 行</option>
-              <option value={3000}>尾部 3000 行</option>
-            </select>
+            <Select
+              ariaLabel="显示运行日志行数"
+              value={String(tail)}
+              options={[
+                { value: '200', label: '尾部 200 行' },
+                { value: '400', label: '尾部 400 行' },
+                { value: '1000', label: '尾部 1000 行' },
+                { value: '3000', label: '尾部 3000 行' },
+              ]}
+              onChange={(v) => setTail(Number(v))}
+            />
           </div>
           <div className="logs-filter-right">
             {(data?.file.errorLines ?? 0) > 0 ? (
@@ -2463,20 +2450,15 @@ function SchemasView() {
                 </button>
               ) : null}
             </label>
-            <select
-              className="logs-select"
+            <Select
+              ariaLabel="Schema 日志时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
@@ -2681,20 +2663,15 @@ function PlatformEventsView() {
                 </button>
               ) : null}
             </label>
-            <select
-              className="logs-select"
+            <Select
+              ariaLabel="平台事件时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}
@@ -2964,34 +2941,30 @@ function SandboxLogsView() {
                 </button>
               ) : null}
             </label>
-            <select
-              className="logs-select"
+            <Select
+              ariaLabel="筛选沙箱状态"
               value={state}
-              onChange={(e) => {
-                setState(e.target.value);
+              options={[
+                { value: 'ALL', label: '全部状态' },
+                { value: 'active', label: '活跃 (active)' },
+                { value: 'creating', label: '创建中 (creating)' },
+                { value: 'destroyed', label: '已销毁 (destroyed)' },
+                { value: 'failed', label: '启动失败 (failed)' },
+              ]}
+              onChange={(v) => {
+                setState(v);
                 setOffset(0);
               }}
-            >
-              <option value="ALL">全部状态</option>
-              <option value="active">活跃 (active)</option>
-              <option value="creating">创建中 (creating)</option>
-              <option value="destroyed">已销毁 (destroyed)</option>
-              <option value="failed">启动失败 (failed)</option>
-            </select>
-            <select
-              className="logs-select"
+            />
+            <Select
+              ariaLabel="沙箱日志时间范围"
               value={range}
-              onChange={(e) => {
-                setRange(e.target.value as OpsLogRange);
+              options={RANGE_OPTIONS}
+              onChange={(v) => {
+                setRange(v as OpsLogRange);
                 setOffset(0);
               }}
-            >
-              {RANGES.map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
+            />
             <button
               type="button"
               className={`logs-chip err ${onlyErrors ? 'active' : ''}`}

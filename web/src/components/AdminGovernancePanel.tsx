@@ -12,6 +12,7 @@ import type {
 } from '../api/types';
 import { confirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { Select } from './Select';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { fmtCompact, fmtNum } from './DashboardCharts';
@@ -202,19 +203,16 @@ export function AdminGovernancePanel({
               <p>针对重点团队或异常空间单独调整应用数量、每日任务数与并发数上限</p>
             </div>
             <div className="dash-admin-inline-form">
-              <select
-                aria-label="选择工作空间调整配额"
-                className="dash-select"
+              <Select
+                ariaLabel="选择工作空间调整配额"
                 value={quotaPickWs}
-                onChange={(e) => setQuotaPickWs(e.target.value)}
-              >
-                <option value="">选择工作空间…</option>
-                {workspaceChoices.map(([wsId, label]) => (
-                  <option key={wsId} value={wsId}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                placeholder="选择工作空间…"
+                options={[
+                  { value: '', label: '选择工作空间…' },
+                  ...workspaceChoices.map(([wsId, label]) => ({ value: wsId, label })),
+                ]}
+                onChange={setQuotaPickWs}
+              />
               <button
                 type="button"
                 className="primary-button dash-compact-btn"
@@ -754,15 +752,18 @@ export function AdminGovernancePanel({
             <p className="dash-modal-quote">{triageTarget.content}</p>
             <label>
               <span>处理状态</span>
-              <select
+              <Select
+                ariaLabel="处理状态"
+                className="field"
                 value={triageStatus}
-                onChange={(e) => setTriageStatus(e.target.value as AdminFeedbackStatus)}
-              >
-                <option value="open">待处理 (open)</option>
-                <option value="in_progress">跟进中 (in_progress)</option>
-                <option value="resolved">已解决 (resolved)</option>
-                <option value="ignored">已忽略 (ignored)</option>
-              </select>
+                options={[
+                  { value: 'open', label: '待处理 (open)' },
+                  { value: 'in_progress', label: '跟进中 (in_progress)' },
+                  { value: 'resolved', label: '已解决 (resolved)' },
+                  { value: 'ignored', label: '已忽略 (ignored)' },
+                ]}
+                onChange={(v) => setTriageStatus(v as AdminFeedbackStatus)}
+              />
             </label>
             <label>
               <span>管理员备注 / 解决说明</span>
