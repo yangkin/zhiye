@@ -358,6 +358,7 @@ export interface AuthUser {
 export interface AuthInfo {
   mode: 'anonymous' | 'sso';
   user: AuthUser | null;
+  admin?: boolean;
 }
 
 export interface Workspace {
@@ -609,8 +610,20 @@ export interface TemplateQuery {
   q?: string;
 }
 
-export type DashboardRange = 'today' | '7d' | '30d' | '90d' | 'all';
+export type DashboardRange = 'today' | '7d' | '30d' | '90d' | 'all' | 'custom';
 export type DashboardScope = 'platform' | 'workspace';
+
+export interface DashboardActor {
+  kind: 'user' | 'workspace';
+  value: string;
+  userId: string | null;
+  workspaceId: string | null;
+  loginName: string;
+  realName: string;
+  apps: number;
+  tasks: number;
+  label: string;
+}
 
 export interface DashboardCountItem {
   key: string;
@@ -630,6 +643,7 @@ export interface DashboardDailyRow {
   deployments: number;
   tokens: number;
   modelCalls: number;
+  cost: number;
   messages: number;
   fnCalls: number;
   sourceCalls: number;
@@ -658,11 +672,15 @@ export interface DashboardData {
     startDate: string;
     endDate: string;
     days: number;
+    filterWorkspaceId: string | null;
+    filterUserId: string | null;
+    filterLabel: string;
     generatedAt: string;
     workspaceId: string;
     fivestarEnabled: boolean;
     skillhubEnabled: boolean;
   };
+  actors: DashboardActor[];
   overview: {
     workspacesTotal: number;
     workspacesProductive: number;
@@ -697,6 +715,7 @@ export interface DashboardData {
     taskSuccessRate: number;
     taskAvgDurationSec: number;
     taskP50DurationSec: number;
+    taskP90DurationSec: number;
     taskP95DurationSec: number;
     versionsTotal: number;
     versionsRange: number;
@@ -732,7 +751,9 @@ export interface DashboardData {
   hourly: { hour: number; total: number; succeeded: number; failed: number }[];
   workspaces: {
     workspaceId: string;
+    userId: string | null;
     ownerName: string;
+    loginName: string;
     apps: number;
     published: number;
     tasks: number;
@@ -793,6 +814,12 @@ export interface DashboardData {
     activeList: DashboardTaskItem[];
     recentFailures: DashboardTaskItem[];
     recentTasks: DashboardTaskItem[];
+  };
+  agentTelemetry: {
+    tools: { tool: string; calls: number; failed: number; passRate: number }[];
+    verifyChecks: { name: string; total: number; passed: number; failed: number; passRate: number }[];
+    confirms: { kind: string; state: string; count: number }[];
+    eventBreakdown: { thinking: number; todo: number; steer: number; verify: number };
   };
   llm: {
     totalCalls: number;
@@ -964,4 +991,307 @@ export interface DashboardData {
       totalPv: number;
     };
   };
+}
+
+// ---- 日志排查中心 ----
+export type OpsLogRange = '1h' | '24h' | '7d' | '30d' | 'all';
+
+export interface OpsLogActor {
+  kind: 'user' | 'workspace';
+  value: string;
+  userId: string | null;
+  workspaceId: string | null;
+  loginName: string;
+  realName: string;
+  tasks: number;
+  failed: number;
+}
+
+export interface OpsTaskSummary {
+  id: string;
+  workspaceId: string;
+  isMine: boolean;
+  appId: string;
+  appName: string;
+  appType: string;
+  projectKind: string;
+  model: string;
+  mode: string;
+  ownerUserId: string | null;
+  ownerLoginName: string;
+  ownerName: string;
+  type: TaskType;
+  status: TaskStatus;
+  active: boolean;
+  phaseLabel: string;
+  progress: number;
+  attempt: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  leaseOwner: string | null;
+  tokenUsed: number;
+  durationMs: number;
+  eventCount: number;
+  logEventCount: number;
+  toolErrorCount: number;
+  hasLogFile: boolean;
+  logFileBytes: number;
+  promptPreview: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface OpsTaskDetail extends OpsTaskSummary {
+  baseVersionId: string | null;
+  resultVersionId: string | null;
+  parentTaskId: string | null;
+  idempotencyKey: string | null;
+  leaseUntil: string | null;
+  tokenBudget: number;
+  input: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  todos: TodoItem[] | null;
+  appDeleted: boolean;
+}
+
+export interface OpsTasksResponse {
+  meta: {
+    range: OpsLogRange;
+    currentWorkspaceId: string;
+    generatedAt: string;
+  };
+  summary: {
+    total: number;
+    active: number;
+    failed: number;
+    succeeded: number;
+    cancelled: number;
+  };
+  errorCodes: { code: string; count: number }[];
+  actors: OpsLogActor[];
+  items: OpsTaskSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface OpsTaskEventRow {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface OpsLogFileLine {
+  no: number;
+  text: string;
+}
+
+export interface OpsLogFileView {
+  fileName: string;
+  exists: boolean;
+  sizeBytes: number;
+  updatedAt: string | null;
+  totalLines: number;
+  matchedLines: number;
+  truncated: boolean;
+  lines: OpsLogFileLine[];
+}
+
+export interface OpsModelUsageRow {
+  id: number;
+  provider: string;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  createdAt: string;
+}
+
+export interface OpsTaskMessageRow {
+  id: string;
+  role: string;
+  content: string;
+  steer: boolean;
+  elementContext: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface OpsFunctionLogItem {
+  id: number;
+  appId: string;
+  appName: string;
+  workspaceId: string | null;
+  ownerName: string;
+  name: string;
+  versionId: string | null;
+  ok: boolean;
+  durationMs: number;
+  error: string | null;
+  logs: string | null;
+  caller: string | null;
+  createdAt: string;
+}
+
+export interface OpsSourceCallItem {
+  id: number;
+  sourceId: string;
+  sourceKey: string;
+  sourceName: string;
+  method: string;
+  appId: string | null;
+  appName: string;
+  origin: 'preview' | 'site' | 'test' | string;
+  status: number | null;
+  ok: boolean;
+  durationMs: number;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface OpsTaskDetailResponse {
+  task: OpsTaskDetail;
+  eventCounts: Record<string, number>;
+  events: OpsTaskEventRow[];
+  modelUsages: OpsModelUsageRow[];
+  messages: OpsTaskMessageRow[];
+  checkpoint: {
+    workspaceDir: string;
+    agentDir: string | null;
+    sessionFile: string | null;
+    draftApplied: boolean;
+  } | null;
+  runnerLog: OpsLogFileView;
+  fnLogs: OpsFunctionLogItem[];
+  sourceCalls: OpsSourceCallItem[];
+}
+
+export interface OpsTaskEventsDeltaResponse {
+  task: {
+    id: string;
+    status: TaskStatus;
+    phaseLabel: string;
+    progress: number;
+    errorCode: string | null;
+    errorMessage: string | null;
+    tokenUsed: number;
+    startedAt: string | null;
+    finishedAt: string | null;
+    terminal: boolean;
+  };
+  events: OpsTaskEventRow[];
+  lastSeq: number;
+}
+
+export interface OpsRuntimeResponse {
+  target: 'api' | 'site' | 'web-build';
+  sandboxProvider: string;
+  runtimeDir: string;
+  prometheusEndpoint: string;
+  metrics: DashboardData['system']['runtime'] & {
+    scope?: string;
+    instances?: string[];
+    alerts?: { code: string; level?: string; message: string; value: number; threshold: number }[];
+  };
+  file: OpsLogFileView;
+}
+
+export type AdminFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'ignored';
+
+export interface AdminCustomQuota {
+  workspaceId: string;
+  ownerLogin: string | null;
+  ownerName: string;
+  maxApps: number | null;
+  dailyTaskLimit: number | null;
+  maxConcurrentTasks: number | null;
+  note: string | null;
+  updatedBy: string | null;
+  updatedAt: string;
+  appCount: number;
+  tasksToday: number;
+  activeTasks: number;
+}
+
+export interface AdminFeedbackItem {
+  id: string;
+  workspaceId: string;
+  ownerLogin: string | null;
+  ownerName: string;
+  conversationId: string | null;
+  content: string;
+  assetCount: number;
+  status: AdminFeedbackStatus;
+  adminNote: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface AdminDeletedAppItem {
+  id: string;
+  workspaceId: string;
+  ownerLogin: string | null;
+  ownerName: string;
+  name: string;
+  type: string;
+  projectKind: string;
+  phase: string;
+  versionCount: number;
+  deletedAt: string;
+  updatedAt: string;
+}
+
+export interface AdminTemplateItem {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description: string | null;
+  type: string;
+  projectKind: string;
+  author: string | null;
+  cloneCount: number;
+  viewCount: number;
+  likeCount: number;
+  featured: boolean;
+  pinnedOrder: number;
+  createdAt: string;
+}
+
+export interface AdminRateLimitBucket {
+  bucket: string;
+  totalHits: number;
+  hits24h: number;
+  lastHitAt: string;
+}
+
+export interface AdminAuditLogItem {
+  id: string;
+  actor: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  detail: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface AdminOverview {
+  currentActor: string;
+  ssoRestricted: boolean;
+  defaultQuota: {
+    maxApps: number;
+    dailyTaskLimit: number;
+    maxConcurrentTasks: number;
+  };
+  customQuotas: AdminCustomQuota[];
+  feedbacks: AdminFeedbackItem[];
+  feedbackOpenCount: number;
+  deletedApps: AdminDeletedAppItem[];
+  templates: AdminTemplateItem[];
+  rateLimitStats: {
+    totalHits: number;
+    recentHits24h: number;
+    buckets: AdminRateLimitBucket[];
+  };
+  auditLogs: AdminAuditLogItem[];
 }

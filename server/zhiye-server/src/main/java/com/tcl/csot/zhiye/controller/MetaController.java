@@ -29,6 +29,8 @@ public class MetaController {
     private com.tcl.csot.zhiye.config.SkillHubProperties skillhub;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.admin.AdminAuthService adminAuth;
 
     public MetaController(ZhiyeProperties props, CurrentPrincipal principal, WorkspaceService workspaces,
                           com.tcl.csot.zhiye.service.auth.AuthService authService, com.tcl.csot.zhiye.service.skillhub.SkillRefs skillRefs) {
@@ -52,15 +54,18 @@ public class MetaController {
         m.put("styles", Catalog.STYLES.values().stream().map(s -> Map.of("id", s.id(), "label", s.label(), "accent", s.accent())).toList());
         m.put("limits", Map.of("uploadMaxBytes", props.importer().maxUploadBytes(), "uploadMaxFiles", props.importer().maxFiles(),
                 "assetMaxBytes", props.importer().assetMaxBytes()));
-        m.put("auth", authService.describe(request));
+        Map<String, Object> authInfo = authService.describe(request);
+        Object ws = request.getAttribute(com.tcl.csot.zhiye.util.RequestPrincipal.ATTR_WS);
+        String wsId = ws instanceof String id && !id.isEmpty() ? id : null;
+        authInfo.put("admin", adminAuth != null && adminAuth.isAdmin(request, wsId));
+        m.put("auth", authInfo);
         // 五星模式：模型列表与额度改从 /api/llm/models、/api/llm/quota 取（以五星AI岛为准）
         m.put("fivestar", fivestar.enabled());
         m.put("skillhub", skillhub.enabled());
         // 内置技能：编码与问答时由模型按需加载，这里只用于在技能选择器里展示
         m.put("builtinSkills", skillRefs.builtinList());
         // 登录页也会读取 meta；此时没有工作空间，不能因为查询安装列表返回 401
-        Object ws = request.getAttribute(com.tcl.csot.zhiye.util.RequestPrincipal.ATTR_WS);
-        m.put("hubSkills", ws instanceof String id && !id.isEmpty() ? skillRefs.hubList(id) : List.of());
+        m.put("hubSkills", wsId != null ? skillRefs.hubList(wsId) : List.of());
         return m;
     }
 

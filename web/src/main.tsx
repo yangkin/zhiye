@@ -13,6 +13,7 @@ import './styles/create.css';
 import './styles/timeline.css';
 import './styles/community.css';
 import './styles/dashboard.css';
+import './styles/logs.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {

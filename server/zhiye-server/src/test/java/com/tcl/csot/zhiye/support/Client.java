@@ -21,10 +21,27 @@ public class Client {
 
     private final String base;
     private final HttpClient http;
+    private final Map<String, String> defaultHeaders;
 
     public Client(int port) {
-        this.base = "http://127.0.0.1:" + port;
-        this.http = HttpClient.newBuilder().cookieHandler(new CookieManager()).connectTimeout(Duration.ofSeconds(5)).build();
+        this(port, HttpClient.newBuilder().cookieHandler(new CookieManager()).connectTimeout(Duration.ofSeconds(5)).build(), Map.of());
+    }
+
+    private Client(String base, HttpClient http, Map<String, String> defaultHeaders) {
+        this.base = base;
+        this.http = http;
+        this.defaultHeaders = defaultHeaders;
+    }
+
+    private Client(int port, HttpClient http, Map<String, String> defaultHeaders) {
+        this("http://127.0.0.1:" + port, http, defaultHeaders);
+    }
+
+    /** 复用同一 cookie 会话，并附带平台管理员测试密钥请求头。 */
+    public Client asAdmin() {
+        Map<String, String> merged = new LinkedHashMap<>(defaultHeaders);
+        merged.put("X-Zhiye-Admin-Token", "test-admin-token");
+        return new Client(base, http, Map.copyOf(merged));
     }
 
     public String base() { return base; }
@@ -32,6 +49,7 @@ public class Client {
     public Res send(String method, String path, Object body, Map<String, String> headers) {
         try {
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(path.startsWith("http") ? path : base + path)).timeout(Duration.ofSeconds(60));
+            defaultHeaders.forEach(b::header);
             headers.forEach(b::header);
             if (body != null) {
                 b.header("Content-Type", "application/json");

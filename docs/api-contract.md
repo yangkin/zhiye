@@ -417,4 +417,22 @@ interface Selection {
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/dashboard?range=today\|7d\|30d\|90d\|all&scope=platform\|workspace` | 全景统计看板：支持全平台管理视角（`platform`，默认）与当前工作空间隔离视角（`workspace`），返回 KPI 环比、转化漏斗、逐日趋势、24h 时段分布、工作空间/用户排行、应用资产、任务效能与失败诊断、模型/Token 成本、版本部署、云服务与云函数、数据源与 AGW、会话/素材/小织反馈、技能生态与社区、运行期监控 |
+| GET | `/api/dashboard?range=today\|7d\|30d\|90d\|all&startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&workspaceId=&userId=` | 平台管理侧全景统计看板：支持按预设/自定义时间段与按人（`userId`）/按工作空间（`workspaceId`）下钻筛选，返回人员目录、KPI 环比、转化漏斗、逐日趋势（含成本）、24h 时段分布、工作空间/用户排行、应用资产、任务效能与失败诊断、Agent 工具/质检门禁/确认卡遥测、模型/Token 成本、版本部署、云服务与云函数、数据源与 AGW、会话/素材/小织反馈、技能生态与社区、运行期监控 |
+
+## 平台治理与运维（2026-11 新增）
+
+当开启 SSO 且配置 `zhiye.admin.allow-login-names` 时，仅白名单内的登录名可调用 `/api/admin/**`（否则返回 `403 FORBIDDEN`）；所有写操作均写入 `admin_audit_log` 审计表。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/admin/overview` | 聚合返回系统默认配额、自定义配额工作空间列表、用户反馈列表、回收站已删应用、灵感社区作品、限流触发统计、最近 60 条管理审计日志 |
+| PUT | `/api/admin/workspaces/{wsId}/quota` | 设置或重置（`{ "reset": true }`）指定工作空间的 `maxApps` / `dailyTaskLimit` / `maxConcurrentTasks` 与备注 |
+| POST | `/api/admin/apps/{id}/unpublish` | 强行下线已发布站点（不删除应用本体，清理活跃部署状态） |
+| POST | `/api/admin/apps/{id}/restore` | 从回收站恢复被软删除的应用 |
+| DELETE | `/api/admin/apps/{id}` | 管理员软删除应用（联动下线站点与草稿，存在进行中任务时返回 409） |
+| POST | `/api/admin/tasks/{id}/cancel` | 强行停止排队中或运行中的任务 |
+| POST | `/api/admin/tasks/{id}/retry` | 运维重跑失败或已取消的任务 |
+| POST | `/api/admin/templates/{id}/feature` | 设置或取消灵感社区作品的 `featured` 精选标志与 `pinnedOrder` 置顶权重（精选作品在社区列表优先展示） |
+| DELETE | `/api/admin/templates/{id}` | 管理员从灵感社区下架并清理作品快照与压缩包 |
+| PATCH | `/api/admin/feedbacks/{id}` | 更新用户反馈分诊状态（`open` / `in_progress` / `resolved` / `ignored`）与 `adminNote` 管理员备注 |
+| POST | `/api/admin/rate-limits/clear` | 清理 `rate_limit_hit` 限流计数记录（可传 `{ "bucket": "..." }` 按桶清理或全清） |

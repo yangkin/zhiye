@@ -61,6 +61,7 @@ const paths = {
   community: 'M4 4h6.5v6.5H4zM13.5 4H20v6.5h-6.5zM4 13.5h6.5V20H4zM16.75 13.5a3.25 3.25 0 1 0 0 6.5 3.25 3.25 0 0 0 0-6.5z',
   database: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
   chart: 'M4 20h16M7 16v-5M12 16V7M17 16v-8',
+  terminal: 'M4 5h16v14H4zM8 10l3 3-3 3M13 16h4',
 } as const;
 
 export type IconName = keyof typeof paths;

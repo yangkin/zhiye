@@ -9,7 +9,7 @@ import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
 import { HelpPanel } from './HelpPanel';
 
-const titles: Record<string, string> = { create: '我的工作空间', apps: '我的应用', history: '版本与记录', community: '灵感社区', dashboard: '统计看板' };
+const titles: Record<string, string> = { create: '我的工作空间', apps: '我的应用', history: '版本与记录', community: '灵感社区', dashboard: '统计看板', logs: '日志排查' };
 
 export function LightLayout() {
   const location = useLocation();
@@ -80,6 +80,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
             ['apps', 'grid', '应用'],
             ['history', 'history', '历史'],
             ['dashboard', 'chart', '看板'],
+            ['logs', 'terminal', '日志'],
           ] as const
         ).map(([p, i, t]) => (
           <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={t}>

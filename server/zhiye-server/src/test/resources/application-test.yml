@@ -28,6 +28,8 @@ zhiye:
     daily-task-limit: 1000
   dev:
     faults-enabled: true
+  admin:
+    token: test-admin-token
 logging:
   level:
     root: warn

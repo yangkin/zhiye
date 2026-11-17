@@ -1,5 +1,7 @@
 import { clearPlatformToken, getPlatformToken } from '../lib/platformToken';
 import type {
+  AdminFeedbackStatus,
+  AdminOverview,
   TemplateItem,
   TemplateDetail,
   TemplateQuery,
@@ -19,6 +21,14 @@ import type {
   DashboardData,
   DashboardRange,
   DashboardScope,
+  OpsFunctionLogItem,
+  OpsLogFileView,
+  OpsLogRange,
+  OpsRuntimeResponse,
+  OpsSourceCallItem,
+  OpsTaskDetailResponse,
+  OpsTaskEventsDeltaResponse,
+  OpsTasksResponse,
   StatsRange,
   AppDetail,
   AppSummary,
@@ -349,8 +359,42 @@ export const api = {
   ) => request<AppDetail>('/api/apps', { method: 'POST', body: input, idempotencyKey }),
   appsSummary: () => request<AppsSummary>('/api/apps/summary'),
   appStats: (id: string, range: StatsRange) => request<AppStats>(`/api/apps/${enc(id)}/stats` + qs({ range })),
-  dashboard: (range: DashboardRange = '30d', scope: DashboardScope = 'platform') =>
-    request<DashboardData>('/api/dashboard' + qs({ range, scope })),
+  dashboard: (opts: {
+    range?: DashboardRange;
+    scope?: DashboardScope;
+    startDate?: string;
+    endDate?: string;
+    workspaceId?: string;
+    userId?: string;
+  } = {}) => request<DashboardData>('/api/dashboard' + qs(opts)),
+  opsTasks: (opts: {
+    range?: OpsLogRange;
+    status?: string;
+    type?: string;
+    workspaceId?: string;
+    userId?: string;
+    errorCode?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  } = {}) => request<OpsTasksResponse>('/api/logs/tasks' + qs(opts)),
+  opsTaskDetail: (id: string, tailLines = 800) =>
+    request<OpsTaskDetailResponse>(`/api/logs/tasks/${enc(id)}` + qs({ tailLines })),
+  opsTaskEvents: (id: string, after = 0) =>
+    request<OpsTaskEventsDeltaResponse>(`/api/logs/tasks/${enc(id)}/events` + qs({ after })),
+  opsRunnerLog: (id: string, opts: { tail?: number; offset?: number; q?: string } = {}) =>
+    request<OpsLogFileView>(`/api/logs/tasks/${enc(id)}/runner-log` + qs(opts)),
+  opsRunnerLogDownloadUrl: (id: string) => `/api/logs/tasks/${enc(id)}/runner-log/download`,
+  opsFunctionLogs: (opts: { q?: string; appId?: string; ok?: boolean; range?: OpsLogRange; limit?: number; offset?: number } = {}) =>
+    request<{ range: OpsLogRange; total: number; errorCount: number; items: OpsFunctionLogItem[]; limit: number; offset: number }>(
+      '/api/logs/functions' + qs(opts),
+    ),
+  opsSourceCalls: (opts: { q?: string; appId?: string; ok?: boolean; origin?: string; range?: OpsLogRange; limit?: number; offset?: number } = {}) =>
+    request<{ range: OpsLogRange; total: number; errorCount: number; items: OpsSourceCallItem[]; limit: number; offset: number }>(
+      '/api/logs/sources' + qs(opts),
+    ),
+  opsRuntime: (opts: { target?: 'api' | 'site' | 'web-build'; tail?: number; q?: string } = {}) =>
+    request<OpsRuntimeResponse>('/api/logs/runtime' + qs(opts)),
   getApp: (id: string) => request<AppDetail>(`/api/apps/${enc(id)}`),
   patchApp: (
     id: string,
@@ -486,6 +530,38 @@ export const api = {
   },
   assets: () => request<Asset[]>('/api/assets'),
   assetContentUrl: (id: string) => `/api/assets/${enc(id)}/content`,
+
+  // 管理控制台治理与运维
+  adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  adminUpdateQuota: (
+    wsId: string,
+    body: {
+      maxApps?: number | null;
+      dailyTaskLimit?: number | null;
+      maxConcurrentTasks?: number | null;
+      note?: string;
+      reset?: boolean;
+    },
+  ) =>
+    request<{ workspaceId: string; maxApps: number; dailyTaskLimit: number; maxConcurrentTasks: number; custom: boolean; note: string | null }>(
+      `/api/admin/workspaces/${enc(wsId)}/quota`,
+      { method: 'PUT', body },
+    ),
+  adminUnpublishApp: (id: string) => request<{ id: string; name: string; published: boolean }>(`/api/admin/apps/${enc(id)}/unpublish`, { method: 'POST', body: {} }),
+  adminRestoreApp: (id: string) => request<{ id: string; name: string; restored: boolean }>(`/api/admin/apps/${enc(id)}/restore`, { method: 'POST', body: {} }),
+  adminDeleteApp: (id: string) => request<{ id: string; name: string; deleted: boolean }>(`/api/admin/apps/${enc(id)}`, { method: 'DELETE' }),
+  adminCancelTask: (id: string) => request<Task>(`/api/admin/tasks/${enc(id)}/cancel`, { method: 'POST', body: {} }),
+  adminRetryTask: (id: string) => request<Task>(`/api/admin/tasks/${enc(id)}/retry`, { method: 'POST', body: {} }),
+  adminFeatureTemplate: (id: string, body: { featured: boolean; pinnedOrder?: number }) =>
+    request<{ id: string; featured: boolean; pinnedOrder: number }>(`/api/admin/templates/${enc(id)}/feature`, { method: 'POST', body }),
+  adminDeleteTemplate: (id: string) => request<{ id: string; deleted: boolean }>(`/api/admin/templates/${enc(id)}`, { method: 'DELETE' }),
+  adminTriageFeedback: (id: string, body: { status: AdminFeedbackStatus; adminNote?: string | null }) =>
+    request<{ id: string; status: AdminFeedbackStatus; adminNote: string | null; resolvedAt: string | null }>(
+      `/api/admin/feedbacks/${enc(id)}`,
+      { method: 'PATCH', body },
+    ),
+  adminClearRateLimits: (bucket?: string) =>
+    request<{ clearedCount: number; bucket: string }>('/api/admin/rate-limits/clear', { method: 'POST', body: bucket ? { bucket } : {} }),
 };
 
 export const errorMessage = (error: unknown, fallback = '操作未完成，请重试。') =>

@@ -16,6 +16,7 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage').then((m) => ({ defa
 const CommunityPage = lazy(() => import('./pages/CommunityPage').then((m) => ({ default: m.CommunityPage })));
 const WorkPage = lazy(() => import('./pages/WorkPage').then((m) => ({ default: m.WorkPage })));
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
+const LogsPage = lazy(() => import('./pages/LogsPage').then((m) => ({ default: m.LogsPage })));
 const WorkbenchRoute = lazy(() => import('./workbench/Workbench').then((m) => ({ default: m.WorkbenchRoute })));
 
 function RouteFallback() {
@@ -54,6 +55,7 @@ export function App() {
           <Route path="/community" element={<CommunityPage />} />
           <Route path="/community/:id" element={<WorkPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/logs" element={<LogsPage />} />
           <Route path="/chat/:id" element={<ChatPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/create" replace />} />

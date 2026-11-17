@@ -49,11 +49,44 @@
 .dash-scope-badge {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   height: 24px;
   padding: 0 10px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
+}
+
+.dash-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2f9e8f;
+  box-shadow: 0 0 0 3px #2f9e8f26;
+}
+
+.dash-cmd-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  background: #f6f4fb;
+  border: 1px solid #ebe6f4;
+  font-size: 12px;
+  color: #4b4360;
+}
+
+.dash-cmd-pill .icon {
+  width: 13px;
+  height: 13px;
+  color: #6b4fc0;
+}
+
+.dash-cmd-pill b {
+  color: #1f1c29;
+  font-variant-numeric: tabular-nums;
 }
 
 .dash-scope-badge.platform {
@@ -122,7 +155,7 @@
   background: #fff;
   border: 1px solid #eae6f2;
   border-radius: 12px;
-  padding: 6px 10px;
+  padding: 7px 10px;
   margin-bottom: 16px;
   box-shadow: 0 2px 10px #31235305;
 }
@@ -130,7 +163,15 @@
 .dash-command-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.dash-command-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -138,6 +179,7 @@
   font-size: 12px;
   color: #6c667d;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .dash-command-bar .seg-control {
@@ -149,7 +191,7 @@
 
 .dash-command-bar .seg-control button {
   height: 26px;
-  padding: 0 12px;
+  padding: 0 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -157,8 +199,205 @@
   white-space: nowrap;
 }
 
-.seg-control.scope-switch {
-  background: #ede8f8;
+/* 自定义起止日期区间 */
+.dash-date-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 4px 0 9px;
+  border: 1px solid #e6e2ee;
+  border-radius: 8px;
+  background: #faf9fc;
+  font-size: 12px;
+  color: #6c667d;
+}
+
+.dash-date-range input[type='date'] {
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: #1f1c29;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  padding: 0;
+}
+
+.dash-date-apply {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #ece7f7;
+  color: #5b3db5;
+}
+
+.dash-date-apply:hover,
+.dash-date-apply.active {
+  background: #7953dc;
+  color: #fff;
+}
+
+/* 按人/工作空间选择器 */
+.dash-actor-wrap {
+  position: relative;
+}
+
+.dash-actor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e6e2ee;
+  border-radius: 8px;
+  background: #faf9fc;
+  color: #1f1c29;
+  font-size: 12px;
+  max-width: 280px;
+}
+
+.dash-actor-btn:hover {
+  border-color: #cfc4ea;
+  background: #f5f2fb;
+}
+
+.dash-actor-btn.filtered {
+  background: #ece4fb;
+  border-color: #cfc0f2;
+  color: #4f31a8;
+  font-weight: 500;
+}
+
+.dash-actor-btn .icon {
+  width: 14px;
+  height: 14px;
+  color: #6b4fc0;
+  flex: none;
+}
+
+.dash-actor-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-clear-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: #fdeef1;
+  color: #b53449;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.dash-clear-chip .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.dash-actor-pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  width: min(360px, calc(100vw - 32px));
+  background: #fff;
+  border: 1px solid #e6e0f2;
+  border-radius: 12px;
+  box-shadow: 0 14px 40px #2a1d4a22;
+  padding: 8px;
+}
+
+.dash-actor-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e6e2ee;
+  border-radius: 8px;
+  background: #faf9fc;
+  margin-bottom: 6px;
+}
+
+.dash-actor-search .icon {
+  width: 14px;
+  height: 14px;
+  color: #8f87a0;
+  flex: none;
+}
+
+.dash-actor-search input {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  font-size: 12px;
+  color: #1f1c29;
+  outline: none;
+}
+
+.dash-actor-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-actor-group {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c667d;
+  padding: 8px 8px 4px;
+}
+
+.dash-actor-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: #1f1c29;
+  text-align: left;
+}
+
+.dash-actor-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-actor-list button small {
+  font-size: 11px;
+  color: #6c667d;
+  white-space: nowrap;
+  flex: none;
+}
+
+.dash-actor-list button:hover {
+  background: #f5f2fb;
+}
+
+.dash-actor-list button.active {
+  background: #ece4fb;
+  color: #5b3db5;
+  font-weight: 500;
+}
+
+.dash-actor-empty {
+  font-size: 12px;
+  color: #6c667d;
+  text-align: center;
+  padding: 16px 8px;
 }
 
 /* 维度导航页签 */
@@ -181,6 +420,7 @@
   border: 1px solid transparent;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   white-space: nowrap;
 }
 
@@ -1097,6 +1337,30 @@
   color: #2368a2;
 }
 
+.dash-rate-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-rate-pill.ok {
+  background: #e8f6ef;
+  color: #20724d;
+}
+
+.dash-rate-pill.warn {
+  background: #fdf4e3;
+  color: #9e6514;
+}
+
+.dash-rate-pill.err {
+  background: #fdeef1;
+  color: #b53449;
+}
+
 .dash-ok {
   color: #20724d;
   font-weight: 600;
@@ -1196,6 +1460,230 @@
   color: #6c667d;
 }
 
+/* Admin Governance & Operations */
+.dash-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: #d0465c;
+  color: #ffffff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.dash-live-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dash-live-stop {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(208, 70, 92, 0.3);
+  background: rgba(255, 255, 255, 0.92);
+  color: #b42338;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.dash-live-stop:hover:not(:disabled) {
+  background: #fdecef;
+  border-color: #d0465c;
+}
+
+.dash-action-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-link.danger {
+  color: #b42338;
+}
+
+.dash-link.danger:hover {
+  color: #8f1628;
+}
+
+.dash-admin-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dash-admin-stat {
+  background: #ffffff;
+  border: 1px solid var(--line, #eeedf3);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dash-admin-stat span {
+  font-size: 12px;
+  color: #5e586e;
+}
+
+.dash-admin-stat b {
+  font-size: 22px;
+  font-weight: 650;
+  color: #1f1c29;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-admin-stat b.dash-warn-num {
+  color: #b42338;
+}
+
+.dash-admin-stat small {
+  font-size: 11px;
+  color: #6c667d;
+}
+
+.dash-admin-inline-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dash-select {
+  height: 30px;
+  max-width: 240px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid #dfdbe8;
+  background: #ffffff;
+  color: #1f1c29;
+  font-size: 12px;
+}
+
+.dash-compact-btn {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.dash-admin-fb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dash-admin-fb-list li {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #eeedf3;
+  background: #fbfafc;
+}
+
+.dash-admin-fb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.dash-admin-fb-list p {
+  margin: 0;
+  font-size: 12px;
+  color: #1f1c29;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.dash-admin-fb-note {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f3effa;
+  color: #4f359e;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.dash-audit-json {
+  display: inline-block;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-size: 11px;
+}
+
+.dash-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dash-modal-target {
+  font-size: 12px;
+  color: #4d475c;
+}
+
+.dash-modal-quote {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f6fb;
+  border: 1px solid #ece9f3;
+  font-size: 12px;
+  color: #1f1c29;
+  line-height: 1.55;
+}
+
+.dash-modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dash-modal-form label span {
+  font-size: 12px;
+  font-weight: 500;
+  color: #4d475c;
+}
+
+.dash-modal-form input,
+.dash-modal-form select,
+.dash-modal-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #dfdbe8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #1f1c29;
+  background: #ffffff;
+}
+
+.dash-modal-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 /* Responsive */
 @media (max-width: 1180px) {
   .dash-kpi-grid-6 {
@@ -1209,6 +1697,9 @@
   }
   .dash-mini-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .dash-admin-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1232,7 +1723,9 @@
   .dash-mini-stats,
   .dash-mini-stats.compact-2,
   .dash-mini-stats.compact-3,
-  .dash-mini-stats.compact-4 {
+  .dash-mini-stats.compact-4,
+  .dash-admin-summary,
+  .dash-modal-grid3 {
     grid-template-columns: 1fr;
   }
   .dash-kpi-val b {

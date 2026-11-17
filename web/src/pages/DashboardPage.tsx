@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
-import { qk } from '../api/queries';
-import type { DashboardRange, DashboardScope } from '../api/types';
+import { qk, useMeta } from '../api/queries';
+import type { AdminCustomQuota, DashboardActor, DashboardData, DashboardRange } from '../api/types';
 import { Icon } from '../lib/icons';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
+import { confirmDialog } from '../components/ConfirmDialog';
+import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import {
   BreakdownBars,
@@ -25,10 +27,10 @@ import {
   type SeriesPoint,
 } from '../components/DashboardCharts';
 
-type SectionTab = 'all' | 'apps' | 'tasks' | 'cloud' | 'interactions' | 'system';
-type TrendMetric = 'tasks' | 'tokens' | 'pv' | 'apps' | 'versions' | 'activity' | 'calls' | 'modelCalls';
+type SectionTab = 'all' | 'growth' | 'apps' | 'agent' | 'llm' | 'infra' | 'admin';
+type TrendMetric = 'tasks' | 'tokens' | 'cost' | 'pv' | 'apps' | 'versions' | 'activity' | 'calls' | 'modelCalls';
 
-const RANGES: [DashboardRange, string][] = [
+const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
   ['today', '今天'],
   ['7d', '近 7 天'],
   ['30d', '近 30 天'],
@@ -36,23 +38,20 @@ const RANGES: [DashboardRange, string][] = [
   ['all', '全部时间'],
 ];
 
-const SCOPES: [DashboardScope, string][] = [
-  ['platform', '全平台管理视角'],
-  ['workspace', '我的工作空间'],
-];
-
 const SECTION_TABS: [SectionTab, string][] = [
   ['all', '全部维度'],
-  ['apps', '空间与应用排行'],
-  ['tasks', '任务诊断与模型'],
-  ['cloud', '版本、云服务与数据源'],
-  ['interactions', '会话、反馈与社区'],
-  ['system', '实例运行监控'],
+  ['growth', '增长与空间排行'],
+  ['apps', '应用资产与流量'],
+  ['agent', 'Agent 编排与质检'],
+  ['llm', '模型与 Token 成本'],
+  ['infra', '云服务、反馈与运行监控'],
+  ['admin', '治理与运维'],
 ];
 
 const TREND_METRICS: [TrendMetric, string][] = [
   ['tasks', 'AI 任务'],
   ['tokens', 'Token 消耗'],
+  ['cost', '模型花费'],
   ['pv', '访问 PV'],
   ['apps', '应用 / 空间'],
   ['versions', '版本 / 部署'],
@@ -108,6 +107,30 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   VERIFYING: '校验中',
   COMMITTING: '提交中',
   CANCELLING: '停止中',
+};
+
+const TOOL_LABELS: Record<string, string> = {
+  bash: '命令执行 (bash)',
+  write: '写入文件 (write)',
+  edit: '精确编辑 (edit)',
+  edits: '批量编辑 (edits)',
+  read: '读取文件 (read)',
+  screenshot: '页面自查截图 (screenshot)',
+  todo_write: '待办规划 (todo_write)',
+  cloud: '云服务操作 (cloud)',
+  request_confirm: '人工确认卡 (confirm)',
+};
+
+const CONFIRM_KIND_LABELS: Record<string, string> = {
+  cloud: '启用共享云服务',
+  continue: '超步数继续确认',
+};
+
+const CONFIRM_STATE_LABELS: Record<string, string> = {
+  accepted: '已同意',
+  declined: '已拒绝',
+  pending: '待回应',
+  timeout: '已超时',
 };
 
 const VERSION_SOURCE_LABELS: Record<string, string> = {
@@ -182,8 +205,8 @@ function calcDelta(cur: number, prev: number): { text: string; tone: 'up' | 'dow
   return { text: '持平 0%', tone: 'flat' };
 }
 
-function downloadJson(filename: string, payload: unknown) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+function downloadBlob(filename: string, content: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -192,29 +215,146 @@ function downloadJson(filename: string, payload: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function exportTrendsCsv(data: DashboardData) {
+  const header = ['日期', 'PV', '新建应用', '活跃工作空间', '总任务', '成功任务', '失败任务', '版本数', '部署数', 'Token消耗', '模型调用', '估算花费(元)', '对话消息', '云函数调用', '数据源调用'];
+  const rows = data.trends.daily.map((d) => [
+    d.date,
+    d.pv,
+    d.appsCreated,
+    d.activeWorkspaces,
+    d.tasksTotal,
+    d.tasksSucceeded,
+    d.tasksFailed,
+    d.versions,
+    d.deployments,
+    d.tokens,
+    d.modelCalls,
+    d.cost.toFixed(4),
+    d.messages,
+    d.fnCalls,
+    d.sourceCalls,
+  ]);
+  const csv = '\uFEFF' + [header, ...rows].map((r) => r.join(',')).join('\n');
+  downloadBlob(`zhiye-admin-trends-${data.meta.range}-${data.meta.endDate}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [scope, setScope] = useState<DashboardScope>('platform');
   const [range, setRange] = useState<DashboardRange>('30d');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const [appliedStart, setAppliedStart] = useState('');
+  const [appliedEnd, setAppliedEnd] = useState('');
+  const [filterWorkspaceId, setFilterWorkspaceId] = useState('');
+  const [filterUserId, setFilterUserId] = useState('');
   const [section, setSection] = useState<SectionTab>('all');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('tasks');
   const [chartKind, setChartKind] = useState<'line' | 'bar'>('bar');
   const [appQuery, setAppQuery] = useState('');
   const [appTypeFilter, setAppTypeFilter] = useState('');
   const [appSort, setAppSort] = useState<'pv' | 'versions' | 'tasks' | 'tokens'>('pv');
+  const [wsQuery, setWsQuery] = useState('');
   const [wsSort, setWsSort] = useState<'apps' | 'tasks' | 'tokens' | 'pv'>('apps');
   const [expandWs, setExpandWs] = useState(false);
   const [expandApps, setExpandApps] = useState(false);
+  const [quotaTarget, setQuotaTarget] = useState<QuotaModalTarget | null>(null);
+  const [inlineBusy, setInlineBusy] = useState<string | null>(null);
+
+  const qc = useQueryClient();
+  const metaQ = useMeta();
+  const isAdmin = Boolean(metaQ.data?.auth?.admin);
+  const scope: 'platform' | 'workspace' = isAdmin ? 'platform' : 'workspace';
+
+  const adminQ = useQuery({
+    queryKey: qk.adminOverview,
+    queryFn: api.adminOverview,
+    enabled: isAdmin,
+  });
+
+  const customQuotaByWs = useMemo(() => {
+    const map = new Map<string, AdminCustomQuota>();
+    for (const item of adminQ.data?.customQuotas ?? []) map.set(item.workspaceId, item);
+    return map;
+  }, [adminQ.data?.customQuotas]);
+
+  const invalidateAdminAndDash = async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ['dashboard'] }),
+      qc.invalidateQueries({ queryKey: qk.adminOverview }),
+    ]);
+  };
+
+  const runInlineAdmin = async (key: string, fn: () => Promise<void>) => {
+    setInlineBusy(key);
+    try {
+      await fn();
+      await invalidateAdminAndDash();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setInlineBusy(null);
+    }
+  };
+
+  const queryParams = useMemo(
+    () => ({
+      scope,
+      range: range === 'custom' ? undefined : range,
+      startDate: range === 'custom' && appliedStart ? appliedStart : undefined,
+      endDate: range === 'custom' && appliedEnd ? appliedEnd : undefined,
+      workspaceId: isAdmin && filterWorkspaceId ? filterWorkspaceId : undefined,
+      userId: isAdmin && filterUserId ? filterUserId : undefined,
+    }),
+    [scope, isAdmin, range, appliedStart, appliedEnd, filterWorkspaceId, filterUserId],
+  );
 
   const q = useQuery({
-    queryKey: qk.dashboard(range, scope),
-    queryFn: () => api.dashboard(range, scope),
+    queryKey: qk.dashboard(queryParams),
+    queryFn: () => api.dashboard(queryParams),
+    enabled: !metaQ.isPending,
     placeholderData: keepPreviousData,
   });
 
+  const applyCustomDates = () => {
+    if (!customStart || !customEnd) {
+      toast('请同时选择开始日期和结束日期。', 'error');
+      return;
+    }
+    if (customStart > customEnd) {
+      toast('开始日期不能晚于结束日期。', 'error');
+      return;
+    }
+    setAppliedStart(customStart);
+    setAppliedEnd(customEnd);
+    setRange('custom');
+  };
+
+  const selectPresetRange = (r: Exclude<DashboardRange, 'custom'>) => {
+    setRange(r);
+    setAppliedStart('');
+    setAppliedEnd('');
+  };
+
+  const selectActor = (actor: { userId?: string | null; workspaceId?: string | null } | null) => {
+    if (!actor) {
+      setFilterUserId('');
+      setFilterWorkspaceId('');
+      return;
+    }
+    if (actor.userId && !actor.workspaceId) {
+      setFilterUserId(actor.userId);
+      setFilterWorkspaceId('');
+    } else if (actor.workspaceId) {
+      setFilterWorkspaceId(actor.workspaceId);
+      setFilterUserId('');
+    } else if (actor.userId) {
+      setFilterUserId(actor.userId);
+      setFilterWorkspaceId('');
+    }
+  };
+
   const data = q.data;
   const show = (tab: SectionTab) => section === 'all' || section === tab;
-  const isPlatform = scope === 'platform';
 
   const trendConfig = useMemo(() => {
     const daily = data?.trends.daily ?? [];
@@ -235,6 +375,14 @@ export function DashboardPage() {
           primaryColor: '#4a7bd0',
           unit: '',
           points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: d.tokens })),
+        };
+      case 'cost':
+        return {
+          primaryLabel: '模型花费 (元)',
+          secondaryLabel: undefined,
+          primaryColor: '#d9822b',
+          unit: ' 元',
+          points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: Math.round(d.cost * 100) / 100 })),
         };
       case 'pv':
         return {
@@ -291,7 +439,8 @@ export function DashboardPage() {
   }, [data, trendMetric]);
 
   const sortedWorkspaces = useMemo(() => {
-    const list = [...(data?.workspaces ?? [])];
+    const qText = wsQuery.trim().toLowerCase();
+    const list = (data?.workspaces ?? []).filter((w) => !qText || w.workspaceId.toLowerCase().includes(qText) || w.ownerName.toLowerCase().includes(qText));
     list.sort((a, b) => {
       if (wsSort === 'tasks') return b.tasks - a.tasks || b.apps - a.apps;
       if (wsSort === 'tokens') return b.tokens - a.tokens || b.tasks - a.tasks;
@@ -299,7 +448,7 @@ export function DashboardPage() {
       return b.apps - a.apps || b.tasks - a.tasks;
     });
     return list;
-  }, [data, wsSort]);
+  }, [data, wsQuery, wsSort]);
 
   const filteredTopApps = useMemo(() => {
     const list = [...(data?.apps.topApps ?? [])];
@@ -321,29 +470,61 @@ export function DashboardPage() {
   const daily = data?.trends.daily ?? [];
   const visibleWorkspaces = expandWs ? sortedWorkspaces : sortedWorkspaces.slice(0, 8);
   const visibleApps = expandApps ? filteredTopApps : filteredTopApps.slice(0, 8);
+  const totalVerifyChecks = (data?.agentTelemetry.verifyChecks ?? []).reduce((s, c) => s + c.total, 0);
+  const passedVerifyChecks = (data?.agentTelemetry.verifyChecks ?? []).reduce((s, c) => s + c.passed, 0);
+  const overallVerifyRate = totalVerifyChecks ? Math.round((passedVerifyChecks / totalVerifyChecks) * 1000) / 10 : 0;
 
   return (
     <div className="content-page dash-page">
-      {/* 顶部标题区 + 主操作按钮严格左右对齐 */}
+      {/* 顶部管理指挥舱标题与操作按钮 */}
       <header className="dash-header-top">
         <div className="dash-title-block">
-          <span className="overline">ZHIYE OPERATIONS &amp; ANALYTICS CONSOLE</span>
+          <span className="overline">ZHIYE ADMIN OBSERVABILITY &amp; OPERATIONS CONSOLE</span>
           <div className="dash-title-row">
-            <h1>{isPlatform ? '系统全景管理看板' : '我的工作空间看板'}</h1>
-            <span className={`dash-scope-badge ${isPlatform ? 'platform' : 'workspace'}`}>
-              {isPlatform ? '全平台汇总口径' : '当前空间隔离口径'}
+            <h1>织页平台管理看板</h1>
+            <span className={`dash-scope-badge ${scope}`}>
+              <i className="dash-pulse-dot" aria-hidden="true" />
+              {!isAdmin
+                ? '当前工作空间统计（个人隔离视角）'
+                : filterWorkspaceId || filterUserId
+                  ? `已按人员/空间筛选 · ${data?.meta.filterLabel ?? ''}`
+                  : '全平台实时统计'}
             </span>
           </div>
           <p>
-            {isPlatform
-              ? '汇聚全平台工作空间、应用资产、AI 任务编排、模型 Token 成本、云服务合规、数据源与实例运行监控。'
-              : `聚焦当前工作空间（${data?.meta.workspaceId ?? '当前会话'}）的应用产出、配额用量、访问流量与任务明细。`}
+            面向平台运营、研发与运维的全维度指挥舱：覆盖空间生产力、创作漏斗、Agent 工具遥测与质量门禁、故障根因诊断、模型 Token 经济学、云服务合规与实例健康度。
           </p>
         </div>
         <div className="dash-header-cta">
+          <button
+            type="button"
+            className="dash-action-btn"
+            onClick={() => {
+              const sp = new URLSearchParams();
+              if (filterWorkspaceId) sp.set('workspaceId', filterWorkspaceId);
+              if (filterUserId) sp.set('userId', filterUserId);
+              navigate('/logs' + (sp.size ? '?' + sp.toString() : ''));
+            }}
+          >
+            <Icon name="terminal" />
+            <span>日志排查</span>
+          </button>
           <button type="button" className="dash-action-btn" onClick={() => void q.refetch()} disabled={q.isFetching}>
             <Icon name="refresh" className={q.isFetching ? 'spinning' : ''} />
             <span>{q.isFetching ? '刷新中…' : '刷新数据'}</span>
+          </button>
+          <button
+            type="button"
+            className="dash-action-btn"
+            disabled={!data}
+            onClick={() => {
+              if (!data) return;
+              exportTrendsCsv(data);
+              toast('已导出每日趋势 CSV 报表。');
+            }}
+          >
+            <Icon name="file" />
+            <span>导出 CSV</span>
           </button>
           <button
             type="button"
@@ -351,44 +532,76 @@ export function DashboardPage() {
             disabled={!data}
             onClick={() => {
               if (!data) return;
-              downloadJson(`zhiye-${data.meta.scope}-${data.meta.range}-${data.meta.endDate}.json`, data);
-              toast('已导出统计看板完整报表 JSON。');
+              downloadBlob(`zhiye-admin-snapshot-${data.meta.range}-${data.meta.endDate}.json`, JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
+              toast('已导出全量管理看板快照 JSON。');
             }}
           >
             <Icon name="download" />
-            <span>导出报表</span>
+            <span>导出 JSON</span>
           </button>
         </div>
       </header>
 
-      {/* 单行控制工具条：口径切换 + 统计窗口 + 时间范围 */}
+      {/* 双排精准筛选控制条：按人 / 按工作空间 + 按预设/自定义时间段 */}
       <div className="dash-command-bar">
         <div className="dash-command-left">
-          <div className="seg-control scope-switch" role="radiogroup" aria-label="看板统计视角">
-            {SCOPES.map(([s, label]) => (
-              <button key={s} type="button" role="radio" aria-checked={scope === s} className={scope === s ? 'active' : ''} onClick={() => setScope(s)}>
+          {isAdmin ? (
+            <>
+              <ActorPicker
+                actors={data?.actors ?? []}
+                filterWorkspaceId={filterWorkspaceId}
+                filterUserId={filterUserId}
+                activeLabel={data?.meta.filterLabel ?? '全平台全部人员与空间'}
+                onSelect={selectActor}
+              />
+              {(filterWorkspaceId || filterUserId) ? (
+                <button type="button" className="dash-clear-chip" onClick={() => selectActor(null)}>
+                  <span>清除人员筛选</span>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {data ? (
+            <span className="dash-window-info">
+              {data.meta.startDate} ~ {data.meta.endDate}（{data.meta.days} 天） · 更新于 {fmtTime(data.meta.generatedAt)}
+            </span>
+          ) : null}
+        </div>
+        <div className="dash-command-right">
+          <div className="seg-control" role="radiogroup" aria-label="快捷时间段">
+            {RANGES.map(([r, label]) => (
+              <button key={r} type="button" role="radio" aria-checked={range === r} className={range === r ? 'active' : ''} onClick={() => selectPresetRange(r)}>
                 {label}
               </button>
             ))}
           </div>
-          {data ? (
-            <span className="dash-window-info">
-              {data.meta.startDate} 至 {data.meta.endDate}（{data.meta.days} 天） · 更新于 {fmtTime(data.meta.generatedAt)}
-            </span>
-          ) : null}
-        </div>
-        <div className="seg-control" role="radiogroup" aria-label="统计时间范围">
-          {RANGES.map(([r, label]) => (
-            <button key={r} type="button" role="radio" aria-checked={range === r} className={range === r ? 'active' : ''} onClick={() => setRange(r)}>
-              {label}
+          <div className="dash-date-range" aria-label="自定义起止日期">
+            <input
+              type="date"
+              aria-label="开始日期"
+              value={customStart || data?.meta.startDate || ''}
+              max={customEnd || data?.meta.endDate}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span>至</span>
+            <input
+              type="date"
+              aria-label="结束日期"
+              value={customEnd || data?.meta.endDate || ''}
+              min={customStart || undefined}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+            <button type="button" className={`dash-date-apply ${range === 'custom' ? 'active' : ''}`} onClick={applyCustomDates}>
+              筛选
             </button>
-          ))}
+          </div>
         </div>
       </div>
 
       {/* 维度导航页签 */}
-      <nav className="dash-nav-bar" role="tablist" aria-label="统计维度分组">
-        {SECTION_TABS.map(([id, label]) => (
+      <nav className="dash-nav-bar" role="tablist" aria-label="管理维度分组">
+        {SECTION_TABS.filter(([id]) => isAdmin || id !== 'admin').map(([id, label]) => (
           <button
             key={id}
             type="button"
@@ -397,13 +610,16 @@ export function DashboardPage() {
             className={section === id ? 'active' : ''}
             onClick={() => setSection(id)}
           >
-            {label}
+            <span>{label}</span>
+            {id === 'admin' && (adminQ.data?.feedbackOpenCount ?? 0) > 0 ? (
+              <em className="dash-tab-badge">{adminQ.data?.feedbackOpenCount}</em>
+            ) : null}
           </button>
         ))}
       </nav>
 
       {q.isLoading ? (
-        <LoadingState label="正在聚合全系统多维统计数据…" />
+        <LoadingState label="正在聚合全平台多维运营与遥测数据…" />
       ) : q.error || !data ? (
         <ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} />
       ) : (
@@ -414,61 +630,89 @@ export function DashboardPage() {
               <span className="dash-live-dot" aria-hidden="true" />
               <b>实时运行中（{data.tasks.activeList.length} 个任务）</b>
               <div className="dash-live-items">
-                {data.tasks.activeList.slice(0, 4).map((t) => (
-                  <button key={t.id} type="button" className="dash-live-chip" onClick={() => navigate('/apps/' + t.appId)}>
-                    <span>{t.appName}</span>
-                    <em>{labelOf(TASK_TYPE_LABELS, t.type)} · {t.progress}%</em>
-                  </button>
+                {data.tasks.activeList.slice(0, 5).map((t) => (
+                  <div key={t.id} className="dash-live-group">
+                    <button
+                      type="button"
+                      className="dash-live-chip"
+                      onClick={() => navigate('/logs?taskId=' + encodeURIComponent(t.id))}
+                      title="点击实时查看该任务过程日志"
+                    >
+                      <span>{t.appName}</span>
+                      <em>{labelOf(TASK_TYPE_LABELS, t.type)} · {t.progress}%</em>
+                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        className="dash-live-stop"
+                        disabled={inlineBusy === `stop-${t.id}`}
+                        onClick={async () => {
+                          const ok = await confirmDialog({
+                            title: '强行停止任务',
+                            message: `确认强行停止「${t.appName}」的运行任务 ${t.id} 吗？`,
+                            confirmLabel: '强行停止',
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          await runInlineAdmin(`stop-${t.id}`, async () => {
+                            await api.adminCancelTask(t.id);
+                            toast('已发送强停指令', 'ok');
+                          });
+                        }}
+                      >
+                        强停
+                      </button>
+                    ) : null}
+                  </div>
                 ))}
               </div>
             </div>
           ) : null}
 
-          {/* 1. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 周期环比） */}
-          <section className="dash-section" aria-label="核心全景指标">
+          {/* 1. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比） */}
+          <section className="dash-section" aria-label="核心管理 KPI">
             <div className="dash-kpi-grid-6">
               <KpiCard
-                title={isPlatform ? '活跃空间与用户' : '我的空间配额'}
-                value={isPlatform ? fmtNum(data.overview.workspacesActiveRange) : `${fmtNum(data.overview.appsUsedInMyWs)}/${fmtNum(data.overview.appsLimit)}`}
-                unit={isPlatform ? `活跃 / ${fmtNum(data.overview.workspacesProductive)} 有产出（共 ${fmtNum(data.overview.workspacesTotal)}）` : '应用配额已用'}
+                title="活跃空间与用户"
+                value={fmtNum(data.overview.workspacesActiveRange)}
+                unit={`活跃 / ${fmtNum(data.overview.workspacesProductive)} 有产出（库内 ${fmtNum(data.overview.workspacesTotal)}）`}
                 accent="#7953dc"
                 spark={daily.map((d) => d.activeWorkspaces)}
                 details={[
-                  isPlatform ? `SSO 用户 ${fmtNum(data.overview.ssoUsersTotal)}` : `空间 ${data.meta.workspaceId}`,
-                  `窗口 ${data.meta.days} 天`,
-                  `转化应用 ${fmtNum(data.overview.conversationsConverted)}`,
+                  `产出率 ${data.overview.workspacesTotal ? Math.round((data.overview.workspacesProductive / data.overview.workspacesTotal) * 1000) / 10 : 0}%`,
+                  `SSO 用户 ${fmtNum(data.overview.ssoUsersTotal)}`,
+                  `对话转应用 ${fmtNum(data.overview.conversationsConverted)}`,
                 ]}
               />
               <KpiCard
-                title="应用资产规模"
+                title="应用资产与发布"
                 value={fmtNum(data.overview.appsTotal)}
-                unit={`已发布 ${fmtNum(data.overview.appsPublished)} (${data.overview.appsTotal ? Math.round((data.overview.appsPublished / data.overview.appsTotal) * 1000) / 10 : 0}%)`}
+                unit={`已发布 ${fmtNum(data.overview.appsPublished)}（发布率 ${data.overview.appsTotal ? Math.round((data.overview.appsPublished / data.overview.appsTotal) * 1000) / 10 : 0}%）`}
                 accent="#2f9e8f"
                 delta={range === 'all' ? null : calcDelta(data.overview.appsRange, data.overview.appsPrevRange)}
                 spark={daily.map((d) => d.appsCreated)}
                 details={[
-                  `新增 ${fmtNum(data.overview.appsRange)}`,
-                  `就绪 ${fmtNum(data.overview.appsReady)}`,
-                  `失败 ${fmtNum(data.overview.appsFailed)} · 回收站 ${fmtNum(data.overview.appsDeleted)}`,
+                  `窗口新增 ${fmtNum(data.overview.appsRange)}`,
+                  `就绪 ${fmtNum(data.overview.appsReady)} · 失败 ${fmtNum(data.overview.appsFailed)}`,
+                  `回收站 ${fmtNum(data.overview.appsDeleted)}`,
                 ]}
               />
               <KpiCard
-                title="AI 任务吞吐"
+                title="AI 任务吞吐与 SLA"
                 value={fmtNum(data.overview.tasksTotal)}
                 unit={`成功率 ${data.overview.taskSuccessRate}%`}
                 accent="#4a7bd0"
                 delta={range === 'all' ? null : calcDelta(data.overview.tasksRange, data.overview.tasksPrevRange)}
                 spark={daily.map((d) => d.tasksTotal)}
                 details={[
-                  `成功 ${fmtNum(data.overview.tasksSucceeded)} · 失败 ${fmtNum(data.overview.tasksFailed)}`,
-                  `P50 ${data.overview.taskP50DurationSec}s / P95 ${data.overview.taskP95DurationSec}s`,
-                  `活跃 ${fmtNum(data.overview.tasksActive)}`,
+                  `成 ${fmtNum(data.overview.tasksSucceeded)} · 败 ${fmtNum(data.overview.tasksFailed)} · 消 ${fmtNum(data.overview.tasksCancelled)}`,
+                  `P50 ${data.overview.taskP50DurationSec}s / P90 ${data.overview.taskP90DurationSec}s / P95 ${data.overview.taskP95DurationSec}s`,
                 ]}
               />
               <KpiCard
-                title="模型 Token 消耗"
+                title="模型 Token 与花费"
                 value={fmtCompact(data.overview.tokensTotal)}
-                unit={`调用 ${fmtCompact(data.overview.modelCallsTotal)} 次 · ¥${data.overview.costTotal.toFixed(2)}`}
+                unit={`请求 ${fmtCompact(data.overview.modelCallsTotal)} 次 · ¥${data.overview.costTotal.toFixed(2)}`}
                 accent="#d9822b"
                 delta={range === 'all' ? null : calcDelta(data.overview.tokensRange, data.overview.tokensPrevRange)}
                 spark={daily.map((d) => d.tokens)}
@@ -492,23 +736,23 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="版本、云与社区生态"
-                value={fmtNum(data.overview.versionsTotal)}
-                unit={`版本 · ${fmtNum(data.overview.deploymentsTotal)} 次部署`}
+                title="质检、云服务与反馈"
+                value={`${overallVerifyRate}%`}
+                unit={`质检通过率（${fmtNum(totalVerifyChecks)} 次门禁）`}
                 accent="#c7527c"
                 spark={daily.map((d) => d.versions)}
                 details={[
+                  `版本 ${fmtNum(data.overview.versionsTotal)} · 部署 ${fmtNum(data.overview.deploymentsTotal)}`,
                   `云服务 ${fmtNum(data.overview.cloudEnabledApps)} · 表 ${fmtNum(data.overview.cloudTablesTotal)}`,
-                  `云函数 ${fmtNum(data.overview.fnCallsTotal)} · 数据源 ${fmtNum(data.overview.sourceCallsTotal)}`,
-                  `反馈 ${fmtNum(data.overview.helpFeedbackTotal)} · 社区 ${fmtNum(data.overview.templatesPublished)}`,
+                  `用户反馈 ${fmtNum(data.overview.helpFeedbackTotal)} · 社区 ${fmtNum(data.overview.templatesPublished)}`,
                 ]}
               />
             </div>
           </section>
 
-          {/* 2. 转化漏斗 + 多维每日趋势 */}
-          {show('apps') || show('tasks') ? (
-            <section className="dash-section" aria-label="转化漏斗与每日趋势">
+          {/* 2. 转化漏斗 + 多维每日趋势 + 24h 时段 + 空间生产力排行 */}
+          {show('growth') ? (
+            <section className="dash-section" aria-label="增长趋势与空间排行">
               <div className="dash-hero-split">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
@@ -524,7 +768,7 @@ export function DashboardPage() {
                   <header className="dash-panel-head compact">
                     <div>
                       <h2>多维度每日趋势</h2>
-                      <p>按 Asia/Shanghai 时区对每日核心指标补零对齐。</p>
+                      <p>按 Asia/Shanghai 时区对每日核心指标补零对齐，支持 9 类指标切换。</p>
                     </div>
                     <div className="seg-control small" role="radiogroup" aria-label="图表形式">
                       <button type="button" role="radio" aria-checked={chartKind === 'line'} className={chartKind === 'line' ? 'active' : ''} onClick={() => setChartKind('line')}>
@@ -553,66 +797,68 @@ export function DashboardPage() {
                   />
                 </div>
               </div>
-            </section>
-          ) : null}
 
-          {/* 3. 工作空间/用户生产力排行 + 应用资产画像 */}
-          {show('apps') ? (
-            <section className="dash-section" aria-label="工作空间与应用资产">
-              <SectionTitle
-                title={isPlatform ? '工作空间生产力排行与应用资产画像' : '我的应用资产画像与排行'}
-                sub={isPlatform ? '剔除零产出空壳空间，按应用产出、任务、Token 与访问量排序。' : '查看当前工作空间的应用类型、项目形态、阶段分布与单应用流量。'}
-              />
-
-              {isPlatform ? (
-                <div className="dash-panel">
-                  <header className="dash-panel-head">
-                    <div>
-                      <h3>活跃工作空间 / 用户生产力排行（Top {sortedWorkspaces.length}）</h3>
-                      <p>全库共 {fmtNum(data.overview.workspacesTotal)} 个工作空间，其中 {fmtNum(data.overview.workspacesProductive)} 个有真实产出。</p>
+              <div className="dash-panel">
+                <header className="dash-panel-head">
+                  <div>
+                    <h3>活跃工作空间 / 用户生产力排行（Top {sortedWorkspaces.length}）</h3>
+                    <p>全库共 {fmtNum(data.overview.workspacesTotal)} 个工作空间，其中 {fmtNum(data.overview.workspacesProductive)} 个有真实产出（已过滤空壳空间）。</p>
+                  </div>
+                  <div className="dash-toolbar-group">
+                    <label className="dash-search">
+                      <Icon name="search" />
+                      <input
+                        aria-label="搜索工作空间"
+                        placeholder="按空间 ID 或用户名筛选"
+                        value={wsQuery}
+                        onChange={(e) => setWsQuery(e.target.value)}
+                      />
+                    </label>
+                    <div className="seg-control unified" role="radiogroup" aria-label="工作空间排序">
+                      {(
+                        [
+                          ['apps', '按应用'],
+                          ['tasks', '按任务'],
+                          ['tokens', '按 Token'],
+                          ['pv', '按 PV'],
+                        ] as const
+                      ).map(([k, lbl]) => (
+                        <button key={k} type="button" role="radio" aria-checked={wsSort === k} className={wsSort === k ? 'active' : ''} onClick={() => setWsSort(k)}>
+                          {lbl}
+                        </button>
+                      ))}
                     </div>
-                    <div className="dash-toolbar-group">
-                      <div className="seg-control unified" role="radiogroup" aria-label="工作空间排序">
-                        {(
-                          [
-                            ['apps', '按应用数'],
-                            ['tasks', '按任务数'],
-                            ['tokens', '按 Token'],
-                            ['pv', '按 PV'],
-                          ] as const
-                        ).map(([k, lbl]) => (
-                          <button key={k} type="button" role="radio" aria-checked={wsSort === k} className={wsSort === k ? 'active' : ''} onClick={() => setWsSort(k)}>
-                            {lbl}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </header>
-                  {sortedWorkspaces.length === 0 ? (
-                    <p className="dash-empty">暂无有产出的工作空间</p>
-                  ) : (
-                    <>
-                      <div className="dash-table-wrap">
-                        <table className="dash-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">工作空间 / 归属人</th>
-                              <th scope="col">应用 (已发布)</th>
-                              <th scope="col">任务 (窗口新增)</th>
-                              <th scope="col">成功率</th>
-                              <th scope="col">Token 消耗</th>
-                              <th scope="col">估算成本</th>
-                              <th scope="col">PV (今日)</th>
-                              <th scope="col">最近活跃</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visibleWorkspaces.map((w) => (
-                              <tr key={w.workspaceId} className={w.workspaceId === data.meta.workspaceId ? 'dash-row-highlight' : ''}>
+                  </div>
+                </header>
+                {sortedWorkspaces.length === 0 ? (
+                  <p className="dash-empty">暂无符合条件的工作空间</p>
+                ) : (
+                  <>
+                    <div className="dash-table-wrap">
+                      <table className="dash-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">工作空间 / 归属人</th>
+                            <th scope="col">应用 (已发布)</th>
+                            <th scope="col">任务 (窗口)</th>
+                            <th scope="col">成功率</th>
+                            <th scope="col">Token 消耗</th>
+                            <th scope="col">估算成本</th>
+                            <th scope="col">PV (末日)</th>
+                            <th scope="col">最近活跃</th>
+                            <th scope="col">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {visibleWorkspaces.map((w) => {
+                            const isFiltered = filterWorkspaceId === w.workspaceId;
+                            const customQ = customQuotaByWs.get(w.workspaceId) ?? null;
+                            return (
+                              <tr key={w.workspaceId} className={isFiltered ? 'dash-row-highlight' : ''}>
                                 <td>
                                   <code>{w.workspaceId}</code>
                                   {w.ownerName ? <span className="dash-tag" style={{ marginLeft: 6 }}>{w.ownerName}</span> : null}
-                                  {w.workspaceId === data.meta.workspaceId ? <span className="dash-pill ok" style={{ marginLeft: 6 }}>当前</span> : null}
+                                  {customQ ? <span className="dash-pill cloud" style={{ marginLeft: 6 }}>自定义配额</span> : null}
                                 </td>
                                 <td><b>{fmtNum(w.apps)}</b> <span className="dash-muted">({fmtNum(w.published)})</span></td>
                                 <td>{fmtNum(w.tasks)} <span className="dash-muted">({fmtNum(w.rangeTasks)})</span></td>
@@ -621,22 +867,55 @@ export function DashboardPage() {
                                 <td>¥{w.cost.toFixed(4)}</td>
                                 <td><b>{fmtNum(w.pv)}</b> <span className="dash-muted">({fmtNum(w.todayPv)})</span></td>
                                 <td className="dash-nowrap">{w.lastActiveAt ? fmtTime(w.lastActiveAt) : '-'}</td>
+                                <td>
+                                  <div className="dash-action-row">
+                                    <button
+                                      type="button"
+                                      className="dash-link"
+                                      onClick={() => selectActor(isFiltered ? null : { workspaceId: w.workspaceId })}
+                                    >
+                                      {isFiltered ? '取消筛选' : '下钻'}
+                                    </button>
+                                    {isAdmin ? (
+                                      <button
+                                        type="button"
+                                        className="dash-link"
+                                        onClick={() =>
+                                          setQuotaTarget({
+                                            workspaceId: w.workspaceId,
+                                            ownerName: w.ownerName,
+                                            custom: customQ,
+                                          })
+                                        }
+                                      >
+                                        配额
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {sortedWorkspaces.length > 8 ? (
+                      <div className="dash-table-footer">
+                        <button type="button" className="text-button" onClick={() => setExpandWs((v) => !v)}>
+                          {expandWs ? '收起至 Top 8' : `展开全部 Top ${sortedWorkspaces.length} 工作空间`}
+                        </button>
                       </div>
-                      {sortedWorkspaces.length > 8 ? (
-                        <div className="dash-table-footer">
-                          <button type="button" className="text-button" onClick={() => setExpandWs((v) => !v)}>
-                            {expandWs ? '收起至 Top 8' : `展开全部 Top ${sortedWorkspaces.length} 工作空间`}
-                          </button>
-                        </div>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              ) : null}
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </section>
+          ) : null}
+
+          {/* 3. 应用资产画像与排行 */}
+          {show('apps') ? (
+            <section className="dash-section" aria-label="应用资产画像与排行">
+              <SectionTitle title="全平台应用资产画像与流量排行" sub="按创造类型、项目形态、生命周期、创建模式与来源、设计风格深度拆解全平台 384+ 应用资产。" />
 
               <div className="dash-grid-2">
                 <div className="dash-panel">
@@ -741,7 +1020,7 @@ export function DashboardPage() {
                 <header className="dash-panel-head">
                   <div>
                     <h3>热门应用综合明细排行（Top {filteredTopApps.length}）</h3>
-                    <p>按 PV、版本迭代次数、任务数与 Token 消耗排行。</p>
+                    <p>按 PV、版本迭代次数、任务数与 Token 消耗排行，支持关键词检索与类型过滤。</p>
                   </div>
                   <div className="dash-toolbar-group">
                     <label className="dash-search">
@@ -789,7 +1068,7 @@ export function DashboardPage() {
                         <thead>
                           <tr>
                             <th scope="col">应用名称</th>
-                            {isPlatform ? <th scope="col">所属空间</th> : null}
+                            <th scope="col">所属空间</th>
                             <th scope="col">类型 / 形态</th>
                             <th scope="col">状态</th>
                             <th scope="col">云服务 / 访问</th>
@@ -797,13 +1076,14 @@ export function DashboardPage() {
                             <th scope="col">任务</th>
                             <th scope="col">Token</th>
                             <th scope="col">今日 / 累计 PV</th>
+                            {isAdmin ? <th scope="col">治理操作</th> : null}
                           </tr>
                         </thead>
                         <tbody>
                           {visibleApps.map((a) => (
                             <tr key={a.id}>
                               <td>
-                                {!isPlatform || a.workspaceId === data.meta.workspaceId ? (
+                                {a.workspaceId === data.meta.workspaceId ? (
                                   <button type="button" className="dash-link" onClick={() => navigate('/apps/' + a.id)}>
                                     {a.name}
                                   </button>
@@ -811,7 +1091,7 @@ export function DashboardPage() {
                                   <b>{a.name}</b>
                                 )}
                               </td>
-                              {isPlatform ? <td><code>{a.workspaceId}</code></td> : null}
+                              <td><code>{a.workspaceId}</code></td>
                               <td>
                                 <span className="dash-tag">{a.type}</span>{' '}
                                 <span className="dash-muted">{labelOf(KIND_LABELS, a.projectKind)}</span>
@@ -830,6 +1110,54 @@ export function DashboardPage() {
                               <td>{fmtNum(a.tasks)}</td>
                               <td>{fmtCompact(a.tokensUsed)}</td>
                               <td>{fmtNum(a.todayPv)} / <b>{fmtNum(a.totalPv)}</b></td>
+                              {isAdmin ? (
+                                <td>
+                                  <div className="dash-action-row">
+                                    {a.published ? (
+                                      <button
+                                        type="button"
+                                        className="dash-link danger"
+                                        disabled={inlineBusy === `unpub-${a.id}`}
+                                        onClick={async () => {
+                                          const ok = await confirmDialog({
+                                            title: '强行下线站点',
+                                            message: `确认下线「${a.name}」的已发布站点吗？应用本身不会被删除。`,
+                                            confirmLabel: '强行下线',
+                                            danger: true,
+                                          });
+                                          if (!ok) return;
+                                          await runInlineAdmin(`unpub-${a.id}`, async () => {
+                                            await api.adminUnpublishApp(a.id);
+                                            toast(`已下线站点「${a.name}」`, 'ok');
+                                          });
+                                        }}
+                                      >
+                                        下线站点
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      className="dash-link danger"
+                                      disabled={inlineBusy === `del-${a.id}`}
+                                      onClick={async () => {
+                                        const ok = await confirmDialog({
+                                          title: '管理员删除应用',
+                                          message: `确认将「${a.name}」移入回收站并下线其站点吗？后续可在「治理与运维 -> 回收站」恢复。`,
+                                          confirmLabel: '确认删除',
+                                          danger: true,
+                                        });
+                                        if (!ok) return;
+                                        await runInlineAdmin(`del-${a.id}`, async () => {
+                                          await api.adminDeleteApp(a.id);
+                                          toast(`已删除「${a.name}」，可随时在回收站恢复`, 'ok');
+                                        });
+                                      }}
+                                    >
+                                      删除
+                                    </button>
+                                  </div>
+                                </td>
+                              ) : null}
                             </tr>
                           ))}
                         </tbody>
@@ -848,16 +1176,16 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 4. AI 任务诊断、24h 时段分布与模型经济学 */}
-          {show('tasks') ? (
-            <section className="dash-section" aria-label="AI 任务诊断与模型分析">
-              <SectionTitle title="AI 任务编排、失败诊断与模型成本" sub="涵盖 24 小时活跃峰谷、失败错误码与真实报错样本、各任务类型 P50/P95 耗时及各模型 Token 经济学。" />
+          {/* 4. Agent 编排、工具遥测、质检门禁与故障诊断 */}
+          {show('agent') ? (
+            <section className="dash-section" aria-label="Agent 编排与质检遥测">
+              <SectionTitle title="Agent 编排效能、工具遥测与质量门禁" sub="深度剖析 2.9 万+任务事件流：Agent 工具调用成功率、构建/冒烟/视觉质检通过率、人工确认卡、分时段高峰与失败根因。" />
 
               <div className="dash-grid-2">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>任务执行健康度与交互队列</h3>
+                      <h3>任务 SLA 健康度与编排事件</h3>
                       <p>
                         总任务 {fmtNum(data.overview.tasksTotal)} · 重试 {fmtNum(data.tasks.retries)} · Steer {fmtNum(data.tasks.steerCount)} · 检查点 {fmtNum(data.tasks.checkpointsCount)} · 事件流 {fmtNum(data.tasks.eventsCount)}
                       </p>
@@ -874,8 +1202,8 @@ export function DashboardPage() {
                   <div className="dash-mini-stats compact-4">
                     <div><span>平均耗时</span><b>{data.overview.taskAvgDurationSec}s</b></div>
                     <div><span>P50 耗时</span><b>{data.overview.taskP50DurationSec}s</b></div>
+                    <div><span>P90 耗时</span><b>{data.overview.taskP90DurationSec}s</b></div>
                     <div><span>P95 耗时</span><b>{data.overview.taskP95DurationSec}s</b></div>
-                    <div><span>排队 (待/已/云)</span><b>{data.tasks.queue.pending}/{data.tasks.queue.sent}/{data.tasks.queue.enableCloudCount}</b></div>
                   </div>
                 </div>
 
@@ -887,6 +1215,113 @@ export function DashboardPage() {
                     </div>
                   </header>
                   <HourlyBarChart data={data.hourly} />
+                </div>
+              </div>
+
+              {/* Agent 工具调用 + 质量门禁检查通过率 + 人工确认卡 */}
+              <div className="dash-grid-2">
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>Agent 工具调用遥测（Tool Telemetry）</h3>
+                      <p>统计 bash / write / edit / read / screenshot / cloud 等工具调用量与成功率</p>
+                    </div>
+                  </header>
+                  {data.agentTelemetry.tools.length === 0 ? (
+                    <p className="dash-empty">暂无工具调用遥测数据</p>
+                  ) : (
+                    <div className="dash-table-wrap">
+                      <table className="dash-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">工具名称</th>
+                            <th scope="col">调用次数</th>
+                            <th scope="col">失败次数</th>
+                            <th scope="col">成功率</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.agentTelemetry.tools.map((tl) => (
+                            <tr key={tl.tool}>
+                              <td><b>{labelOf(TOOL_LABELS, tl.tool)}</b></td>
+                              <td>{fmtNum(tl.calls)}</td>
+                              <td className={tl.failed > 0 ? 'dash-err' : ''}>{fmtNum(tl.failed)}</td>
+                              <td>
+                                <span className={`dash-rate-pill ${tl.passRate >= 95 ? 'ok' : tl.passRate >= 80 ? 'warn' : 'err'}`}>
+                                  {tl.passRate}%
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <div className="dash-sub-block">
+                    <h4>推理与人机协同事件统计</h4>
+                    <div className="dash-chip-grid">
+                      <span className="dash-kv-chip"><span>深度思考 (thinking)</span><b>{fmtNum(data.agentTelemetry.eventBreakdown.thinking)}</b></span>
+                      <span className="dash-kv-chip"><span>待办规划 (todo)</span><b>{fmtNum(data.agentTelemetry.eventBreakdown.todo)}</b></span>
+                      <span className="dash-kv-chip"><span>中途补充 (steer)</span><b>{fmtNum(data.agentTelemetry.eventBreakdown.steer)}</b></span>
+                      <span className="dash-kv-chip"><span>队列触发云服务</span><b>{fmtNum(data.tasks.queue.enableCloudCount)}</b></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>自动化质检门禁通过率（Quality Gates）</h3>
+                      <p>覆盖类型检查、构建预览/发布版、Chromium 冒烟测试、视觉自查与技能格式校验</p>
+                    </div>
+                  </header>
+                  {data.agentTelemetry.verifyChecks.length === 0 ? (
+                    <p className="dash-empty">暂无质检门禁记录</p>
+                  ) : (
+                    <div className="dash-scroll-list" style={{ maxHeight: 310 }}>
+                      <div className="dash-table-wrap">
+                        <table className="dash-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">门禁检查项</th>
+                              <th scope="col">总次数</th>
+                              <th scope="col">通过 / 未通过</th>
+                              <th scope="col">通过率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.agentTelemetry.verifyChecks.map((vc) => (
+                              <tr key={vc.name}>
+                                <td><b>{vc.name}</b></td>
+                                <td>{fmtNum(vc.total)}</td>
+                                <td>
+                                  <span className="dash-ok">{fmtNum(vc.passed)}</span> / <span className={vc.failed > 0 ? 'dash-err' : 'dash-muted'}>{fmtNum(vc.failed)}</span>
+                                </td>
+                                <td>
+                                  <span className={`dash-rate-pill ${vc.passRate >= 95 ? 'ok' : vc.passRate >= 75 ? 'warn' : 'err'}`}>
+                                    {vc.passRate}%
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  {data.agentTelemetry.confirms.length > 0 ? (
+                    <div className="dash-sub-block">
+                      <h4>人机确认卡决策分布（Confirm Cards）</h4>
+                      <div className="dash-chip-grid">
+                        {data.agentTelemetry.confirms.map((c, idx) => (
+                          <span key={idx} className="dash-kv-chip">
+                            <span>{labelOf(CONFIRM_KIND_LABELS, c.kind)} · {labelOf(CONFIRM_STATE_LABELS, c.state)}</span>
+                            <b>{fmtNum(c.count)}</b>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -968,8 +1403,127 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>模型调用与 Token 经济学</h3>
-                      <p>按 Provider 与 Model 聚合调用数、Input/Output Token、均次消耗与费用</p>
+                      <h3>最近失败任务诊断（最新 10 条）</h3>
+                      <p>展示失败应用、错误码、报错详情与耗时</p>
+                    </div>
+                  </header>
+                  {data.tasks.recentFailures.length === 0 ? (
+                    <p className="dash-empty">当前范围暂无失败任务</p>
+                  ) : (
+                    <div className="dash-scroll-list">
+                      <ul className="dash-error-list">
+                        {data.tasks.recentFailures.map((f) => (
+                          <li key={f.id}>
+                            <div className="dash-err-head">
+                              <b>{f.appName} · {labelOf(TASK_TYPE_LABELS, f.type)}</b>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                                <span className="dash-pill err">{f.errorCode || 'UNKNOWN'}</span>
+                                <button type="button" className="dash-link" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(f.id))}>
+                                  查看日志
+                                </button>
+                                {isAdmin && f.type !== 'import' && f.type !== 'clone' ? (
+                                  <button
+                                    type="button"
+                                    className="dash-link"
+                                    disabled={inlineBusy === `retry-${f.id}`}
+                                    onClick={async () => {
+                                      const ok = await confirmDialog({
+                                        title: '运维重跑失败任务',
+                                        message: `确认替用户重跑「${f.appName}」的失败任务 ${f.id} 吗？`,
+                                        confirmLabel: '立即重跑',
+                                      });
+                                      if (!ok) return;
+                                      await runInlineAdmin(`retry-${f.id}`, async () => {
+                                        const nt = await api.adminRetryTask(f.id);
+                                        toast(`已提交重跑任务 ${nt.id}`, 'ok');
+                                      });
+                                    }}
+                                  >
+                                    运维重跑
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                            <span>{f.errorMessage || f.phaseLabel || '无详细错误信息'}</span>
+                            <small>{fmtTime(f.createdAt)} · 任务 {f.id} · 空间 {f.workspaceId} · 耗时 {fmtDurationMs(f.durationMs)} · Token {fmtCompact(f.tokenUsed)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>最近任务执行流水（最新 15 条）</h3>
+                      <p>实时记录每次规划、生成、修改、代码保存的耗时与 Token</p>
+                    </div>
+                  </header>
+                  {data.tasks.recentTasks.length === 0 ? (
+                    <p className="dash-empty">暂无最近任务</p>
+                  ) : (
+                    <div className="dash-scroll-list">
+                      <div className="dash-table-wrap">
+                        <table className="dash-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">时间</th>
+                              <th scope="col">应用</th>
+                              <th scope="col">类型</th>
+                              <th scope="col">状态</th>
+                              <th scope="col">耗时 / Token</th>
+                              <th scope="col">排查</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.tasks.recentTasks.map((t) => (
+                              <tr key={t.id}>
+                                <td className="dash-nowrap">{fmtTime(t.createdAt)}</td>
+                                <td>
+                                  {t.workspaceId === data.meta.workspaceId ? (
+                                    <button type="button" className="dash-link" onClick={() => navigate('/apps/' + t.appId)}>
+                                      {t.appName}
+                                    </button>
+                                  ) : (
+                                    <b>{t.appName}</b>
+                                  )}
+                                </td>
+                                <td>{labelOf(TASK_TYPE_LABELS, t.type)}</td>
+                                <td>
+                                  <span className={`dash-pill ${t.status === 'SUCCEEDED' ? 'ok' : t.status === 'FAILED' ? 'err' : ''}`}>
+                                    {labelOf(TASK_STATUS_LABELS, t.status)}
+                                  </span>
+                                </td>
+                                <td>{fmtDurationMs(t.durationMs)} / {fmtCompact(t.tokenUsed)}</td>
+                                <td>
+                                  <button type="button" className="dash-link" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(t.id))}>
+                                    日志
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* 5. 模型与 Token 经济学 */}
+          {show('llm') ? (
+            <section className="dash-section" aria-label="模型与 Token 成本分析">
+              <SectionTitle title="模型调用与 Token 经济学" sub="按供应商/模型与任务类型精确计量输入/输出 Token、均次消耗与成本分布。" />
+
+              <div className="dash-grid-2">
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>模型调用与成本明细</h3>
+                      <p>共 {fmtNum(data.llm.totalCalls)} 次请求 · 总计 {fmtCompact(data.llm.totalTokens)} Tokens · 估算花费 ¥{data.llm.totalCost.toFixed(4)}</p>
                     </div>
                   </header>
                   {data.llm.byModel.length === 0 ? (
@@ -1005,7 +1559,7 @@ export function DashboardPage() {
                     </div>
                   )}
                   <div className="dash-sub-block">
-                    <h4>五星 AI 岛个人套餐额度</h4>
+                    <h4>五星 AI 岛对接状态</h4>
                     {!data.llm.quota.enabled ? (
                       <p className="dash-muted-line">当前为本地统一模型模式（未开启五星 AI 岛对接）。</p>
                     ) : !data.llm.quota.available ? (
@@ -1053,93 +1607,13 @@ export function DashboardPage() {
                   ) : null}
                 </div>
               </div>
-
-              <div className="dash-grid-2">
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>最近失败任务诊断（最新 10 条）</h3>
-                      <p>展示失败应用、错误码、报错详情与耗时（滚动查看完整列表）</p>
-                    </div>
-                  </header>
-                  {data.tasks.recentFailures.length === 0 ? (
-                    <p className="dash-empty">当前范围暂无失败任务</p>
-                  ) : (
-                    <div className="dash-scroll-list">
-                      <ul className="dash-error-list">
-                        {data.tasks.recentFailures.map((f) => (
-                          <li key={f.id}>
-                            <div className="dash-err-head">
-                              <b>{f.appName} · {labelOf(TASK_TYPE_LABELS, f.type)}</b>
-                              <span className="dash-pill err">{f.errorCode || 'UNKNOWN'}</span>
-                            </div>
-                            <span>{f.errorMessage || f.phaseLabel || '无详细错误信息'}</span>
-                            <small>{fmtTime(f.createdAt)} · 空间 {f.workspaceId} · 耗时 {fmtDurationMs(f.durationMs)} · Token {fmtCompact(f.tokenUsed)}</small>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>最近任务执行流水（最新 15 条）</h3>
-                      <p>实时记录每次规划、生成、修改、代码保存的耗时与 Token</p>
-                    </div>
-                  </header>
-                  {data.tasks.recentTasks.length === 0 ? (
-                    <p className="dash-empty">暂无最近任务</p>
-                  ) : (
-                    <div className="dash-scroll-list">
-                      <div className="dash-table-wrap">
-                        <table className="dash-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">时间</th>
-                              <th scope="col">应用</th>
-                              <th scope="col">类型</th>
-                              <th scope="col">状态</th>
-                              <th scope="col">耗时 / Token</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {data.tasks.recentTasks.map((t) => (
-                              <tr key={t.id}>
-                                <td className="dash-nowrap">{fmtTime(t.createdAt)}</td>
-                                <td>
-                                  {!isPlatform || t.workspaceId === data.meta.workspaceId ? (
-                                    <button type="button" className="dash-link" onClick={() => navigate('/apps/' + t.appId)}>
-                                      {t.appName}
-                                    </button>
-                                  ) : (
-                                    <b>{t.appName}</b>
-                                  )}
-                                </td>
-                                <td>{labelOf(TASK_TYPE_LABELS, t.type)}</td>
-                                <td>
-                                  <span className={`dash-pill ${t.status === 'SUCCEEDED' ? 'ok' : t.status === 'FAILED' ? 'err' : ''}`}>
-                                    {labelOf(TASK_STATUS_LABELS, t.status)}
-                                  </span>
-                                </td>
-                                <td>{fmtDurationMs(t.durationMs)} / {fmtCompact(t.tokenUsed)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
             </section>
           ) : null}
 
-          {/* 5. 版本演进、云服务与外部数据源 */}
-          {show('cloud') ? (
-            <section className="dash-section" aria-label="版本、云服务与数据源">
-              <SectionTitle title="版本演进、云服务合规与外部数据源" sub="涵盖 Git 版本来源、构建部署、云数据库权限策略、站内访问控制、Deno 云函数日志及 API 网关数据源调用。" />
+          {/* 6. 云服务、数据源、对话、反馈、生态与运行监控 */}
+          {show('infra') ? (
+            <section className="dash-section" aria-label="云服务、数据源、用户反馈与运行监控">
+              <SectionTitle title="版本部署、云服务合规、数据源、用户反馈与运行监控" sub="覆盖全平台 BaaS 数据表与站内安全权限、Deno 云函数、AGW 数据源、会话转化、用户上报反馈与实例延迟。" />
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
@@ -1212,7 +1686,7 @@ export function DashboardPage() {
                     <div><span>绑定关系数</span><b>{fmtNum(data.dataSources.totalBindings)}</b></div>
                   </div>
                   <BreakdownBars
-                    emptyText="暂未登记数据源"
+                    emptyText="当前无活跃登记的数据源（历史调用见下方监控）"
                     items={[
                       ...data.dataSources.byProvider.map((p, i) => ({
                         key: 'prov-' + p.key,
@@ -1225,12 +1699,6 @@ export function DashboardPage() {
                         label: `方法 · ${m.key}`,
                         value: m.count,
                         color: '#4a7bd0',
-                      })),
-                      ...data.dataSources.byAuthType.map((a) => ({
-                        key: 'auth-' + a.key,
-                        label: `鉴权 · ${a.key}`,
-                        value: a.count,
-                        color: '#9b6fd6',
                       })),
                     ]}
                   />
@@ -1336,13 +1804,6 @@ export function DashboardPage() {
                   )}
                 </div>
               </div>
-            </section>
-          ) : null}
-
-          {/* 6. 会话交互、素材导入、小织反馈与生态社区 */}
-          {show('interactions') ? (
-            <section className="dash-section" aria-label="会话、反馈与生态社区">
-              <SectionTitle title="对话交互、用户反馈与生态社区" sub="统计创造页多轮会话转化、工作台精细修改行为、附件与导入分布、小织问题上报内容、SkillHub 与灵感社区热度。" />
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
@@ -1370,7 +1831,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   <div className="dash-mini-stats compact-2">
-                    <div><span>用户指令 / AI 回复</span><b>{fmtNum(data.interactions.workbench.userMessages)} / {fmtNum(data.interactions.workbench.assistantMessages)}</b></div>
+                    <div><span>用户 / AI 消息</span><b>{fmtNum(data.interactions.workbench.userMessages)} / {fmtNum(data.interactions.workbench.assistantMessages)}</b></div>
                     <div><span>系统提示消息</span><b>{fmtNum(data.interactions.workbench.systemMessages)}</b></div>
                     <div><span>定点元素修改</span><b>{fmtNum(data.interactions.workbench.elementContextMessages)}</b></div>
                     <div><span>挂载技能 / 附件</span><b>{fmtNum(data.interactions.workbench.skillAttachedMessages)} / {fmtNum(data.interactions.workbench.assetAttachedMessages)}</b></div>
@@ -1471,7 +1932,7 @@ export function DashboardPage() {
                     <div>
                       <h3>灵感社区贡献与热门作品</h3>
                       <p>
-                        我的发布 {fmtNum(data.ecosystem.myCommunity.publishedWorks)} · 全社区 {fmtNum(data.ecosystem.platformCommunity.totalWorks)} 个作品（浏览 {fmtNum(data.ecosystem.platformCommunity.totalViews)} · 复刻 {fmtNum(data.ecosystem.platformCommunity.totalClones)}）
+                        全社区 {fmtNum(data.ecosystem.platformCommunity.totalWorks)} 个作品（浏览 {fmtNum(data.ecosystem.platformCommunity.totalViews)} · 复刻 {fmtNum(data.ecosystem.platformCommunity.totalClones)} · 赞 {fmtNum(data.ecosystem.platformCommunity.totalLikes)}）
                       </p>
                     </div>
                   </header>
@@ -1505,78 +1966,205 @@ export function DashboardPage() {
                   )}
                 </div>
               </div>
-            </section>
-          ) : null}
 
-          {/* 7. 系统运行期监控 & 平台脉冲 */}
-          {show('system') ? (
-            <section className="dash-section" aria-label="系统运行期监控与平台脉冲">
-              <SectionTitle title="系统运行期健康度与实例监控" sub="展示当前 API 实例 JVM 运行期延迟指标、跨实例限流滑窗与任务信号，以及全平台总规模脉冲。" />
-              <div className="dash-grid-2">
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>全平台聚合脉冲（全库总计）</h3>
-                      <p>整个织页服务实例库内的总体规模概览</p>
-                    </div>
-                  </header>
-                  <div className="dash-mini-stats compact-4">
-                    <div><span>工作空间总数</span><b>{fmtNum(data.system.platformPulse.workspaces)}</b></div>
-                    <div><span>SSO 登录用户</span><b>{fmtNum(data.system.platformPulse.ssoUsers)}</b></div>
-                    <div><span>全平台应用</span><b>{fmtNum(data.system.platformPulse.totalApps)}</b></div>
-                    <div><span>已上线应用</span><b>{fmtNum(data.system.platformPulse.publishedApps)}</b></div>
-                    <div><span>全平台任务</span><b>{fmtNum(data.system.platformPulse.totalTasks)}</b></div>
-                    <div><span>当前活跃任务</span><b>{fmtNum(data.system.platformPulse.activeTasks)}</b></div>
-                    <div><span>累计版本数</span><b>{fmtNum(data.system.platformPulse.totalVersions)}</b></div>
-                    <div><span>全站总 PV</span><b>{fmtCompact(data.system.platformPulse.totalPv)}</b></div>
+              <div className="dash-panel">
+                <header className="dash-panel-head compact">
+                  <div>
+                    <h3>API 实例 JVM 运行期监控与跨实例控制</h3>
+                    <p>来自 RuntimeMetricsService（本次进程启动以来）、PostgreSQL 原子滑窗限流及跨实例任务信号</p>
                   </div>
-                </div>
-
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>实例运行期延迟与限流控制</h3>
-                      <p>来自 RuntimeMetricsService（本次进程启动以来）、限流滑窗与跨实例任务信号</p>
-                    </div>
-                  </header>
-                  <div className="dash-mini-stats compact-3">
-                    <div>
-                      <span>沙箱冷启动</span>
-                      <b>{fmtNum(data.system.runtime.sandbox?.count ?? 0)} 次</b>
-                      <small>均 {data.system.runtime.sandbox?.avgMs ?? 0}ms / 峰值 {data.system.runtime.sandbox?.maxMs ?? 0}ms</small>
-                    </div>
-                    <div>
-                      <span>上游 LLM 调用</span>
-                      <b>{fmtNum(data.system.runtime.llm?.count ?? 0)} 次</b>
-                      <small>均 {data.system.runtime.llm?.avgMs ?? 0}ms / 重试 {data.system.runtime.llm?.retries ?? 0}</small>
-                    </div>
-                    <div>
-                      <span>额度错误率</span>
-                      <b>{((data.system.runtime.llm?.quotaErrorRate ?? 0) * 100).toFixed(2)}%</b>
-                      <small>额度错 {data.system.runtime.llm?.quotaErrors ?? 0} 次</small>
-                    </div>
-                    <div>
-                      <span>近 10 分钟限流</span>
-                      <b>{fmtNum(data.system.rateLimits.hitsLast10Min)}</b>
-                      <small>{data.system.rateLimits.byBucket.map((b) => `${b.bucket}:${b.count}`).join(' · ') || '无触发'}</small>
-                    </div>
-                    <div>
-                      <span>跨实例任务信号</span>
-                      <b>{fmtNum(data.system.taskSignals.consumed)} 已消费</b>
-                      <small>待消费 {fmtNum(data.system.taskSignals.pending)}</small>
-                    </div>
-                    <div>
-                      <span>本实例启动后任务</span>
-                      <b>{fmtNum(data.system.runtime.tasks?.total ?? 0)}</b>
-                      <small>成 {data.system.runtime.tasks?.succeeded ?? 0} / 败 {data.system.runtime.tasks?.failed ?? 0}</small>
-                    </div>
+                </header>
+                <div className="dash-mini-stats">
+                  <div>
+                    <span>沙箱冷启动</span>
+                    <b>{fmtNum(data.system.runtime.sandbox?.count ?? 0)} 次</b>
+                    <small>均 {data.system.runtime.sandbox?.avgMs ?? 0}ms / 峰值 {data.system.runtime.sandbox?.maxMs ?? 0}ms</small>
+                  </div>
+                  <div>
+                    <span>上游 LLM 调用</span>
+                    <b>{fmtNum(data.system.runtime.llm?.count ?? 0)} 次</b>
+                    <small>均 {data.system.runtime.llm?.avgMs ?? 0}ms / 重试 {data.system.runtime.llm?.retries ?? 0}</small>
+                  </div>
+                  <div>
+                    <span>额度错误率</span>
+                    <b>{((data.system.runtime.llm?.quotaErrorRate ?? 0) * 100).toFixed(2)}%</b>
+                    <small>额度错 {data.system.runtime.llm?.quotaErrors ?? 0} 次</small>
+                  </div>
+                  <div>
+                    <span>近 10 分钟限流</span>
+                    <b>{fmtNum(data.system.rateLimits.hitsLast10Min)}</b>
+                    <small>{data.system.rateLimits.byBucket.map((b) => `${b.bucket}:${b.count}`).join(' · ') || '无触发'}</small>
+                  </div>
+                  <div>
+                    <span>跨实例任务信号</span>
+                    <b>{fmtNum(data.system.taskSignals.consumed)} 已消费</b>
+                    <small>待消费 {fmtNum(data.system.taskSignals.pending)}</small>
+                  </div>
+                  <div>
+                    <span>本实例启动后任务</span>
+                    <b>{fmtNum(data.system.runtime.tasks?.total ?? 0)}</b>
+                    <small>成 {data.system.runtime.tasks?.succeeded ?? 0} / 败 {data.system.runtime.tasks?.failed ?? 0}</small>
                   </div>
                 </div>
               </div>
             </section>
           ) : null}
+
+          {isAdmin && show('admin') ? (
+            <AdminGovernancePanel
+              overview={adminQ.data}
+              loading={adminQ.isLoading}
+              error={adminQ.error}
+              onRetry={() => void adminQ.refetch()}
+              dashboard={data}
+              onOpenQuotaModal={(target) => setQuotaTarget(target)}
+            />
+          ) : null}
+
+          {quotaTarget && adminQ.data ? (
+            <AdminQuotaModal
+              target={quotaTarget}
+              defaultQuota={adminQ.data.defaultQuota}
+              onClose={() => setQuotaTarget(null)}
+              onSaved={invalidateAdminAndDash}
+            />
+          ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+function ActorPicker({
+  actors,
+  filterWorkspaceId,
+  filterUserId,
+  activeLabel,
+  onSelect,
+}: {
+  actors: DashboardActor[];
+  filterWorkspaceId: string;
+  filterUserId: string;
+  activeLabel: string;
+  onSelect: (actor: { userId?: string | null; workspaceId?: string | null } | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return actors;
+    return actors.filter(
+      (a) =>
+        a.label.toLowerCase().includes(t) ||
+        (a.workspaceId ?? '').toLowerCase().includes(t) ||
+        a.loginName.toLowerCase().includes(t) ||
+        a.realName.toLowerCase().includes(t),
+    );
+  }, [actors, q]);
+
+  const users = filtered.filter((a) => a.kind === 'user');
+  const spaces = filtered.filter((a) => a.kind === 'workspace');
+  const isFiltered = Boolean(filterWorkspaceId || filterUserId);
+
+  return (
+    <div className="dash-actor-wrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={`dash-actor-btn ${isFiltered ? 'filtered' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name="agent" />
+        <span className="dash-actor-text">{isFiltered ? activeLabel : '全部人员 / 工作空间'}</span>
+        <Icon name="down" />
+      </button>
+      {open ? (
+        <div className="dash-actor-pop" role="dialog" aria-label="按人员或工作空间筛选">
+          <label className="dash-actor-search">
+            <Icon name="search" />
+            <input
+              autoFocus
+              placeholder="搜索姓名、工号或 ws_xxx"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
+          <div className="dash-actor-list" role="listbox">
+            <button
+              type="button"
+              role="option"
+              aria-selected={!isFiltered}
+              className={!isFiltered ? 'active' : ''}
+              onClick={() => {
+                onSelect(null);
+                setOpen(false);
+              }}
+            >
+              <span>全部人员与工作空间（全平台汇总）</span>
+            </button>
+            {users.length > 0 ? <div className="dash-actor-group">实名员工（SSO）</div> : null}
+            {users.map((a) => {
+              const sel = filterUserId === a.userId && !filterWorkspaceId;
+              return (
+                <button
+                  key={a.value}
+                  type="button"
+                  role="option"
+                  aria-selected={sel}
+                  className={sel ? 'active' : ''}
+                  onClick={() => {
+                    onSelect({ userId: a.userId, workspaceId: null });
+                    setOpen(false);
+                  }}
+                >
+                  <span>{a.realName} ({a.loginName})</span>
+                  <small>{a.apps}应用 · {a.tasks}任务</small>
+                </button>
+              );
+            })}
+            {spaces.length > 0 ? <div className="dash-actor-group">活跃工作空间</div> : null}
+            {spaces.map((a) => {
+              const sel = filterWorkspaceId === a.workspaceId;
+              return (
+                <button
+                  key={a.value}
+                  type="button"
+                  role="option"
+                  aria-selected={sel}
+                  className={sel ? 'active' : ''}
+                  onClick={() => {
+                    onSelect({ workspaceId: a.workspaceId });
+                    setOpen(false);
+                  }}
+                >
+                  <span>{a.realName ? `${a.realName} · ${a.workspaceId}` : a.workspaceId}</span>
+                  <small>{a.apps}应用 · {a.tasks}任务</small>
+                </button>
+              );
+            })}
+            {filtered.length === 0 ? <p className="dash-actor-empty">未匹配到人员或空间</p> : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

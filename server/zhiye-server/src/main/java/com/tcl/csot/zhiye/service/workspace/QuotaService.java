@@ -32,10 +32,39 @@ public class QuotaService {
         try { return body.get(); } finally { lock.unlock(); }
     }
 
+    public record Limits(int maxApps, int dailyTaskLimit, int maxConcurrentTasks, boolean custom, String note) {}
+
+    /** 查询指定工作空间生效的配额上限（优先读取 workspace_quota 覆盖值，缺省字段回落系统默认配额） */
+    public Limits effectiveLimits(String ws) {
+        int defApps = props.workspace().maxApps();
+        int defDaily = props.workspace().dailyTaskLimit();
+        int defConcurrent = props.workspace().maxConcurrentTasks();
+        return jdbc.sql("""
+                select max_apps, daily_task_limit, max_concurrent_tasks, note
+                from workspace_quota where workspace_id = ?
+                """)
+                .param(ws)
+                .query((rs, i) -> {
+                    Integer ma = rs.getObject("max_apps", Integer.class);
+                    Integer dt = rs.getObject("daily_task_limit", Integer.class);
+                    Integer mc = rs.getObject("max_concurrent_tasks", Integer.class);
+                    String note = rs.getString("note");
+                    boolean custom = ma != null || dt != null || mc != null;
+                    return new Limits(
+                            ma != null ? ma : defApps,
+                            dt != null ? dt : defDaily,
+                            mc != null ? mc : defConcurrent,
+                            custom,
+                            note);
+                })
+                .optional()
+                .orElse(new Limits(defApps, defDaily, defConcurrent, false, null));
+    }
+
     /** 创建或导入应用前检查数量上限。导入中（尚未显示）的应用也计入，失败或取消的导入会被删除、不计入。 */
     public void checkCanCreateApp(String ws) {
         long n = jdbc.sql("select count(*) from app where workspace_id = ? and deleted_at is null").param(ws).query(Long.class).single();
-        int max = props.workspace().maxApps();
+        int max = effectiveLimits(ws).maxApps();
         if (n >= max)
             throw new ApiException(HttpStatus.CONFLICT, "APP_LIMIT", "每人最多 " + max + " 个应用（已删除的不算），请先删除不用的应用再创建");
     }
@@ -43,13 +72,14 @@ public class QuotaService {
     /** 当前在用的应用数与上限 */
     public long[] appUsage(String ws) {
         long n = jdbc.sql("select count(*) from app where workspace_id = ? and deleted_at is null").param(ws).query(Long.class).single();
-        return new long[]{n, props.workspace().maxApps()};
+        return new long[]{n, effectiveLimits(ws).maxApps()};
     }
 
     public void checkCanStart(String ws, boolean writeTask) {
-        if (tasks.countCreatedToday(ws) >= props.workspace().dailyTaskLimit())
+        Limits limits = effectiveLimits(ws);
+        if (tasks.countCreatedToday(ws) >= limits.dailyTaskLimit())
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "RATE_LIMITED", "今天的任务次数已用完，请明天再试");
-        int max = props.workspace().maxConcurrentTasks();
+        int max = limits.maxConcurrentTasks();
         if (tasks.countActiveAll(ws) >= max)
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "TASK_LIMIT",
                     "每人同时只能运行 " + max + " 个任务，请等当前任务完成或停止后再试");

@@ -36,9 +36,12 @@ class DashboardTest extends IntegrationTest {
         assertThat(emptyWs.path("overview").path("appsTotal").asLong()).isZero();
         assertThat(emptyWs.path("overview").path("appsLimit").asLong()).isGreaterThan(0);
 
-        // 非法参数返回 400
-        assertThat(c.get("/api/dashboard?range=bad").status()).isEqualTo(400);
+        // 非法参数返回 400（普通用户 scope=workspace 与管理员 scope=platform 均校参数）
+        assertThat(c.get("/api/dashboard?range=bad&scope=workspace").status()).isEqualTo(400);
         assertThat(c.get("/api/dashboard?scope=bad").status()).isEqualTo(400);
+        assertThat(c.get("/api/dashboard?startDate=2026-11-10&endDate=2026-11-01&scope=workspace").status()).isEqualTo(400);
+        assertThat(c.get("/api/dashboard?startDate=bad-date&scope=workspace").status()).isEqualTo(400);
+        assertThat(c.asAdmin().get("/api/dashboard?range=bad").status()).isEqualTo(400);
 
         // 创建应用、生成、发布、记录 PV、创建会话与数据源
         JsonNode app = c.createApp("看板测试应用");
@@ -89,15 +92,41 @@ class DashboardTest extends IntegrationTest {
         assertThat(all.path("overview").path("pvTotal").asLong()).isEqualTo(8);
         assertThat(all.path("trends").path("daily").size()).isGreaterThanOrEqualTo(5);
 
-        // 另一工作空间：workspace 视角严格隔离，platform 默认视角可看到全系统聚合数据
+        // 另一普通工作空间（无管理员权限）：
+        // 1) scope=workspace 严格隔离自身数据，不泄漏全局 actors 与 platformPulse；
+        // 2) scope=platform、跨空间 workspaceId、他人 userId 与跨空间运维日志一律返回 403；
+        // 3) 具备管理员身份（X-Zhiye-Admin-Token）时允许看全平台与跨空间下钻。
+        String wsId = fullWsId(c);
         Client other = client();
+        String otherWsId = fullWsId(other);
+
+        assertThat(other.ok(other.get("/api/meta")).at("/auth/admin").asBoolean()).isFalse();
         JsonNode otherWs = other.ok(other.get("/api/dashboard?range=today&scope=workspace"));
         assertThat(otherWs.path("trends").path("daily").size()).isEqualTo(1);
         assertThat(otherWs.path("overview").path("appsTotal").asLong()).isZero();
         assertThat(otherWs.path("overview").path("tokensTotal").asLong()).isZero();
         assertThat(otherWs.path("apps").path("topApps").size()).isZero();
+        assertThat(otherWs.path("actors").size()).isZero();
+        assertThat(otherWs.path("system").path("platformPulse").path("totalApps").asLong()).isZero();
 
-        JsonNode platform = other.ok(other.get("/api/dashboard?range=30d"));
+        // 传入本人自己的 workspaceId + scope=workspace 允许访问
+        assertThat(other.get("/api/dashboard?range=today&scope=workspace&workspaceId=" + otherWsId).status()).isEqualTo(200);
+
+        // 普通用户越权访问全平台/他人空间/他人人员/运维日志均返回 403
+        assertThat(other.get("/api/dashboard?range=30d").status()).isEqualTo(403);
+        assertThat(other.get("/api/dashboard?range=30d&scope=platform").status()).isEqualTo(403);
+        assertThat(other.get("/api/dashboard?scope=workspace&workspaceId=" + wsId).status()).isEqualTo(403);
+        assertThat(other.get("/api/dashboard?workspaceId=" + wsId).status()).isEqualTo(403);
+        assertThat(other.get("/api/dashboard?scope=workspace&userId=u_someone").status()).isEqualTo(403);
+        assertThat(other.get("/api/logs/runtime").status()).isEqualTo(403);
+        assertThat(other.get("/api/logs/tasks?workspaceId=" + wsId).status()).isEqualTo(403);
+        assertThat(other.get("/api/logs/tasks/" + taskId).status()).isEqualTo(403);
+        assertThat(other.get("/api/logs/functions?appId=" + appId).status()).isEqualTo(403);
+
+        // 管理员身份放行全平台聚合与跨空间下钻
+        Client admin = other.asAdmin();
+        assertThat(admin.ok(admin.get("/api/meta")).at("/auth/admin").asBoolean()).isTrue();
+        JsonNode platform = admin.ok(admin.get("/api/dashboard?range=30d"));
         assertThat(platform.path("meta").path("scope").asText()).isEqualTo("platform");
         assertThat(platform.path("overview").path("appsTotal").asLong()).isGreaterThanOrEqualTo(1);
         assertThat(platform.path("overview").path("tokensTotal").asLong()).isGreaterThanOrEqualTo(1540);
@@ -107,5 +136,28 @@ class DashboardTest extends IntegrationTest {
         assertThat(platform.path("agentTelemetry").has("eventBreakdown")).isTrue();
         assertThat(platform.path("workspaces").size()).isGreaterThanOrEqualTo(1);
         assertThat(platform.path("tasks").path("recentTasks").toString()).contains(taskId);
+        assertThat(platform.path("actors").size()).isGreaterThanOrEqualTo(1);
+
+        // 管理员自定义起止日期 + 按工作空间 ID 下钻筛选
+        String todayStr = LocalDate.now(PageViewRecorder.ZONE).toString();
+        String yesterdayStr = LocalDate.now(PageViewRecorder.ZONE).minusDays(1).toString();
+        JsonNode customWs = admin.ok(admin.get("/api/dashboard?startDate=" + yesterdayStr + "&endDate=" + todayStr + "&workspaceId=" + wsId));
+        assertThat(customWs.path("meta").path("range").asText()).isEqualTo("custom");
+        assertThat(customWs.path("meta").path("filterWorkspaceId").asText()).isEqualTo(wsId);
+        assertThat(customWs.path("trends").path("daily").size()).isEqualTo(2);
+        assertThat(customWs.path("overview").path("appsTotal").asLong()).isEqualTo(1);
+        assertThat(customWs.path("overview").path("tokensInput").asLong()).isGreaterThanOrEqualTo(1200);
+        assertThat(admin.get("/api/logs/tasks/" + taskId).status()).isEqualTo(200);
+        assertThat(admin.get("/api/logs/runtime").status()).isEqualTo(200);
+
+        // 未来空时间段返回 0
+        String future = LocalDate.now(PageViewRecorder.ZONE).plusDays(5).toString();
+        JsonNode futureDash = admin.ok(admin.get("/api/dashboard?startDate=" + future + "&endDate=" + future + "&workspaceId=" + wsId));
+        assertThat(futureDash.path("overview").path("appsTotal").asLong()).isZero();
+        assertThat(futureDash.path("overview").path("tasksTotal").asLong()).isZero();
+    }
+
+    private String fullWsId(Client c) {
+        return c.ok(c.get("/api/workspace")).path("id").asText();
     }
 }

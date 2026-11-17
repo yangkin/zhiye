@@ -40,9 +40,9 @@ import java.util.Set;
 public class TemplateService {
     private static final Set<String> TABS = Set.of("all", "liked", "mine");
     private static final Map<String, String> SORTS = Map.of(
-            "new", "t.created_at desc",
-            "likes", "t.like_count desc, t.created_at desc",
-            "uses", "t.clone_count desc, t.created_at desc");
+            "new", "t.featured desc, t.pinned_order desc, t.created_at desc",
+            "likes", "t.featured desc, t.pinned_order desc, t.like_count desc, t.created_at desc",
+            "uses", "t.featured desc, t.pinned_order desc, t.clone_count desc, t.created_at desc");
 
     private final JdbcClient jdbc;
     private final AppRepository apps;
@@ -69,14 +69,16 @@ public class TemplateService {
 
     private record Tpl(String id, String ws, String name, String description, String type, String kind, String framework,
                        Integer sourceVersion, String objectKey, int fileCount, Instant createdAt, String previewPrefix,
-                       String author, String sourceAppId, int cloneCount, int viewCount, int likeCount, boolean liked) {}
+                       String author, String sourceAppId, int cloneCount, int viewCount, int likeCount, boolean liked,
+                       boolean featured, int pinnedOrder) {}
 
     private static Tpl map(ResultSet rs, int i) throws SQLException {
         return new Tpl(rs.getString("id"), rs.getString("workspace_id"), rs.getString("name"), rs.getString("description"),
                 rs.getString("app_type"), rs.getString("project_kind"), rs.getString("framework"),
                 rs.getObject("source_version", Integer.class), rs.getString("object_key"), rs.getInt("file_count"),
                 Db.ts(rs, "created_at"), rs.getString("preview_prefix"), rs.getString("author"), rs.getString("source_app_id"),
-                rs.getInt("clone_count"), rs.getInt("view_count"), rs.getInt("like_count"), rs.getBoolean("liked"));
+                rs.getInt("clone_count"), rs.getInt("view_count"), rs.getInt("like_count"), rs.getBoolean("liked"),
+                rs.getBoolean("featured"), rs.getInt("pinned_order"));
     }
 
     private static final String SELECT = "select t.*, exists(select 1 from template_like l where l.template_id = t.id and l.workspace_id = :ws) as liked from template t";
@@ -252,6 +254,8 @@ public class TemplateService {
         m.put("viewCount", t.viewCount());
         m.put("likeCount", t.likeCount());
         m.put("liked", t.liked());
+        m.put("featured", t.featured());
+        m.put("pinnedOrder", t.pinnedOrder());
         m.put("createdAt", Db.iso(t.createdAt()));
         return m;
     }

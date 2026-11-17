@@ -39,6 +39,8 @@ public class CloudService {
     private final GitService git;
     /** 令牌签名密钥，启动时确定；生产环境不允许回落到开发密钥 */
     private final String secretKey;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
 
     public CloudService(JdbcClient jdbc, ObjectStore store, AppRepository apps, VersionRepository versions, GitService git) {
         this.jdbc = jdbc;
@@ -99,11 +101,16 @@ public class CloudService {
         String prefix = "cloud/" + appId + "/";
         String token = mint(appId, 24 * 3600);
 
-        jdbc.sql("create schema if not exists \"" + schema + "\"").update();
-        Schema sc = readSchema(appId);
-        for (TableDef t : sc.tables()) createTable(appId, schema, t, sc.policies().get(t.name()));
-        dropPlaceholder(appId, schema, sc);
-        List<TableDef> defs = sc.tables();
+        long t0 = System.currentTimeMillis();
+        List<String> ddlLog = new ArrayList<>();
+        try {
+            String createSchemaSql = "create schema if not exists \"" + schema + "\"";
+            jdbc.sql(createSchemaSql).update();
+            ddlLog.add(createSchemaSql + ";");
+            Schema sc = readSchema(appId);
+            for (TableDef t : sc.tables()) createTable(appId, schema, t, sc.policies().get(t.name()), ddlLog);
+            dropPlaceholder(appId, schema, sc, ddlLog);
+            List<TableDef> defs = sc.tables();
 
         jdbc.sql("""
                 insert into app_cloud (app_id, status, schema_name, storage_prefix, token_hash, enabled_at)
@@ -131,7 +138,7 @@ public class CloudService {
      * 先启用、后有 schema.sql 时，启用那会儿建的默认 notes 表会留在控制台里和真正的表并列。
      * 有了正式的表结构、里面没声明 notes、notes 还是默认的两列且没有数据，就把它去掉；有数据一律保留。
      */
-    private void dropPlaceholder(String appId, String schema, Schema sc) {
+    private void dropPlaceholder(String appId, String schema, Schema sc, List<String> ddlLog) {
         if (sc.placeholder() || sc.tables().stream().anyMatch(t -> t.name().equals("notes"))) return;
         String cols = jdbc.sql("select columns from app_cloud_table where app_id = ? and name = 'notes'").param(appId)
                 .query(String.class).optional().orElse(null);
@@ -143,7 +150,9 @@ public class CloudService {
         String q = "\"" + schema + "\".\"notes\"";
         Long rows = jdbc.sql("select count(*) from " + q).query(Long.class).single();
         if (rows > 0) return;
-        jdbc.sql("drop table " + q).update();
+        String dropSql = "drop table " + q;
+        jdbc.sql(dropSql).update();
+        ddlLog.add(dropSql + ";");
         jdbc.sql("delete from app_cloud_table where app_id = ? and name = 'notes'").param(appId).update();
         log.info("去掉默认的空 notes 表：app={}", appId);
     }
@@ -218,6 +227,10 @@ public class CloudService {
     public void disable(String ws, String appId) {
         require(ws, appId);
         jdbc.sql("update app_cloud set status = 'off', updated_at = now() where app_id = ?").params(appId).update();
+        if (platformLogs != null) {
+            platformLogs.info("cloud_schema", "CLOUD_DISABLE", ws, null, appId, null,
+                    "关闭应用云服务（保留既有 Schema 与表数据）", null, Map.of());
+        }
     }
 
     /** 工作空间内的令牌：预览页注入用 */
@@ -414,16 +427,24 @@ public class CloudService {
         return TYPE_ALIASES.get(first);
     }
 
-    private void createTable(String appId, String schema, TableDef t, com.fasterxml.jackson.databind.node.ObjectNode filePolicy) {
+    private void createTable(String appId, String schema, TableDef t, com.fasterxml.jackson.databind.node.ObjectNode filePolicy, List<String> ddlLog) {
         StringBuilder cols = new StringBuilder("id bigserial primary key, created_at timestamptz not null default now(), updated_at timestamptz not null default now()");
         for (var e : t.columns().entrySet()) cols.append(", \"").append(e.getKey()).append("\" ").append(e.getValue());
         String q = "\"" + schema + "\".\"" + t.name() + "\"";
-        jdbc.sql("create table if not exists " + q + " (" + cols + ")").update();
+        String createSql = "create table if not exists " + q + " (" + cols + ")";
+        jdbc.sql(createSql).update();
+        ddlLog.add(createSql + ";");
         // 已有的表：schema.sql 里新增的列也要真正加上（create table if not exists 不会补列）；系统字段老表也补上
-        for (var e : t.columns().entrySet())
-            jdbc.sql("alter table " + q + " add column if not exists \"" + e.getKey() + "\" " + e.getValue()).update();
-        for (String sys : List.of("created_by", "created_by_name", "updated_by"))
-            jdbc.sql("alter table " + q + " add column if not exists " + sys + " text").update();
+        for (var e : t.columns().entrySet()) {
+            String alterSql = "alter table " + q + " add column if not exists \"" + e.getKey() + "\" " + e.getValue();
+            jdbc.sql(alterSql).update();
+            ddlLog.add(alterSql + ";");
+        }
+        for (String sys : List.of("created_by", "created_by_name", "updated_by")) {
+            String sysSql = "alter table " + q + " add column if not exists " + sys + " text";
+            jdbc.sql(sysSql).update();
+            ddlLog.add(sysSql + ";");
+        }
         // 预设：policies.json 里这张表的预设变了才覆盖（控制台里手动切换的保留）；字段规则和状态流转以文件为准
         JsonNode old = jdbc.sql("select policy from app_cloud_table where app_id = ? and name = ?").params(appId, t.name())
                 .query((rs, i) -> Json.read(rs.getString(1))).optional().orElse(null);
