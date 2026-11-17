@@ -77,11 +77,11 @@ public class AskController {
                     .orElseThrow(() -> ApiException.notFound("应用")).id();
         }
         String content = body.path("content").asText("");
-        // 多轮：创造页会把之前的对话一起带上来，问完还能接着聊
+        // 多轮：保留最新历史由 AskService.normalizeHistory 统一去重、折叠旧文件块并裁剪最近 12 条
         java.util.List<JsonNode> history = new java.util.ArrayList<>();
         if (body.has("history") && body.get("history").isArray()) {
             for (JsonNode h : body.get("history")) {
-                if (history.size() >= 12) break;
+                if (history.size() >= 100) break;
                 if (h.hasNonNull("role") && h.hasNonNull("content")) history.add(h);
             }
         }

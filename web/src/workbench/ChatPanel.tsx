@@ -304,13 +304,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       setError('');
       setDraft('');
       setAsking({ q: content, a: '' });
-      // 带上本应用已有的对话，追问才有上下文：只留 user/assistant、非空、非失败，最近 12 条，每条截断 2000 字
+      // 带上本应用已有的对话，追问才有上下文：只留 user/assistant、非空、非失败，最近 24 条交服务端合并归一化为 12 轮
       // 首条用户消息是应用最初需求（界面上已单独展示），不再重复喂给模型
       const history = (messages ?? [])
         .filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim()))
         .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed')
-        .slice(-12)
-        .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }));
+        .slice(-24)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, m.content.includes('[[file:') ? 40000 : 2000) }));
       try {
         await api.ask(
           {

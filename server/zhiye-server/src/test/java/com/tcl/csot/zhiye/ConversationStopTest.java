@@ -12,6 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** 会话里「停止回答」：服务端真的停下，只保存用户已经看到的部分，且不留 [[build]] 标记（停了不能再被当成「开始做」）。 */
 class ConversationStopTest extends IntegrationTest {
+    static { System.setProperty("KIMI_API_KEY", System.getenv().getOrDefault("KIMI_API_KEY", "test-key")); }
 
     private static Client.Res ask(Client c, String cid, String content) {
         return c.send("POST", "/api/conversations/" + cid + "/ask", Map.of("content", content), Map.of("Accept", "text/event-stream"));

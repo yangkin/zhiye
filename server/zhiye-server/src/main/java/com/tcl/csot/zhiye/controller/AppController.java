@@ -136,4 +136,19 @@ public class AppController {
 
     @GetMapping("/{id}/deployments")
     public List<Map<String, Object>> deployments(@PathVariable String id) { return apps.deployments(ws(), id); }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private SkillHubController skillHub;
+
+    /** 兼容前端 SkillhubModal 与既有接口约定：/api/apps/{id}/skillhub/* 委托给 SkillHubController */
+    @PostMapping("/{id}/skillhub/publish")
+    public Map<String, Object> skillhubPublish(jakarta.servlet.http.HttpServletRequest req, @PathVariable String id,
+                                               @RequestBody(required = false) JsonNode body) {
+        return skillHub.publish(req, id, body);
+    }
+
+    @GetMapping("/{id}/skillhub/publications")
+    public List<Map<String, Object>> skillhubPublications(@PathVariable String id) {
+        return skillHub.publicationsLegacy(id);
+    }
 }

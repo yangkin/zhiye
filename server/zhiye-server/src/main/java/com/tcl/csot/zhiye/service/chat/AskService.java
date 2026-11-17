@@ -41,6 +41,12 @@ public class AskService {
     public static final String FILE_OPEN = "[[file:", FILE_CLOSE = "[[/file]]";
     /** 带文件的历史消息保留的长度（后续修改要看到整份文档） */
     public static final int MAX_FILE_CHARS = 40000;
+    public static final int MAX_HISTORY = 12;
+    public static final int MAX_HISTORY_CHARS = 2000;
+    /** 多轮历史总字符预算，避免多个带文件的大回复撑爆模型上下文 */
+    public static final int MAX_HISTORY_TOTAL_CHARS = 48000;
+    private static final java.util.regex.Pattern FILE_BLOCK = java.util.regex.Pattern.compile(
+            "\\[\\[file:([^\\]\\r\\n]+)\\]\\][\\s\\S]*?\\[\\[/file\\]\\]");
 
     /** 一次回答：正文 + 模型的思考过程（可能为空） */
     public record Reply(String content, String thinking) {}
@@ -240,7 +246,14 @@ public class AskService {
         return out.contains("ask") && !out.contains("modify") ? "ask" : "modify";
     }
 
-    private static String cap(String s, int n) { return s.length() > n ? s.substring(0, n) : s; }
+    /** 按 UTF-16 长度截断并避免切断代理对。 */
+    public static String cap(String s, int n) {
+        if (s == null || n <= 0) return "";
+        if (s.length() <= n) return s;
+        int end = n;
+        if (end > 0 && Character.isHighSurrogate(s.charAt(end - 1))) end--;
+        return s.substring(0, end);
+    }
 
     private String complete(String ws, String system, String user, int maxTokens, String what) throws com.tcl.csot.zhiye.exception.LlmException {
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
@@ -289,7 +302,7 @@ public class AskService {
         return c;
     }
 
-    /** system（产品知识 + 技能/应用上下文）+ 多轮历史 + 本轮问题 */
+    /** system（产品知识 + 技能/应用上下文）+ 归一化多轮历史 + 本轮问题 */
     private ArrayNode baseMessages(String ws, String content, List<String> skillAppIds, String appId,
                                    java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets) {
         boolean conversation = appId == null || appId.isBlank();
@@ -298,18 +311,79 @@ public class AskService {
             context += "\n\n用户在创造页选的类型：" + type + "（只是参考，成品形态仍按「先判断要交付什么」自己判断）";
         ArrayNode msgs = Json.M.createArrayNode();
         msgs.addObject().put("role", "system").put("content", SYSTEM + (conversation ? CONVERSATION_RULES + com.tcl.csot.zhiye.constants.Capabilities.CHAT : "") + (context.isEmpty() ? "" : "\n\n" + context));
-        // 多轮对话：只带最近几条，避免把上下文撑爆
-        int start = Math.max(0, history.size() - 12);
-        for (int i = start; i < history.size(); i++) {
-            JsonNode h = history.get(i);
-            String role = h.path("role").asText("user");
+        List<JsonNode> norm = normalizeHistory(history);
+        String mergedUser = content;
+        // 若上一条是未得到回答的 user（如之前中断/停止），与本轮 user 合并，严格保持 user/assistant 交替
+        if (!norm.isEmpty() && "user".equals(norm.get(norm.size() - 1).path("role").asText())) {
+            String prev = norm.get(norm.size() - 1).path("content").asText("").trim();
+            if (!prev.isEmpty()) mergedUser = prev + "\n\n" + content;
+            norm = norm.subList(0, norm.size() - 1);
+        }
+        for (JsonNode h : norm) msgs.add(h);
+        msgs.add(userMessage(mergedUser, assets));
+        return msgs;
+    }
+
+    /**
+     * 归一化多轮历史：合并连续同角色、保留最近 12 条、确保首条为 user；
+     * 仅最新一份含 [[file:…]] 的助手文档保留全文，更早的文件块折叠为占位，并受总字符预算限制。
+     */
+    public static List<JsonNode> normalizeHistory(List<JsonNode> raw) {
+        if (raw == null || raw.isEmpty()) return List.of();
+        List<String> roles = new ArrayList<>();
+        List<String> texts = new ArrayList<>();
+        for (JsonNode h : raw) {
+            if (h == null || !h.isObject()) continue;
+            String role = h.path("role").asText("");
+            if (!"user".equals(role) && !"assistant".equals(role)) continue;
             String text = h.path("content").asText("").trim();
             if (text.isEmpty()) continue;
-            msgs.addObject().put("role", "assistant".equals(role) ? "assistant" : "user")
-                    .put("content", text.length() > historyCap(text) ? text.substring(0, historyCap(text)) : text);
+            if (!roles.isEmpty() && roles.get(roles.size() - 1).equals(role)) {
+                int last = texts.size() - 1;
+                texts.set(last, texts.get(last) + "\n\n" + text);
+            } else {
+                roles.add(role);
+                texts.add(text);
+            }
         }
-        msgs.add(userMessage(content, assets));
-        return msgs;
+        if (roles.isEmpty()) return List.of();
+
+        int start = Math.max(0, roles.size() - MAX_HISTORY);
+        while (start < roles.size() && !"user".equals(roles.get(start))) start++;
+        if (start >= roles.size()) return List.of();
+
+        int latestFile = -1;
+        for (int i = roles.size() - 1; i >= start; i--) {
+            if ("assistant".equals(roles.get(i)) && texts.get(i).contains(FILE_OPEN)) {
+                latestFile = i;
+                break;
+            }
+        }
+
+        List<JsonNode> bounded = new ArrayList<>();
+        for (int i = start; i < roles.size(); i++) {
+            String t = texts.get(i);
+            if ("assistant".equals(roles.get(i)) && t.contains(FILE_OPEN) && i != latestFile) {
+                t = FILE_BLOCK.matcher(t).replaceAll("[[file:$1]]（旧版本文件内容已省略，以最新一版为准）[[/file]]");
+                t = cap(t, MAX_HISTORY_CHARS);
+            } else {
+                t = cap(t, historyCap(t));
+            }
+            bounded.add(Json.obj().put("role", roles.get(i)).put("content", t));
+        }
+
+        // 从最新往前按总字符预算保留，避免历史文件块叠加撑爆上下文
+        int total = 0;
+        int keepFrom = bounded.size();
+        for (int i = bounded.size() - 1; i >= 0; i--) {
+            int len = bounded.get(i).path("content").asText().length();
+            if (keepFrom < bounded.size() && total + len > MAX_HISTORY_TOTAL_CHARS) break;
+            total += len;
+            keepFrom = i;
+        }
+        while (keepFrom < bounded.size() && !"user".equals(bounded.get(keepFrom).path("role").asText())) keepFrom++;
+        if (keepFrom >= bounded.size()) return List.of();
+        return List.copyOf(bounded.subList(keepFrom, bounded.size()));
     }
 
     /** 本轮用户消息：文字内容 + 附件里提取的文档片段；有图片时用多模态 content 数组（每个附件先出名字再给内容） */

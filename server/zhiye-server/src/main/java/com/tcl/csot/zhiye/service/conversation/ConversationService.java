@@ -237,35 +237,22 @@ public class ConversationService {
         List<JsonNode> out = new ArrayList<>();
         for (JsonNode h : body.get("history")) {
             if (!h.isObject()) continue;
-            String role = h.path("role").asText("");
-            if (!"user".equals(role) && !"assistant".equals(role)) continue;
-            String text = h.path("content").asText("").trim();
-            if (text.isEmpty()) continue;
-            out.add(Json.obj().put("role", role).put("content", cap(text, historyCap(text))));
+            out.add(h);
         }
-        return normalizeHistory(out);
+        return AskService.normalizeHistory(out);
     }
 
     private List<JsonNode> storedHistory(String id) {
         List<JsonNode> out = new ArrayList<>();
-        for (ConversationRepository.MessageRow msg : repo.recent(id, MAX_HISTORY)) {
-            out.add(Json.obj().put("role", msg.role()).put("content", cap(msg.content().trim(), historyCap(msg.content()))));
+        for (ConversationRepository.MessageRow msg : repo.recent(id, MAX_HISTORY * 2)) {
+            out.add(Json.obj().put("role", msg.role()).put("content", msg.content()));
         }
-        return normalizeHistory(out);
+        return AskService.normalizeHistory(out);
     }
 
     /** 带文件（[[file:…]]）的回答保留全文：用户接着说「第 3 节再展开」时模型要看到整份文档 */
     static int historyCap(String text) {
         return text != null && text.contains(AskService.FILE_OPEN) ? AskService.MAX_FILE_CHARS : MAX_HISTORY_CHARS;
-    }
-
-    /** 上游要求首个上下文消息是 user；同时只保留最近 12 条。 */
-    private static List<JsonNode> normalizeHistory(List<JsonNode> input) {
-        if (input.isEmpty()) return List.of();
-        int start = Math.max(0, input.size() - MAX_HISTORY);
-        while (start < input.size() && !"user".equals(input.get(start).path("role").asText())) start++;
-        if (start >= input.size()) return List.of();
-        return List.copyOf(input.subList(start, input.size()));
     }
 
     /** 创建应用前整理完整对话，而不是只拼接用户消息。 */
@@ -339,28 +326,64 @@ public class ConversationService {
         return renderBrief(compressed, limit);
     }
 
-    /** limit < 0 表示不压缩；否则对每条正文分配固定预算，保证角色标记和最近确认不会整体丢失。 */
+    /** limit < 0 表示不压缩；否则先剥离控制标记，再用注水法按实际长度分配字符预算，避免短回复浪费配额。 */
     private static String renderBrief(List<ConversationRepository.MessageRow> messages, int limit) {
+        List<String> cleaned = new ArrayList<>(messages.size());
+        for (ConversationRepository.MessageRow msg : messages) cleaned.add(stripControlTags(msg.content()));
         if (limit < 0) {
             StringBuilder out = new StringBuilder(BRIEF_HEADER);
-            for (ConversationRepository.MessageRow msg : messages) appendBlock(out, msg, msg.content().trim());
+            for (int i = 0; i < messages.size(); i++) appendBlock(out, messages.get(i), cleaned.get(i));
             return out.toString();
         }
         String note = "\n\n…（内容较长，已保留首条需求、最近助手结论和最近用户确认，并对选中内容压缩）";
         int fixed = BRIEF_HEADER.length() + note.length();
         for (ConversationRepository.MessageRow msg : messages) fixed += 2 + roleLabel(msg.role()).length() + 2;
         int budget = Math.max(0, limit - fixed);
-        int each = messages.isEmpty() ? 0 : budget / messages.size();
+        int[] caps = allocateBudgets(cleaned, budget);
         StringBuilder out = new StringBuilder(BRIEF_HEADER);
-        for (ConversationRepository.MessageRow msg : messages) appendBlock(out, msg, cap(msg.content().trim(), each));
+        for (int i = 0; i < messages.size(); i++) appendBlock(out, messages.get(i), AskService.cap(cleaned.get(i), caps[i]));
         out.append(note);
-        return cap(out.toString(), limit);
+        return AskService.cap(out.toString(), limit);
+    }
+
+    private static int[] allocateBudgets(List<String> texts, int budget) {
+        int n = texts.size();
+        int[] caps = new int[n];
+        boolean[] done = new boolean[n];
+        int remaining = budget;
+        int left = n;
+        while (left > 0) {
+            int share = remaining / left;
+            boolean changed = false;
+            for (int i = 0; i < n; i++) {
+                if (!done[i] && texts.get(i).length() <= share) {
+                    caps[i] = texts.get(i).length();
+                    remaining -= caps[i];
+                    done[i] = true;
+                    left--;
+                    changed = true;
+                }
+            }
+            if (!changed) {
+                int rem = remaining - share * left;
+                for (int i = n - 1; i >= 0; i--) {
+                    if (!done[i]) {
+                        caps[i] = share + (rem-- > 0 ? 1 : 0);
+                    }
+                }
+                break;
+            }
+        }
+        return caps;
+    }
+
+    private static String stripControlTags(String raw) {
+        if (raw == null) return "";
+        return raw.replaceAll("(?m)^\\s*\\[\\[(?:next|build(?::[^\\]]*)?)\\]\\].*$", "").trim();
     }
 
     private static void appendBlock(StringBuilder out, ConversationRepository.MessageRow msg, String content) {
-        // 界面用的 [[build]] / [[next]] 标记不进需求
-        out.append("\n\n").append(roleLabel(msg.role())).append("：\n")
-                .append(content.replaceAll("(?m)^\\s*\\[\\[(?:next|build(?::[^\\]]*)?)\\]\\].*$", "").trim());
+        out.append("\n\n").append(roleLabel(msg.role())).append("：\n").append(content);
     }
 
     private static String roleLabel(String role) {
@@ -408,13 +431,6 @@ public class ConversationService {
         return false;
     }
 
-    /** 按 UTF-16 长度截断，兼顾 AppService 现有的 String.length 校验，并避免切断代理对。 */
-    private static String cap(String text, int max) {
-        if (text == null) return "";
-        if (max <= 0) return "";
-        if (text.length() <= max) return text;
-        int end = max;
-        if (end > 0 && Character.isHighSurrogate(text.charAt(end - 1))) end--;
-        return text.substring(0, end);
-    }
+    /** 按 UTF-16 长度截断并避免切断代理对（共用 AskService.cap）。 */
+    private static String cap(String text, int max) { return AskService.cap(text, max); }
 }

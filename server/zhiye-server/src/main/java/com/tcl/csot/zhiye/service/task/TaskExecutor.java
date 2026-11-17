@@ -12,6 +12,7 @@ import com.tcl.csot.zhiye.controller.*;
 import com.tcl.csot.zhiye.entity.*;
 import com.tcl.csot.zhiye.repository.*;
 import com.tcl.csot.zhiye.service.app.*;
+import com.tcl.csot.zhiye.util.Db;
 import com.tcl.csot.zhiye.util.Json;
 import com.tcl.csot.zhiye.util.ServerPort;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
@@ -515,6 +516,8 @@ public class TaskExecutor {
         instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.instruction(skills);
         if (!bound.isEmpty()) instruction += dataSources.instruction(app.id());
         if (modify && !app.isSkill()) {
+            String qa = recentWorkbenchQa(app.id(), t);
+            if (!qa.isEmpty()) instruction += qa;
             String fnErrors = functions.recentErrors(app.id());
             if (!fnErrors.isEmpty()) {
                 instruction += fnErrors;
@@ -1130,6 +1133,39 @@ public class TaskExecutor {
                     "summary", "更新云数据库表结构失败：" + e.getMessage(), "state", "end", "ok", false));
         }
         return null;
+    }
+
+    /** 取上一个任务之后、本次修改之前的最近几条工作台问答（task_id 为空），避免「先讨论再按讨论改」断片 */
+    public String recentWorkbenchQa(String appId, TaskRow current) {
+        if (current == null || current.createdAt() == null) return "";
+        Instant after = jdbc.sql(
+                        "select max(created_at) as ts from task where app_id = ? and id <> ? and status in ('SUCCEEDED','FAILED','CANCELLED') and created_at <= ?")
+                .params(appId, current.id(), java.sql.Timestamp.from(current.createdAt()))
+                .query((rs, i) -> Db.ts(rs, "ts")).optional().orElse(null);
+        List<MessageRepository.MessageRow> rows = (after == null
+                ? jdbc.sql("select id, app_id, role, content, status, created_at from message where app_id = ? and task_id is null and status = 'ok' and role in ('user','assistant') and created_at <= ? order by created_at desc, id desc limit 6")
+                        .params(appId, java.sql.Timestamp.from(current.createdAt()))
+                : jdbc.sql("select id, app_id, role, content, status, created_at from message where app_id = ? and task_id is null and status = 'ok' and role in ('user','assistant') and created_at > ? and created_at <= ? order by created_at desc, id desc limit 6")
+                        .params(appId, java.sql.Timestamp.from(after), java.sql.Timestamp.from(current.createdAt())))
+                .query((rs, i) -> new MessageRepository.MessageRow(rs.getString("id"), rs.getString("app_id"), rs.getString("role"), rs.getString("content"),
+                        null, null, rs.getString("status"), Db.ts(rs, "created_at"), null, null, false))
+                .list();
+        if (rows.isEmpty()) return "";
+        List<MessageRepository.MessageRow> ordered = new ArrayList<>(rows);
+        Collections.reverse(ordered);
+        StringBuilder sb = new StringBuilder("\n\n## 工作台最近讨论记录（先问答后修改，供参考）\n");
+        int remaining = 2400;
+        for (MessageRepository.MessageRow m : ordered) {
+            String content = m.content() == null ? "" : m.content().trim();
+            if (content.isEmpty()) continue;
+            String body = com.tcl.csot.zhiye.service.chat.AskService.cap(content, Math.min(600, remaining));
+            if (body.length() < content.length()) body += "…";
+            String line = "- " + ("assistant".equals(m.role()) ? "助手" : "用户") + "：" + body + "\n";
+            if (line.length() > remaining) break;
+            sb.append(line);
+            remaining -= line.length();
+        }
+        return remaining == 2400 ? "" : sb.toString();
     }
 
     private static final java.util.regex.Pattern NEXT_LINE = java.util.regex.Pattern.compile("(?m)^\\s*\\[\\[next\\]\\].*$");

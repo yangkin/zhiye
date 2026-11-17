@@ -87,6 +87,7 @@ public class ConversationController {
         Running old = running.put(id, run);
         if (old != null) old.stop().set(true);
         StringBuilder shown = new StringBuilder(), thought = new StringBuilder();
+        long[] lastSendAt = { System.currentTimeMillis() };
         Threads.start("conv-ask", () -> {
             try {
                 ask.answer(ws, p.content(), p.skillAppIds(), null, p.history(), p.type(), p.assets(),
@@ -99,7 +100,14 @@ public class ConversationController {
                             if (run.stop().get()) throw new java.io.IOException("用户停止了回答");
                             String text = Json.M.valueToTree(data).path("text").asText("");
                             try {
+                                long now = System.currentTimeMillis();
+                                if (now - lastSendAt[0] > 300) {
+                                    // 长时间停顿后先发注释心跳触发内核 RST 检测，再发真实事件，避免断开后的末段内容落库
+                                    emitter.send(SseEmitter.event().comment("hb"));
+                                    try { Thread.sleep(5); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                                }
                                 emitter.send(SseEmitter.event().name(name).data(Json.write(data), MediaType.APPLICATION_JSON));
+                                lastSendAt[0] = System.currentTimeMillis();
                             } catch (java.io.IOException | IllegalStateException gone) {
                                 // 浏览器断开：点了停止（多实例时停止请求可能落在别的实例上）、关了页面或网络断了
                                 run.stop().set(true);
