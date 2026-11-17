@@ -173,6 +173,11 @@ function Workbench({ id }: { id: string }) {
   };
   // 刷新预览：先确认预览地址能打开再换 iframe；打不开就保留当前画面并说明，不报「已刷新」
   const [refreshing, setRefreshing] = useState(false);
+  const [frameLoading, setFrameLoading] = useState(false);
+  const frameKey = frameSrc ? `${frameSrc}#${refreshKey}` : null;
+  useEffect(() => {
+    if (frameKey) setFrameLoading(true);
+  }, [frameKey]);
   const refreshPreview = async () => {
     if (!frameSrc || refreshing) return;
     setRefreshing(true);
@@ -658,14 +663,22 @@ function Workbench({ id }: { id: string }) {
               ) : null}
               <div className={`preview-stage ${editMode ? 'is-selecting' : ''}`}>
                 {frameSrc ? (
-                  <iframe
-                    key={frameSrc + '#' + refreshKey}
-                    ref={frameRef}
-                    src={frameSrc}
-                    data-preview
-                    sandbox="allow-scripts allow-forms"
-                    title={`${app.name}应用预览`}
-                  />
+                  <>
+                    {frameLoading ? (
+                      <div className="ze-mode-tip" role="status" aria-live="polite" style={{ top: 10, bottom: 'auto', opacity: 0.9 }}>
+                        正在加载最新预览…
+                      </div>
+                    ) : null}
+                    <iframe
+                      key={frameKey!}
+                      ref={frameRef}
+                      src={frameSrc}
+                      data-preview
+                      onLoad={() => setFrameLoading(false)}
+                      sandbox="allow-scripts allow-forms"
+                      title={`${app.name}应用预览`}
+                    />
+                  </>
                 ) : null}
                 {frameSrc && editMode && editor.selection ? <ElementTagPill selection={editor.selection} frameRef={frameRef} /> : null}
                 {frameSrc && editMode === 'chat' && editor.selection ? (

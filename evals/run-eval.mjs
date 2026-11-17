@@ -3,7 +3,7 @@
 //   --check : 离线校验评测集格式、评分器逻辑，并用真实 app-template / vue-template 跑一遍构建+冒烟门禁；
 //   --live  : 对运行中的本地/远程织页服务（默认 http://127.0.0.1:8080）执行端到端生成+评测。
 import assert from 'node:assert/strict'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -65,22 +65,24 @@ async function runOfflineCheck() {
 async function runLive() {
   const baseUrl = (process.env.ZHIYE_EVAL_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '')
   const limit = Number(process.env.ZHIYE_EVAL_LIMIT || cases.length)
-  const targetCases = cases.slice(0, limit)
+  const onlyIds = process.env.ZHIYE_EVAL_IDS ? new Set(process.env.ZHIYE_EVAL_IDS.split(',').map((s) => s.trim())) : null
+  const targetCases = (onlyIds ? cases.filter((c) => onlyIds.has(c.id)) : cases).slice(0, limit)
   const cookieJar = []
-  const req = async (method, p, body) => {
+  const req = async (method, p, body, raw = false) => {
     const headers = { ...(cookieJar.length ? { Cookie: cookieJar.join('; ') } : {}) }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     const res = await fetch(`${baseUrl}${p}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
     const setCookie = res.headers.get('set-cookie')
-    if (setCookie) cookieJar.push(setCookie.split(';')[0])
+    if (setCookie) {
+      for (const part of setCookie.split(/,(?=\s*[^;,\s]+=)/)) cookieJar.push(part.split(';')[0].trim())
+    }
     const text = await res.text()
-    let json = null
-    try { json = text ? JSON.parse(text) : null } catch {}
     if (!res.ok) throw new Error(`${method} ${p} -> HTTP ${res.status}: ${text.slice(0, 200)}`)
-    return json
+    if (raw) return text
+    return text ? JSON.parse(text) : null
   }
   const waitTask = async (id) => {
-    const deadline = Date.now() + 300_000
+    const deadline = Date.now() + 360_000
     while (Date.now() < deadline) {
       const t = await req('GET', `/api/tasks/${id}`)
       if (['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(t.status)) return t
@@ -92,32 +94,87 @@ async function runLive() {
   const out = []
   for (const c of targetCases) {
     const started = Date.now()
-    const created = await req('POST', '/api/apps', {
-      type: c.type, mode: c.mode || '快速', prompt: c.prompt, model: 'auto', assetIds: [],
-    })
-    const appId = created.id
-    let task = created.activeTask?.id ? await waitTask(created.activeTask.id) : null
-    if (task && task.type === 'plan' && task.status === 'SUCCEEDED') {
-      if (c.cloud) await req('POST', `/api/apps/${appId}/cloud/enable`, {})
-      const gen = await req('POST', `/api/apps/${appId}/generate`, {})
-      task = await waitTask(gen.id)
+    let appId = null
+    let task = null
+    let tokenUsed = 0
+    let contract = { passed: false, errors: [] }
+    let previewOk = null
+    try {
+      const created = await req('POST', '/api/apps', {
+        type: c.type, mode: c.mode || '快速', prompt: c.prompt, model: 'auto', assetIds: [],
+      })
+      appId = created.id
+      task = created.activeTask?.id ? await waitTask(created.activeTask.id) : null
+      tokenUsed += Number(task?.tokenUsed || 0)
+      if (task && task.type === 'plan' && task.status === 'SUCCEEDED') {
+        if (c.cloud) await req('POST', `/api/apps/${appId}/cloud/enable`, {})
+        const gen = await req('POST', `/api/apps/${appId}/generate`, {})
+        task = await waitTask(gen.id)
+        tokenUsed += Number(task?.tokenUsed || 0)
+      }
+      if (task?.status === 'SUCCEEDED' && c.followUpModify) {
+        const mod = await req('POST', `/api/apps/${appId}/messages`, { content: c.followUpModify })
+        task = await waitTask(mod.task.id)
+        tokenUsed += Number(task?.tokenUsed || 0)
+      }
+      const app = await req('GET', `/api/apps/${appId}`)
+      const vid = app?.currentVersion?.id
+      if (task?.status === 'SUCCEEDED' && vid) {
+        const fileList = await req('GET', `/api/versions/${vid}/files`)
+        const tmp = mkdtempSync(path.join(os.tmpdir(), `zhiye-live-${c.id}-`))
+        try {
+          for (const f of fileList || []) {
+            if (!f.path || f.size > 512_000) continue
+            const content = await req('GET', `/api/versions/${vid}/file?path=${encodeURIComponent(f.path)}`, undefined, true)
+            const dst = path.join(tmp, f.path)
+            mkdirSync(path.dirname(dst), { recursive: true })
+            writeFileSync(dst, content)
+          }
+          contract = scoreWorkspace(tmp, c)
+        } finally {
+          rmSync(tmp, { recursive: true, force: true })
+        }
+        if (app.previewUrl) {
+          try {
+            const pr = await fetch(app.previewUrl)
+            const html = await pr.text()
+            previewOk = pr.ok && html.includes('<html')
+          } catch { previewOk = false }
+        }
+      } else {
+        contract = { passed: false, errors: [task?.error?.message || `任务状态 ${task?.status}`] }
+      }
+    } catch (e) {
+      contract = { passed: false, errors: [e.message] }
     }
-    if (task?.status === 'SUCCEEDED' && c.followUpModify) {
-      const mod = await req('POST', `/api/apps/${appId}/messages`, { content: c.followUpModify })
-      task = await waitTask(mod.task.id)
-    }
+    const passed = task?.status === 'SUCCEEDED' && contract.passed && (previewOk !== false)
     out.push({
       id: c.id,
       name: c.name,
-      status: task?.status || 'UNKNOWN',
-      passed: task?.status === 'SUCCEEDED',
+      appId,
+      status: task?.status || 'ERROR',
+      contractPassed: contract.passed,
+      previewOk,
+      passed,
       durationMs: Date.now() - started,
-      tokenUsed: task?.tokenUsed || 0,
-      error: task?.error?.message || null,
+      tokenUsed,
+      errors: contract.errors,
     })
   }
   const summary = summarizeResults(out)
-  console.log(JSON.stringify({ mode: 'live', baseUrl, ...summary }, null, 2))
+  const report = {
+    mode: 'live',
+    at: new Date().toISOString(),
+    baseUrl,
+    avgDurationMs: out.length ? Math.round(out.reduce((s, r) => s + r.durationMs, 0) / out.length) : 0,
+    totalTokens: out.reduce((s, r) => s + (r.tokenUsed || 0), 0),
+    ...summary,
+  }
+  try {
+    mkdirSync(path.join(root, 'runtime'), { recursive: true })
+    writeFileSync(path.join(root, 'runtime', 'eval-report.json'), JSON.stringify(report, null, 2))
+  } catch {}
+  console.log(JSON.stringify(report, null, 2))
   if (summary.passed < summary.total) process.exitCode = 1
 }
 

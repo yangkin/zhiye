@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, existsSync, cpSync, symlinkSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { takeScreenshot } from '../src/screenshot.mjs'
@@ -46,4 +46,21 @@ test('screenshot 工具：能看图的模型拿到图片，不能看图的只拿
   assert.match(t.content[0].text, /不能看图/)
   assert.equal(checkToolCall('screenshot', {}, { cwd: '/tmp' }), null)
   assert.equal(toolSummary('/tmp', 'screenshot', { device: 'mobile', route: '#/orders' }), '截图自查 · 手机 #/orders')
+})
+
+test('截图自查：template 项目走内存 Vite Dev Server 免写构建产物', { skip: !existsSync(CHROME) && '没有 Chrome' }, async () => {
+  const root = path.resolve(import.meta.dirname, '..', '..')
+  const nm = path.join(root, 'runtime', 'template-cache', 'node_modules')
+  if (!existsSync(nm)) return
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'shot-vite-'))
+  try {
+    cpSync(path.join(root, 'packages', 'app-template'), dir, { recursive: true })
+    symlinkSync(nm, path.join(dir, 'node_modules'))
+    const r = await takeScreenshot(dir, { projectKind: 'template' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
+    assert.equal(r.ok, true, r.text)
+    assert.ok(r.image && r.image.length > 1000)
+    assert.equal(existsSync(path.join(dir, '.zhiye', 'dist-shot')), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

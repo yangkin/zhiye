@@ -60,7 +60,7 @@
   {
     "id": "python-cli",
     "name": "Python 标准库数据清洗脚本",
-    "type": "写脚本",
+    "type": "日常开发",
     "mode": "快速",
     "prompt": "写一个 Python 命令行脚本，读取 CSV 生产日志，统计每条产线报错 Top5 并输出汇总 CSV，不依赖第三方库且提供 --help。",
     "expect": { "projectKind": "script", "requireFiles": ["README.md"], "forbidFiles": ["index.html"] }

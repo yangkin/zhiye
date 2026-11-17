@@ -3,6 +3,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { pathToFileURL } from 'node:url'
 import { startStaticServer } from './smoke.mjs'
 import { buildEnv, viteBuild } from './verify.mjs'
 
@@ -12,19 +13,48 @@ export const DEVICES = {
   mobile: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, label: '手机 390×844' },
 }
 
+async function startViteDevServer(cwd) {
+  const viteEntry = path.join(cwd, 'node_modules', 'vite', 'dist', 'node', 'index.js')
+  if (!existsSync(viteEntry)) return null
+  try {
+    const { createServer } = await import(pathToFileURL(viteEntry).href)
+    const server = await createServer({
+      root: cwd,
+      mode: 'development',
+      clearScreen: false,
+      logLevel: 'silent',
+      optimizeDeps: { holdUntilCrawlEnd: false },
+      server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, fs: { allow: [cwd] } },
+    })
+    await server.listen()
+    const addr = server.httpServer?.address()
+    if (!addr || typeof addr !== 'object') { await server.close().catch(() => {}); return null }
+    return { port: addr.port, close: () => server.close().catch(() => {}) }
+  } catch {
+    return null
+  }
+}
+
 /** 返回 { ok, text, image?, mimeType? }；构建失败或没有浏览器时 ok=false，text 说明原因 */
 export async function takeScreenshot(cwd, { projectKind = 'template', route = '', device = 'desktop', fullPage = false } = {}, env = process.env) {
   const chromePath = env.ZHIYE_CHROME_PATH
   if (!chromePath || !existsSync(chromePath)) return { ok: false, text: '截图不可用：当前环境没有浏览器，请用类型检查和构建结果自查。' }
   let root = cwd
-  if (projectKind === 'template' || projectKind === 'vue' || projectKind === 'vite') {
-    const b = await viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: SHOT_DIR })
-    if (!b.ok) return { ok: false, text: `构建失败，先修好再截图：\n${String(b.detail).slice(0, 3000)}` }
-    root = path.join(cwd, SHOT_DIR)
+  let srv = null
+  const useVite = projectKind === 'template' || projectKind === 'vue' || projectKind === 'vite'
+  if (useVite && existsSync(path.join(cwd, 'index.html'))) {
+    srv = await startViteDevServer(cwd)
   }
-  if (!existsSync(path.join(root, 'index.html'))) return { ok: false, text: '没有 index.html，无法截图' }
+  if (!srv) {
+    if (useVite) {
+      const b = await viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: SHOT_DIR, minify: false })
+      if (!b.ok) return { ok: false, text: `构建失败，先修好再截图：\n${String(b.detail).slice(0, 3000)}` }
+      root = path.join(cwd, SHOT_DIR)
+    }
+    if (!existsSync(path.join(root, 'index.html'))) return { ok: false, text: '没有 index.html，无法截图' }
+    srv = await startStaticServer(root)
+  }
   const dev = DEVICES[device] || DEVICES.desktop
-  const srv = await startStaticServer(root)
   const { chromium } = await import('playwright-core')
   const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-shot-'))
   let browser
@@ -75,6 +105,7 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
       return {
         title: document.title,
         scrollWidth: document.documentElement.scrollWidth, vw, height: document.documentElement.scrollHeight,
+        hasViewport: !!document.querySelector('meta[name="viewport"]'),
         headings: pick('h1,h2,h3', 12), buttons: pick('button,a[role=button],[role=tab]', 20), inputs: pick('input,textarea,select', 12),
         text: (document.body.innerText || '').trim().replace(/\n{3,}/g, '\n\n').slice(0, 1500),
         overflow, clipped,
@@ -89,7 +120,10 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
       if (info.buttons.length) lines.push(`按钮：${info.buttons.join(' / ')}`)
       if (info.inputs.length) lines.push(`输入框：${info.inputs.join(' / ')}`)
       const issues = []
-      if (info.scrollWidth > info.vw + 2) issues.push(`页面横向溢出 ${info.scrollWidth - info.vw}px（出现横向滚动条）`)
+      const actualWidth = Math.max(info.scrollWidth, info.hasViewport ? info.vw : 0)
+      if (actualWidth > dev.viewport.width + 2 && info.scrollWidth > info.vw + 2 || (info.hasViewport && info.vw > dev.viewport.width + 2)) {
+        issues.push(`页面横向溢出 ${Math.max(info.scrollWidth, info.vw) - dev.viewport.width}px（出现横向滚动条）`)
+      }
       if (info.overflow.length) issues.push(`超出屏幕右侧的元素：${info.overflow.join('，')}`)
       if (info.clipped.length) issues.push(`文字被截断（没有省略号）：${info.clipped.join('，')}`)
       if (!info.text) issues.push('页面没有任何可见文字（可能是空白页）')

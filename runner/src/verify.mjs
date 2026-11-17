@@ -48,12 +48,13 @@ function viteBin(cwd) {
   return existsSync(p) ? p : null
 }
 
-export async function viteBuild(cwd, env, { mode, outDir }) {
+export async function viteBuild(cwd, env, { mode, outDir, minify = true } = {}) {
   const bin = viteBin(cwd)
   if (!bin) return { ok: false, detail: '找不到 vite（node_modules 不完整）' }
   cleanDir(cwd, outDir)
   const args = [bin, 'build', '--outDir', outDir, '--emptyOutDir', '--configLoader', 'native', '--logLevel', 'warn']
   if (mode) args.push('--mode', mode)
+  if (minify === false) args.push('--minify', 'false')
   const r = await run(process.execPath, args, { cwd, env, timeoutMs: 180_000, onLine: emitLog })
   if (r.timedOut) return { ok: false, detail: `构建超时\n${r.out}` }
   if (r.code !== 0) return { ok: false, detail: r.out || `构建失败（退出码 ${r.code}）` }
@@ -120,7 +121,7 @@ async function verifyTemplate(cwd, env) {
     return problems.length ? { ok: false, detail: problems.join('\n') } : { ok: true, detail: '' }
   }))
   const [preview, publish] = await Promise.all([
-    step('构建预览版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: plugin }), { mode: 'preview', outDir: PREVIEW_DIR })),
+    step('构建预览版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: plugin }), { mode: 'preview', outDir: PREVIEW_DIR, minify: false })),
     step('构建发布版', () => viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: PUBLISH_DIR })),
   ])
   if (preview.ok) {
