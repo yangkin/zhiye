@@ -473,7 +473,7 @@ export function Sparkline({ values, color = '#7953dc' }: { values: number[]; col
 export function ConversionFunnel({ steps }: { steps: { key: string; label: string; count: number }[] }) {
   const max = Math.max(...steps.map((s) => s.count), 1);
   if (steps.every((s) => s.count === 0)) {
-    return <p className="dash-empty">当前范围暂无漏斗转化数据</p>;
+    return <DashEmptyBox icon="chart" title="当前范围暂无漏斗转化数据" />;
   }
   return (
     <ol className="dash-funnel">
@@ -508,7 +508,7 @@ export function HourlyBarChart({ data }: { data: { hour: number; total: number; 
   const [active, setActive] = useState<number | null>(null);
   const max = Math.max(...data.map((d) => d.total), 1);
   if (data.every((d) => d.total === 0)) {
-    return <p className="dash-empty">当前窗口暂无分时段任务分布</p>;
+    return <DashEmptyBox icon="history" title="当前窗口暂无分时段任务分布" />;
   }
   const peak = data.reduce((best, cur) => (cur.total > best.total ? cur : best), data[0]);
   const tip = active !== null ? data[active] : null;

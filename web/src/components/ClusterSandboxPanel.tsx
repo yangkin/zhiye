@@ -10,7 +10,9 @@ import { toast } from '../lib/store';
 import { confirmDialog } from './ConfirmDialog';
 import { ErrorState, LoadingState } from './EmptyState';
 import { Modal } from './Modal';
+import { Select } from './Select';
 import {
+  DashEmptyBox,
   MultiTrendChart,
   fmtBytes,
   fmtDurationMs,
@@ -398,7 +400,7 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
         </header>
 
         {nodes.length === 0 ? (
-          <p className="dash-empty">暂无已注册的集群节点心跳记录</p>
+          <DashEmptyBox icon="cloud" title="暂无已注册的集群节点心跳记录" />
         ) : (
           <div className="dash-node-grid">
             {nodes.map((node) => (
@@ -438,7 +440,7 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
             </div>
           </header>
           {hourlyPoints.length === 0 ? (
-            <p className="dash-empty">近 24 小时暂无运行期事件趋势数据</p>
+            <DashEmptyBox icon="chart" title="近 24 小时暂无运行期事件趋势数据" />
           ) : (
             <MultiTrendChart
               data={hourlyPoints}
@@ -514,6 +516,20 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
             </p>
           </div>
           <div className="dash-toolbar-group">
+            <Select
+              ariaLabel="按沙箱类别筛选"
+              value={kindFilter}
+              onChange={(val) => setKindFilter(val)}
+              options={[
+                { value: 'ALL', label: `全部记录 (${fmtNum(sbxSum.totalRows ?? sandboxes.items.length)})` },
+                { value: 'LIVE', label: `仅看活跃/异常 (${fmtNum(sbxSum.total)})` },
+                { value: 'session', label: `正常会话 (${fmtNum(sbxSum.byKind?.session ?? 0)})` },
+                { value: 'ledger-ghost', label: `账面幽灵 (${fmtNum(sbxSum.byKind?.['ledger-ghost'] ?? 0)})` },
+                { value: 'unregistered', label: `未登记孤儿 (${fmtNum(sbxSum.byKind?.unregistered ?? 0)})` },
+                { value: 'destroyed', label: `已销毁历史 (${fmtNum(sbxSum.byKind?.destroyed ?? 0)})` },
+                { value: 'failed', label: `启动失败 (${fmtNum(sbxSum.byKind?.failed ?? 0)})` },
+              ]}
+            />
             <label className="dash-search">
               <Icon name="search" />
               <input
@@ -526,32 +542,8 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
           </div>
         </header>
 
-        <div className="dash-sbx-filters">
-          {(
-            [
-              ['ALL', '全部记录', sbxSum.totalRows ?? sandboxes.items.length],
-              ['LIVE', '仅看活跃/异常', sbxSum.total],
-              ['session', '正常会话 (session)', sbxSum.byKind?.session ?? 0],
-              ['ledger-ghost', '账面幽灵 (ghost)', sbxSum.byKind?.['ledger-ghost'] ?? 0],
-              ['unregistered', '未登记孤儿', sbxSum.byKind?.unregistered ?? 0],
-              ['destroyed', '已销毁历史', sbxSum.byKind?.destroyed ?? 0],
-              ['failed', '启动失败', sbxSum.byKind?.failed ?? 0],
-            ] as [string, string, number][]
-          ).map(([k, lbl, cnt]) => (
-            <button
-              key={k}
-              type="button"
-              className={`logs-chip ${k === 'ledger-ghost' || k === 'failed' ? 'err' : ''} ${kindFilter === k ? 'active' : ''}`}
-              onClick={() => setKindFilter(k)}
-            >
-              <span>{lbl}</span>
-              <b>{fmtNum(cnt)}</b>
-            </button>
-          ))}
-        </div>
-
         {visibleSandboxes.length === 0 ? (
-          <p className="dash-empty">当前筛选条件下暂无沙箱记录</p>
+          <DashEmptyBox icon="terminal" title="当前筛选条件下暂无沙箱记录" />
         ) : (
           <div className="dash-table-wrap">
             <table className="dash-table">

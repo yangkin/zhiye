@@ -15,7 +15,7 @@ import { Modal } from './Modal';
 import { Select } from './Select';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
-import { fmtCompact, fmtNum } from './DashboardCharts';
+import { DashEmptyBox, fmtCompact, fmtNum } from './DashboardCharts';
 
 const FEEDBACK_STATUS_LABELS: Record<AdminFeedbackStatus, string> = {
   open: '待处理',
@@ -233,7 +233,11 @@ export function AdminGovernancePanel({
             </div>
           </header>
           {overview.customQuotas.length === 0 ? (
-            <p className="dash-empty">当前所有工作空间均使用全局默认配额，可从上方下拉或空间排行行内点击“配额”设置</p>
+            <DashEmptyBox
+              icon="settings"
+              title="当前所有工作空间均使用全局默认配额"
+              hint="可从上方下拉或空间排行行内点击“配额”设置"
+            />
           ) : (
             <div className="dash-table-wrap">
               <table className="dash-table">
@@ -338,7 +342,7 @@ export function AdminGovernancePanel({
             </button>
           </header>
           {overview.rateLimitStats.buckets.length === 0 ? (
-            <p className="dash-empty">当前没有触发过速率限制的 bucket</p>
+            <DashEmptyBox icon="alert" title="当前没有触发过速率限制的 bucket" />
           ) : (
             <div className="dash-table-wrap">
               <table className="dash-table">
@@ -399,7 +403,7 @@ export function AdminGovernancePanel({
             </div>
           </header>
           {dashboard.tasks.activeList.length === 0 ? (
-            <p className="dash-empty">当前全平台没有排队或运行中的任务</p>
+            <DashEmptyBox icon="play" title="当前全平台没有排队或运行中的任务" />
           ) : (
             <div className="dash-table-wrap">
               <table className="dash-table">
@@ -469,7 +473,7 @@ export function AdminGovernancePanel({
             </div>
           </header>
           {overview.deletedApps.length === 0 ? (
-            <p className="dash-empty">回收站当前为空</p>
+            <DashEmptyBox icon="trash" title="回收站当前为空" />
           ) : (
             <div className="dash-scroll-list">
               <div className="dash-table-wrap">
@@ -535,29 +539,21 @@ export function AdminGovernancePanel({
               <h3>用户问题反馈分诊台（{filteredFeedbacks.length} 条）</h3>
               <p>跟踪小织问题上报处理状态、指派解决说明并自动闭环计时</p>
             </div>
-            <div className="dash-metric-pills" role="group" aria-label="反馈状态筛选">
-              {(
-                [
-                  ['all', '全部'],
-                  ['open', '待处理'],
-                  ['in_progress', '跟进中'],
-                  ['resolved', '已解决'],
-                  ['ignored', '已忽略'],
-                ] as const
-              ).map(([st, label]) => (
-                <button
-                  key={st}
-                  type="button"
-                  className={fbFilter === st ? 'active' : ''}
-                  onClick={() => setFbFilter(st)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Select
+              ariaLabel="反馈状态筛选"
+              value={fbFilter}
+              onChange={(val) => setFbFilter(val as typeof fbFilter)}
+              options={[
+                { value: 'all', label: '全部状态' },
+                { value: 'open', label: '待处理' },
+                { value: 'in_progress', label: '跟进中' },
+                { value: 'resolved', label: '已解决' },
+                { value: 'ignored', label: '已忽略' },
+              ]}
+            />
           </header>
           {filteredFeedbacks.length === 0 ? (
-            <p className="dash-empty">当前筛选状态下暂无用户反馈</p>
+            <DashEmptyBox icon="help" title="当前筛选状态下暂无用户反馈" />
           ) : (
             <div className="dash-scroll-list">
               <ul className="dash-admin-fb-list">
@@ -597,7 +593,7 @@ export function AdminGovernancePanel({
             </div>
           </header>
           {overview.templates.length === 0 ? (
-            <p className="dash-empty">灵感社区当前暂无作品</p>
+            <DashEmptyBox icon="community" title="灵感社区当前暂无作品" />
           ) : (
             <div className="dash-scroll-list">
               <div className="dash-table-wrap">
@@ -689,7 +685,7 @@ export function AdminGovernancePanel({
           </div>
         </header>
         {overview.auditLogs.length === 0 ? (
-          <p className="dash-empty">暂无管理操作审计记录</p>
+          <DashEmptyBox icon="lock" title="暂无管理操作审计记录" />
         ) : (
           <div className="dash-scroll-list">
             <div className="dash-table-wrap">

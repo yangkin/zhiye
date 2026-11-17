@@ -554,15 +554,15 @@
 .logs-subtabs {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
-  padding: 8px 16px 0;
+  padding: 6px 14px 0;
   border-bottom: 1px solid #eae6f2;
   background: #fcfbfe;
-  overflow-x: auto;
 }
 
 .logs-subtabs button {
-  padding: 8px 12px 10px;
+  padding: 8px 10px 10px;
   font-size: 12px;
   font-weight: 500;
   color: #655d79;
@@ -570,7 +570,7 @@
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .logs-subtabs button:hover {

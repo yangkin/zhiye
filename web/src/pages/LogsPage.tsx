@@ -16,7 +16,7 @@ import { Icon } from '../lib/icons';
 import { copyText, downloadUrl, handleTabListKeyDown } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
 import { toast } from '../lib/store';
-import { fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
+import { DashEmptyBox, fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { Select } from '../components/Select';
 
@@ -439,6 +439,23 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
             ) : null}
 
             <Select
+              ariaLabel="筛选任务状态"
+              value={status}
+              options={[
+                { value: 'ALL', label: `全部状态 (${fmtNum(data?.summary.total ?? 0)})` },
+                { value: 'ACTIVE', label: `执行中 (${fmtNum(data?.summary.active ?? 0)})` },
+                { value: 'FAILED', label: `失败 (${fmtNum(data?.summary.failed ?? 0)})` },
+                { value: 'SUCCEEDED', label: `成功 (${fmtNum(data?.summary.succeeded ?? 0)})` },
+                { value: 'CANCELLED', label: `已取消 (${fmtNum(data?.summary.cancelled ?? 0)})` },
+              ]}
+              onChange={(v) => {
+                setStatus(v);
+                if (v !== 'FAILED') setErrorCode('');
+                setOffset(0);
+              }}
+            />
+
+            <Select
               ariaLabel="筛选任务类型"
               value={type}
               options={[
@@ -460,6 +477,22 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
                 setOffset(0);
               }}
             />
+
+            {(data?.errorCodes?.length ?? 0) > 0 ? (
+              <Select
+                ariaLabel="按错误码筛选"
+                value={errorCode}
+                options={[
+                  { value: '', label: '全部错误码' },
+                  ...data!.errorCodes.map((ec) => ({ value: ec.code, label: `${ec.code} (${ec.count})` })),
+                ]}
+                onChange={(nextCode) => {
+                  setErrorCode(nextCode);
+                  if (nextCode) setStatus('FAILED');
+                  setOffset(0);
+                }}
+              />
+            ) : null}
           </div>
 
           <div className="logs-filter-right">
@@ -477,56 +510,6 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
               <span>{listQ.isFetching ? '刷新中…' : '刷新'}</span>
             </button>
           </div>
-        </div>
-
-        <div className="logs-filter-row">
-          <div className="logs-chip-row" role="group" aria-label="按任务状态筛选">
-            {(
-              [
-                ['ALL', '全部', data?.summary.total ?? 0, ''],
-                ['ACTIVE', '执行中', data?.summary.active ?? 0, ''],
-                ['FAILED', '失败', data?.summary.failed ?? 0, 'err'],
-                ['SUCCEEDED', '成功', data?.summary.succeeded ?? 0, 'ok'],
-                ['CANCELLED', '已取消', data?.summary.cancelled ?? 0, ''],
-              ] as [string, string, number, string][]
-            ).map(([k, label, count, cls]) => (
-              <button
-                key={k}
-                type="button"
-                className={`logs-chip ${cls} ${status === k ? 'active' : ''}`}
-                onClick={() => {
-                  setStatus(k);
-                  if (k !== 'FAILED') setErrorCode('');
-                  setOffset(0);
-                }}
-              >
-                {k === 'ACTIVE' && count > 0 ? <span className="logs-live-dot" aria-hidden="true" /> : null}
-                <span>{label}</span>
-                <b>{fmtNum(count)}</b>
-              </button>
-            ))}
-          </div>
-
-          {(data?.errorCodes?.length ?? 0) > 0 ? (
-            <div className="logs-chip-row" aria-label="按错误码快筛">
-              {data!.errorCodes.map((ec) => (
-                <button
-                  key={ec.code}
-                  type="button"
-                  className={`logs-err-chip ${errorCode === ec.code ? 'active' : ''}`}
-                  onClick={() => {
-                    const nextCode = errorCode === ec.code ? '' : ec.code;
-                    setErrorCode(nextCode);
-                    if (nextCode) setStatus('FAILED');
-                    setOffset(0);
-                  }}
-                >
-                  <span>{ec.code}</span>
-                  <b>{ec.count}</b>
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -933,19 +916,19 @@ function TaskDiagnosticPane({
 
       <nav className="logs-subtabs" role="tablist" aria-label="单任务诊断视图">
         <button type="button" role="tab" aria-selected={subTab === 'events'} className={subTab === 'events' ? 'active' : ''} onClick={() => setSubTab('events')}>
-          <span>过程事件流 (task_event)</span>
+          <span>过程事件</span>
           <small>{events.length}</small>
         </button>
         <button type="button" role="tab" aria-selected={subTab === 'runner'} className={subTab === 'runner' ? 'active' : ''} onClick={() => setSubTab('runner')}>
-          <span>沙箱 Runner 日志 (.log)</span>
+          <span>Runner 日志</span>
           <small>{runnerLog?.exists ? fmtBytes(runnerLog.sizeBytes) : '无文件'}</small>
         </button>
         <button type="button" role="tab" aria-selected={subTab === 'resources'} className={subTab === 'resources' ? 'active' : ''} onClick={() => setSubTab('resources')}>
-          <span>模型网关与链路事件</span>
+          <span>网关与链路</span>
           <small>{baseDetail.modelUsages.length + (baseDetail.platformEvents?.length ?? 0)}</small>
         </button>
         <button type="button" role="tab" aria-selected={subTab === 'app'} className={subTab === 'app' ? 'active' : ''} onClick={() => setSubTab('app')}>
-          <span>云库 Schema · 云函数 · 数据源</span>
+          <span>云库与云函数</span>
           <small>{(baseDetail.cloudTables?.length ?? 0) + baseDetail.fnLogs.length + baseDetail.sourceCalls.length}</small>
         </button>
       </nav>
@@ -1031,30 +1014,11 @@ function TaskDiagnosticPane({
           <>
             <div className="logs-event-toolbar">
               <div className="logs-filter-left">
-                <div className="logs-chip-row" role="group" aria-label="日志级别过滤">
-                  {(
-                    [
-                      ['ALL', '全部', runnerLog?.totalLines ?? 0, ''],
-                      ['ERROR', 'ERROR', runnerLog?.errorLines ?? 0, 'err'],
-                      ['WARN', 'WARN', runnerLog?.warnLines ?? 0, 'warn'],
-                      ['INFO', 'INFO', undefined, ''],
-                    ] as [LogLevelFilter, string, number | undefined, string][]
-                  ).map(([lvl, label, cnt, cls]) => (
-                    <button
-                      key={lvl}
-                      type="button"
-                      className={`logs-chip ${cls} ${runnerLevel === lvl ? 'active' : ''}`}
-                      onClick={() => setRunnerLevel(lvl)}
-                    >
-                      <span>{label}</span>
-                      {cnt !== undefined ? <b>{fmtNum(cnt)}</b> : null}
-                    </button>
-                  ))}
-                </div>
-                <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 300, height: 32 }}>
+                <label className="logs-search-box" style={{ minWidth: 220, maxWidth: 300, height: 32 }}>
                   <Icon name="search" />
                   <input
-                    placeholder="检索 Runner 日志关键字（自动高亮）…"
+                    aria-label="检索 Runner 日志"
+                    placeholder="检索日志关键字（自动高亮）…"
                     value={runnerQuery}
                     onChange={(e) => setRunnerQuery(e.target.value)}
                   />
@@ -1064,6 +1028,17 @@ function TaskDiagnosticPane({
                     </button>
                   ) : null}
                 </label>
+                <Select
+                  ariaLabel="筛选 Runner 日志级别"
+                  value={runnerLevel}
+                  options={[
+                    { value: 'ALL', label: `全部级别 (${fmtNum(runnerLog?.totalLines ?? 0)})` },
+                    { value: 'ERROR', label: `ERROR (${fmtNum(runnerLog?.errorLines ?? 0)})` },
+                    { value: 'WARN', label: `WARN (${fmtNum(runnerLog?.warnLines ?? 0)})` },
+                    { value: 'INFO', label: 'INFO' },
+                  ]}
+                  onChange={(v) => setRunnerLevel(v as LogLevelFilter)}
+                />
                 <Select
                   ariaLabel="显示 Runner 日志行数"
                   value={String(runnerTail)}
@@ -1078,7 +1053,6 @@ function TaskDiagnosticPane({
                 {runnerLog?.exists ? (
                   <span style={{ fontSize: 12, color: '#6b647d' }}>
                     匹配 {fmtNum(runnerLog.matchedLines)} / {fmtNum(runnerLog.totalLines)} 行 · {fmtBytes(runnerLog.sizeBytes)}
-                    {runnerLog.updatedAt ? ` · 更新于 ${fmtDateTime(runnerLog.updatedAt)}` : ''}
                   </span>
                 ) : null}
               </div>
@@ -1198,9 +1172,9 @@ function TaskDiagnosticPane({
               </div>
             ) : null}
             <div className="logs-json-block">
-              <h4>模型调用记账明细（model_usage · 共 {baseDetail.modelUsages.length} 次）</h4>
+              <h4>模型调用记账明细（共 {baseDetail.modelUsages.length} 次）</h4>
               {baseDetail.modelUsages.length === 0 ? (
-                <p className="dash-empty">暂无模型调用明细记录（可能未经过模型网关或尚未产生 usage）。</p>
+                <DashEmptyBox icon="spark" title="暂无模型调用明细记录" hint="可能未经过模型网关或尚未产生用量" />
               ) : (
                 <div className="dash-table-wrap">
                   <table className="dash-table">
@@ -1311,9 +1285,9 @@ function TaskDiagnosticPane({
                   : '（未启用云服务）'}
               </h4>
               {!baseDetail.cloudStatus ? (
-                <p className="dash-empty">该应用尚未创建云数据库 Schema</p>
+                <DashEmptyBox icon="database" title="该应用尚未创建云数据库 Schema" />
               ) : (baseDetail.cloudTables?.length ?? 0) === 0 ? (
-                <p className="dash-empty">Schema 已创建，当前暂无注册表</p>
+                <DashEmptyBox icon="database" title="Schema 已创建，当前暂无注册表" />
               ) : (
                 <div className="dash-table-wrap">
                   <table className="dash-table">
@@ -1341,7 +1315,7 @@ function TaskDiagnosticPane({
             <div className="logs-json-block">
               <h4>该应用近期云函数执行记录（最新 {baseDetail.fnLogs.length} 条）</h4>
               {baseDetail.fnLogs.length === 0 ? (
-                <p className="dash-empty">该应用暂无云函数执行记录</p>
+                <DashEmptyBox icon="code" title="该应用暂无云函数执行记录" />
               ) : (
                 <div className="dash-table-wrap">
                   <table className="dash-table">
@@ -1375,7 +1349,7 @@ function TaskDiagnosticPane({
             <div className="logs-json-block">
               <h4>该应用近期数据源代理调用（最新 {baseDetail.sourceCalls.length} 条）</h4>
               {baseDetail.sourceCalls.length === 0 ? (
-                <p className="dash-empty">该应用暂无数据源调用记录</p>
+                <DashEmptyBox icon="globe" title="该应用暂无数据源调用记录" />
               ) : (
                 <div className="dash-table-wrap">
                   <table className="dash-table">
@@ -2196,40 +2170,7 @@ function RuntimeLogsView() {
       <div className="logs-filter-bar">
         <div className="logs-filter-row">
           <div className="logs-filter-left">
-            <div className="logs-chip-row">
-              {(
-                [
-                  ['api', 'api.log (主服务)'],
-                  ['site', 'site.log (站点网关)'],
-                  ['web-build', 'web-build.log (构建)'],
-                ] as ['api' | 'site' | 'web-build', string][]
-              ).map(([k, label]) => (
-                <button key={k} type="button" className={`logs-chip ${target === k ? 'active' : ''}`} onClick={() => setTarget(k)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="logs-chip-row" role="group" aria-label="日志级别过滤">
-              {(
-                [
-                  ['ALL', '全部', data?.file.totalLines ?? 0, ''],
-                  ['ERROR', 'ERROR', data?.file.errorLines ?? 0, 'err'],
-                  ['WARN', 'WARN', data?.file.warnLines ?? 0, 'warn'],
-                  ['INFO', 'INFO', undefined, ''],
-                ] as [LogLevelFilter, string, number | undefined, string][]
-              ).map(([lvl, label, cnt, cls]) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  className={`logs-chip ${cls} ${level === lvl ? 'active' : ''}`}
-                  onClick={() => setLevel(lvl)}
-                >
-                  <span>{label}</span>
-                  {cnt !== undefined ? <b>{fmtNum(cnt)}</b> : null}
-                </button>
-              ))}
-            </div>
-            <label className="logs-search-box" style={{ minWidth: 200, maxWidth: 300 }}>
+            <label className="logs-search-box" style={{ minWidth: 220, maxWidth: 300 }}>
               <Icon name="search" />
               <input placeholder="筛选服务日志关键字（自动高亮）…" value={q} onChange={(e) => setQ(e.target.value)} />
               {q ? (
@@ -2238,6 +2179,27 @@ function RuntimeLogsView() {
                 </button>
               ) : null}
             </label>
+            <Select
+              ariaLabel="选择日志文件"
+              value={target}
+              options={[
+                { value: 'api', label: 'api.log (主服务)' },
+                { value: 'site', label: 'site.log (站点网关)' },
+                { value: 'web-build', label: 'web-build.log (构建)' },
+              ]}
+              onChange={(v) => setTarget(v as 'api' | 'site' | 'web-build')}
+            />
+            <Select
+              ariaLabel="筛选运行日志级别"
+              value={level}
+              options={[
+                { value: 'ALL', label: `全部级别 (${fmtNum(data?.file.totalLines ?? 0)})` },
+                { value: 'ERROR', label: `ERROR (${fmtNum(data?.file.errorLines ?? 0)})` },
+                { value: 'WARN', label: `WARN (${fmtNum(data?.file.warnLines ?? 0)})` },
+                { value: 'INFO', label: 'INFO' },
+              ]}
+              onChange={(v) => setLevel(v as LogLevelFilter)}
+            />
             <Select
               ariaLabel="显示运行日志行数"
               value={String(tail)}
@@ -2307,12 +2269,12 @@ function RuntimeLogsView() {
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>限流判定流水（rate_limit_event · 最新 80 条）</h3>
-              <p>分别记录 429 拦截（rejected）与滑窗放行（allowed），便于分辨真实限流事件与正常流量</p>
+              <h3>限流判定流水（最新 80 条）</h3>
+              <p>分别记录 429 拦截与滑窗放行，便于分辨真实限流事件与正常流量</p>
             </div>
           </header>
           {!data?.rateLimitHits?.length ? (
-            <p className="dash-empty">近期无限流判定记录</p>
+            <DashEmptyBox icon="alert" title="近期无限流判定记录" />
           ) : (
             <div className="dash-scroll-list">
               <div className="dash-table-wrap">
@@ -2353,12 +2315,12 @@ function RuntimeLogsView() {
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>平台管理操作审计（admin_audit_log · 最新 50 条）</h3>
+              <h3>平台管理操作审计（最新 50 条）</h3>
               <p>强停任务、配额调整、应用下线恢复、社区置顶等操作留痕</p>
             </div>
           </header>
           {!data?.auditLogs?.length ? (
-            <p className="dash-empty">暂无管理操作审计记录</p>
+            <DashEmptyBox icon="lock" title="暂无管理操作审计记录" />
           ) : (
             <div className="dash-scroll-list">
               <div className="dash-table-wrap">
@@ -2557,7 +2519,7 @@ function SchemasView() {
           </div>
         </header>
         {schemas.length === 0 ? (
-          <p className="dash-empty">当前筛选下暂无已注册的云数据库 Schema</p>
+          <DashEmptyBox icon="database" title="当前筛选下暂无已注册的云数据库 Schema" />
         ) : (
           <div className="dash-table-wrap">
             <table className="dash-table">
@@ -2664,6 +2626,19 @@ function PlatformEventsView() {
               ) : null}
             </label>
             <Select
+              ariaLabel="筛选事件类别"
+              value={category}
+              options={Object.entries(CATEGORY_LABELS).map(([k, label]) => {
+                const stat = data?.byCategory?.find((c) => c.category === k);
+                const cnt = k === 'ALL' ? data?.total ?? 0 : stat?.count ?? 0;
+                return { value: k, label: `${label} (${fmtNum(cnt)})` };
+              })}
+              onChange={(v) => {
+                setCategory(v);
+                setOffset(0);
+              }}
+            />
+            <Select
               ariaLabel="平台事件时间范围"
               value={range}
               options={RANGE_OPTIONS}
@@ -2691,27 +2666,6 @@ function PlatformEventsView() {
               <span>刷新</span>
             </button>
           </div>
-        </div>
-
-        <div className="logs-chip-row">
-          {Object.entries(CATEGORY_LABELS).map(([k, label]) => {
-            const stat = data?.byCategory?.find((c) => c.category === k);
-            const cnt = k === 'ALL' ? data?.total ?? 0 : stat?.count ?? 0;
-            return (
-              <button
-                key={k}
-                type="button"
-                className={`logs-chip ${category === k ? 'active' : ''}`}
-                onClick={() => {
-                  setCategory(k);
-                  setOffset(0);
-                }}
-              >
-                <span>{label}</span>
-                <b>{fmtNum(cnt)}</b>
-              </button>
-            );
-          })}
         </div>
       </div>
 

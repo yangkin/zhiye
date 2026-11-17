@@ -874,7 +874,7 @@ export function DashboardPage() {
                   </div>
                 </header>
                 {sortedWorkspaces.length === 0 ? (
-                  <p className="dash-empty">暂无符合条件的工作空间</p>
+                  <DashEmptyBox icon="folder" title="暂无符合条件的工作空间" />
                 ) : (
                   <>
                     <div className="dash-table-wrap">
@@ -1101,7 +1101,7 @@ export function DashboardPage() {
                   </div>
                 </header>
                 {filteredTopApps.length === 0 ? (
-                  <p className="dash-empty">暂无符合条件的应用数据</p>
+                  <DashEmptyBox icon="grid" title="暂无符合条件的应用数据" />
                 ) : (
                   <>
                     <div className="dash-table-wrap">
@@ -1269,7 +1269,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.agentTelemetry.tools.length === 0 ? (
-                    <p className="dash-empty">暂无工具调用遥测数据</p>
+                    <DashEmptyBox icon="terminal" title="暂无工具调用遥测数据" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -1317,7 +1317,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.agentTelemetry.verifyChecks.length === 0 ? (
-                    <p className="dash-empty">暂无质检门禁记录</p>
+                    <DashEmptyBox icon="check" title="暂无质检门禁记录" />
                   ) : (
                     <div className="dash-scroll-list" style={{ maxHeight: 310 }}>
                       <div className="dash-table-wrap">
@@ -1375,7 +1375,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.tasks.byType.length === 0 ? (
-                    <p className="dash-empty">暂无任务记录</p>
+                    <DashEmptyBox icon="play" title="暂无任务记录" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -1449,7 +1449,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.tasks.recentFailures.length === 0 ? (
-                    <p className="dash-empty">当前范围暂无失败任务</p>
+                    <DashEmptyBox icon="check" title="当前范围暂无失败任务" />
                   ) : (
                     <div className="dash-scroll-list">
                       <ul className="dash-error-list">
@@ -1502,7 +1502,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.tasks.recentTasks.length === 0 ? (
-                    <p className="dash-empty">暂无最近任务</p>
+                    <DashEmptyBox icon="history" title="暂无最近任务" />
                   ) : (
                     <div className="dash-scroll-list">
                       <div className="dash-table-wrap">
@@ -1568,7 +1568,7 @@ export function DashboardPage() {
                     </div>
                   </header>
                   {data.llm.byModel.length === 0 ? (
-                    <p className="dash-empty">暂无模型调用记账数据</p>
+                    <DashEmptyBox icon="spark" title="暂无模型调用记账数据" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
