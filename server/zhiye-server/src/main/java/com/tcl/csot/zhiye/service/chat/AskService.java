@@ -43,8 +43,9 @@ public class AskService {
     public static final int MAX_FILE_CHARS = 40000;
     public static final int MAX_HISTORY = 12;
     public static final int MAX_HISTORY_CHARS = 2000;
-    /** 多轮历史总字符预算，避免多个带文件的大回复撑爆模型上下文 */
+    /** 多轮历史总字符预算与近似 token 预算，避免多个带文件或高密度中文回复撑爆模型上下文 */
     public static final int MAX_HISTORY_TOTAL_CHARS = 48000;
+    public static final int MAX_HISTORY_TOTAL_TOKENS = 28000;
     private static final java.util.regex.Pattern FILE_BLOCK = java.util.regex.Pattern.compile(
             "\\[\\[file:([^\\]\\r\\n]+)\\]\\][\\s\\S]*?\\[\\[/file\\]\\]");
 
@@ -372,18 +373,33 @@ public class AskService {
             bounded.add(Json.obj().put("role", roles.get(i)).put("content", t));
         }
 
-        // 从最新往前按总字符预算保留，避免历史文件块叠加撑爆上下文
-        int total = 0;
+        // 从最新往前按总字符数和估算 token 双重预算保留，避免高密度中文或大文件历史撑爆上下文
+        int totalChars = 0;
+        int totalTokens = 0;
         int keepFrom = bounded.size();
         for (int i = bounded.size() - 1; i >= 0; i--) {
-            int len = bounded.get(i).path("content").asText().length();
-            if (keepFrom < bounded.size() && total + len > MAX_HISTORY_TOTAL_CHARS) break;
-            total += len;
+            String text = bounded.get(i).path("content").asText();
+            int len = text.length();
+            int tok = estimateTokens(text);
+            if (keepFrom < bounded.size() && (totalChars + len > MAX_HISTORY_TOTAL_CHARS || totalTokens + tok > MAX_HISTORY_TOTAL_TOKENS)) break;
+            totalChars += len;
+            totalTokens += tok;
             keepFrom = i;
         }
         while (keepFrom < bounded.size() && !"user".equals(bounded.get(keepFrom).path("role").asText())) keepFrom++;
         if (keepFrom >= bounded.size()) return List.of();
         return List.copyOf(bounded.subList(keepFrom, bounded.size()));
+    }
+
+    /** 粗略估算混合中英文代码的 token 数（中文/全角约 1.5 tok/字符，ASCII 约 0.35 tok/字符）。 */
+    public static int estimateTokens(String s) {
+        if (s == null || s.isEmpty()) return 0;
+        int nonAscii = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) > 0x7f) nonAscii++;
+        }
+        int ascii = s.length() - nonAscii;
+        return (int) Math.ceil(nonAscii * 1.5 + ascii * 0.35);
     }
 
     /** 本轮用户消息：文字内容 + 附件里提取的文档片段；有图片时用多模态 content 数组（每个附件先出名字再给内容） */

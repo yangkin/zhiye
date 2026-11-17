@@ -12,7 +12,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // CodeMirror 编辑器按需加载，单独分包约 670 KB
     chunkSizeWarningLimit: 700,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor', test: /node_modules[\\/](react|react-dom|react-router|@tanstack|zustand)/ },
+            { name: 'markdown', test: /node_modules[\\/](marked|dompurify|fflate)/ },
+          ],
+        },
+      },
+    },
   },
 });

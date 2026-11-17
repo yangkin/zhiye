@@ -5,7 +5,10 @@ import com.tcl.csot.zhiye.entity.TaskRow;
 import com.tcl.csot.zhiye.repository.ConversationRepository;
 import com.tcl.csot.zhiye.repository.TaskRepository;
 import com.tcl.csot.zhiye.service.chat.AskService;
+import com.tcl.csot.zhiye.service.common.RateLimitService;
 import com.tcl.csot.zhiye.service.conversation.ConversationService;
+import com.tcl.csot.zhiye.service.task.Prompts;
+import com.tcl.csot.zhiye.service.task.RepoMap;
 import com.tcl.csot.zhiye.service.task.TaskExecutor;
 import com.tcl.csot.zhiye.support.Client;
 import com.tcl.csot.zhiye.support.FakeUpstreamController;
@@ -16,12 +19,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 上下文压缩、角色交替归一化、多文件折叠与工作台问答→修改上下文连续性测试。 */
 class ContextHistoryTest extends IntegrationTest {
@@ -94,6 +101,9 @@ class ContextHistoryTest extends IntegrationTest {
     @Autowired
     private JdbcClient jdbc;
 
+    @Autowired
+    private RateLimitService rateLimit;
+
     @Test
     void dialogueBriefWaterFillingPreservesLongDesignSpec() throws Exception {
         Method m = ConversationService.class.getDeclaredMethod("dialogueBrief", List.class, int.class);
@@ -139,5 +149,83 @@ class ContextHistoryTest extends IntegrationTest {
                 .contains("工作台最近讨论记录")
                 .contains("我想把导出按钮改成按月导出 Excel")
                 .doesNotContain("上一轮任务之前的旧问题");
+    }
+
+    @Test
+    void repoMapSummarizesWorkspaceSymbolsAndRecentVersions() throws Exception {
+        Path dir = Files.createTempDirectory("repomap-");
+        try {
+            Files.createDirectories(dir.resolve("src/components"));
+            Files.createDirectories(dir.resolve("cloud"));
+            Files.createDirectories(dir.resolve("node_modules/pkg"));
+            Files.writeString(dir.resolve("src/App.tsx"), "export function App() {\n  return <div />;\n}\n");
+            Files.writeString(dir.resolve("src/components/InspectionTable.tsx"), "export interface Item { id: string }\nexport function InspectionTable() {}\n");
+            Files.writeString(dir.resolve("cloud/schema.sql"), "create table inspection_log (id text primary key);\n");
+            Files.writeString(dir.resolve("node_modules/pkg/index.js"), "export function ignored() {}\n");
+
+            String map = RepoMap.build(dir, "template", List.of(
+                    new RepoMap.VersionNote(2, "modify", "增加按月筛选"),
+                    new RepoMap.VersionNote(1, "generate", "页面与交互生成完成")
+            ));
+            assertThat(map)
+                    .contains("最近版本演进")
+                    .contains("V2 [modify]：增加按月筛选")
+                    .contains("当前项目地图（template）")
+                    .contains("src/App.tsx（4 行）：App")
+                    .contains("src/components/InspectionTable.tsx（3 行）：Item, InspectionTable")
+                    .contains("cloud/schema.sql（2 行）：table inspection_log")
+                    .doesNotContain("node_modules");
+        } finally {
+            org.springframework.util.FileSystemUtils.deleteRecursively(dir);
+        }
+    }
+
+    @Test
+    void promptsFixAndEstimateTokensAdaptToProjectAndLanguage() {
+        var checks = Json.M.createArrayNode().add(Json.obj().put("name", "类型检查").put("ok", false).put("detail", "error TS1"));
+        assertThat(Prompts.fix(checks, 1, "vue")).contains("vue-tsc --noEmit");
+        assertThat(Prompts.fix(checks, 1, "script")).contains("脚本自查").doesNotContain("tsc --noEmit");
+        assertThat(Prompts.fix(checks, 1, "template")).contains("tsc --noEmit");
+
+        assertThat(AskService.estimateTokens("中文密度高的长文本")).isGreaterThan(AskService.estimateTokens("english"));
+        // 超过 token 预算的多轮高密度中文历史同样会被裁减
+        List<JsonNode> dense = new ArrayList<>();
+        String bigCn = "需求说明：".repeat(250);
+        for (int i = 0; i < 20; i++) {
+            dense.add(Json.obj().put("role", "user").put("content", "第" + i + "轮：" + bigCn));
+            dense.add(Json.obj().put("role", "assistant").put("content", "答复" + i + "：" + bigCn));
+        }
+        List<JsonNode> norm = AskService.normalizeHistory(dense);
+        int est = norm.stream().mapToInt(n -> AskService.estimateTokens(n.path("content").asText())).sum();
+        assertThat(est).isLessThanOrEqualTo(AskService.MAX_HISTORY_TOTAL_TOKENS);
+    }
+
+    @Test
+    void distributedRateLimitRejectsOverflowWith429() {
+        String bucket = "test-bucket-" + java.util.UUID.randomUUID();
+        rateLimit.check(bucket, 2, 60, "RATE_LIMITED", "太快了");
+        rateLimit.check(bucket, 2, 60, "RATE_LIMITED", "太快了");
+        assertThatThrownBy(() -> rateLimit.check(bucket, 2, 60, "RATE_LIMITED", "太快了"))
+                .isInstanceOf(com.tcl.csot.zhiye.exception.ApiException.class)
+                .hasMessageContaining("太快了");
+    }
+
+    @Test
+    void crossInstanceStopAbortsStreamingConversation() throws Exception {
+        Client c = client();
+        String cid = c.ok(c.post("/api/conversations", Map.of())).path("id").asText();
+        CompletableFuture<Client.Res> stream = CompletableFuture.supplyAsync(() ->
+                c.send("POST", "/api/conversations/" + cid + "/ask", Map.of("content", "做个看板 [slowstream]"), Map.of("Accept", "text/event-stream")));
+        Thread.sleep(500);
+        // 模拟「停止请求落到另一台实例」：直接向共享库写入停止信号，而不是命中本机内存 running 表
+        jdbc.sql("insert into conversation_stop (conversation_id, requested_at) values (?, clock_timestamp()) "
+                + "on conflict (conversation_id) do update set requested_at = excluded.requested_at")
+                .param(cid).update();
+        assertThat(stream.get().body()).contains("第一段").doesNotContain("第二段");
+        Thread.sleep(400);
+        JsonNode msgs = c.ok(c.get("/api/conversations/" + cid)).path("messages");
+        JsonNode last = msgs.get(msgs.size() - 1);
+        assertThat(last.path("role").asText()).isEqualTo("assistant");
+        assertThat(last.path("content").asText()).isEqualTo("第一段，\n\n（已停止回答）");
     }
 }

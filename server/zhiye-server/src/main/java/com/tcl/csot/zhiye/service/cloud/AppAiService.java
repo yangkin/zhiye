@@ -42,6 +42,8 @@ public class AppAiService {
     private com.tcl.csot.zhiye.service.llm.LlmRouter router;
     @org.springframework.beans.factory.annotation.Autowired
     private org.springframework.jdbc.core.simple.JdbcClient jdbc;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RateLimitService rateLimit;
     private final Map<String, Deque<Long>> calls = new ConcurrentHashMap<>();
 
     public AppAiService(UpstreamClient upstream, ZhiyeProperties props, UsageHook usage, ObjectStore store) {
@@ -148,6 +150,11 @@ public class AppAiService {
     }
 
     private void rateLimit(String appId) {
+        if (rateLimit != null) {
+            rateLimit.check("app-ai:" + appId, PER_MINUTE, 60, "AI_RATE_LIMITED",
+                    "调用太频繁（每分钟最多 " + PER_MINUTE + " 次），请稍后再试");
+            return;
+        }
         long now = System.currentTimeMillis();
         Deque<Long> q = calls.computeIfAbsent(appId, k -> new ArrayDeque<>());
         synchronized (q) {

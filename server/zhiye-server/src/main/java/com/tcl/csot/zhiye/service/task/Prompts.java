@@ -7,7 +7,7 @@ import com.tcl.csot.zhiye.service.app.Catalog;
 import java.util.List;
 
 /** 交给 agent 的中文指令。 */
-final class Prompts {
+public final class Prompts {
     private Prompts() {}
 
     static String generate(AppRow app, List<String> assetPaths) {
@@ -168,8 +168,18 @@ final class Prompts {
                 + "补完后再处理新要求；如果新要求明显是要换方向（例如「不要了」「改成…」），以新要求为准，不用补完上一轮。\n\n---\n" + instruction;
     }
 
-    static String fix(JsonNode checks, int round) {
-        StringBuilder sb = new StringBuilder("平台校验没有通过（第 " + round + " 轮修复），请修复下面的问题，修复后再用 `npx tsc --noEmit` 自查：\n\n");
+    public static String fix(JsonNode checks, int round) { return fix(checks, round, "template"); }
+
+    public static String fix(JsonNode checks, int round, String projectKind) {
+        String checkCmd = switch (projectKind == null ? "template" : projectKind) {
+            case "vue" -> "修复后再用 `npx vue-tsc --noEmit -p tsconfig.json` 自查";
+            case "script" -> "修复后用样例数据重新运行脚本自查";
+            case "static" -> "修复后再检查 HTML / CSS / 脚本报错";
+            case "skill" -> "修复后对照 SKILL.md 规范与引用路径自查";
+            case "vite" -> "修复后再用 `npm run build` 自查";
+            default -> "修复后再用 `npx tsc --noEmit -p tsconfig.json` 自查";
+        };
+        StringBuilder sb = new StringBuilder("平台校验没有通过（第 " + round + " 轮修复），请修复下面的问题，" + checkCmd + "：\n\n");
         for (JsonNode c : checks) {
             if (c.path("ok").asBoolean(true)) continue;
             sb.append("### ").append(c.path("name").asText()).append("\n```\n").append(c.path("detail").asText("")).append("\n```\n");

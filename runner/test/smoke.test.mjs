@@ -88,3 +88,53 @@ test('smokeTest 能检出子路由切换后 #root 白屏', { skip: !HAS_CHROME &
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('smokeTest 能检出移动端 390px 视口下的横向溢出', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+  const dir = makeSite(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0">
+<div id="root"><div style="width:900px;height:80px">宽表格撑爆移动端视口</div></div>
+</body></html>`)
+  try {
+    const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, false)
+    assert.match(r.detail, /移动端.*横向溢出/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('smokeTest 安全交互探活能检出点击 Tab 后的运行时异常', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+  const dir = makeSite(`<!doctype html><html><body>
+<div id="root">
+  <nav>
+    <button role="tab" onclick="document.getElementById('panel').textContent='概览'">概览</button>
+    <button role="tab" onclick="throw new Error('tab boom')">明细</button>
+  </nav>
+  <main id="panel">概览</main>
+</div>
+</body></html>`)
+  try {
+    const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, false)
+    assert.match(r.detail, /tab boom|页面脚本错误/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('smokeTest 对响应式正常且 Tab 切换无异常的应用放行', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+  const dir = makeSite(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0">
+<div id="root">
+  <nav>
+    <button role="tab" onclick="document.getElementById('panel').textContent='概览'">概览</button>
+    <button role="tab" onclick="document.getElementById('panel').textContent='设置'">设置</button>
+  </nav>
+  <main id="panel" style="max-width:100%">内容区</main>
+</div>
+</body></html>`)
+  try {
+    const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
+    assert.equal(r.ok, true, r.detail)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

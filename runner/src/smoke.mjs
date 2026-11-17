@@ -30,6 +30,8 @@ export function startStaticServer(root) {
   })
 }
 
+const SAFE_TAB_SKIP = /删除|移除|清空|重置|退出|注销|取消|提交|保存|发布|购买|支付|导出|下载|确认|发送/
+
 async function readRenderState(target) {
   return target.evaluate(() => {
     const root = document.getElementById('root') || document.getElementById('app')
@@ -37,16 +39,22 @@ async function readRenderState(target) {
     const isUi = (el) => !!el.closest('[data-zhiye-editor-ui]')
     const text = (document.body?.innerText || '').trim()
     const media = Array.from(document.querySelectorAll('body img, body svg, body canvas, body video, body button, body input')).filter((el) => !isUi(el) && visible(el)).length
-    return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title }
+    const vw = window.innerWidth
+    const scrollWidth = document.documentElement ? document.documentElement.scrollWidth : vw
+    const hasViewport = !!document.querySelector('meta[name="viewport"]')
+    return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length, media, title: document.title, vw, scrollWidth, hasViewport }
   })
 }
 
-function checkRenderState(content, requireRoot, errors, prefix = '') {
+function checkRenderState(content, requireRoot, errors, prefix = '', maxWidth = 0) {
   if (!content) return
   if (requireRoot && (!content.hasRoot || content.rootChildren === 0)) {
     errors.push(`${prefix}页面是空白的：挂载节点（#root / #app）里没有渲染出任何内容（可能是渲染时报错或 App 返回了空内容）`)
   } else if (content.textLen === 0 && content.media === 0) {
     errors.push(`${prefix}页面是空白的：body 里没有可见内容`)
+  } else if (maxWidth > 0 && (content.scrollWidth > content.vw + 16 || (content.hasViewport && content.vw > maxWidth + 16))) {
+    const actual = Math.max(content.scrollWidth, content.vw)
+    errors.push(`${prefix}存在横向溢出：页面宽度 ${actual}px 超出视口 ${maxWidth}px，请检查布局响应式适配`)
   }
 }
 
@@ -112,7 +120,7 @@ export async function smokeTest(dir, { requireRoot = false, chromePath = process
     }
     await page.waitForTimeout(800)
     try {
-      checkRenderState(await readRenderState(page), requireRoot, errors)
+      checkRenderState(await readRenderState(page), requireRoot, errors, '', requireRoot ? 1280 : 0)
     } catch (e) {
       errors.push(`无法检查页面内容：${String(e.message).split('\n')[0]}`)
     }
@@ -137,6 +145,50 @@ export async function smokeTest(dir, { requireRoot = false, chromePath = process
         }
       } catch (e) {
         errors.push(`路由切换检查失败：${String(e.message).split('\n')[0]}`)
+      }
+    }
+
+    // 非破坏性导航/标签探活：点开前 3 个安全 tab / 导航按钮，验证切换不会抛出运行时异常或白屏
+    if (requireRoot && errors.length === 0) {
+      try {
+        const candidates = await page.evaluate(() => {
+          const btns = Array.from(document.querySelectorAll('[role="tab"], nav button, aside button'))
+          return btns.map((b, idx) => {
+            const r = b.getBoundingClientRect()
+            const cs = getComputedStyle(b)
+            const label = (b.innerText || b.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ')
+            const ok = r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !b.disabled
+            return { idx, label, ok }
+          }).filter((x) => x.ok && x.label)
+        })
+        let clicked = 0
+        for (const c of candidates) {
+          if (clicked >= 3 || errors.length > 0) break
+          if (SAFE_TAB_SKIP.test(c.label)) continue
+          await page.locator('[role="tab"], nav button, aside button').nth(c.idx).click({ timeout: 2000 }).catch(() => {})
+          await page.waitForTimeout(150)
+          checkRenderState(await readRenderState(page), requireRoot, errors, `切换「${c.label.slice(0, 16)}」后 `)
+          clicked++
+        }
+      } catch (e) {
+        errors.push(`交互切换检查失败：${String(e.message).split('\n')[0]}`)
+      }
+    }
+
+    // 移动端（390×844）视口冒烟：检测常见的小屏横向溢出或渲染报错
+    if (requireRoot && errors.length === 0) {
+      let mobileCtx
+      try {
+        mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+        const mp = await mobileCtx.newPage()
+        await attachPageWatchers(mp, { origin, blocked, errors, warnings, prefix: '移动端 ' })
+        await mp.goto(origin + '/index.html', { waitUntil: 'load', timeout: timeoutMs })
+        await mp.waitForTimeout(450)
+        checkRenderState(await readRenderState(mp), requireRoot, errors, '移动端 ', 390)
+      } catch (e) {
+        errors.push(`移动端检查失败：${String(e.message).split('\n')[0]}`)
+      } finally {
+        if (mobileCtx) await mobileCtx.close().catch(() => {})
       }
     }
 

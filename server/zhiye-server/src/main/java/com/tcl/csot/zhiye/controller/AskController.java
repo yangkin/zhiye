@@ -32,6 +32,8 @@ public class AskController {
     private final CurrentPrincipal principal;
     private final AppRepository apps;
     private final MessageRepository messages;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RateLimitService rateLimit;
 
     public AskController(AskService ask, AskAttachments attachments, CurrentPrincipal principal, AppRepository apps, MessageRepository messages) {
         this.ask = ask;
@@ -41,9 +43,16 @@ public class AskController {
         this.messages = messages;
     }
 
+    private void checkRateLimit(String ws) {
+        if (rateLimit != null) {
+            rateLimit.check("ws-ask:" + ws, 60, 60, "RATE_LIMITED", "提问太频繁，请稍后再试");
+        }
+    }
+
     /** 创造页「润色」：把粗略需求改写得更清楚，不创建应用 */
     @PostMapping("/polish")
     public Map<String, Object> polish(@RequestBody JsonNode body) {
+        checkRateLimit(principal.workspaceId());
         try {
             return Map.of("text", ask.polish(principal.workspaceId(), body == null ? "" : body.path("content").asText("")));
         } catch (com.tcl.csot.zhiye.exception.LlmException e) {
@@ -58,6 +67,7 @@ public class AskController {
 
     @PostMapping("/intent")
     public Map<String, Object> intent(@RequestBody JsonNode body) {
+        checkRateLimit(principal.workspaceId());
         try {
             return Map.of("intent", ask.intent(principal.workspaceId(), body == null ? "" : body.path("content").asText(""), body != null && body.path("hasElement").asBoolean(false),
                     body == null ? null : body.path("appName").asText(null), body == null ? null : body.path("appBrief").asText(null)));
@@ -87,6 +97,7 @@ public class AskController {
         }
         // 校验放在请求线程：内容为空/超长/没有密钥时直接返回 400/503，而不是 SSE 错误事件
         String c = ask.validate(content);
+        checkRateLimit(ws);
         java.util.List<String> skillIds = AskService.ids(body);
         // 消息里附带的素材：图片走视觉、文档提取文本，问答时能读
         java.util.List<String> assetIds = AskService.assetIds(body);

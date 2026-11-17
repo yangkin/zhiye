@@ -516,6 +516,8 @@ public class TaskExecutor {
         instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.instruction(skills);
         if (!bound.isEmpty()) instruction += dataSources.instruction(app.id());
         if (modify && !app.isSkill()) {
+            String repoMap = RepoMap.build(ctx.workspace, app.projectKind(), recentVersions(app.id()));
+            if (!repoMap.isEmpty()) instruction += repoMap;
             String qa = recentWorkbenchQa(app.id(), t);
             if (!qa.isEmpty()) instruction += qa;
             String fnErrors = functions.recentErrors(app.id());
@@ -545,7 +547,7 @@ public class TaskExecutor {
             if (round >= fixRounds)
                 throw new TaskContext.Fail("VERIFY_FAILED", "校验未通过（已修复 " + fixRounds + " 轮）：" + failedSummary(v));
             phase(ctx, "RUNNING", "校验未通过，正在修复（第 " + (round + 1) + " 轮）", 50);
-            String fixSummary = prompt(ctx, Prompts.fix(v.path("checks"), round + 1));
+            String fixSummary = prompt(ctx, Prompts.fix(v.path("checks"), round + 1, app.projectKind()));
             if (fixSummary != null && !fixSummary.isBlank()) fixes.add(fixSummary.trim());
         }
 
@@ -1133,6 +1135,14 @@ public class TaskExecutor {
                     "summary", "更新云数据库表结构失败：" + e.getMessage(), "state", "end", "ok", false));
         }
         return null;
+    }
+
+    /** 取最近几次版本演进摘要（跨任务保留演进轨迹） */
+    private List<RepoMap.VersionNote> recentVersions(String appId) {
+        return jdbc.sql("select number, source, title from version where app_id = ? order by number desc limit 3")
+                .param(appId)
+                .query((rs, i) -> new RepoMap.VersionNote(rs.getInt("number"), rs.getString("source"), rs.getString("title")))
+                .list();
     }
 
     /** 取上一个任务之后、本次修改之前的最近几条工作台问答（task_id 为空），避免「先讨论再按讨论改」断片 */
