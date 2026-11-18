@@ -1526,6 +1526,37 @@ export interface AdminAuditLogItem {
   createdAt: string;
 }
 
+export interface AdminUserItem {
+  id: string;
+  loginName: string;
+  realName: string;
+  email: string | null;
+  role: 'admin' | 'user' | string;
+  dbRole?: string;
+  allowlisted: boolean;
+  self: boolean;
+  workspaceCount: number;
+  appCount: number;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AdminPublishedAppItem {
+  id: string;
+  workspaceId: string;
+  ownerLogin: string | null;
+  ownerName: string;
+  name: string;
+  slug: string;
+  type: string;
+  projectKind: string;
+  accessLevel: 'public' | 'login' | 'members' | string;
+  publishedVersionId: string;
+  totalPv: number;
+  todayPv: number;
+  updatedAt: string;
+}
+
 export interface AdminOverview {
   currentActor: string;
   ssoRestricted: boolean;
@@ -1535,8 +1566,10 @@ export interface AdminOverview {
     maxConcurrentTasks: number;
   };
   customQuotas: AdminCustomQuota[];
+  users?: AdminUserItem[];
   feedbacks: AdminFeedbackItem[];
   feedbackOpenCount: number;
+  publishedApps?: AdminPublishedAppItem[];
   deletedApps: AdminDeletedAppItem[];
   templates: AdminTemplateItem[];
   rateLimitStats: {

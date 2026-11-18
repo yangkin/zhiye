@@ -165,6 +165,48 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
     }
   };
 
+  const handlePurgeOfflineNodes = async (instanceId?: string) => {
+    const ok = await confirmDialog({
+      title: instanceId ? '移除离线节点记录' : '清理全部离线节点记录',
+      message: instanceId
+        ? `确认从集群拓扑中移除已离线的历史节点「${instanceId}」吗？在线节点不受影响。`
+        : '确认移除所有已停机或心跳超时（>120s）的离线历史节点记录吗？在线节点不受影响。',
+      confirmLabel: '确认清理',
+    });
+    if (!ok) return;
+    const key = instanceId ? `node-${instanceId}` : 'node-all';
+    setBusyKey(key);
+    try {
+      const res = await api.adminPurgeOfflineNodes(instanceId);
+      toast(`已清理 ${res.purgedCount} 个离线集群节点记录`, 'ok');
+      await invalidateCluster();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleReclaimLeases = async () => {
+    const ok = await confirmDialog({
+      title: '立即回收超时任务租约',
+      message: '将立即把所有租约已过期的卡死任务标记为失败（WORKER_LOST），释放对应应用的单任务写锁。确认执行吗？',
+      confirmLabel: '立即回收',
+      danger: true,
+    });
+    if (!ok) return;
+    setBusyKey('reclaim-leases');
+    try {
+      const res = await api.adminReclaimExpiredLeases();
+      toast(`已回收 ${res.reclaimedCount} 个超时任务租约并释放应用写锁`, 'ok');
+      await invalidateCluster();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const filteredSandboxes = useMemo(() => {
     const items = data?.sandboxes?.items ?? [];
     const q = search.trim().toLowerCase();
@@ -356,7 +398,16 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
           {queue.expiredLeases > 0 ? (
             <div className="dash-alert-item err">
               <b>EXPIRED_TASK_LEASE</b>
-              <span>检测到 {queue.expiredLeases} 个任务租约已超时，worker 可能已重启，等待 TaskWorker 自动回收为 worker_lost。</span>
+              <span>检测到 {queue.expiredLeases} 个任务租约已超时，worker 可能已重启或异常退出，应用写锁仍被占用。</span>
+              <button
+                type="button"
+                className="dash-link danger"
+                style={{ marginLeft: 'auto', flexShrink: 0 }}
+                disabled={busyKey === 'reclaim-leases'}
+                onClick={() => void handleReclaimLeases()}
+              >
+                {busyKey === 'reclaim-leases' ? '回收中…' : `立即回收租约 (${queue.expiredLeases})`}
+              </button>
             </div>
           ) : null}
           {anomalyCount > 0 ? (
@@ -396,6 +447,16 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
             {queue.oldestQueuedSeconds > 0 ? (
               <span className="dash-pill warn">最长排队 {fmtSecondsAgo(queue.oldestQueuedSeconds)}</span>
             ) : null}
+            {nodesSummary.offline > 0 ? (
+              <button
+                type="button"
+                className="subtle-button dash-compact-btn"
+                disabled={busyKey === 'node-all'}
+                onClick={() => void handlePurgeOfflineNodes()}
+              >
+                清理离线节点 ({nodesSummary.offline})
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -404,7 +465,12 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
         ) : (
           <div className="dash-node-grid">
             {nodes.map((node) => (
-              <NodeTopologyCard key={node.instanceId} node={node} />
+              <NodeTopologyCard
+                key={node.instanceId}
+                node={node}
+                busy={busyKey === `node-${node.instanceId}`}
+                onPurgeOffline={(id) => void handlePurgeOfflineNodes(id)}
+              />
             ))}
           </div>
         )}
@@ -738,8 +804,19 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
   );
 }
 
-function NodeTopologyCard({ node }: { node: ClusterNodeInfo }) {
+function NodeTopologyCard({
+  node,
+  busy,
+  onPurgeOffline,
+}: {
+  node: ClusterNodeInfo;
+  busy?: boolean;
+  onPurgeOffline?: (instanceId: string) => void;
+}) {
   const slotPct = node.workerConcurrency > 0 ? Math.min(100, Math.round((node.activeTasks / node.workerConcurrency) * 100)) : 0;
+  const heapPct =
+    node.heapPercent ??
+    (node.heapMaxBytes > 0 ? Math.round((node.heapUsedBytes / node.heapMaxBytes) * 1000) / 10 : 0);
   const isGracefulStop = node.status === 'offline' && node.gracefulStop;
   const statusPillClass = node.status === 'online' ? 'ok' : node.status === 'degraded' || isGracefulStop ? 'warn' : 'err';
   const statusLabel =
@@ -787,11 +864,11 @@ function NodeTopologyCard({ node }: { node: ClusterNodeInfo }) {
           <div>
             <span>JVM 堆内存</span>
             <b>
-              {fmtBytes(node.heapUsedBytes)} / {fmtBytes(node.heapMaxBytes)} ({node.heapPercent}%)
+              {fmtBytes(node.heapUsedBytes)} / {fmtBytes(node.heapMaxBytes)} ({heapPct}%)
             </b>
           </div>
           <div className="dash-gauge-track">
-            <div className="dash-gauge-fill" style={{ width: `${Math.min(100, node.heapPercent)}%`, background: node.heapPercent >= 85 ? '#d9822b' : '#2f9e8f' }} />
+            <div className="dash-gauge-fill" style={{ width: `${Math.min(100, heapPct)}%`, background: heapPct >= 85 ? '#d9822b' : '#2f9e8f' }} />
           </div>
         </div>
       </div>
@@ -799,7 +876,18 @@ function NodeTopologyCard({ node }: { node: ClusterNodeInfo }) {
       <div className="dash-node-foot">
         <span>活跃沙箱 {node.activeSandboxes}</span>
         <span>OS CPU {node.cpuPercent != null ? `${node.cpuPercent}%` : '—'}</span>
-        <span>进程 {node.sandboxProvider}</span>
+        {node.status === 'offline' && !node.isCurrent && onPurgeOffline ? (
+          <button
+            type="button"
+            className="dash-link danger"
+            disabled={busy}
+            onClick={() => onPurgeOffline(node.instanceId)}
+          >
+            {busy ? '移除中…' : '移除离线记录'}
+          </button>
+        ) : (
+          <span>进程 {node.sandboxProvider}</span>
+        )}
       </div>
     </div>
   );

@@ -138,16 +138,66 @@ class AdminGovernanceTest extends IntegrationTest {
         // 非法状态返回 400
         assertThat(c.send("PATCH", "/api/admin/feedbacks/" + fbId, Map.of("status", "bad_state"), ADMIN_HEADERS).status()).isEqualTo(400);
 
-        // 6. 限流清理与审计日志汇总
+        // 6. 站点访问风控、回收站彻底清除、角色授权、离线节点清理与超时租约回收
+        JsonNode accessUpdated = c.ok(c.send("PATCH", "/api/admin/apps/" + appId + "/access",
+                Map.of("level", "login"), ADMIN_HEADERS));
+        assertThat(accessUpdated.path("accessLevel").asText()).isEqualTo("login");
+        assertThat(c.send("PATCH", "/api/admin/apps/" + appId + "/access", Map.of("level", "invalid"), ADMIN_HEADERS).status()).isEqualTo(400);
+
+        // 未软删除前禁止直接 purge（409 APP_NOT_IN_TRASH），软删除后可彻底清除
+        assertThat(c.send("DELETE", "/api/admin/apps/" + app2Id + "/purge", null, ADMIN_HEADERS).status()).isEqualTo(409);
+        c.ok(c.send("DELETE", "/api/admin/apps/" + app2Id, null, ADMIN_HEADERS));
+        JsonNode purged = c.ok(c.send("DELETE", "/api/admin/apps/" + app2Id + "/purge", null, ADMIN_HEADERS));
+        assertThat(purged.path("purged").asBoolean()).isTrue();
+        assertThat(c.send("POST", "/api/admin/apps/" + app2Id + "/restore", Map.of(), ADMIN_HEADERS).status()).isEqualTo(404);
+
+        // SSO 账号管理员角色授予与撤销
+        String testUserId = Ids.newId("usr");
+        jdbc.sql("""
+                insert into app_user (id, sso_user_id, login_name, real_name, role)
+                values (?, ?, 'ops_candidate', '候选管理员', 'user')
+                """).params(testUserId, "sso_" + testUserId).update();
+        JsonNode promoted = c.ok(c.send("PATCH", "/api/admin/users/" + testUserId + "/role",
+                Map.of("role", "admin"), ADMIN_HEADERS));
+        assertThat(promoted.path("role").asText()).isEqualTo("admin");
+        JsonNode demoted = c.ok(c.send("PATCH", "/api/admin/users/" + testUserId + "/role",
+                Map.of("role", "user"), ADMIN_HEADERS));
+        assertThat(demoted.path("role").asText()).isEqualTo("user");
+
+        // 离线集群节点清理（在线节点拒绝 409，离线节点成功删除）
+        jdbc.sql("""
+                insert into cluster_node (instance_id, role, hostname, port, status, heartbeat_at)
+                values ('node-online-guard', 'api', 'h1', 8080, 'online', now()),
+                       ('node-offline-stale', 'api', 'h2', 8080, 'offline', now() - interval '10 minutes')
+                on conflict (instance_id) do update set status = excluded.status, heartbeat_at = excluded.heartbeat_at
+                """).update();
+        assertThat(c.send("DELETE", "/api/admin/cluster/nodes?instanceId=node-online-guard", null, ADMIN_HEADERS).status()).isEqualTo(409);
+        JsonNode nodePurged = c.ok(c.send("DELETE", "/api/admin/cluster/nodes?instanceId=node-offline-stale", null, ADMIN_HEADERS));
+        assertThat(nodePurged.path("purgedCount").asInt()).isEqualTo(1);
+        jdbc.sql("delete from cluster_node where instance_id = 'node-online-guard'").update();
+
+        // 超时任务租约一键回收
+        String expiredTaskId = Ids.newId("tsk");
+        jdbc.sql("""
+                insert into task (id, workspace_id, app_id, type, status, input, phase_label, progress, lease_owner, lease_until)
+                values (?, ?, ?, 'modify', 'RUNNING', '{}'::jsonb, '编写代码中', 35, 'dead-worker', now() - interval '5 minutes')
+                """).params(expiredTaskId, wsId, appId).update();
+        JsonNode reclaimed = c.ok(c.send("POST", "/api/admin/cluster/reclaim-leases", Map.of(), ADMIN_HEADERS));
+        assertThat(reclaimed.path("reclaimedCount").asInt()).isGreaterThanOrEqualTo(1);
+        assertThat(reclaimed.path("taskIds").toString()).contains(expiredTaskId);
+
+        // 7. 限流清理与审计日志汇总
         jdbc.sql("insert into rate_limit_hit (bucket) values ('test-bucket')").update();
         JsonNode cleared = c.ok(c.send("POST", "/api/admin/rate-limits/clear", Map.of("bucket", "test-bucket"), ADMIN_HEADERS));
         assertThat(cleared.path("clearedCount").asInt()).isGreaterThanOrEqualTo(1);
 
         JsonNode finalOverview = c.ok(c.send("GET", "/api/admin/overview", null, ADMIN_HEADERS));
+        assertThat(finalOverview.path("users").toString()).contains("ops_candidate");
         String auditJson = finalOverview.path("auditLogs").toString();
         assertThat(auditJson).contains("QUOTA_UPDATE", "QUOTA_RESET", "APP_UNPUBLISH", "APP_DELETE",
-                "APP_RESTORE", "TASK_CANCEL", "TASK_RETRY", "TEMPLATE_FEATURE", "TEMPLATE_DELETE",
-                "FEEDBACK_TRIAGE", "RATE_LIMIT_CLEAR");
+                "APP_RESTORE", "APP_PURGE", "SITE_ACCESS_UPDATE", "ADMIN_ROLE_UPDATE",
+                "CLUSTER_NODE_PURGE", "TASK_LEASE_RECLAIM", "TASK_CANCEL", "TASK_RETRY",
+                "TEMPLATE_FEATURE", "TEMPLATE_DELETE", "FEEDBACK_TRIAGE", "RATE_LIMIT_CLEAR");
     }
 
     @Test

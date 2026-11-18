@@ -40,7 +40,15 @@ public class AdminController {
     @GetMapping("/overview")
     public Map<String, Object> overview(HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());
-        return admin.overview(actor);
+        return admin.overview(actor, admin.currentUserId(req));
+    }
+
+    @PatchMapping("/users/{id}/role")
+    public Map<String, Object> updateUserRole(@PathVariable String id,
+                                              @RequestBody(required = false) JsonNode body,
+                                              HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.updateUserRole(id, body == null ? Json.obj() : body, actor, admin.currentUserId(req));
     }
 
     @PutMapping("/workspaces/{wsId}/quota")
@@ -67,6 +75,20 @@ public class AdminController {
     public Map<String, Object> deleteApp(@PathVariable String id, HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());
         return admin.deleteApp(id, actor);
+    }
+
+    @DeleteMapping("/apps/{id}/purge")
+    public Map<String, Object> purgeApp(@PathVariable String id, HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.purgeDeletedApp(id, actor);
+    }
+
+    @PatchMapping("/apps/{id}/access")
+    public Map<String, Object> updateSiteAccess(@PathVariable String id,
+                                                @RequestBody(required = false) JsonNode body,
+                                                HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.updateSiteAccess(id, body == null ? Json.obj() : body, actor);
     }
 
     @PostMapping("/tasks/{id}/cancel")
@@ -149,5 +171,20 @@ public class AdminController {
         String actor = admin.requireActor(req, principal.workspaceId());
         if (clusterSandbox == null) return Map.of("ok", false);
         return clusterSandbox.reapOrphansAndGhosts(actor);
+    }
+
+    @DeleteMapping("/cluster/nodes")
+    public Map<String, Object> purgeOfflineNodes(@RequestParam(required = false) String instanceId,
+                                                 HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        if (clusterSandbox == null) return Map.of("ok", false, "purgedCount", 0);
+        return clusterSandbox.purgeOfflineNodes(instanceId, actor);
+    }
+
+    @PostMapping("/cluster/reclaim-leases")
+    public Map<String, Object> reclaimExpiredLeases(HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        if (clusterSandbox == null) return Map.of("ok", false, "reclaimedCount", 0);
+        return clusterSandbox.reclaimExpiredLeases(actor);
     }
 }

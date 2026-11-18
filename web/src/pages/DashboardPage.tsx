@@ -639,9 +639,10 @@ export function DashboardPage() {
             </div>
           ) : null}
 
-          {/* 1. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比） */}
-          <section className="dash-section" aria-label="核心管理 KPI">
-            <div className="dash-kpi-grid-6">
+          {/* 1. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比，仅在「全部维度」展示） */}
+          {section === 'all' ? (
+            <section className="dash-section" aria-label="核心管理 KPI">
+              <div className="dash-kpi-grid-6">
               <KpiCard
                 title="活跃空间与用户"
                 value={fmtNum(data.overview.workspacesActiveRange)}
@@ -716,8 +717,9 @@ export function DashboardPage() {
                   `用户反馈 ${fmtNum(data.overview.helpFeedbackTotal)} · 社区 ${fmtNum(data.overview.templatesPublished)}`,
                 ]}
               />
-            </div>
-          </section>
+              </div>
+            </section>
+          ) : null}
 
           {/* 集群与沙箱全景（在「全部」显示高密度摘要条，在「集群与沙箱」页签展开完整节点拓扑与沙箱控制台） */}
           {isAdmin && section === 'all' ? (

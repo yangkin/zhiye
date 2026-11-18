@@ -1424,6 +1424,7 @@
   font-weight: 500;
   text-align: left;
   padding: 0;
+  white-space: nowrap;
 }
 
 .dash-link:hover {
@@ -1750,12 +1751,12 @@
 
 .dash-audit-json {
   display: inline-block;
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
+  max-width: 440px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  vertical-align: top;
   font-size: 11px;
+  line-height: 1.45;
 }
 
 .dash-modal-form {
@@ -1911,6 +1912,7 @@
 
 .dash-cluster-toolbar {
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 12px;

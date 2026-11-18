@@ -579,6 +579,11 @@ export const api = {
   adminUnpublishApp: (id: string) => request<{ id: string; name: string; published: boolean }>(`/api/admin/apps/${enc(id)}/unpublish`, { method: 'POST', body: {} }),
   adminRestoreApp: (id: string) => request<{ id: string; name: string; restored: boolean }>(`/api/admin/apps/${enc(id)}/restore`, { method: 'POST', body: {} }),
   adminDeleteApp: (id: string) => request<{ id: string; name: string; deleted: boolean }>(`/api/admin/apps/${enc(id)}`, { method: 'DELETE' }),
+  adminPurgeApp: (id: string) => request<{ id: string; name: string; purged: boolean }>(`/api/admin/apps/${enc(id)}/purge`, { method: 'DELETE' }),
+  adminUpdateSiteAccess: (id: string, level: 'public' | 'login' | 'members') =>
+    request<{ id: string; name: string; accessLevel: string }>(`/api/admin/apps/${enc(id)}/access`, { method: 'PATCH', body: { level } }),
+  adminUpdateUserRole: (id: string, role: 'admin' | 'user') =>
+    request<{ id: string; loginName: string; realName: string; role: string }>(`/api/admin/users/${enc(id)}/role`, { method: 'PATCH', body: { role } }),
   adminCancelTask: (id: string) => request<Task>(`/api/admin/tasks/${enc(id)}/cancel`, { method: 'POST', body: {} }),
   adminRetryTask: (id: string) => request<Task>(`/api/admin/tasks/${enc(id)}/retry`, { method: 'POST', body: {} }),
   adminFeatureTemplate: (id: string, body: { featured: boolean; pinnedOrder?: number }) =>
@@ -612,6 +617,15 @@ export const api = {
     }>(`/api/admin/sandboxes/${enc(ref)}` + qs(opts), { method: 'DELETE' }),
   adminReapSandboxes: () =>
     request<{ ok: boolean; ghostsSettled: number; orphansKilled: number; operator: string }>('/api/admin/sandboxes/reap', {
+      method: 'POST',
+      body: {},
+    }),
+  adminPurgeOfflineNodes: (instanceId?: string) =>
+    request<{ ok: boolean; purgedCount: number; instanceId: string }>('/api/admin/cluster/nodes' + qs(instanceId ? { instanceId } : {}), {
+      method: 'DELETE',
+    }),
+  adminReclaimExpiredLeases: () =>
+    request<{ ok: boolean; reclaimedCount: number; taskIds: string[] }>('/api/admin/cluster/reclaim-leases', {
       method: 'POST',
       body: {},
     }),

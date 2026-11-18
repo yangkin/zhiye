@@ -930,6 +930,80 @@ public class ClusterSandboxService {
         return Map.of("ok", true, "ghostsSettled", ghostsSettled, "orphansKilled", orphansKilled, "operator", op);
     }
 
+    /** 清理已离线的集群历史节点记录（禁止清理本实例或仍在线/心跳未超时的节点） */
+    public Map<String, Object> purgeOfflineNodes(String targetInstanceId, String actor) {
+        String cleanTarget = clean(targetInstanceId);
+        int purged;
+        if (cleanTarget != null) {
+            if (instanceId.equals(cleanTarget)) {
+                throw new ApiException(HttpStatus.CONFLICT, "NODE_IS_CURRENT", "不能清理当前正在响应的本机实例节点");
+            }
+            var nodeOpt = jdbc.sql("""
+                    select status, extract(epoch from (now() - heartbeat_at)) as hb_age_sec
+                    from cluster_node where instance_id = ?
+                    """).param(cleanTarget).query((rs, i) -> {
+                String st = rs.getString("status");
+                double age = Math.max(0.0, rs.getDouble("hb_age_sec"));
+                return "offline".equals(st) || age > 120;
+            }).optional();
+            if (nodeOpt.isEmpty()) {
+                throw ApiException.notFound("集群节点");
+            }
+            if (!nodeOpt.get()) {
+                throw new ApiException(HttpStatus.CONFLICT, "NODE_STILL_ONLINE", "该节点心跳正常仍在线，仅允许清理已离线节点");
+            }
+            purged = jdbc.sql("delete from cluster_node where instance_id = ?").param(cleanTarget).update();
+        } else {
+            purged = jdbc.sql("""
+                    delete from cluster_node
+                    where instance_id <> ?
+                      and (status = 'offline' or heartbeat_at < now() - interval '120 seconds')
+                    """).param(instanceId).update();
+        }
+        try {
+            jdbc.sql("""
+                    insert into admin_audit_log (id, actor, action, target_type, target_id, detail)
+                    values (?, ?, 'CLUSTER_NODE_PURGE', 'cluster_node', ?, ?::jsonb)
+                    """).params("aud_" + Ids.random(10), actor, cleanTarget == null ? "offline_all" : cleanTarget,
+                    Json.write(Map.of("purgedCount", purged, "instanceId", cleanTarget == null ? "all_offline" : cleanTarget))).update();
+        } catch (Exception ignored) {}
+        return Map.of("ok", true, "purgedCount", purged, "instanceId", cleanTarget == null ? "all_offline" : cleanTarget);
+    }
+
+    /** 立即回收所有租约已超时的卡死任务（释放应用单任务写锁并记入操作审计） */
+    public Map<String, Object> reclaimExpiredLeases(String actor) {
+        List<String> expiredIds = jdbc.sql("""
+                select id from task
+                where status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                  and (lease_until is null or lease_until < now())
+                order by created_at asc
+                limit 100
+                """).query(String.class).list();
+        int reclaimed = 0;
+        for (String tid : expiredIds) {
+            int n = jdbc.sql("""
+                    update task set
+                      status = 'FAILED',
+                      error_code = coalesce(error_code, 'WORKER_LOST'),
+                      error_message = coalesce(error_message, '任务租约已超时，由管理员手动回收释放应用写锁'),
+                      phase_label = '租约超时已回收',
+                      finished_at = coalesce(finished_at, now())
+                    where id = ?
+                      and status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                      and (lease_until is null or lease_until < now())
+                    """).param(tid).update();
+            reclaimed += n;
+        }
+        try {
+            jdbc.sql("""
+                    insert into admin_audit_log (id, actor, action, target_type, target_id, detail)
+                    values (?, ?, 'TASK_LEASE_RECLAIM', 'task', 'expired_leases', ?::jsonb)
+                    """).params("aud_" + Ids.random(10), actor,
+                    Json.write(Map.of("reclaimedCount", reclaimed, "taskIds", expiredIds))).update();
+        } catch (Exception ignored) {}
+        return Map.of("ok", true, "reclaimedCount", reclaimed, "taskIds", expiredIds);
+    }
+
     // ================= 内部采样与控制面辅助 =================
 
     private void sampleLiveLocalSandboxes() {

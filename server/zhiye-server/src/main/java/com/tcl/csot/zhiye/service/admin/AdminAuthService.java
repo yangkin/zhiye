@@ -54,6 +54,17 @@ public class AdminAuthService {
         return auth.ssoEnabled() && !allowLoginNames.isEmpty();
     }
 
+    public boolean isAllowlistedLogin(String loginName) {
+        String cleanLogin = clean(loginName);
+        return cleanLogin != null && allowLoginNames.contains(cleanLogin);
+    }
+
+    public String currentUserId(HttpServletRequest req) {
+        if (req == null) return null;
+        SsoUser user = (SsoUser) req.getAttribute(SsoAuthFilter.ATTR_USER);
+        return user == null ? null : clean(user.id());
+    }
+
     public boolean isAdmin(HttpServletRequest req, String currentWs) {
         if (hasValidAdminToken(req)) return true;
         SsoUser user = req == null ? null : (SsoUser) req.getAttribute(SsoAuthFilter.ATTR_USER);

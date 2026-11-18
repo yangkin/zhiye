@@ -42,6 +42,8 @@ import java.util.UUID;
 @Service
 public class AdminService {
     private static final Set<String> FEEDBACK_STATUSES = Set.of("open", "in_progress", "resolved", "ignored");
+    private static final Set<String> USER_ROLES = Set.of("admin", "user");
+    private static final Set<String> SITE_ACCESS_LEVELS = Set.of("public", "login", "members");
 
     private final JdbcClient jdbc;
     private final QuotaService quota;
@@ -101,8 +103,17 @@ public class AdminService {
         return adminAuth.requireAdminActor(user, fallbackWorkspaceId);
     }
 
+    public String currentUserId(HttpServletRequest req) {
+        return adminAuth.currentUserId(req);
+    }
+
     /** 聚合返回管理控制台治理全貌数据 */
     public Map<String, Object> overview(String actor) {
+        return overview(actor, null);
+    }
+
+    /** 聚合返回管理控制台治理全貌数据 */
+    public Map<String, Object> overview(String actor, String currentUserId) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("currentActor", actor);
         out.put("ssoRestricted", adminAuth.isSsoRestricted());
@@ -112,11 +123,13 @@ public class AdminService {
                 "maxConcurrentTasks", props.workspace().maxConcurrentTasks()));
 
         out.put("customQuotas", queryCustomQuotas());
+        out.put("users", queryUsers(currentUserId));
         var feedbacks = queryFeedbacks();
         out.put("feedbacks", feedbacks);
         out.put("feedbackOpenCount", feedbacks.stream()
                 .filter(f -> "open".equals(f.get("status")) || "in_progress".equals(f.get("status")))
                 .count());
+        out.put("publishedApps", queryPublishedApps());
         out.put("deletedApps", queryDeletedApps());
         out.put("templates", queryTemplates());
         out.put("rateLimitStats", queryRateLimitStats());
@@ -308,7 +321,7 @@ public class AdminService {
                 select id, actor, action, target_type, target_id, detail, created_at
                 from admin_audit_log
                 order by created_at desc
-                limit 60
+                limit 200
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
@@ -318,6 +331,71 @@ public class AdminService {
             m.put("targetId", rs.getString("target_id"));
             m.put("detail", Json.read(rs.getString("detail")));
             m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).list();
+    }
+
+    private List<Map<String, Object>> queryUsers(String currentUserId) {
+        return jdbc.sql("""
+                select u.id, u.login_name, u.real_name, u.email, u.role, u.created_at, u.last_login_at,
+                       (select count(*) from workspace w where w.owner_user_id = u.id) as ws_count,
+                       (select count(*) from app a join workspace w on w.id = a.workspace_id
+                         where w.owner_user_id = u.id and a.deleted_at is null) as app_count
+                from app_user u
+                order by case when lower(u.role) = 'admin' then 0 else 1 end, u.last_login_at desc
+                limit 200
+                """).query((rs, i) -> {
+            String id = rs.getString("id");
+            String loginName = rs.getString("login_name");
+            String dbRole = rs.getString("role") == null ? "user" : rs.getString("role").toLowerCase();
+            boolean allowlisted = adminAuth.isAllowlistedLogin(loginName);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", id);
+            m.put("loginName", loginName);
+            m.put("realName", displayName(rs.getString("real_name"), loginName, id));
+            m.put("email", rs.getString("email"));
+            m.put("role", allowlisted ? "admin" : dbRole);
+            m.put("dbRole", dbRole);
+            m.put("allowlisted", allowlisted);
+            m.put("self", currentUserId != null && currentUserId.equals(id));
+            m.put("workspaceCount", rs.getInt("ws_count"));
+            m.put("appCount", rs.getInt("app_count"));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            m.put("lastLoginAt", Db.iso(Db.ts(rs, "last_login_at")));
+            return m;
+        }).list();
+    }
+
+    private List<Map<String, Object>> queryPublishedApps() {
+        return jdbc.sql("""
+                select a.id, a.workspace_id, a.name, a.slug, a.type, a.project_kind,
+                       a.published_version_id, a.updated_at,
+                       coalesce(sa.level, 'public') as access_level,
+                       u.login_name, u.real_name,
+                       coalesce((select sum(pv) from app_pageview_daily p where p.app_id = a.id), 0) as total_pv,
+                       coalesce((select sum(pv) from app_pageview_daily p where p.app_id = a.id and p.day = current_date), 0) as today_pv
+                from app a
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                left join app_site_access sa on sa.app_id = a.id
+                where a.deleted_at is null and a.published_version_id is not null
+                order by total_pv desc, a.updated_at desc
+                limit 200
+                """).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", rs.getString("id"));
+            m.put("workspaceId", rs.getString("workspace_id"));
+            m.put("ownerLogin", rs.getString("login_name"));
+            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            m.put("name", rs.getString("name"));
+            m.put("slug", rs.getString("slug"));
+            m.put("type", rs.getString("type"));
+            m.put("projectKind", rs.getString("project_kind"));
+            m.put("accessLevel", rs.getString("access_level"));
+            m.put("publishedVersionId", rs.getString("published_version_id"));
+            m.put("totalPv", rs.getLong("total_pv"));
+            m.put("todayPv", rs.getLong("today_pv"));
+            m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
             return m;
         }).list();
     }
@@ -497,6 +575,120 @@ public class AdminService {
         }
         audit(actor, "RATE_LIMIT_CLEAR", "rate_limit", bucket.isEmpty() ? "all" : bucket, Map.of("clearedCount", cleared));
         return Map.of("clearedCount", cleared, "bucket", bucket.isEmpty() ? "all" : bucket);
+    }
+
+    /** 授予或撤销 SSO 用户的平台管理员权限（禁止降级当前操作者本人或固定白名单账号） */
+    public Map<String, Object> updateUserRole(String userId, JsonNode body, String actor, String currentUserId) {
+        var row = jdbc.sql("select id, login_name, real_name, role from app_user where id = ?")
+                .param(userId)
+                .query((rs, i) -> Map.of(
+                        "id", rs.getString("id"),
+                        "loginName", rs.getString("login_name"),
+                        "realName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("id")),
+                        "role", rs.getString("role") == null ? "user" : rs.getString("role").toLowerCase()))
+                .optional()
+                .orElseThrow(() -> ApiException.notFound("用户"));
+
+        String role = body.path("role").asText("").trim().toLowerCase();
+        if (!USER_ROLES.contains(role)) {
+            throw ApiException.validation("不支持的角色类型：" + role);
+        }
+        if (currentUserId != null && currentUserId.equals(userId) && !"admin".equals(role)) {
+            throw ApiException.conflict("SELF_DEMOTE_FORBIDDEN", "不能撤销当前登录账号自身的管理员权限");
+        }
+        if (adminAuth.isAllowlistedLogin(row.get("loginName")) && !"admin".equals(role)) {
+            throw ApiException.conflict("ALLOWLIST_IMMUTABLE", "该账号属于系统配置白名单固定管理员，无法通过界面降级");
+        }
+
+        jdbc.sql("update app_user set role = ? where id = ?").params(role, userId).update();
+        audit(actor, "ADMIN_ROLE_UPDATE", "user", userId, Map.of(
+                "loginName", row.get("loginName"),
+                "previousRole", row.get("role"),
+                "role", role));
+        return Map.of(
+                "id", userId,
+                "loginName", row.get("loginName"),
+                "realName", row.get("realName"),
+                "role", role);
+    }
+
+    /** 管理员调整已发布站点的访问权限级别（public / login / members） */
+    public Map<String, Object> updateSiteAccess(String appId, JsonNode body, String actor) {
+        AppRow app = apps.findById(appId).orElseThrow(() -> ApiException.notFound("应用"));
+        if (app.deletedAt() != null) {
+            throw ApiException.conflict("APP_DELETED", "应用已被删除，无法修改站点访问权限");
+        }
+        String level = body.path("level").asText("").trim().toLowerCase();
+        if (!SITE_ACCESS_LEVELS.contains(level)) {
+            throw ApiException.validation("不支持的站点访问级别：" + level);
+        }
+        jdbc.sql("""
+                insert into app_site_access (app_id, level, updated_at)
+                values (?, ?, now())
+                on conflict (app_id) do update set level = excluded.level, updated_at = now()
+                """).params(appId, level).update();
+        audit(actor, "SITE_ACCESS_UPDATE", "app", appId, Map.of(
+                "name", app.name(),
+                "workspaceId", app.workspaceId(),
+                "accessLevel", level));
+        return Map.of("id", appId, "name", app.name(), "accessLevel", level);
+    }
+
+    /** 彻底永久清除回收站中的应用及其全部关联版本、任务与云存储资源 */
+    public Map<String, Object> purgeDeletedApp(String id, String actor) {
+        AppRow app = apps.findById(id).orElseThrow(() -> ApiException.notFound("应用"));
+        if (app.deletedAt() == null) {
+            throw ApiException.conflict("APP_NOT_IN_TRASH", "仅允许彻底清除已移入回收站的应用，请先执行软删除");
+        }
+        long activeTasks = jdbc.sql("""
+                select count(*) from task
+                where app_id = ? and status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                """).param(id).query(Long.class).single();
+        if (activeTasks > 0) {
+            throw ApiException.conflict("TASK_ACTIVE", "该应用仍有运行中的任务，无法彻底清除");
+        }
+
+        var cloudRow = jdbc.sql("select schema_name, storage_prefix from app_cloud where app_id = ?")
+                .param(id)
+                .query((rs, i) -> Map.of(
+                        "schemaName", rs.getString("schema_name") == null ? "" : rs.getString("schema_name"),
+                        "storagePrefix", rs.getString("storage_prefix") == null ? "" : rs.getString("storage_prefix")))
+                .optional();
+
+        jdbc.sql("delete from task_message_queue where app_id = ?").param(id).update();
+        jdbc.sql("delete from draft where app_id = ?").param(id).update();
+        jdbc.sql("delete from message where app_id = ?").param(id).update();
+        jdbc.sql("delete from task_event where task_id in (select id from task where app_id = ?)").param(id).update();
+        jdbc.sql("delete from checkpoint where task_id in (select id from task where app_id = ?)").param(id).update();
+        jdbc.sql("delete from task_token where task_id in (select id from task where app_id = ?)").param(id).update();
+        jdbc.sql("delete from model_usage where task_id in (select id from task where app_id = ?)").param(id).update();
+        jdbc.sql("delete from deployment where app_id = ?").param(id).update();
+        jdbc.sql("delete from version where app_id = ?").param(id).update();
+        jdbc.sql("delete from task where app_id = ?").param(id).update();
+        jdbc.sql("delete from skill_publication where app_id = ?").param(id).update();
+        jdbc.sql("delete from data_source_call where app_id = ?").param(id).update();
+        jdbc.sql("delete from app_cloud_table where app_id = ?").param(id).update();
+        jdbc.sql("delete from app_cloud where app_id = ?").param(id).update();
+        jdbc.sql("delete from app_pageview_daily where app_id = ?").param(id).update();
+        jdbc.sql("delete from asset where app_id = ?").param(id).update();
+        jdbc.sql("delete from app where id = ?").param(id).update();
+
+        if (cloudRow.isPresent()) {
+            String schema = cloudRow.get().get("schemaName");
+            if (schema != null && schema.matches("^app_[a-z0-9_]+$")) {
+                try {
+                    jdbc.sql("drop schema if exists " + schema + " cascade").update();
+                } catch (Exception ignored) {}
+            }
+            String prefix = cloudRow.get().get("storagePrefix");
+            if (prefix != null && !prefix.isBlank()) {
+                try { store.deletePrefix(prefix); } catch (Exception ignored) {}
+            }
+        }
+        try { store.deletePrefix("apps/" + id + "/"); } catch (Exception ignored) {}
+
+        audit(actor, "APP_PURGE", "app", id, Map.of("name", app.name(), "workspaceId", app.workspaceId()));
+        return Map.of("id", id, "name", app.name(), "purged", true);
     }
 
     private void audit(String actor, String action, String targetType, String targetId, Map<String, Object> detail) {

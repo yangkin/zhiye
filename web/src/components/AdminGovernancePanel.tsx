@@ -13,6 +13,7 @@ import type {
 import { confirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
 import { Select } from './Select';
+import { Icon } from '../lib/icons';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { DashEmptyBox, fmtCompact, fmtNum } from './DashboardCharts';
@@ -24,20 +25,31 @@ const FEEDBACK_STATUS_LABELS: Record<AdminFeedbackStatus, string> = {
   ignored: '已忽略',
 };
 
+const SITE_ACCESS_LABELS: Record<string, string> = {
+  public: '内网公开',
+  login: '员工登录',
+  members: '指定成员',
+};
+
 const AUDIT_ACTION_LABELS: Record<string, string> = {
   QUOTA_UPDATE: '调整配额',
   QUOTA_RESET: '恢复默认配额',
+  ADMIN_ROLE_UPDATE: '变更管理员角色',
+  SITE_ACCESS_UPDATE: '调整站点访问权限',
   APP_UNPUBLISH: '强行下线站点',
   APP_RESTORE: '恢复已删应用',
   APP_DELETE: '下架删除应用',
+  APP_PURGE: '彻底清除应用',
   TASK_CANCEL: '强停任务',
   TASK_RETRY: '重跑失败任务',
+  TASK_LEASE_RECLAIM: '回收超时租约',
   TEMPLATE_FEATURE: '设置精选置顶',
   TEMPLATE_DELETE: '下架社区作品',
   FEEDBACK_TRIAGE: '分诊用户反馈',
   RATE_LIMIT_CLEAR: '清理限流窗口',
   SANDBOX_DESTROY: '销毁沙箱实例',
   SANDBOX_REAP: '幽灵沙箱对账清理',
+  CLUSTER_NODE_PURGE: '清理离线集群节点',
   RUNTIME_LOG_VIEW: '查看服务运行日志',
   RUNNER_LOG_DOWNLOAD: '下载 Runner 日志',
 };
@@ -71,6 +83,12 @@ export function AdminGovernancePanel({
   const [triageNote, setTriageNote] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [quotaPickWs, setQuotaPickWs] = useState('');
+  const [userQuery, setUserQuery] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'user'>('all');
+  const [siteQuery, setSiteQuery] = useState('');
+  const [siteLevelFilter, setSiteLevelFilter] = useState<'all' | 'public' | 'login' | 'members'>('all');
+  const [auditQuery, setAuditQuery] = useState('');
+  const [auditActionFilter, setAuditActionFilter] = useState('all');
 
   const invalidateAll = async () => {
     await Promise.all([
@@ -96,6 +114,81 @@ export function AdminGovernancePanel({
     if (fbFilter === 'all') return list;
     return list.filter((f) => f.status === fbFilter);
   }, [overview?.feedbacks, fbFilter]);
+
+  const filteredUsers = useMemo(() => {
+    const list = overview?.users ?? [];
+    const q = userQuery.trim().toLowerCase();
+    return list.filter((u) => {
+      if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+      if (!q) return true;
+      return (
+        u.loginName.toLowerCase().includes(q) ||
+        u.realName.toLowerCase().includes(q) ||
+        (u.email ?? '').toLowerCase().includes(q) ||
+        u.id.toLowerCase().includes(q)
+      );
+    });
+  }, [overview?.users, userQuery, userRoleFilter]);
+
+  const filteredPublishedApps = useMemo(() => {
+    const list = overview?.publishedApps ?? [];
+    const q = siteQuery.trim().toLowerCase();
+    return list.filter((a) => {
+      if (siteLevelFilter !== 'all' && a.accessLevel !== siteLevelFilter) return false;
+      if (!q) return true;
+      return (
+        a.name.toLowerCase().includes(q) ||
+        a.slug.toLowerCase().includes(q) ||
+        a.workspaceId.toLowerCase().includes(q) ||
+        a.ownerName.toLowerCase().includes(q)
+      );
+    });
+  }, [overview?.publishedApps, siteQuery, siteLevelFilter]);
+
+  const auditActionOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of overview?.auditLogs ?? []) {
+      counts.set(row.action, (counts.get(row.action) ?? 0) + 1);
+    }
+    return [
+      { value: 'all', label: `全部动作 (${overview?.auditLogs.length ?? 0})` },
+      ...Array.from(counts.entries()).map(([act, cnt]) => ({
+        value: act,
+        label: `${AUDIT_ACTION_LABELS[act] || act} (${cnt})`,
+      })),
+    ];
+  }, [overview?.auditLogs]);
+
+  const filteredAuditLogs = useMemo(() => {
+    const list = overview?.auditLogs ?? [];
+    const q = auditQuery.trim().toLowerCase();
+    return list.filter((log) => {
+      if (auditActionFilter !== 'all' && log.action !== auditActionFilter) return false;
+      if (!q) return true;
+      const hay = `${log.actor} ${log.action} ${AUDIT_ACTION_LABELS[log.action] || ''} ${log.targetType} ${log.targetId} ${JSON.stringify(log.detail)}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [overview?.auditLogs, auditQuery, auditActionFilter]);
+
+  const exportAuditCsv = () => {
+    const rows = filteredAuditLogs.map((l) => [
+      l.createdAt,
+      `"${(l.actor || '').replace(/"/g, '""')}"`,
+      AUDIT_ACTION_LABELS[l.action] || l.action,
+      l.targetType,
+      `"${(l.targetId || '').replace(/"/g, '""')}"`,
+      `"${JSON.stringify(l.detail ?? {}).replace(/"/g, '""')}"`,
+    ]);
+    const header = ['时间', '操作人', '动作', '对象类型', '目标ID', '变更详情'];
+    const csv = '\uFEFF' + [header, ...rows].map((r) => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zhiye-admin-audit-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const workspaceChoices = useMemo(() => {
     const map = new Map<string, string>();
@@ -132,7 +225,7 @@ export function AdminGovernancePanel({
     return (
       <section className="dash-section" aria-label="治理与运维">
         <div className="dash-panel">
-          <p className="dash-empty">正在加载管理治理与审计台账…</p>
+          <DashEmptyBox icon="settings" title="正在加载管理治理与审计台账…" />
         </div>
       </section>
     );
@@ -142,7 +235,7 @@ export function AdminGovernancePanel({
     return (
       <section className="dash-section" aria-label="治理与运维">
         <div className="dash-panel">
-          <p className="dash-empty">治理台账加载失败：{errorMessage(error)}</p>
+          <DashEmptyBox icon="alert" title={`治理台账加载失败：${errorMessage(error)}`} />
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
             <button type="button" className="subtle-button" onClick={onRetry}>
               重试加载
@@ -501,25 +594,47 @@ export function AdminGovernancePanel({
                         <td>{fmtNum(a.versionCount)}</td>
                         <td className="dash-nowrap">{fmtTime(a.deletedAt)}</td>
                         <td>
-                          <button
-                            type="button"
-                            className="dash-link"
-                            disabled={busyKey === `restore-${a.id}`}
-                            onClick={async () => {
-                              const ok = await confirmDialog({
-                                title: '从回收站恢复应用',
-                                message: `确认恢复「${a.name}」回原工作空间（${a.ownerName}）吗？`,
-                                confirmLabel: '确认恢复',
-                              });
-                              if (!ok) return;
-                              await runAction(`restore-${a.id}`, async () => {
-                                await api.adminRestoreApp(a.id);
-                                toast(`已恢复应用「${a.name}」`, 'ok');
-                              });
-                            }}
-                          >
-                            一键恢复
-                          </button>
+                          <div className="dash-action-row">
+                            <button
+                              type="button"
+                              className="dash-link"
+                              disabled={busyKey === `restore-${a.id}`}
+                              onClick={async () => {
+                                const ok = await confirmDialog({
+                                  title: '从回收站恢复应用',
+                                  message: `确认恢复「${a.name}」回原工作空间（${a.ownerName}）吗？`,
+                                  confirmLabel: '确认恢复',
+                                });
+                                if (!ok) return;
+                                await runAction(`restore-${a.id}`, async () => {
+                                  await api.adminRestoreApp(a.id);
+                                  toast(`已恢复应用「${a.name}」`, 'ok');
+                                });
+                              }}
+                            >
+                              一键恢复
+                            </button>
+                            <button
+                              type="button"
+                              className="dash-link danger"
+                              disabled={busyKey === `purge-${a.id}`}
+                              onClick={async () => {
+                                const ok = await confirmDialog({
+                                  title: '彻底清除回收站应用',
+                                  message: `确认永久清除「${a.name}」及其所有历史版本、任务记录和云存储文件吗？此操作不可恢复！`,
+                                  confirmLabel: '彻底清除',
+                                  danger: true,
+                                });
+                                if (!ok) return;
+                                await runAction(`purge-${a.id}`, async () => {
+                                  await api.adminPurgeApp(a.id);
+                                  toast(`已彻底清除应用「${a.name}」`, 'ok');
+                                });
+                              }}
+                            >
+                              彻底清除
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -676,16 +791,273 @@ export function AdminGovernancePanel({
         </div>
       </div>
 
-      {/* 4. 管理操作审计日志 */}
+      {/* 4. 平台账号与管理员角色授权 + 全平台已发布站点巡检与风控 */}
+      <div className="dash-grid-2">
+        <div className="dash-panel">
+          <header className="dash-panel-head">
+            <div>
+              <h3>平台管理员与 SSO 账号权限（{filteredUsers.length} 人）</h3>
+              <p>查看统一登录员工账号，按需授予或撤销平台管理员权限（变更实时落库审计）</p>
+            </div>
+            <div className="dash-toolbar-group">
+              <Select
+                ariaLabel="按角色筛选账号"
+                value={userRoleFilter}
+                onChange={(val) => setUserRoleFilter(val as typeof userRoleFilter)}
+                options={[
+                  { value: 'all', label: `全部账号 (${(overview.users ?? []).length})` },
+                  { value: 'admin', label: '仅管理员' },
+                  { value: 'user', label: '普通员工' },
+                ]}
+              />
+              <label className="dash-search">
+                <Icon name="search" />
+                <input
+                  aria-label="搜索员工账号"
+                  placeholder="搜姓名 / 登录名 / 邮箱…"
+                  value={userQuery}
+                  onChange={(e) => setUserQuery(e.target.value)}
+                />
+              </label>
+            </div>
+          </header>
+          {filteredUsers.length === 0 ? (
+            <DashEmptyBox
+              icon="lock"
+              title="暂无匹配的统一认证账号"
+              hint="接入企业 SSO 登录后，员工账号会自动同步至此"
+            />
+          ) : (
+            <div className="dash-scroll-list">
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">姓名 / 登录账号</th>
+                      <th scope="col">当前角色</th>
+                      <th scope="col">空间 / 应用</th>
+                      <th scope="col">最近登录</th>
+                      <th scope="col">权限操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredUsers.map((u) => {
+                      const isAdminRole = u.role === 'admin';
+                      return (
+                        <tr key={u.id}>
+                          <td>
+                            <b>{u.realName}</b>{' '}
+                            {u.self ? <span className="dash-pill cloud">当前本人</span> : null}
+                            <div>
+                              <code>{u.loginName}</code>
+                              {u.email ? <span className="dash-muted"> · {u.email}</span> : null}
+                            </div>
+                          </td>
+                          <td>
+                            {u.allowlisted ? (
+                              <span className="dash-pill ok">白名单管理员</span>
+                            ) : isAdminRole ? (
+                              <span className="dash-pill ok">平台管理员</span>
+                            ) : (
+                              <span className="dash-muted">普通员工</span>
+                            )}
+                          </td>
+                          <td>
+                            {fmtNum(u.workspaceCount)} / <b>{fmtNum(u.appCount)}</b>
+                          </td>
+                          <td className="dash-nowrap">{u.lastLoginAt ? fmtTime(u.lastLoginAt) : '—'}</td>
+                          <td>
+                            {u.allowlisted ? (
+                              <span className="dash-muted" title="由配置文件白名单锁定">配置锁定</span>
+                            ) : u.self ? (
+                              <span className="dash-muted" title="不可降级当前本人账号">本人账号</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className={`dash-link ${isAdminRole ? 'danger' : ''}`}
+                                disabled={busyKey === `role-${u.id}`}
+                                onClick={async () => {
+                                  const nextRole = isAdminRole ? 'user' : 'admin';
+                                  const ok = await confirmDialog({
+                                    title: isAdminRole ? '撤销平台管理员权限' : '授予平台管理员权限',
+                                    message: isAdminRole
+                                      ? `确认撤销「${u.realName} (${u.loginName})」的平台管理员权限吗？`
+                                      : `确认授予「${u.realName} (${u.loginName})」平台管理员权限吗？授权后可查看全平台看板与执行运维操作。`,
+                                    confirmLabel: isAdminRole ? '确认撤销' : '确认授权',
+                                    danger: isAdminRole,
+                                  });
+                                  if (!ok) return;
+                                  await runAction(`role-${u.id}`, async () => {
+                                    await api.adminUpdateUserRole(u.id, nextRole);
+                                    toast(
+                                      isAdminRole
+                                        ? `已撤销 ${u.realName} 的管理员权限`
+                                        : `已授予 ${u.realName} 平台管理员权限`,
+                                      'ok',
+                                    );
+                                  });
+                                }}
+                              >
+                                {isAdminRole ? '撤销管理员' : '设为管理员'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="dash-panel">
+          <header className="dash-panel-head">
+            <div>
+              <h3>全平台已发布站点巡检与访问风控（{filteredPublishedApps.length} 个）</h3>
+              <p>检索所有正在对外提供服务的线上站点，支持直接收紧访问权限或紧急下线</p>
+            </div>
+            <div className="dash-toolbar-group">
+              <Select
+                ariaLabel="按访问级别筛选站点"
+                value={siteLevelFilter}
+                onChange={(val) => setSiteLevelFilter(val as typeof siteLevelFilter)}
+                options={[
+                  { value: 'all', label: `全部级别 (${(overview.publishedApps ?? []).length})` },
+                  { value: 'public', label: '内网公开' },
+                  { value: 'login', label: '员工登录' },
+                  { value: 'members', label: '指定成员' },
+                ]}
+              />
+              <label className="dash-search">
+                <Icon name="search" />
+                <input
+                  aria-label="搜索已发布站点"
+                  placeholder="搜应用名 / slug / 归属人…"
+                  value={siteQuery}
+                  onChange={(e) => setSiteQuery(e.target.value)}
+                />
+              </label>
+            </div>
+          </header>
+          {filteredPublishedApps.length === 0 ? (
+            <DashEmptyBox icon="globe" title="当前筛选条件下暂无已发布站点" />
+          ) : (
+            <div className="dash-scroll-list">
+              <div className="dash-table-wrap">
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">站点名称 / 子域 Slug</th>
+                      <th scope="col">归属人 / 空间</th>
+                      <th scope="col">今日 / 累计 PV</th>
+                      <th scope="col">访问权限级别</th>
+                      <th scope="col">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredPublishedApps.map((site) => (
+                      <tr key={site.id}>
+                        <td>
+                          <b>{site.name}</b>
+                          <div>
+                            <code>{site.slug}</code> <span className="dash-tag">{site.type}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span>{site.ownerName}</span>
+                          <div><code>{site.workspaceId}</code></div>
+                        </td>
+                        <td>
+                          {fmtNum(site.todayPv)} / <b>{fmtNum(site.totalPv)}</b>
+                        </td>
+                        <td>
+                          <Select
+                            ariaLabel={`修改 ${site.name} 访问级别`}
+                            value={site.accessLevel}
+                            disabled={busyKey === `acc-${site.id}`}
+                            options={[
+                              { value: 'public', label: '内网公开' },
+                              { value: 'login', label: '员工登录' },
+                              { value: 'members', label: '指定成员' },
+                            ]}
+                            onChange={async (lvl) => {
+                              if (lvl === site.accessLevel) return;
+                              await runAction(`acc-${site.id}`, async () => {
+                                await api.adminUpdateSiteAccess(site.id, lvl as 'public' | 'login' | 'members');
+                                toast(`已将「${site.name}」访问级别设为${SITE_ACCESS_LABELS[lvl] || lvl}`, 'ok');
+                              });
+                            }}
+                          />
+                        </td>
+                        <td className="dash-nowrap">
+                          <button
+                            type="button"
+                            className="dash-link danger"
+                            disabled={busyKey === `unpub-${site.id}`}
+                            onClick={async () => {
+                              const ok = await confirmDialog({
+                                title: '强行下线站点',
+                                message: `确认下线「${site.name} (${site.slug})」的线上站点吗？应用代码与版本本身不会丢失。`,
+                                confirmLabel: '强行下线',
+                                danger: true,
+                              });
+                              if (!ok) return;
+                              await runAction(`unpub-${site.id}`, async () => {
+                                await api.adminUnpublishApp(site.id);
+                                toast(`已下线站点「${site.name}」`, 'ok');
+                              });
+                            }}
+                          >
+                            强行下线
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 5. 管理操作审计日志 */}
       <div className="dash-panel">
-        <header className="dash-panel-head compact">
+        <header className="dash-panel-head">
           <div>
-            <h3>管理操作审计日志（最近 {overview.auditLogs.length} 条）</h3>
-            <p>所有配额变更、站点下线、应用恢复/删除、任务强停/重跑、社区治理、沙箱销毁与运维下载均已操作审计落库留痕</p>
+            <h3>管理操作审计日志（匹配 {filteredAuditLogs.length} / 最近 {overview.auditLogs.length} 条）</h3>
+            <p>所有权限变更、配额覆盖、站点风控/下线、应用恢复/清除、任务干预、沙箱销毁与日志下载均已落库留痕</p>
+          </div>
+          <div className="dash-toolbar-group">
+            <Select
+              ariaLabel="按审计动作筛选"
+              value={auditActionFilter}
+              options={auditActionOptions}
+              onChange={setAuditActionFilter}
+            />
+            <label className="dash-search">
+              <Icon name="search" />
+              <input
+                aria-label="搜索审计日志"
+                placeholder="搜操作人 / 目标 ID / 详情…"
+                value={auditQuery}
+                onChange={(e) => setAuditQuery(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              className="subtle-button dash-compact-btn"
+              disabled={filteredAuditLogs.length === 0}
+              onClick={exportAuditCsv}
+            >
+              导出 CSV
+            </button>
           </div>
         </header>
-        {overview.auditLogs.length === 0 ? (
-          <DashEmptyBox icon="lock" title="暂无管理操作审计记录" />
+        {filteredAuditLogs.length === 0 ? (
+          <DashEmptyBox icon="lock" title="暂无匹配的管理操作审计记录" />
         ) : (
           <div className="dash-scroll-list">
             <div className="dash-table-wrap">
@@ -700,7 +1072,7 @@ export function AdminGovernancePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {overview.auditLogs.map((log) => (
+                  {filteredAuditLogs.map((log) => (
                     <tr key={log.id}>
                       <td className="dash-nowrap">{fmtTime(log.createdAt)}</td>
                       <td>{log.actor}</td>
