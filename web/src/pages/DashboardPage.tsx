@@ -31,8 +31,8 @@ import {
   type SeriesPoint,
 } from '../components/DashboardCharts';
 
-type SectionTab = 'all' | 'cluster' | 'growth' | 'apps' | 'agent' | 'llm' | 'infra' | 'admin';
-type TrendMetric = 'tasks' | 'tokens' | 'cost' | 'pv' | 'apps' | 'versions' | 'activity' | 'calls' | 'modelCalls';
+type SectionTab = 'all' | 'cluster' | 'growth' | 'apps' | 'agent' | 'infra' | 'admin';
+type TrendMetric = 'tasks' | 'pv' | 'apps' | 'versions' | 'activity' | 'calls';
 
 const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
   ['today', '今天'],
@@ -48,21 +48,17 @@ const SECTION_TABS: [SectionTab, string][] = [
   ['growth', '增长与空间排行'],
   ['apps', '应用资产与流量'],
   ['agent', 'Agent 编排与质检'],
-  ['llm', '模型与 Token 成本'],
   ['infra', '云服务、反馈与运行监控'],
   ['admin', '治理与运维'],
 ];
 
 const TREND_METRICS: [TrendMetric, string][] = [
   ['tasks', 'AI 任务'],
-  ['tokens', 'Token 消耗'],
-  ['cost', '模型花费'],
   ['pv', '访问 PV'],
   ['apps', '应用 / 空间'],
   ['versions', '版本 / 部署'],
   ['activity', '消息互动'],
   ['calls', '云 / 数据源'],
-  ['modelCalls', '模型请求'],
 ];
 
 const KIND_LABELS: Record<string, string> = {
@@ -176,20 +172,6 @@ const ORIGIN_LABELS: Record<string, string> = {
   test: '连通性测试',
 };
 
-const REVIEW_LABELS: Record<string, string> = {
-  approved: '已通过',
-  pending: '审核中',
-  submitted: '已提交',
-  rejected: '已退回',
-  draft: '草稿',
-};
-
-const VISIBILITY_LABELS: Record<string, string> = {
-  private: '仅自己可见',
-  team: '团队可见',
-  public: '全员公开',
-};
-
 const UPLOAD_FORMAT_LABELS: Record<string, string> = {
   html: '单文件 HTML',
   zip: 'ZIP 压缩包',
@@ -221,7 +203,7 @@ function downloadBlob(filename: string, content: string, mime: string) {
 }
 
 function exportTrendsCsv(data: DashboardData) {
-  const header = ['日期', 'PV', '新建应用', '活跃工作空间', '总任务', '成功任务', '失败任务', '版本数', '部署数', 'Token消耗', '模型调用', '估算花费(元)', '对话消息', '云函数调用', '数据源调用'];
+  const header = ['日期', 'PV', '新建应用', '活跃工作空间', '总任务', '成功任务', '失败任务', '版本数', '部署数', '对话消息', '云函数调用', '数据源调用'];
   const rows = data.trends.daily.map((d) => [
     d.date,
     d.pv,
@@ -232,9 +214,6 @@ function exportTrendsCsv(data: DashboardData) {
     d.tasksFailed,
     d.versions,
     d.deployments,
-    d.tokens,
-    d.modelCalls,
-    d.cost.toFixed(4),
     d.messages,
     d.fnCalls,
     d.sourceCalls,
@@ -257,9 +236,9 @@ export function DashboardPage() {
   const [chartKind, setChartKind] = useState<'line' | 'bar'>('bar');
   const [appQuery, setAppQuery] = useState('');
   const [appTypeFilter, setAppTypeFilter] = useState('');
-  const [appSort, setAppSort] = useState<'pv' | 'versions' | 'tasks' | 'tokens'>('pv');
+  const [appSort, setAppSort] = useState<'pv' | 'versions' | 'tasks'>('pv');
   const [wsQuery, setWsQuery] = useState('');
-  const [wsSort, setWsSort] = useState<'apps' | 'tasks' | 'tokens' | 'pv'>('apps');
+  const [wsSort, setWsSort] = useState<'apps' | 'tasks' | 'pv'>('apps');
   const [expandWs, setExpandWs] = useState(false);
   const [expandApps, setExpandApps] = useState(false);
   const [quotaTarget, setQuotaTarget] = useState<QuotaModalTarget | null>(null);
@@ -373,22 +352,6 @@ export function DashboardPage() {
           unit: ' 次',
           points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: d.tasksSucceeded, secondary: d.tasksFailed })),
         };
-      case 'tokens':
-        return {
-          primaryLabel: 'Token 消耗',
-          secondaryLabel: undefined,
-          primaryColor: '#4a7bd0',
-          unit: '',
-          points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: d.tokens })),
-        };
-      case 'cost':
-        return {
-          primaryLabel: '模型花费 (元)',
-          secondaryLabel: undefined,
-          primaryColor: '#d9822b',
-          unit: ' 元',
-          points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: Math.round(d.cost * 100) / 100 })),
-        };
       case 'pv':
         return {
           primaryLabel: '页面浏览量 (PV)',
@@ -432,14 +395,6 @@ export function DashboardPage() {
           unit: ' 次',
           points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: d.fnCalls, secondary: d.sourceCalls })),
         };
-      case 'modelCalls':
-        return {
-          primaryLabel: '模型请求次数',
-          secondaryLabel: undefined,
-          primaryColor: '#d9822b',
-          unit: ' 次',
-          points: daily.map<SeriesPoint>((d) => ({ date: d.date, primary: d.modelCalls })),
-        };
     }
   }, [data, trendMetric]);
 
@@ -448,7 +403,6 @@ export function DashboardPage() {
     const list = (data?.workspaces ?? []).filter((w) => !qText || w.workspaceId.toLowerCase().includes(qText) || w.ownerName.toLowerCase().includes(qText));
     list.sort((a, b) => {
       if (wsSort === 'tasks') return b.tasks - a.tasks || b.apps - a.apps;
-      if (wsSort === 'tokens') return b.tokens - a.tokens || b.tasks - a.tasks;
       if (wsSort === 'pv') return b.pv - a.pv || b.apps - a.apps;
       return b.apps - a.apps || b.tasks - a.tasks;
     });
@@ -466,7 +420,6 @@ export function DashboardPage() {
     filtered.sort((a, b) => {
       if (appSort === 'versions') return b.versions - a.versions || b.totalPv - a.totalPv;
       if (appSort === 'tasks') return b.tasks - a.tasks || b.totalPv - a.totalPv;
-      if (appSort === 'tokens') return b.tokensUsed - a.tokensUsed || b.totalPv - a.totalPv;
       return b.totalPv - a.totalPv || b.versions - a.versions;
     });
     return filtered;
@@ -497,7 +450,7 @@ export function DashboardPage() {
             </span>
           </div>
           <p>
-            面向平台运营、研发与运维的全维度指挥舱：覆盖空间生产力、创作漏斗、Agent 工具遥测与质量门禁、故障根因诊断、模型 Token 经济学、云服务合规与实例健康度。
+            面向平台运营、研发与运维的全维度指挥舱：覆盖空间生产力、创作漏斗、Agent 工具遥测与质量门禁、故障根因诊断、云服务能力与集群实例健康度。
           </p>
         </div>
         <div className="dash-header-cta">
@@ -727,16 +680,15 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="模型 Token 与花费"
-                value={fmtCompact(data.overview.tokensTotal)}
-                unit={`请求 ${fmtCompact(data.overview.modelCallsTotal)} 次 · ¥${data.overview.costTotal.toFixed(2)}`}
+                title="版本构建与云调用"
+                value={fmtNum(data.overview.versionsTotal)}
+                unit={`部署 ${fmtNum(data.overview.deploymentsTotal)} · 构建 ${fmtNum(data.overview.buildsTotal)}`}
                 accent="#d9822b"
-                delta={range === 'all' ? null : calcDelta(data.overview.tokensRange, data.overview.tokensPrevRange)}
-                spark={daily.map((d) => d.tokens)}
+                spark={daily.map((d) => d.versions)}
                 details={[
-                  `输入 ${fmtCompact(data.overview.tokensInput)}`,
-                  `输出 ${fmtCompact(data.overview.tokensOutput)}`,
-                  `窗口 ${fmtCompact(data.overview.tokensRange)}`,
+                  `云函数 ${fmtCompact(data.overview.fnCallsTotal)}`,
+                  `数据源 ${fmtCompact(data.overview.sourceCallsTotal)}`,
+                  `消息互动 ${fmtCompact(data.overview.workbenchMessagesTotal)}`,
                 ]}
               />
               <KpiCard
@@ -791,7 +743,7 @@ export function DashboardPage() {
                   <header className="dash-panel-head compact">
                     <div>
                       <h2>多维度每日趋势</h2>
-                      <p>按 Asia/Shanghai 时区对每日核心指标补零对齐，支持 9 类指标切换。</p>
+                      <p>按 Asia/Shanghai 时区对每日核心指标补零对齐，支持 6 类指标切换。</p>
                     </div>
                     <div className="seg-control small" role="radiogroup" aria-label="图表形式">
                       <button type="button" role="radio" aria-checked={chartKind === 'line'} className={chartKind === 'line' ? 'active' : ''} onClick={() => setChartKind('line')}>
@@ -862,7 +814,6 @@ export function DashboardPage() {
                         [
                           ['apps', '按应用'],
                           ['tasks', '按任务'],
-                          ['tokens', '按 Token'],
                           ['pv', '按 PV'],
                         ] as const
                       ).map(([k, lbl]) => (
@@ -885,9 +836,7 @@ export function DashboardPage() {
                             <th scope="col">应用 (已发布)</th>
                             <th scope="col">任务 (窗口)</th>
                             <th scope="col">成功率</th>
-                            <th scope="col">Token 消耗</th>
-                            <th scope="col">估算成本</th>
-                            <th scope="col">PV (末日)</th>
+                            <th scope="col">PV (今日)</th>
                             <th scope="col">最近活跃</th>
                             <th scope="col">操作</th>
                           </tr>
@@ -906,8 +855,6 @@ export function DashboardPage() {
                                 <td><b>{fmtNum(w.apps)}</b> <span className="dash-muted">({fmtNum(w.published)})</span></td>
                                 <td>{fmtNum(w.tasks)} <span className="dash-muted">({fmtNum(w.rangeTasks)})</span></td>
                                 <td><span className={w.successRate >= 80 ? 'dash-ok' : w.successRate < 50 && w.tasks > 0 ? 'dash-err' : ''}>{w.successRate}%</span></td>
-                                <td><b>{fmtCompact(w.tokens)}</b></td>
-                                <td>¥{w.cost.toFixed(4)}</td>
                                 <td><b>{fmtNum(w.pv)}</b> <span className="dash-muted">({fmtNum(w.todayPv)})</span></td>
                                 <td className="dash-nowrap">{w.lastActiveAt ? fmtTime(w.lastActiveAt) : '-'}</td>
                                 <td>
@@ -1063,7 +1010,7 @@ export function DashboardPage() {
                 <header className="dash-panel-head">
                   <div>
                     <h3>热门应用综合明细排行（Top {filteredTopApps.length}）</h3>
-                    <p>按 PV、版本迭代次数、任务数与 Token 消耗排行，支持关键词检索与类型过滤。</p>
+                    <p>按 PV、版本迭代次数与任务数排行，支持关键词检索与类型过滤。</p>
                   </div>
                   <div className="dash-toolbar-group">
                     <label className="dash-search">
@@ -1090,7 +1037,6 @@ export function DashboardPage() {
                           ['pv', '按 PV'],
                           ['versions', '按版本'],
                           ['tasks', '按任务'],
-                          ['tokens', '按 Token'],
                         ] as const
                       ).map(([k, lbl]) => (
                         <button key={k} type="button" role="radio" aria-checked={appSort === k} className={appSort === k ? 'active' : ''} onClick={() => setAppSort(k)}>
@@ -1115,7 +1061,6 @@ export function DashboardPage() {
                             <th scope="col">云服务 / 访问</th>
                             <th scope="col">版本</th>
                             <th scope="col">任务</th>
-                            <th scope="col">Token</th>
                             <th scope="col">今日 / 累计 PV</th>
                             {isAdmin ? <th scope="col">治理操作</th> : null}
                           </tr>
@@ -1149,7 +1094,6 @@ export function DashboardPage() {
                               </td>
                               <td>{fmtNum(a.versions)}</td>
                               <td>{fmtNum(a.tasks)}</td>
-                              <td>{fmtCompact(a.tokensUsed)}</td>
                               <td>{fmtNum(a.todayPv)} / <b>{fmtNum(a.totalPv)}</b></td>
                               {isAdmin ? (
                                 <td>
@@ -1371,7 +1315,7 @@ export function DashboardPage() {
                   <header className="dash-panel-head compact">
                     <div>
                       <h3>各类型任务效能矩阵</h3>
-                      <p>不同任务类型的数量、成功率、平均与最大耗时、平均 Token</p>
+                      <p>不同任务类型的数量、成功率与平均/最大耗时</p>
                     </div>
                   </header>
                   {data.tasks.byType.length === 0 ? (
@@ -1386,7 +1330,6 @@ export function DashboardPage() {
                             <th scope="col">成 / 败 / 消</th>
                             <th scope="col">成功率</th>
                             <th scope="col">平均 / 最大耗时</th>
-                            <th scope="col">均 Token</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1399,7 +1342,6 @@ export function DashboardPage() {
                               </td>
                               <td>{t.successRate}%</td>
                               <td>{fmtDurationMs(t.avgDurationMs)} / {fmtDurationMs(t.maxDurationMs)}</td>
-                              <td>{fmtCompact(t.avgTokens)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1486,7 +1428,7 @@ export function DashboardPage() {
                               </div>
                             </div>
                             <span>{f.errorMessage || f.phaseLabel || '无详细错误信息'}</span>
-                            <small>{fmtTime(f.createdAt)} · 任务 {f.id} · 空间 {f.workspaceId} · 耗时 {fmtDurationMs(f.durationMs)} · Token {fmtCompact(f.tokenUsed)}</small>
+                            <small>{fmtTime(f.createdAt)} · 任务 {f.id} · 空间 {f.workspaceId} · 耗时 {fmtDurationMs(f.durationMs)}</small>
                           </li>
                         ))}
                       </ul>
@@ -1498,7 +1440,7 @@ export function DashboardPage() {
                   <header className="dash-panel-head compact">
                     <div>
                       <h3>最近任务执行流水（最新 15 条）</h3>
-                      <p>实时记录每次规划、生成、修改、代码保存的耗时与 Token</p>
+                      <p>实时记录每次规划、生成、修改、代码保存的耗时与状态</p>
                     </div>
                   </header>
                   {data.tasks.recentTasks.length === 0 ? (
@@ -1513,7 +1455,7 @@ export function DashboardPage() {
                               <th scope="col">应用</th>
                               <th scope="col">类型</th>
                               <th scope="col">状态</th>
-                              <th scope="col">耗时 / Token</th>
+                              <th scope="col">耗时</th>
                               <th scope="col">排查</th>
                             </tr>
                           </thead>
@@ -1536,7 +1478,7 @@ export function DashboardPage() {
                                     {labelOf(TASK_STATUS_LABELS, t.status)}
                                   </span>
                                 </td>
-                                <td>{fmtDurationMs(t.durationMs)} / {fmtCompact(t.tokenUsed)}</td>
+                                <td>{fmtDurationMs(t.durationMs)}</td>
                                 <td>
                                   <button type="button" className="dash-link" onClick={() => navigate('/logs?taskId=' + encodeURIComponent(t.id))}>
                                     日志
@@ -1554,104 +1496,7 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 5. 模型与 Token 经济学 */}
-          {show('llm') ? (
-            <section className="dash-section" aria-label="模型与 Token 成本分析">
-              <SectionTitle title="模型调用与 Token 经济学" sub="按供应商/模型与任务类型精确计量输入/输出 Token、均次消耗与成本分布。" />
-
-              <div className="dash-grid-2">
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>模型调用与成本明细</h3>
-                      <p>共 {fmtNum(data.llm.totalCalls)} 次请求 · 总计 {fmtCompact(data.llm.totalTokens)} Tokens · 估算花费 ¥{data.llm.totalCost.toFixed(4)}</p>
-                    </div>
-                  </header>
-                  {data.llm.byModel.length === 0 ? (
-                    <DashEmptyBox icon="spark" title="暂无模型调用记账数据" />
-                  ) : (
-                    <div className="dash-table-wrap">
-                      <table className="dash-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">供应商 / 模型</th>
-                            <th scope="col">调用次数</th>
-                            <th scope="col">输入 / 输出</th>
-                            <th scope="col">总 Token</th>
-                            <th scope="col">均次 Token</th>
-                            <th scope="col">估算成本</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {data.llm.byModel.map((m) => (
-                            <tr key={`${m.provider}:${m.model}`}>
-                              <td>
-                                <span className="dash-tag">{m.provider}</span> <b>{m.model}</b>
-                              </td>
-                              <td>{fmtNum(m.calls)}</td>
-                              <td>{fmtCompact(m.inputTokens)} / {fmtCompact(m.outputTokens)}</td>
-                              <td><b>{fmtCompact(m.totalTokens)}</b></td>
-                              <td>{fmtCompact(m.avgTokensPerCall)}</td>
-                              <td>¥{m.cost.toFixed(4)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <div className="dash-sub-block">
-                    <h4>五星 AI 岛对接状态</h4>
-                    {!data.llm.quota.enabled ? (
-                      <p className="dash-muted-line">当前为本地统一模型模式（未开启五星 AI 岛对接）。</p>
-                    ) : !data.llm.quota.available ? (
-                      <p className="dash-muted-line">已开启五星对接，当前请求未带平台令牌或额度查询暂不可用。</p>
-                    ) : (
-                      <div className="dash-chip-grid">
-                        <span className="dash-kv-chip"><span>套餐</span><b>{data.llm.quota.packageName || '默认'}</b></span>
-                        <span className="dash-kv-chip"><span>状态</span><b>{data.llm.quota.status || '正常'}</b></span>
-                        <span className="dash-kv-chip"><span>已用</span><b>{fmtCompact(data.llm.quota.usedTokens)}</b></span>
-                        <span className="dash-kv-chip"><span>剩余</span><b>{fmtCompact(data.llm.quota.remainingTokens)}</b></span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="dash-panel">
-                  <header className="dash-panel-head compact">
-                    <div>
-                      <h3>各任务阶段 Token 分摊与模型偏好</h3>
-                      <p>规划、首次生成、修改各自占用的模型资源</p>
-                    </div>
-                  </header>
-                  <BreakdownBars
-                    emptyText="暂无 Token 分摊数据"
-                    items={data.llm.byTaskType.map((t, i) => ({
-                      key: t.taskType,
-                      label: labelOf(TASK_TYPE_LABELS, t.taskType),
-                      value: t.totalTokens,
-                      extra: `${fmtNum(t.calls)} 次 · ¥${t.cost.toFixed(2)}`,
-                      color: CHART_PALETTE[i % CHART_PALETTE.length],
-                    }))}
-                  />
-                  {data.llm.byAppModelSetting.length > 0 ? (
-                    <div className="dash-sub-block">
-                      <h4>应用默认模型配置分布</h4>
-                      <div className="dash-chip-grid">
-                        {data.llm.byAppModelSetting.map((x) => (
-                          <span key={x.key} className="dash-kv-chip">
-                            <span>{x.key === 'auto' ? '自动 / 默认' : x.key}</span>
-                            <b>{fmtNum(x.count)}</b>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </section>
-          ) : null}
-
-          {/* 6. 云服务、数据源、对话、反馈、生态与运行监控 */}
+          {/* 5. 云服务、数据源、对话、反馈、社区与运行监控 */}
           {show('infra') ? (
             <section className="dash-section" aria-label="云服务、数据源、用户反馈与运行监控">
               <SectionTitle title="版本部署、云服务合规、数据源、用户反馈与运行监控" sub="覆盖全平台 BaaS 数据表与站内安全权限、Deno 云函数、AGW 数据源、会话转化、用户上报反馈与实例延迟。" />
@@ -1924,7 +1769,7 @@ export function DashboardPage() {
                 </div>
               </div>
 
-              <div className="dash-grid-3">
+              <div className="dash-grid-2">
                 <div className="dash-panel">
                   <DashPanelHead
                     icon="help"
@@ -1947,41 +1792,6 @@ export function DashboardPage() {
                         </li>
                       ))}
                     </ul>
-                  )}
-                </div>
-
-                <div className="dash-panel">
-                  <DashPanelHead
-                    icon="skill"
-                    tone="violet"
-                    title="技能资产与 SkillHub 市场"
-                    sub={`内置 ${fmtNum(data.ecosystem.skills.builtinCount)} · 自建 ${fmtNum(data.ecosystem.skills.selfBuiltCount)} · 市场安装 ${fmtNum(data.ecosystem.skills.hubInstalledCount)}（${fmtBytes(data.ecosystem.skills.hubInstalledBytes)}）`}
-                  />
-                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
-                    <div><span>内置官方技能</span><b>{fmtNum(data.ecosystem.skills.builtinCount)}</b></div>
-                    <div><span>空间自建技能</span><b>{fmtNum(data.ecosystem.skills.selfBuiltCount)}</b></div>
-                    <div><span>市场安装技能</span><b>{fmtNum(data.ecosystem.skills.hubInstalledCount)}</b></div>
-                    <div><span>SkillHub 发布</span><b>{fmtNum(data.ecosystem.skills.publicationsCount)}</b></div>
-                  </div>
-                  {data.ecosystem.skills.publicationsCount === 0 ? (
-                    <DashEmptyBox icon="skill" title="暂无发布到 SkillHub 的记录" hint="将空间自建技能发布至 SkillHub 后可追踪审核与可见范围" />
-                  ) : (
-                    <BreakdownBars
-                      items={[
-                        ...data.ecosystem.skills.publicationsByReview.map((r, i) => ({
-                          key: 'rev-' + r.key,
-                          label: `审核 · ${labelOf(REVIEW_LABELS, r.key)}`,
-                          value: r.count,
-                          color: CHART_PALETTE[i % CHART_PALETTE.length],
-                        })),
-                        ...data.ecosystem.skills.publicationsByVisibility.map((v) => ({
-                          key: 'vis-' + v.key,
-                          label: `范围 · ${labelOf(VISIBILITY_LABELS, v.key)}`,
-                          value: v.count,
-                          color: '#2f9e8f',
-                        })),
-                      ]}
-                    />
                   )}
                 </div>
 

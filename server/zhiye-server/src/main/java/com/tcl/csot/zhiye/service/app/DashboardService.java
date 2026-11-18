@@ -1,7 +1,5 @@
 package com.tcl.csot.zhiye.service.app;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.tcl.csot.zhiye.client.OpenclawClient;
 import com.tcl.csot.zhiye.config.FivestarProperties;
 import com.tcl.csot.zhiye.config.SkillHubProperties;
 import com.tcl.csot.zhiye.exception.ApiException;
@@ -44,9 +42,6 @@ public class DashboardService {
 
     @Autowired(required = false)
     private RuntimeMetricsService runtimeMetrics;
-
-    @Autowired(required = false)
-    private OpenclawClient openclaw;
 
     @Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.ClusterSandboxService clusterSandbox;
@@ -1186,30 +1181,8 @@ public class DashboardService {
         m.put("byAppModelSetting", groupCounts(
                 "select model as k, count(*) as c from app where " + ctx.wsPred("workspace_id") + " and deleted_at is null and created_at >= ? and created_at < ? group by 1 order by 2 desc",
                 winWs));
-        m.put("quota", fetchFivestarQuota(platformToken));
+        m.put("quota", Map.of("enabled", false, "available", false));
         return m;
-    }
-
-    private Map<String, Object> fetchFivestarQuota(String platformToken) {
-        Map<String, Object> q = new LinkedHashMap<>();
-        q.put("enabled", fivestar.enabled());
-        if (!fivestar.enabled() || openclaw == null || platformToken == null || platformToken.isBlank()) {
-            q.put("available", false);
-            return q;
-        }
-        try {
-            JsonNode u = openclaw.usage(platformToken);
-            q.put("available", true);
-            q.put("packageName", u.path("packageName").asText(null));
-            q.put("status", u.path("quotaStatus").asText(null));
-            q.put("usedTokens", u.hasNonNull("totalTokens") ? u.get("totalTokens").asLong() : null);
-            q.put("limitTokens", u.hasNonNull("packageTotalTokens") ? u.get("packageTotalTokens").asLong() : null);
-            q.put("remainingTokens", u.hasNonNull("remainingTokens") ? u.get("remainingTokens").asLong() : null);
-            q.put("resetAt", u.path("resetAt").asText(null));
-        } catch (Exception ignored) {
-            q.put("available", false);
-        }
-        return q;
     }
 
     private Map<String, Object> versionsSection(FilterCtx ctx) {
