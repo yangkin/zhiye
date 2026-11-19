@@ -23,8 +23,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -130,6 +133,8 @@ public class AdminService {
                 .filter(f -> "open".equals(f.get("status")) || "in_progress".equals(f.get("status")))
                 .count());
         out.put("publishedApps", queryPublishedApps());
+        out.put("allApps", queryAllApps());
+        out.put("workspaces", queryWorkspaces());
         out.put("deletedApps", queryDeletedApps());
         out.put("templates", queryTemplates());
         out.put("rateLimitStats", queryRateLimitStats());
@@ -208,7 +213,7 @@ public class AdminService {
                 left join app_user u on u.id = w.owner_user_id
                 where a.deleted_at is not null
                 order by a.deleted_at desc
-                limit 100
+                limit 2000
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
@@ -380,7 +385,7 @@ public class AdminService {
                 left join app_site_access sa on sa.app_id = a.id
                 where a.deleted_at is null and a.published_version_id is not null
                 order by total_pv desc, a.updated_at desc
-                limit 200
+                limit 2000
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
@@ -396,6 +401,79 @@ public class AdminService {
             m.put("totalPv", rs.getLong("total_pv"));
             m.put("todayPv", rs.getLong("today_pv"));
             m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+            return m;
+        }).list();
+    }
+
+    private List<Map<String, Object>> queryAllApps() {
+        return jdbc.sql("""
+                select a.id, a.workspace_id, a.name, a.slug, a.type, a.project_kind, a.phase,
+                       a.published_version_id, a.updated_at, a.created_at,
+                       coalesce(sa.level, 'public') as access_level,
+                       u.login_name, u.real_name,
+                       (select count(*) from version v where v.app_id = a.id) as version_count,
+                       exists(select 1 from app_cloud ac where ac.app_id = a.id) as cloud_enabled,
+                       coalesce((select sum(pv) from app_pageview_daily p where p.app_id = a.id), 0) as total_pv,
+                       coalesce((select sum(pv) from app_pageview_daily p where p.app_id = a.id and p.day = current_date), 0) as today_pv
+                from app a
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                left join app_site_access sa on sa.app_id = a.id
+                where a.deleted_at is null
+                order by a.updated_at desc
+                limit 2000
+                """).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", rs.getString("id"));
+            m.put("workspaceId", rs.getString("workspace_id"));
+            m.put("ownerLogin", rs.getString("login_name"));
+            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            m.put("name", rs.getString("name"));
+            m.put("slug", rs.getString("slug"));
+            m.put("type", rs.getString("type"));
+            m.put("projectKind", rs.getString("project_kind"));
+            m.put("phase", rs.getString("phase"));
+            m.put("published", rs.getString("published_version_id") != null);
+            m.put("publishedVersionId", rs.getString("published_version_id"));
+            m.put("accessLevel", rs.getString("access_level"));
+            m.put("versionCount", rs.getInt("version_count"));
+            m.put("cloudEnabled", rs.getBoolean("cloud_enabled"));
+            m.put("totalPv", rs.getLong("total_pv"));
+            m.put("todayPv", rs.getLong("today_pv"));
+            m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).list();
+    }
+
+    private List<Map<String, Object>> queryWorkspaces() {
+        return jdbc.sql("""
+                select w.id, w.owner_user_id, w.created_at,
+                       u.login_name, u.real_name,
+                       (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is null) as app_count,
+                       (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is null and a.published_version_id is not null) as published_count,
+                       (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is not null) as deleted_app_count,
+                       (select count(*) from conversation c where c.workspace_id = w.id) as conv_count,
+                       (select count(*) from data_source ds where ds.workspace_id = w.id and ds.deleted_at is null) as ds_count
+                from workspace w
+                left join app_user u on u.id = w.owner_user_id
+                where w.owner_user_id is not null
+                   or exists(select 1 from app a where a.workspace_id = w.id)
+                   or exists(select 1 from conversation c where c.workspace_id = w.id)
+                order by app_count desc, published_count desc, w.created_at desc
+                limit 2000
+                """).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("workspaceId", rs.getString("id"));
+            m.put("ownerUserId", rs.getString("owner_user_id"));
+            m.put("ownerLogin", rs.getString("login_name"));
+            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("id")));
+            m.put("appCount", rs.getInt("app_count"));
+            m.put("publishedCount", rs.getInt("published_count"));
+            m.put("deletedAppCount", rs.getInt("deleted_app_count"));
+            m.put("conversationCount", rs.getInt("conv_count"));
+            m.put("dataSourceCount", rs.getInt("ds_count"));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
             return m;
         }).list();
     }
@@ -632,6 +710,259 @@ public class AdminService {
                 "workspaceId", app.workspaceId(),
                 "accessLevel", level));
         return Map.of("id", appId, "name", app.name(), "accessLevel", level);
+    }
+
+    /** 单应用归属转移：将指定应用及其版本历史、线上站点、云表、任务、素材与关联会话无损划转给目标工作空间（支持传 workspaceId、userId 或 SSO 登录工号） */
+    @Transactional
+    public Map<String, Object> transferApp(String appId, JsonNode body, String actor) {
+        AppRow app = apps.findById(appId).orElseThrow(() -> ApiException.notFound("应用"));
+        String rawTarget = body.path("targetWorkspaceId").asText("").trim();
+        if (rawTarget.isEmpty()) {
+            throw ApiException.validation("请选择目标接收工作空间或接手人工号");
+        }
+        String targetWs = resolveOrProvisionWorkspace(rawTarget);
+        String fromWs = app.workspaceId();
+        if (fromWs.equals(targetWs)) {
+            throw ApiException.conflict("SAME_WORKSPACE", "目标工作空间与当前归属空间相同，无需转移");
+        }
+
+        boolean includeConv = !body.has("includeConversation") || body.path("includeConversation").asBoolean(true);
+        String note = clip(body.path("note").asText("").trim(), 200);
+
+        transferSingleAppResources(appId, fromWs, targetWs, includeConv);
+
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("name", app.name());
+        detail.put("slug", app.slug());
+        detail.put("fromWorkspaceId", fromWs);
+        detail.put("toWorkspaceId", targetWs);
+        detail.put("includeConversation", includeConv);
+        if (!note.isEmpty()) detail.put("note", note);
+        audit(actor, "APP_TRANSFER", "app", appId, detail);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("id", appId);
+        out.put("name", app.name());
+        out.put("fromWorkspaceId", fromWs);
+        out.put("toWorkspaceId", targetWs);
+        out.put("transferred", true);
+        return out;
+    }
+
+    /** 人员离职 / 空间资产批量交接：支持整空间全量交接或勾选指定应用批量交接（支持传 workspaceId、userId 或 SSO 工号） */
+    @Transactional
+    public Map<String, Object> handoverWorkspace(JsonNode body, String actor) {
+        String rawFrom = body.path("fromWorkspaceId").asText("").trim();
+        String rawTo = body.path("toWorkspaceId").asText("").trim();
+        if (rawFrom.isEmpty() || rawTo.isEmpty()) {
+            throw ApiException.validation("请同时选择交出空间与接收空间");
+        }
+        String fromWs = resolveOrProvisionWorkspace(rawFrom);
+        String toWs = resolveOrProvisionWorkspace(rawTo);
+        if (fromWs.equals(toWs)) {
+            throw ApiException.conflict("SAME_WORKSPACE", "交出空间与接收空间不能相同");
+        }
+
+        boolean includeTrash = body.path("includeTrash").asBoolean(false);
+        boolean includeConversations = !body.has("includeConversations") || body.path("includeConversations").asBoolean(true);
+        boolean includeDataSources = !body.has("includeDataSources") || body.path("includeDataSources").asBoolean(true);
+        String note = clip(body.path("note").asText("").trim(), 200);
+
+        Set<String> filterAppIds = new LinkedHashSet<>();
+        if (body.has("appIds") && body.get("appIds").isArray()) {
+            for (JsonNode n : body.get("appIds")) {
+                String aid = n.asText("").trim();
+                if (!aid.isEmpty()) filterAppIds.add(aid);
+            }
+        }
+
+        List<Map<String, String>> sourceApps = jdbc.sql("""
+                select id, name, deleted_at::text as deleted_at
+                from app
+                where workspace_id = ?
+                order by updated_at desc
+                """).param(fromWs).query((rs, i) -> Map.of(
+                "id", rs.getString("id"),
+                "name", rs.getString("name"),
+                "deleted", rs.getString("deleted_at") != null ? "true" : "false"
+        )).list();
+
+        List<String> movedAppIds = new ArrayList<>();
+        List<String> movedAppNames = new ArrayList<>();
+        for (Map<String, String> row : sourceApps) {
+            String aid = row.get("id");
+            boolean isDeleted = "true".equals(row.get("deleted"));
+            if (!filterAppIds.isEmpty()) {
+                if (!filterAppIds.contains(aid)) continue;
+            } else if (isDeleted && !includeTrash) {
+                continue;
+            }
+            transferSingleAppResources(aid, fromWs, toWs, includeConversations);
+            movedAppIds.add(aid);
+            movedAppNames.add(row.get("name"));
+        }
+
+        int movedStandaloneConvs = 0;
+        if (includeConversations && filterAppIds.isEmpty()) {
+            movedStandaloneConvs = jdbc.sql("update conversation set workspace_id = ? where workspace_id = ?")
+                    .params(toWs, fromWs).update();
+            jdbc.sql("update help_conversation set workspace_id = ? where workspace_id = ?")
+                    .params(toWs, fromWs).update();
+        }
+
+        int movedDataSources = 0;
+        if (includeDataSources && filterAppIds.isEmpty()) {
+            movedDataSources = jdbc.sql("""
+                    update data_source ds
+                    set workspace_id = ?
+                    where ds.workspace_id = ?
+                      and ds.deleted_at is null
+                      and not exists (
+                          select 1 from data_source target_ds
+                          where target_ds.workspace_id = ?
+                            and target_ds.key = ds.key
+                            and target_ds.deleted_at is null
+                      )
+                    """).params(toWs, fromWs, toWs).update();
+        }
+
+        // 全空间离职交接时，同步划转剩余独立素材、上传包与社区作品归属
+        if (filterAppIds.isEmpty()) {
+            jdbc.sql("update asset set workspace_id = ? where workspace_id = ?").params(toWs, fromWs).update();
+            jdbc.sql("update upload set workspace_id = ? where workspace_id = ?").params(toWs, fromWs).update();
+            jdbc.sql("update template set workspace_id = ? where workspace_id = ?").params(toWs, fromWs).update();
+        }
+
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("fromWorkspaceId", fromWs);
+        detail.put("toWorkspaceId", toWs);
+        detail.put("transferredAppsCount", movedAppIds.size());
+        detail.put("appNames", movedAppNames.size() > 20 ? movedAppNames.subList(0, 20) : movedAppNames);
+        detail.put("movedConversations", movedStandaloneConvs);
+        detail.put("movedDataSources", movedDataSources);
+        detail.put("includeTrash", includeTrash);
+        if (!note.isEmpty()) detail.put("note", note);
+        audit(actor, "WORKSPACE_HANDOVER", "workspace", fromWs, detail);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("fromWorkspaceId", fromWs);
+        out.put("toWorkspaceId", toWs);
+        out.put("transferredAppsCount", movedAppIds.size());
+        out.put("movedConversations", movedStandaloneConvs);
+        out.put("movedDataSources", movedDataSources);
+        out.put("appNames", movedAppNames);
+        return out;
+    }
+
+    /**
+     * 解析目标空间标识：
+     * 1. 若本身是已存在的 workspace.id（如 ws_xxx），直接返回；
+     * 2. 若是 SSO 用户的 app_user.id 或 login_name（工号），查找其名下主工作空间；若该员工尚未初始化空间，则自动为其创建并绑定空间。
+     */
+    private String resolveOrProvisionWorkspace(String ref) {
+        long wsExists = jdbc.sql("select count(*) from workspace where id = ?").param(ref).query(Long.class).single();
+        if (wsExists > 0) return ref;
+
+        var userOpt = jdbc.sql("""
+                select id from app_user
+                where id = ? or lower(login_name) = lower(?)
+                order by last_login_at desc
+                limit 1
+                """).params(ref, ref).query(String.class).optional();
+        if (userOpt.isPresent()) {
+            String uid = userOpt.get();
+            var ownedWs = jdbc.sql("select id from workspace where owner_user_id = ? order by created_at asc limit 1")
+                    .param(uid).query(String.class).optional();
+            if (ownedWs.isPresent()) return ownedWs.get();
+
+            String newWsId = Ids.newId("ws");
+            String token = Ids.token();
+            jdbc.sql("insert into workspace (id, token_hash, owner_user_id) values (?, ?, ?)")
+                    .params(newWsId, Ids.sha256(token), uid).update();
+            return newWsId;
+        }
+        throw ApiException.notFound("工作空间或员工账号 (" + ref + ")");
+    }
+
+    private void transferSingleAppResources(String appId, String fromWs, String toWs, boolean includeConv) {
+        long activeTasks = jdbc.sql("""
+                select count(*) from task
+                where app_id = ? and status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                """).param(appId).query(Long.class).single();
+        if (activeTasks > 0) {
+            throw ApiException.conflict("TASK_ACTIVE", "应用仍有正在运行或排队的任务，请等待完成或先停止任务后再执行交接");
+        }
+
+        jdbc.sql("update app set workspace_id = ?, updated_at = now() where id = ?")
+                .params(toWs, appId).update();
+        jdbc.sql("""
+                update task
+                set workspace_id = ?,
+                    idempotency_key = case
+                        when idempotency_key is not null and idempotency_key not like (id || ':%')
+                        then id || ':' || idempotency_key
+                        else idempotency_key
+                    end
+                where app_id = ?
+                """).params(toWs, appId).update();
+        jdbc.sql("update task_message_queue set workspace_id = ? where app_id = ?")
+                .params(toWs, appId).update();
+
+        // 迁移直接挂载在 app_id 下、或通过 app.asset_ids / message.asset_ids 关联的素材
+        jdbc.sql("""
+                update asset
+                set workspace_id = ?, app_id = coalesce(app_id, ?)
+                where app_id = ?
+                   or id in (
+                       select jsonb_array_elements_text(coalesce(a.asset_ids, '[]'::jsonb))
+                       from app a where a.id = ?
+                   )
+                   or id in (
+                       select jsonb_array_elements_text(coalesce(m.asset_ids, '[]'::jsonb))
+                       from message m where m.app_id = ? and m.asset_ids is not null
+                   )
+                """).params(toWs, appId, appId, appId, appId).update();
+
+        if (includeConv) {
+            jdbc.sql("""
+                    update asset
+                    set workspace_id = ?
+                    where id in (
+                        select jsonb_array_elements_text(coalesce(cm.asset_ids, '[]'::jsonb))
+                        from conversation_message cm
+                        join app_conversation ac on ac.conversation_id = cm.conversation_id
+                        where ac.app_id = ? and cm.asset_ids is not null
+                    )
+                    """).params(toWs, appId).update();
+            jdbc.sql("""
+                    update conversation
+                    set workspace_id = ?
+                    where id in (select conversation_id from app_conversation where app_id = ?)
+                    """).params(toWs, appId).update();
+        }
+
+        // 若该应用绑定了仅被自己使用的私有数据源且目标空间无同名 key，一并随应用迁移
+        jdbc.sql("""
+                update data_source ds
+                set workspace_id = ?
+                where ds.workspace_id = ?
+                  and ds.deleted_at is null
+                  and ds.id in (select source_id from app_data_source where app_id = ?)
+                  and not exists (
+                      select 1 from app_data_source ads
+                      join app other_app on other_app.id = ads.app_id
+                      where ads.source_id = ds.id
+                        and ads.app_id <> ?
+                        and other_app.workspace_id = ?
+                        and other_app.deleted_at is null
+                  )
+                  and not exists (
+                      select 1 from data_source target_ds
+                      where target_ds.workspace_id = ?
+                        and target_ds.key = ds.key
+                        and target_ds.deleted_at is null
+                  )
+                """).params(toWs, fromWs, appId, appId, fromWs, toWs).update();
     }
 
     /** 彻底永久清除回收站中的应用及其全部关联版本、任务与云存储资源 */

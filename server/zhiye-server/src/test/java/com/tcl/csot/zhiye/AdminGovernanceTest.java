@@ -186,16 +186,41 @@ class AdminGovernanceTest extends IntegrationTest {
         assertThat(reclaimed.path("reclaimedCount").asInt()).isGreaterThanOrEqualTo(1);
         assertThat(reclaimed.path("taskIds").toString()).contains(expiredTaskId);
 
-        // 7. 限流清理与审计日志汇总
+        // 7. 应用归属转移与人员离职整空间批量交接（支持直接传 SSO 登录工号自动初始化接收空间）
+        JsonNode transferred = c.ok(c.send("POST", "/api/admin/apps/" + appId + "/transfer",
+                Map.of("targetWorkspaceId", "ops_candidate", "note", "单应用移交测试"), ADMIN_HEADERS));
+        assertThat(transferred.path("transferred").asBoolean()).isTrue();
+        String candidateWsId = transferred.path("toWorkspaceId").asText();
+        assertThat(candidateWsId).startsWith("ws_");
+        assertThat(jdbc.sql("select workspace_id from app where id = ?").param(appId).query(String.class).single())
+                .isEqualTo(candidateWsId);
+
+        // 整空间离职批量交接回原空间 wsId
+        JsonNode handedOver = c.ok(c.send("POST", "/api/admin/workspaces/handover",
+                Map.of(
+                        "fromWorkspaceId", candidateWsId,
+                        "toWorkspaceId", wsId,
+                        "includeConversations", true,
+                        "includeDataSources", true,
+                        "note", "离职整空间交接测试"
+                ), ADMIN_HEADERS));
+        assertThat(handedOver.path("transferredAppsCount").asInt()).isEqualTo(1);
+        assertThat(jdbc.sql("select workspace_id from app where id = ?").param(appId).query(String.class).single())
+                .isEqualTo(wsId);
+
+        // 8. 限流清理与审计日志汇总
         jdbc.sql("insert into rate_limit_hit (bucket) values ('test-bucket')").update();
         JsonNode cleared = c.ok(c.send("POST", "/api/admin/rate-limits/clear", Map.of("bucket", "test-bucket"), ADMIN_HEADERS));
         assertThat(cleared.path("clearedCount").asInt()).isGreaterThanOrEqualTo(1);
 
         JsonNode finalOverview = c.ok(c.send("GET", "/api/admin/overview", null, ADMIN_HEADERS));
         assertThat(finalOverview.path("users").toString()).contains("ops_candidate");
+        assertThat(finalOverview.path("allApps").isArray()).isTrue();
+        assertThat(finalOverview.path("workspaces").isArray()).isTrue();
         String auditJson = finalOverview.path("auditLogs").toString();
         assertThat(auditJson).contains("QUOTA_UPDATE", "QUOTA_RESET", "APP_UNPUBLISH", "APP_DELETE",
                 "APP_RESTORE", "APP_PURGE", "SITE_ACCESS_UPDATE", "ADMIN_ROLE_UPDATE",
+                "APP_TRANSFER", "WORKSPACE_HANDOVER",
                 "CLUSTER_NODE_PURGE", "TASK_LEASE_RECLAIM", "TASK_CANCEL", "TASK_RETRY",
                 "TEMPLATE_FEATURE", "TEMPLATE_DELETE", "FEEDBACK_TRIAGE", "RATE_LIMIT_CLEAR");
     }

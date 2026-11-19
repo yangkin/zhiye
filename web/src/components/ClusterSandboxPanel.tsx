@@ -10,9 +10,11 @@ import { toast } from '../lib/store';
 import { confirmDialog } from './ConfirmDialog';
 import { ErrorState, LoadingState } from './EmptyState';
 import { Modal } from './Modal';
+import { Pagination, useClientPagination } from './Pagination';
 import { Select } from './Select';
 import {
   DashEmptyBox,
+  DashPanelHead,
   MultiTrendChart,
   fmtBytes,
   fmtDurationMs,
@@ -65,6 +67,7 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
   const [withUsage, setWithUsage] = useState(true);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [kindFilter, setKindFilter] = useState<string>('ALL');
+  const [nodeFilter, setNodeFilter] = useState<'online' | 'offline' | 'all'>('online');
   const [search, setSearch] = useState('');
   const [hourlyMetric, setHourlyMetric] = useState<'tasks' | 'llm'>('tasks');
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -247,6 +250,16 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
     }));
   }, [data?.runtimeMetrics?.trend, hourlyMetric]);
 
+  const filteredNodes = useMemo(() => {
+    const list = data?.nodes ?? [];
+    if (nodeFilter === 'all') return list;
+    if (nodeFilter === 'online') return list.filter((n) => n.status === 'online' && !n.gracefulStop);
+    return list.filter((n) => n.status !== 'online' || n.gracefulStop);
+  }, [data?.nodes, nodeFilter]);
+
+  const nodePager = useClientPagination(filteredNodes, 6, nodeFilter);
+  const sbxPager = useClientPagination(filteredSandboxes, 10, `${kindFilter}|${search}`);
+
   if (clusterQ.isLoading && !data) {
     return (
       <section className="dash-section" aria-label="集群拓扑与沙箱控制">
@@ -274,8 +287,8 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
   if (compact) {
     return (
       <section className="dash-section" aria-label="集群与沙箱实时拓扑摘要">
-        <div className="dash-sec-title">
-          <div>
+        <div className="dash-sec-title-row">
+          <div className="dash-sec-title">
             <h2>集群多副本拓扑与沙箱控制面</h2>
             <p>
               当前沙箱引擎：<code className="dash-code">{PROVIDER_LABELS[data.sandboxProvider] ?? data.sandboxProvider}</code> ·{' '}
@@ -431,48 +444,94 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
 
       {/* 1. 集群节点拓扑卡片 */}
       <div className="dash-panel">
-        <header className="dash-panel-head compact">
-          <div>
-            <h3>集群多副本节点拓扑（Cluster Nodes · {nodesSummary.online} 在线 / {nodes.length} 总计）</h3>
-            <p>
-              每个 Pod / 进程实例每 10 秒向 PostgreSQL 上报心跳、JVM 堆内存、宿主机 CPU 与 Worker 并发槽位占用。
-            </p>
-          </div>
-          <div className="dash-queue-pills">
-            <span className="dash-pill">排队 <b>{fmtNum(queue.queued)}</b></span>
-            <span className="dash-pill">准备 <b>{fmtNum(queue.preparing)}</b></span>
-            <span className="dash-pill ok">编写中 <b>{fmtNum(queue.running)}</b></span>
-            <span className="dash-pill">质检 <b>{fmtNum(queue.verifying)}</b></span>
-            <span className="dash-pill">提交 <b>{fmtNum(queue.committing)}</b></span>
-            {queue.oldestQueuedSeconds > 0 ? (
-              <span className="dash-pill warn">最长排队 {fmtSecondsAgo(queue.oldestQueuedSeconds)}</span>
-            ) : null}
-            {nodesSummary.offline > 0 ? (
-              <button
-                type="button"
-                className="subtle-button dash-compact-btn"
-                disabled={busyKey === 'node-all'}
-                onClick={() => void handlePurgeOfflineNodes()}
-              >
-                清理离线节点 ({nodesSummary.offline})
-              </button>
-            ) : null}
-          </div>
-        </header>
+        <DashPanelHead
+          icon="cloud"
+          tone="indigo"
+          title={`集群多副本节点拓扑（${nodesSummary.online} 在线 / ${nodes.length} 总计）`}
+          sub="每个 Pod / 进程实例每 10 秒上报心跳、JVM 堆内存、宿主机 CPU 与 Worker 并发槽位占用"
+          right={
+            <div className="dash-queue-pills">
+              <div className="seg-control small" role="radiogroup" aria-label="节点在线状态筛选">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={nodeFilter === 'online'}
+                  className={nodeFilter === 'online' ? 'active' : ''}
+                  onClick={() => setNodeFilter('online')}
+                >
+                  在线 ({nodesSummary.online})
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={nodeFilter === 'offline'}
+                  className={nodeFilter === 'offline' ? 'active' : ''}
+                  onClick={() => setNodeFilter('offline')}
+                >
+                  已失联 ({nodesSummary.offline})
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={nodeFilter === 'all'}
+                  className={nodeFilter === 'all' ? 'active' : ''}
+                  onClick={() => setNodeFilter('all')}
+                >
+                  全部 ({nodes.length})
+                </button>
+              </div>
+              {nodesSummary.offline > 0 ? (
+                <button
+                  type="button"
+                  className="subtle-button dash-compact-btn"
+                  disabled={busyKey === 'node-all'}
+                  onClick={() => void handlePurgeOfflineNodes()}
+                >
+                  清理离线节点 ({nodesSummary.offline})
+                </button>
+              ) : null}
+            </div>
+          }
+        />
 
-        {nodes.length === 0 ? (
-          <DashEmptyBox icon="cloud" title="暂无已注册的集群节点心跳记录" />
+        <div className="dash-queue-pills" style={{ marginBottom: 12 }}>
+          <span className="dash-pill">排队 <b>{fmtNum(queue.queued)}</b></span>
+          <span className="dash-pill">准备 <b>{fmtNum(queue.preparing)}</b></span>
+          <span className="dash-pill ok">编写中 <b>{fmtNum(queue.running)}</b></span>
+          <span className="dash-pill">质检 <b>{fmtNum(queue.verifying)}</b></span>
+          <span className="dash-pill">提交 <b>{fmtNum(queue.committing)}</b></span>
+          {queue.oldestQueuedSeconds > 0 ? (
+            <span className="dash-pill warn">最长排队 {fmtSecondsAgo(queue.oldestQueuedSeconds)}</span>
+          ) : null}
+        </div>
+
+        {filteredNodes.length === 0 ? (
+          <DashEmptyBox
+            icon="cloud"
+            title={nodeFilter === 'online' ? '当前暂无在线节点' : '当前筛选条件下无集群节点'}
+            hint="可切换到「全部」查看历史节点记录"
+          />
         ) : (
-          <div className="dash-node-grid">
-            {nodes.map((node) => (
-              <NodeTopologyCard
-                key={node.instanceId}
-                node={node}
-                busy={busyKey === `node-${node.instanceId}`}
-                onPurgeOffline={(id) => void handlePurgeOfflineNodes(id)}
-              />
-            ))}
-          </div>
+          <>
+            <div className={`dash-node-grid ${nodePager.pageItems.length <= 2 ? 'cols-2' : ''}`}>
+              {nodePager.pageItems.map((node) => (
+                <NodeTopologyCard
+                  key={node.instanceId}
+                  node={node}
+                  busy={busyKey === `node-${node.instanceId}`}
+                  onPurgeOffline={(id) => void handlePurgeOfflineNodes(id)}
+                />
+              ))}
+            </div>
+            <Pagination
+              page={nodePager.page}
+              pageSize={nodePager.pageSize}
+              total={nodePager.total}
+              onPageChange={nodePager.setPage}
+              onPageSizeChange={nodePager.setPageSize}
+              pageSizeOptions={[6, 12, 24]}
+            />
+          </>
         )}
       </div>
 
@@ -625,7 +684,7 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
                 </tr>
               </thead>
               <tbody>
-                {visibleSandboxes.map((sb) => {
+                {sbxPager.pageItems.map((sb) => {
                   const kind = sb.kind || sb.state;
                   const tone = KIND_TONES[kind] ?? 'muted';
                   const canDestroy = sb.state === 'creating' || sb.state === 'active' || kind === 'unregistered' || kind === 'ledger-ghost';
@@ -742,6 +801,15 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
             </table>
           </div>
         )}
+        <Pagination
+          page={sbxPager.page}
+          pageSize={sbxPager.pageSize}
+          total={sbxPager.total}
+          onPageChange={sbxPager.setPage}
+          onPageSizeChange={sbxPager.setPageSize}
+          pageSizeOptions={[10, 20, 50]}
+          alwaysShowSummary
+        />
       </div>
 
       {/* 单沙箱详情检查抽屉 Modal */}

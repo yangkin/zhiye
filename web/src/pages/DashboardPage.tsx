@@ -9,6 +9,7 @@ import { fmtTime, handleTabListKeyDown } from '../lib/format';
 import { toast } from '../lib/store';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { Select } from '../components/Select';
+import { Pagination, useClientPagination } from '../components/Pagination';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
 import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
@@ -43,7 +44,7 @@ const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
 ];
 
 const SECTION_TABS: [SectionTab, string][] = [
-  ['all', '全部维度'],
+  ['all', '概览总览'],
   ['cluster', '集群与沙箱'],
   ['growth', '增长与空间排行'],
   ['apps', '应用资产与流量'],
@@ -239,8 +240,6 @@ export function DashboardPage() {
   const [appSort, setAppSort] = useState<'pv' | 'versions' | 'tasks'>('pv');
   const [wsQuery, setWsQuery] = useState('');
   const [wsSort, setWsSort] = useState<'apps' | 'tasks' | 'pv'>('apps');
-  const [expandWs, setExpandWs] = useState(false);
-  const [expandApps, setExpandApps] = useState(false);
   const [quotaTarget, setQuotaTarget] = useState<QuotaModalTarget | null>(null);
   const [inlineBusy, setInlineBusy] = useState<string | null>(null);
 
@@ -338,7 +337,7 @@ export function DashboardPage() {
   };
 
   const data = q.data;
-  const show = (tab: SectionTab) => section === 'all' || section === tab;
+  const show = (tab: SectionTab) => section === tab;
 
   const trendConfig = useMemo(() => {
     const daily = data?.trends.daily ?? [];
@@ -426,8 +425,10 @@ export function DashboardPage() {
   }, [data, appQuery, appTypeFilter, appSort]);
 
   const daily = data?.trends.daily ?? [];
-  const visibleWorkspaces = expandWs ? sortedWorkspaces : sortedWorkspaces.slice(0, 8);
-  const visibleApps = expandApps ? filteredTopApps : filteredTopApps.slice(0, 8);
+  const wsPager = useClientPagination(sortedWorkspaces, 10, `${wsQuery}|${wsSort}|${range}|${filterWorkspaceId}|${filterUserId}`);
+  const appsPager = useClientPagination(filteredTopApps, 10, `${appQuery}|${appTypeFilter}|${appSort}|${range}|${filterWorkspaceId}|${filterUserId}`);
+  const visibleWorkspaces = wsPager.pageItems;
+  const visibleApps = appsPager.pageItems;
   const totalVerifyChecks = (data?.agentTelemetry.verifyChecks ?? []).reduce((s, c) => s + c.total, 0);
   const passedVerifyChecks = (data?.agentTelemetry.verifyChecks ?? []).reduce((s, c) => s + c.passed, 0);
   const overallVerifyRate = totalVerifyChecks ? Math.round((passedVerifyChecks / totalVerifyChecks) * 1000) / 10 : 0;
@@ -727,9 +728,9 @@ export function DashboardPage() {
           ) : null}
           {isAdmin && section === 'cluster' ? <ClusterSandboxPanel /> : null}
 
-          {/* 2. 转化漏斗 + 多维每日趋势 + 24h 时段 + 空间生产力排行 */}
-          {show('growth') ? (
-            <section className="dash-section" aria-label="增长趋势与空间排行">
+          {/* 2. 核心转化漏斗 + 多维每日趋势（总览与增长页均展示，高信号视觉锚点） */}
+          {section === 'all' || section === 'growth' ? (
+            <section className="dash-section" aria-label="转化漏斗与每日趋势">
               <div className="dash-hero-split">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
@@ -794,7 +795,74 @@ export function DashboardPage() {
                   />
                 </div>
               </div>
+            </section>
+          ) : null}
 
+          {/* 总览专享：4 大业务域深度分析直达卡片（替代 8000px 纵向大长页） */}
+          {section === 'all' ? (
+            <section className="dash-section" aria-label="分域深度分析入口">
+              <div className="dash-exec-grid">
+                <button type="button" className="dash-exec-card" onClick={() => setSection('growth')}>
+                  <div className="dash-exec-head">
+                    <span className="dash-head-icon violet sm"><Icon name="chart" /></span>
+                    <b>增长与空间排行</b>
+                    <span className="dash-exec-arrow">深入分析 →</span>
+                  </div>
+                  <div className="dash-exec-metrics">
+                    <div><span>有产出空间</span><strong>{fmtNum(data.overview.workspacesProductive)}</strong></div>
+                    <div><span>活跃空间</span><strong>{fmtNum(data.overview.workspacesActiveRange)}</strong></div>
+                    <div><span>对话转应用</span><strong>{fmtNum(data.overview.conversationsConverted)}</strong></div>
+                  </div>
+                  <p>查看 Top 工作空间生产力榜单、24h 活跃分布与配额快捷调整</p>
+                </button>
+
+                <button type="button" className="dash-exec-card" onClick={() => setSection('apps')}>
+                  <div className="dash-exec-head">
+                    <span className="dash-head-icon teal sm"><Icon name="grid" /></span>
+                    <b>应用资产与流量</b>
+                    <span className="dash-exec-arrow">深入分析 →</span>
+                  </div>
+                  <div className="dash-exec-metrics">
+                    <div><span>应用总量</span><strong>{fmtNum(data.overview.appsTotal)}</strong></div>
+                    <div><span>已发布站点</span><strong>{fmtNum(data.overview.appsPublished)}</strong></div>
+                    <div><span>累计 PV</span><strong>{fmtCompact(data.overview.pvTotal)}</strong></div>
+                  </div>
+                  <p>查看应用类型 / 技术栈分布、状态健康度与热门应用分页榜</p>
+                </button>
+
+                <button type="button" className="dash-exec-card" onClick={() => setSection('agent')}>
+                  <div className="dash-exec-head">
+                    <span className="dash-head-icon indigo sm"><Icon name="agent" /></span>
+                    <b>Agent 编排与质检</b>
+                    <span className="dash-exec-arrow">深入分析 →</span>
+                  </div>
+                  <div className="dash-exec-metrics">
+                    <div><span>任务总数</span><strong>{fmtNum(data.overview.tasksTotal)}</strong></div>
+                    <div><span>成功率</span><strong>{data.overview.taskSuccessRate}%</strong></div>
+                    <div><span>门禁通过率</span><strong>{overallVerifyRate}%</strong></div>
+                  </div>
+                  <p>查看任务耗时分位、工具调用遥测、模型路由与失败根因排行</p>
+                </button>
+
+                <button type="button" className="dash-exec-card" onClick={() => setSection('infra')}>
+                  <div className="dash-exec-head">
+                    <span className="dash-head-icon amber sm"><Icon name="cloud" /></span>
+                    <b>云服务、反馈与监控</b>
+                    <span className="dash-exec-arrow">深入分析 →</span>
+                  </div>
+                  <div className="dash-exec-metrics">
+                    <div><span>云服务应用</span><strong>{fmtNum(data.overview.cloudEnabledApps)}</strong></div>
+                    <div><span>云数据表</span><strong>{fmtNum(data.overview.cloudTablesTotal)}</strong></div>
+                    <div><span>用户反馈</span><strong>{fmtNum(data.overview.helpFeedbackTotal)}</strong></div>
+                  </div>
+                  <p>查看云函数与数据源调用、对话协作、素材导入与社区互动明细</p>
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {show('growth') ? (
+            <section className="dash-section" aria-label="空间生产力排行与时段分布">
               <div className="dash-panel">
                 <header className="dash-panel-head">
                   <div>
@@ -869,19 +937,30 @@ export function DashboardPage() {
                                       {isFiltered ? '取消筛选' : '下钻'}
                                     </button>
                                     {isAdmin ? (
-                                      <button
-                                        type="button"
-                                        className="dash-link"
-                                        onClick={() =>
-                                          setQuotaTarget({
-                                            workspaceId: w.workspaceId,
-                                            ownerName: w.ownerName,
-                                            custom: customQ,
-                                          })
-                                        }
-                                      >
-                                        配额
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="dash-link"
+                                          onClick={() =>
+                                            navigate('/admin?tab=handover&fromWs=' + encodeURIComponent(w.workspaceId))
+                                          }
+                                        >
+                                          交接
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="dash-link"
+                                          onClick={() =>
+                                            setQuotaTarget({
+                                              workspaceId: w.workspaceId,
+                                              ownerName: w.ownerName,
+                                              custom: customQ,
+                                            })
+                                          }
+                                        >
+                                          配额
+                                        </button>
+                                      </>
                                     ) : null}
                                   </div>
                                 </td>
@@ -891,13 +970,15 @@ export function DashboardPage() {
                         </tbody>
                       </table>
                     </div>
-                    {sortedWorkspaces.length > 8 ? (
-                      <div className="dash-table-footer">
-                        <button type="button" className="text-button" onClick={() => setExpandWs((v) => !v)}>
-                          {expandWs ? '收起至 Top 8' : `展开全部 Top ${sortedWorkspaces.length} 工作空间`}
-                        </button>
-                      </div>
-                    ) : null}
+                    <Pagination
+                      page={wsPager.page}
+                      pageSize={wsPager.pageSize}
+                      total={wsPager.total}
+                      onPageChange={wsPager.setPage}
+                      onPageSizeChange={wsPager.setPageSize}
+                      pageSizeOptions={[10, 20, 50]}
+                      alwaysShowSummary
+                    />
                   </>
                 )}
               </div>
@@ -1150,13 +1231,15 @@ export function DashboardPage() {
                         </tbody>
                       </table>
                     </div>
-                    {filteredTopApps.length > 8 ? (
-                      <div className="dash-table-footer">
-                        <button type="button" className="text-button" onClick={() => setExpandApps((v) => !v)}>
-                          {expandApps ? '收起至 Top 8' : `展开全部 Top ${filteredTopApps.length} 应用`}
-                        </button>
-                      </div>
-                    ) : null}
+                    <Pagination
+                      page={appsPager.page}
+                      pageSize={appsPager.pageSize}
+                      total={appsPager.total}
+                      onPageChange={appsPager.setPage}
+                      onPageSizeChange={appsPager.setPageSize}
+                      pageSizeOptions={[10, 20, 50]}
+                      alwaysShowSummary
+                    />
                   </>
                 )}
               </div>
@@ -1701,15 +1784,50 @@ export function DashboardPage() {
                     icon="spark"
                     tone="violet"
                     title="创造页会话 & 文档产出"
-                    sub={`会话到应用转化率 ${data.interactions.conversations.conversionRate}%`}
+                    sub={`会话转应用率 ${data.interactions.conversations.conversionRate}% · 均 ${
+                      data.interactions.conversations.total > 0
+                        ? (
+                            (data.interactions.conversations.userMessages + data.interactions.conversations.assistantMessages) /
+                            data.interactions.conversations.total
+                          ).toFixed(1)
+                        : '0.0'
+                    } 条消息/会话`}
                   />
-                  <div className="dash-mini-stats compact-2">
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
                     <div><span>创造会话总数</span><b>{fmtNum(data.interactions.conversations.total)}</b></div>
                     <div><span>已转为应用</span><b>{fmtNum(data.interactions.conversations.convertedToApp)}</b></div>
-                    <div><span>用户提问条数</span><b>{fmtNum(data.interactions.conversations.userMessages)}</b></div>
-                    <div><span>AI 回复条数</span><b>{fmtNum(data.interactions.conversations.assistantMessages)}</b></div>
                     <div><span>含深度思考回复</span><b>{fmtNum(data.interactions.conversations.thinkingMessages)}</b></div>
                     <div><span>产出文件 / 版本</span><b>{fmtNum(data.interactions.conversations.filesTotal)} / {fmtNum(data.interactions.conversations.fileVersionsTotal)}</b></div>
+                  </div>
+                  <div className="dash-sub-block" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
+                    <h4>会话消息构成</h4>
+                    <SegmentedStrip
+                      segments={[
+                        { key: 'c-user', label: '用户提问', value: data.interactions.conversations.userMessages, color: '#7953dc' },
+                        { key: 'c-ai', label: 'AI 回复', value: data.interactions.conversations.assistantMessages, color: '#2f9e8f' },
+                      ]}
+                    />
+                  </div>
+                  <div className="dash-sub-block">
+                    <h4>关键转化与思考渗透</h4>
+                    <div className="dash-rate-bars">
+                      <RateMetricBar
+                        label="会话 → 应用转化"
+                        valueText={`${data.interactions.conversations.convertedToApp} / ${data.interactions.conversations.total}`}
+                        pct={data.interactions.conversations.conversionRate}
+                        color="#7953dc"
+                      />
+                      <RateMetricBar
+                        label="AI 深度思考占比"
+                        valueText={`${data.interactions.conversations.thinkingMessages} / ${data.interactions.conversations.assistantMessages}`}
+                        pct={
+                          data.interactions.conversations.assistantMessages > 0
+                            ? Math.round((data.interactions.conversations.thinkingMessages / data.interactions.conversations.assistantMessages) * 1000) / 10
+                            : 0
+                        }
+                        color="#2f9e8f"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -1718,15 +1836,36 @@ export function DashboardPage() {
                     icon="agent"
                     tone="indigo"
                     title="工作台协作 & 小织帮助"
-                    sub={`共 ${fmtNum(data.interactions.workbench.totalMessages)} 条工作台消息`}
+                    sub={`共 ${fmtNum(data.interactions.workbench.totalMessages)} 条工作台消息 · 小织咨询 ${fmtNum(data.interactions.help.conversations)} 次`}
                   />
-                  <div className="dash-mini-stats compact-2">
-                    <div><span>用户 / AI 消息</span><b>{fmtNum(data.interactions.workbench.userMessages)} / {fmtNum(data.interactions.workbench.assistantMessages)}</b></div>
-                    <div><span>系统提示消息</span><b>{fmtNum(data.interactions.workbench.systemMessages)}</b></div>
+                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                    <div><span>工作台消息总量</span><b>{fmtNum(data.interactions.workbench.totalMessages)}</b></div>
                     <div><span>定点元素修改</span><b>{fmtNum(data.interactions.workbench.elementContextMessages)}</b></div>
-                    <div><span>挂载技能 / 附件</span><b>{fmtNum(data.interactions.workbench.skillAttachedMessages)} / {fmtNum(data.interactions.workbench.assetAttachedMessages)}</b></div>
                     <div><span>小织会话 / 提问</span><b>{fmtNum(data.interactions.help.conversations)} / {fmtNum(data.interactions.help.userQuestions)}</b></div>
                     <div><span>问题上报反馈</span><b>{fmtNum(data.interactions.help.feedbackCount)}</b></div>
+                  </div>
+                  <div className="dash-sub-block" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
+                    <h4>工作台消息角色分布</h4>
+                    <SegmentedStrip
+                      segments={[
+                        { key: 'w-user', label: '用户指令', value: data.interactions.workbench.userMessages, color: '#4c7be8' },
+                        { key: 'w-ai', label: 'AI 响应', value: data.interactions.workbench.assistantMessages, color: '#7953dc' },
+                        { key: 'w-sys', label: '系统提示', value: data.interactions.workbench.systemMessages, color: '#9c94b3' },
+                      ]}
+                    />
+                  </div>
+                  <div className="dash-sub-block">
+                    <h4>高阶交互与帮助触达</h4>
+                    <BreakdownBars
+                      emptyIcon="agent"
+                      emptyText="暂无高阶协作交互记录"
+                      items={[
+                        { key: 'wb-el', label: '定点元素修改', value: data.interactions.workbench.elementContextMessages, color: '#4c7be8' },
+                        { key: 'wb-help', label: '小织智能问答提问', value: data.interactions.help.userQuestions, color: '#2f9e8f' },
+                        { key: 'wb-skill', label: '消息挂载技能', value: data.interactions.workbench.skillAttachedMessages, color: '#7953dc' },
+                        { key: 'wb-asset', label: '消息挂载素材附件', value: data.interactions.workbench.assetAttachedMessages, color: '#e28743' },
+                      ].filter((x) => x.value > 0)}
+                    />
                   </div>
                 </div>
 
@@ -1777,22 +1916,49 @@ export function DashboardPage() {
                     icon="help"
                     tone="amber"
                     title="用户问题上报反馈（最新 10 条）"
-                    sub="来自小织「问题上报」的真实员工反馈"
+                    sub={`小织咨询 ${fmtNum(data.interactions.help.conversations)} 次 · 提问 ${fmtNum(data.interactions.help.userQuestions)} 条 · 上报 ${fmtNum(data.interactions.help.feedbackCount)} 条`}
+                    right={
+                      isAdmin ? (
+                        <button type="button" className="dash-link" onClick={() => setSection('admin')}>
+                          进入反馈分诊台 →
+                        </button>
+                      ) : undefined
+                    }
                   />
-                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
+                  <div className="dash-mini-stats compact-3" style={{ marginBottom: 12 }}>
                     <div><span>小织咨询会话</span><b>{fmtNum(data.interactions.help.conversations)}</b></div>
-                    <div><span>累计问题上报</span><b>{fmtNum(data.interactions.help.feedbackCount)}</b></div>
+                    <div><span>员工有效提问</span><b>{fmtNum(data.interactions.help.userQuestions)}</b></div>
+                    <div>
+                      <span>待跟进 / 累计上报</span>
+                      <b className={(adminQ.data?.feedbackOpenCount ?? 0) > 0 ? 'dash-warn-num' : ''}>
+                        {isAdmin && adminQ.data ? `${fmtNum(adminQ.data.feedbackOpenCount)} / ` : ''}
+                        {fmtNum(data.interactions.help.feedbackCount)}
+                      </b>
+                    </div>
                   </div>
                   {data.interactions.help.recentFeedbacks.length === 0 ? (
                     <DashEmptyBox icon="help" title="暂无问题上报反馈" hint="来自小织助手「问题上报」的员工反馈会实时汇总于此" />
                   ) : (
                     <ul className="dash-feedback-list">
-                      {data.interactions.help.recentFeedbacks.map((fb) => (
-                        <li key={fb.id}>
-                          <p>{fb.content}</p>
-                          <small>{fmtTime(fb.createdAt)} · 空间 {fb.workspaceId}</small>
-                        </li>
-                      ))}
+                      {data.interactions.help.recentFeedbacks.map((fb) => {
+                        const matchedAdminFb = adminQ.data?.feedbacks.find((x) => x.id === fb.id);
+                        const st = matchedAdminFb?.status;
+                        return (
+                          <li key={fb.id}>
+                            <div className="dash-fb-row-head">
+                              {st ? (
+                                <span className={`dash-pill ${st === 'resolved' ? 'ok' : st === 'open' ? 'err' : 'cloud'}`}>
+                                  {st === 'open' ? '待处理' : st === 'in_progress' ? '跟进中' : st === 'resolved' ? '已解决' : '已忽略'}
+                                </span>
+                              ) : (
+                                <span className="dash-pill">用户反馈</span>
+                              )}
+                              <small>{fmtTime(fb.createdAt)} · <code>{fb.workspaceId}</code></small>
+                            </div>
+                            <p>{fb.content}</p>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
@@ -1803,12 +1969,41 @@ export function DashboardPage() {
                     tone="rose"
                     title="灵感社区贡献与热门作品"
                     sub={`全社区 ${fmtNum(data.ecosystem.platformCommunity.totalWorks)} 个作品（浏览 ${fmtNum(data.ecosystem.platformCommunity.totalViews)} · 复刻 ${fmtNum(data.ecosystem.platformCommunity.totalClones)} · 赞 ${fmtNum(data.ecosystem.platformCommunity.totalLikes)}）`}
+                    right={
+                      isAdmin ? (
+                        <button type="button" className="dash-link" onClick={() => setSection('admin')}>
+                          内容精选与治理 →
+                        </button>
+                      ) : undefined
+                    }
                   />
-                  <div className="dash-mini-stats compact-2" style={{ marginBottom: 12 }}>
-                    <div><span>公开作品数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalWorks)}</b></div>
-                    <div><span>累计浏览 PV</span><b>{fmtNum(data.ecosystem.platformCommunity.totalViews)}</b></div>
-                    <div><span>模板复刻次数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalClones)}</b></div>
-                    <div><span>收获点赞数</span><b>{fmtNum(data.ecosystem.platformCommunity.totalLikes)}</b></div>
+                  <div className="dash-mini-stats compact-4" style={{ marginBottom: 12 }}>
+                    <div><span>公开作品</span><b>{fmtNum(data.ecosystem.platformCommunity.totalWorks)}</b></div>
+                    <div><span>累计浏览</span><b>{fmtNum(data.ecosystem.platformCommunity.totalViews)}</b></div>
+                    <div><span>模板复刻</span><b>{fmtNum(data.ecosystem.platformCommunity.totalClones)}</b></div>
+                    <div><span>收获点赞</span><b>{fmtNum(data.ecosystem.platformCommunity.totalLikes)}</b></div>
+                  </div>
+                  <div className="dash-rate-bars" style={{ marginBottom: 12 }}>
+                    <RateMetricBar
+                      label="浏览 → 模板复刻率"
+                      valueText={`${data.ecosystem.platformCommunity.totalClones} / ${data.ecosystem.platformCommunity.totalViews}`}
+                      pct={
+                        data.ecosystem.platformCommunity.totalViews > 0
+                          ? Math.round((data.ecosystem.platformCommunity.totalClones / data.ecosystem.platformCommunity.totalViews) * 1000) / 10
+                          : 0
+                      }
+                      color="#d0465c"
+                    />
+                    <RateMetricBar
+                      label="浏览 → 点赞互动率"
+                      valueText={`${data.ecosystem.platformCommunity.totalLikes} / ${data.ecosystem.platformCommunity.totalViews}`}
+                      pct={
+                        data.ecosystem.platformCommunity.totalViews > 0
+                          ? Math.round((data.ecosystem.platformCommunity.totalLikes / data.ecosystem.platformCommunity.totalViews) * 1000) / 10
+                          : 0
+                      }
+                      color="#7953dc"
+                    />
                   </div>
                   {data.ecosystem.platformCommunity.topWorks.length === 0 ? (
                     <DashEmptyBox icon="community" title="灵感社区暂无公开作品" hint="将优质应用分享到灵感社区后可实时查看浏览与复刻榜单" />
@@ -1818,6 +2013,7 @@ export function DashboardPage() {
                         <thead>
                           <tr>
                             <th scope="col">作品</th>
+                            <th scope="col">类型</th>
                             <th scope="col">作者</th>
                             <th scope="col">浏览 / 复刻 / 赞</th>
                           </tr>
@@ -1830,6 +2026,7 @@ export function DashboardPage() {
                                   {w.name}
                                 </button>
                               </td>
+                              <td><span className="dash-tag">{w.appType}</span></td>
                               <td>{w.author}</td>
                               <td>{fmtNum(w.views)} / <b>{fmtNum(w.clones)}</b> / {fmtNum(w.likes)}</td>
                             </tr>
@@ -1904,7 +2101,48 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {isAdmin && show('admin') ? (
+          {/* 治理与运维：在「全部维度」展示高密度治理摘要入口，在「治理与运维」专页展开完整控制台 */}
+          {isAdmin && section === 'all' && adminQ.data ? (
+            <section className="dash-section" aria-label="平台治理快捷入口">
+              <div className="dash-panel">
+                <DashPanelHead
+                  icon="lock"
+                  tone="violet"
+                  title="平台治理、配额运维与操作审计"
+                  sub={`当前操作人 ${adminQ.data.currentActor} · 默认配额 ${adminQ.data.defaultQuota.maxApps} 应用 / ${adminQ.data.defaultQuota.dailyTaskLimit} 次日任务 / ${adminQ.data.defaultQuota.maxConcurrentTasks} 并发`}
+                  right={
+                    <button type="button" className="primary-button dash-compact-btn" onClick={() => navigate('/admin')}>
+                      进入管理工作台 →
+                    </button>
+                  }
+                />
+                <div className="dash-mini-stats compact-4">
+                  <div>
+                    <span className="dash-mini-label-icon"><Icon name="settings" /><span>自定义配额空间</span></span>
+                    <b>{fmtNum(adminQ.data.customQuotas.length)}</b>
+                    <small>覆盖全局默认上限</small>
+                  </div>
+                  <div>
+                    <span className="dash-mini-label-icon"><Icon name="help" /><span>待跟进用户反馈</span></span>
+                    <b className={adminQ.data.feedbackOpenCount > 0 ? 'dash-warn-num' : ''}>{fmtNum(adminQ.data.feedbackOpenCount)}</b>
+                    <small>累计 {fmtNum(adminQ.data.feedbacks.length)} 条员工上报</small>
+                  </div>
+                  <div>
+                    <span className="dash-mini-label-icon"><Icon name="globe" /><span>线上站点 / 回收站</span></span>
+                    <b>{fmtNum(adminQ.data.publishedApps?.length ?? 0)} / {fmtNum(adminQ.data.deletedApps.length)}</b>
+                    <small>支持风控权限调整与一键恢复</small>
+                  </div>
+                  <div>
+                    <span className="dash-mini-label-icon"><Icon name="history" /><span>审计留痕记录</span></span>
+                    <b>{fmtNum(adminQ.data.auditLogs.length)}</b>
+                    <small>支持按动作筛选与 CSV 导出</small>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {isAdmin && section === 'admin' ? (
             <AdminGovernancePanel
               overview={adminQ.data}
               loading={adminQ.isLoading}
@@ -2068,6 +2306,34 @@ function SectionTitle({ title, sub }: { title: string; sub: string }) {
     <div className="dash-sec-title">
       <h2>{title}</h2>
       <p>{sub}</p>
+    </div>
+  );
+}
+
+function RateMetricBar({
+  label,
+  valueText,
+  pct,
+  color,
+}: {
+  label: string;
+  valueText: string;
+  pct: number;
+  color: string;
+}) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="dash-rate-row">
+      <div className="dash-rate-top">
+        <span>{label}</span>
+        <div className="dash-rate-val">
+          <small>{valueText}</small>
+          <b>{pct}%</b>
+        </div>
+      </div>
+      <div className="dash-rate-track" role="progressbar" aria-valuenow={clamped} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+        <i style={{ width: `${Math.max(clamped, pct > 0 ? 3 : 0)}%`, background: color }} />
+      </div>
     </div>
   );
 }

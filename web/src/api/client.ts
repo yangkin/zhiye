@@ -582,6 +582,31 @@ export const api = {
   adminPurgeApp: (id: string) => request<{ id: string; name: string; purged: boolean }>(`/api/admin/apps/${enc(id)}/purge`, { method: 'DELETE' }),
   adminUpdateSiteAccess: (id: string, level: 'public' | 'login' | 'members') =>
     request<{ id: string; name: string; accessLevel: string }>(`/api/admin/apps/${enc(id)}/access`, { method: 'PATCH', body: { level } }),
+  adminTransferApp: (
+    id: string,
+    body: { targetWorkspaceId: string; includeConversation?: boolean; note?: string },
+  ) =>
+    request<{ id: string; name: string; fromWorkspaceId: string; toWorkspaceId: string; transferred: boolean }>(
+      `/api/admin/apps/${enc(id)}/transfer`,
+      { method: 'POST', body },
+    ),
+  adminHandoverWorkspace: (body: {
+    fromWorkspaceId: string;
+    toWorkspaceId: string;
+    appIds?: string[];
+    includeTrash?: boolean;
+    includeConversations?: boolean;
+    includeDataSources?: boolean;
+    note?: string;
+  }) =>
+    request<{
+      fromWorkspaceId: string;
+      toWorkspaceId: string;
+      transferredAppsCount: number;
+      movedConversations: number;
+      movedDataSources: number;
+      appNames: string[];
+    }>('/api/admin/workspaces/handover', { method: 'POST', body }),
   adminUpdateUserRole: (id: string, role: 'admin' | 'user') =>
     request<{ id: string; loginName: string; realName: string; role: string }>(`/api/admin/users/${enc(id)}/role`, { method: 'PATCH', body: { role } }),
   adminCancelTask: (id: string) => request<Task>(`/api/admin/tasks/${enc(id)}/cancel`, { method: 'POST', body: {} }),

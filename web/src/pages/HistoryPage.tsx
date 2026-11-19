@@ -1,17 +1,18 @@
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api as convApi, type ConversationSummary } from '../api/conversation';
 import { toast } from '../lib/store';
 import { api, errorMessage, type HistoryQuery } from '../api/client';
-import { qk, useApps } from '../api/queries';
+import { qk, useApps, useMeta } from '../api/queries';
 import type { HistoryRow, Version } from '../api/types';
-import { Icon } from '../lib/icons';
+import { Icon, type IconName } from '../lib/icons';
 import { dayLabel, fmtDate, fmtTime } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { RestoreModal, VersionPreviewModal, VersionRow } from '../components/Versions';
 import { Select } from '../components/Select';
+import { Pagination, useClientPagination } from '../components/Pagination';
 import { confirmDialog } from '../components/ConfirmDialog';
 
 type Filter = '全部记录' | '会话记录' | '已收藏' | '线上版本' | '最近删除';
@@ -39,31 +40,37 @@ export function HistoryPage() {
   });
   const { data: total } = useQuery({ queryKey: qk.history({ filter: 'all' }), queryFn: () => api.history({ filter: 'all' }) });
   const rows = data ?? [];
+  const pager = useClientPagination(rows, 15, `${filter}|${appId}|${q}`);
 
   const grouped = useMemo(() => {
     const out: { day: string; date: string; rows: HistoryRow[] }[] = [];
-    for (const r of rows) {
+    for (const r of pager.pageItems) {
       const day = dayLabel(r.version.createdAt);
       const last = out[out.length - 1];
       if (last && last.day === day) last.rows.push(r);
       else out.push({ day, date: fmtDate(r.version.createdAt), rows: [r] });
     }
     return out;
-  }, [rows]);
+  }, [pager.pageItems]);
 
   const asRow = (r: HistoryRow, v: Version): HistoryRow => ({ app: r.app, version: v });
 
   return (
     <div className="content-page history-page">
-      <div className="page-heading">
-        <div>
-          <span className="overline">EVERY STEP TELLS A STORY</span>
-          <h1>每一步，都有迹可循。</h1>
-          <p>回看创作的轨迹，找回值得保留的灵感。</p>
+      <header className="dash-header-top history-header-compact">
+        <div className="dash-title-block">
+          <div className="dash-title-row">
+            <h1>版本与创作记录</h1>
+            <span className="dash-scope-badge workspace">
+              <i className="dash-pulse-dot" aria-hidden="true" />
+              每一步都有迹可循
+            </span>
+          </div>
+          <p>按时间线回溯应用版本、对话文档与回收站，支持一键预览、收藏备注与无损回滚。</p>
         </div>
-      </div>
+      </header>
       <HistoryStats />
-      <div className="collection-toolbar">
+      <div className="collection-toolbar history-toolbar-card">
         <div className="filter-tabs">
           {(['全部记录', '会话记录', '已收藏', '线上版本', '最近删除'] as Filter[]).map((f) => (
             <button key={f} className={filter === f ? 'active' : ''} onClick={() => setFilter(f)}>
@@ -75,14 +82,14 @@ export function HistoryPage() {
         <div className="collection-controls">
           <label className="search-field">
             <Icon name="search" />
-            <input aria-label="搜索历史" placeholder={filter === '会话记录' ? '搜索会话标题或内容' : '搜索应用或版本标题'} value={query} onChange={(e) => setQuery(e.target.value)} />
+            <input aria-label="搜索历史" placeholder={filter === '会话记录' ? '搜索会话标题或内容' : filter === '最近删除' ? '搜索已删除应用名称' : '搜索应用或版本标题'} value={query} onChange={(e) => setQuery(e.target.value)} />
             {query ? (
               <button aria-label="清除搜索" onClick={() => setQuery('')}>
                 <Icon name="close" />
               </button>
             ) : null}
           </label>
-          {filter === '会话记录' ? null : <Select
+          {filter === '会话记录' || filter === '最近删除' ? null : <Select
             ariaLabel="筛选应用"
             value={appId}
             onChange={(v) => {
@@ -99,7 +106,7 @@ export function HistoryPage() {
           />}
         </div>
       </div>
-      {filter === '最近删除' ? <TrashList /> : null}
+      {filter === '最近删除' ? <TrashList query={q} /> : null}
       {filter === '会话记录' ? <ConversationList query={q} /> : null}
       <div className="history-list" hidden={filter === '最近删除' || filter === '会话记录'}>
         {isLoading ? (
@@ -109,25 +116,37 @@ export function HistoryPage() {
         ) : (
           <>
             {grouped.map((g) => (
-              <Fragment key={g.day + g.date}>
-                <div className="history-day">
-                  <span>{g.day}</span>
-                  <i />
-                  <small>{g.date}</small>
+              <section key={g.day + g.date} className="history-group-card" aria-label={`${g.day} ${g.date}`}>
+                <header className="history-group-head">
+                  <span className="history-group-day">{g.day}</span>
+                  <small className="history-group-meta">{g.date} · {g.rows.length} 条记录</small>
+                </header>
+                <div className="history-group-rows">
+                  {g.rows.map((r) => (
+                    <VersionRow
+                      key={r.version.id}
+                      appId={r.app.id}
+                      appName={r.app.name}
+                      version={r.version}
+                      onOpenApp={() => navigate('/apps/' + r.app.id)}
+                      onPreview={() => setPreview(r)}
+                      onRestore={() => setRestore(r)}
+                    />
+                  ))}
                 </div>
-                {g.rows.map((r) => (
-                  <VersionRow
-                    key={r.version.id}
-                    appId={r.app.id}
-                    appName={r.app.name}
-                    version={r.version}
-                    onOpenApp={() => navigate('/apps/' + r.app.id)}
-                    onPreview={() => setPreview(r)}
-                    onRestore={() => setRestore(r)}
-                  />
-                ))}
-              </Fragment>
+              </section>
             ))}
+            {rows.length > 0 ? (
+              <Pagination
+                page={pager.page}
+                pageSize={pager.pageSize}
+                total={pager.total}
+                onPageChange={pager.setPage}
+                onPageSizeChange={pager.setPageSize}
+                pageSizeOptions={[10, 15, 30, 50]}
+                alwaysShowSummary
+              />
+            ) : null}
             {rows.length === 0 ? (
               total && total.length === 0 ? (
                 <EmptyState icon="history" title="这里还没有记录" desc="生成应用后，每一个版本都会出现在这里。" canCreate />
@@ -165,41 +184,128 @@ export function HistoryPage() {
 function HistoryStats() {
   const { data } = useQuery({ queryKey: ['history-summary'], queryFn: () => api.historySummary() });
   if (!data) return null;
-  const items: [string, number][] = [
-    ['版本', data.versions],
-    ['应用', data.apps],
-    ['已发布', data.published],
-    ['云服务', data.cloudEnabled],
-    ['访问量', data.pageViews],
+  const items: { label: string; value: number; icon: IconName; tone: 'violet' | 'indigo' | 'teal' | 'amber' | 'rose' }[] = [
+    { label: '累计版本', value: data.versions, icon: 'history', tone: 'violet' },
+    { label: '在用应用', value: data.apps, icon: 'grid', tone: 'indigo' },
+    { label: '已发布站点', value: data.published, icon: 'globe', tone: 'teal' },
+    { label: '已启云服务', value: data.cloudEnabled, icon: 'cloud', tone: 'amber' },
+    { label: '累计访问 PV', value: data.pageViews, icon: 'chart', tone: 'rose' },
   ];
   return (
-    <div className="history-stats">
-      {items.map(([label, value]) => (
-        <div key={label} className="history-stat">
-          <strong>{value}</strong>
-          <span>{label}</span>
+    <div className="history-stats-bar">
+      {items.map((item) => (
+        <div key={item.label} className="history-stat-cell">
+          <span className={`dash-head-icon ${item.tone} sm`} aria-hidden="true">
+            <Icon name={item.icon} />
+          </span>
+          <div className="history-stat-copy">
+            <span>{item.label}</span>
+            <strong>{item.value.toLocaleString('zh-CN')}</strong>
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-function TrashList() {
+function TrashList({ query }: { query: string }) {
+  const qc = useQueryClient();
+  const isAdmin = Boolean(useMeta().data?.auth?.admin);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const { data, isLoading, error } = useQuery({ queryKey: ['apps-trash'], queryFn: () => api.trashApps() });
+
+  const filtered = useMemo(() => {
+    const k = query.toLowerCase();
+    return (data ?? []).filter((a) => !k || a.name.toLowerCase().includes(k) || a.type.toLowerCase().includes(k));
+  }, [data, query]);
+  const pager = useClientPagination(filtered, 15, query);
+
   if (isLoading) return <LoadingState label="正在读取回收站…" />;
   if (error) return <ErrorState message={errorMessage(error)} />;
-  if (!data?.length) return <EmptyState title="回收站是空的" desc="删除应用后会先放到这里。" />;
+  if (!filtered.length)
+    return data?.length ? (
+      <EmptyState title="没有匹配的已删除应用" desc="试试其他关键词。" />
+    ) : (
+      <EmptyState icon="trash" title="回收站是空的" desc="删除应用后会先放到这里保留历史。" />
+    );
+
+  const restoreApp = async (id: string, name: string) => {
+    const ok = await confirmDialog({
+      title: `恢复应用「${name}」？`,
+      message: '恢复后应用及历史版本将重新回到你的工作空间。',
+      confirmLabel: '一键恢复',
+    });
+    if (!ok) return;
+    setBusyId(id);
+    try {
+      await api.adminRestoreApp(id);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['apps-trash'] }),
+        qc.invalidateQueries({ queryKey: ['apps'] }),
+        qc.invalidateQueries({ queryKey: ['history'] }),
+        qc.invalidateQueries({ queryKey: ['history-summary'] }),
+      ]);
+      toast(`已恢复「${name}」`, 'ok');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="history-list">
-      {data.map((a) => (
-        <div key={a.id} className="version-row">
-          <div>
-            <b>{a.name}</b>
-            <small> · {a.type}</small>
-          </div>
-          <small>{(a as unknown as { deletedAt?: string }).deletedAt ? fmtDate((a as unknown as { deletedAt: string }).deletedAt) : '已删除'}</small>
+      <section className="history-group-card" aria-label="最近删除的应用">
+        <header className="history-group-head">
+          <span className="history-group-day">最近删除</span>
+          <small className="history-group-meta">共 {filtered.length} 个应用</small>
+        </header>
+        <div className="history-group-rows">
+          {pager.pageItems.map((a) => {
+            const deletedAt = (a as unknown as { deletedAt?: string }).deletedAt;
+            return (
+              <article key={a.id} className="version-row">
+                <span className="version-rail-badge trash">
+                  <Icon name="trash" />
+                </span>
+                <div className="version-main">
+                  <div className="version-headline">
+                    <h3>{a.name}</h3>
+                    <span className="tiny-badge">{a.type}</span>
+                  </div>
+                  <div className="version-author">
+                    {deletedAt ? `删除于 ${fmtDate(deletedAt)} ${fmtTime(deletedAt)}` : '已移入回收站'}
+                  </div>
+                </div>
+                <div className="version-actions">
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={busyId === a.id}
+                      onClick={() => void restoreApp(a.id, a.name)}
+                    >
+                      <Icon name="undo" />
+                      <span>恢复</span>
+                    </button>
+                  ) : (
+                    <span className="dash-muted" style={{ fontSize: 12 }}>可联系管理员恢复</span>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
-      ))}
+      </section>
+      <Pagination
+        page={pager.page}
+        pageSize={pager.pageSize}
+        total={pager.total}
+        onPageChange={pager.setPage}
+        onPageSizeChange={pager.setPageSize}
+        pageSizeOptions={[10, 15, 30, 50]}
+        alwaysShowSummary
+      />
     </div>
   );
 }
@@ -224,16 +330,17 @@ function ConversationList({ query }: { query: string }) {
     const k = query.toLowerCase();
     return (data ?? []).filter((c) => !k || c.title.toLowerCase().includes(k) || (c.lastMessage ?? '').toLowerCase().includes(k));
   }, [data, query]);
+  const pager = useClientPagination(rows, 15, query);
   const groups = useMemo(() => {
     const out: { day: string; date: string; rows: ConversationSummary[] }[] = [];
-    for (const c of rows) {
+    for (const c of pager.pageItems) {
       const day = dayLabel(c.updatedAt);
       const last = out[out.length - 1];
       if (last && last.day === day) last.rows.push(c);
       else out.push({ day, date: fmtDate(c.updatedAt), rows: [c] });
     }
     return out;
-  }, [rows]);
+  }, [pager.pageItems]);
   const remove = async (c: ConversationSummary) => {
     if (!(await confirmDialog({ title: `删除会话「${c.title}」？`, message: '此操作不可撤销。', confirmLabel: '删除', danger: true }))) return;
     try {
@@ -251,41 +358,64 @@ function ConversationList({ query }: { query: string }) {
   return (
     <div className="history-list">
       {groups.map((g) => (
-        <Fragment key={g.day + g.date}>
-          <div className="history-day">
-            <span>{g.day}</span>
-            <i />
-            <small>{g.date}</small>
-          </div>
-          {g.rows.map((c) => (
-            <article key={c.id} className="version-row conversation-row">
-              <span className="timeline-dot"><Icon name="agent" /></span>
-              <div className="version-main">
-                <div className="version-top">
-                  <button className="version-number conversation-row-title" onClick={() => navigate('/chat/' + c.id)}>{c.title}</button>
-                  {c.appId ? (
-                    <button className="version-app" onClick={() => navigate('/apps/' + c.appId)} title="打开创建的应用">{c.appName}</button>
-                  ) : null}
-                  {c.fileCount ? <span className="tiny-badge">{c.fileCount} 个文件</span> : null}
-                  <small>{fmtTime(c.updatedAt)}</small>
+        <section key={g.day + g.date} className="history-group-card" aria-label={`${g.day} 会话`}>
+          <header className="history-group-head">
+            <span className="history-group-day">{g.day}</span>
+            <small className="history-group-meta">{g.date} · {g.rows.length} 段会话</small>
+          </header>
+          <div className="history-group-rows">
+            {g.rows.map((c) => (
+              <article key={c.id} className="version-row conversation-row">
+                <span className="version-rail-badge conv">
+                  <Icon name="agent" />
+                </span>
+                <div className="version-main">
+                  <div className="version-headline">
+                    <button type="button" className="conversation-title-link" onClick={() => navigate('/chat/' + c.id)}>
+                      {c.title}
+                    </button>
+                    {c.fileCount ? <span className="tiny-badge">{c.fileCount} 个文件</span> : null}
+                  </div>
+                  <p className="conversation-snippet">{snippet(c.lastMessage) || '还没有消息'}</p>
+                  <div className="version-author">
+                    {c.appId ? (
+                      <>
+                        <button type="button" className="version-app-chip" onClick={() => navigate('/apps/' + c.appId)} title="打开创建的应用">
+                          <Icon name="grid" />
+                          <span>{c.appName}</span>
+                        </button>
+                        <span className="version-meta-sep" aria-hidden="true">·</span>
+                      </>
+                    ) : null}
+                    <span>{c.messageCount ?? 0} 条消息</span>
+                    <span className="version-meta-sep" aria-hidden="true">·</span>
+                    <time>{fmtTime(c.updatedAt)}</time>
+                  </div>
                 </div>
-                <h3>{snippet(c.lastMessage) || '还没有消息'}</h3>
-                <div className="version-author">{c.messageCount ?? 0} 条消息</div>
-              </div>
-              <div className="version-actions">
-                <button className="text-button" aria-label={`打开会话 ${c.title}`} onClick={() => navigate('/chat/' + c.id)}>
-                  <Icon name="external" />
-                  <span>打开</span>
-                </button>
-                <button className="text-button" aria-label={`删除会话 ${c.title}`} onClick={() => void remove(c)}>
-                  <Icon name="trash" />
-                  <span>删除</span>
-                </button>
-              </div>
-            </article>
-          ))}
-        </Fragment>
+                <div className="version-actions">
+                  <button type="button" className="text-button" aria-label={`打开会话 ${c.title}`} onClick={() => navigate('/chat/' + c.id)}>
+                    <Icon name="external" />
+                    <span>打开</span>
+                  </button>
+                  <button type="button" className="text-button" aria-label={`删除会话 ${c.title}`} onClick={() => void remove(c)}>
+                    <Icon name="trash" />
+                    <span>删除</span>
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       ))}
+      <Pagination
+        page={pager.page}
+        pageSize={pager.pageSize}
+        total={pager.total}
+        onPageChange={pager.setPage}
+        onPageSizeChange={pager.setPageSize}
+        pageSizeOptions={[10, 15, 30, 50]}
+        alwaysShowSummary
+      />
     </div>
   );
 }

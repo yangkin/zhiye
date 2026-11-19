@@ -9,7 +9,15 @@ import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
 import { HelpPanel } from './HelpPanel';
 
-const titles: Record<string, string> = { create: '我的工作空间', apps: '我的应用', history: '版本与记录', community: '灵感社区', dashboard: '统计看板', logs: '日志排查' };
+const titles: Record<string, string> = {
+  create: '我的工作空间',
+  apps: '我的应用',
+  history: '版本与记录',
+  community: '灵感社区',
+  dashboard: '统计看板',
+  admin: '管理工作台',
+  logs: '日志排查',
+};
 
 export function LightLayout() {
   const location = useLocation();
@@ -72,9 +80,22 @@ export function AppRail({ page = '' }: { page?: string }) {
 }
 
 function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => void; onWorkspace: () => void }) {
-  const user = useMeta().data?.auth?.user ?? null;
+  const meta = useMeta().data;
+  const user = meta?.auth?.user ?? null;
+  const isAdmin = Boolean(meta?.auth?.admin);
   const mobileNav = useUi((s) => s.mobileNav);
   const { data: apps } = useApps({ sort: 'updated' });
+  const creatorItems = [
+    ['create', 'plus', '创造'],
+    ['community', 'community', '社区'],
+    ['apps', 'grid', '应用'],
+    ['history', 'history', '历史'],
+  ] as const;
+  const adminItems = [
+    ['dashboard', 'chart', '看板'],
+    ['admin', 'settings', '管理'],
+    ['logs', 'terminal', '日志'],
+  ] as const;
   return (
     <aside className={`sidebar rail ${mobileNav ? 'visible' : ''}`}>
       <Link className="rail-brand" to="/create" aria-label="织页 · 让想法成形" title="织页 · 让想法成形">
@@ -82,16 +103,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
         <b>织页</b>
       </Link>
       <nav className="main-nav rail-nav" aria-label="主导航">
-        {(
-          [
-            ['create', 'plus', '创造'],
-            ['community', 'community', '社区'],
-            ['apps', 'grid', '应用'],
-            ['history', 'history', '历史'],
-            ['dashboard', 'chart', '看板'],
-            ['logs', 'terminal', '日志'],
-          ] as const
-        ).map(([p, i, t]) => (
+        {creatorItems.map(([p, i, t]) => (
           <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={t}>
             <span className="rail-icon">
               <Icon name={i} />
@@ -100,6 +112,19 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
             <span>{t}</span>
           </NavLink>
         ))}
+        {isAdmin ? (
+          <>
+            <div className="rail-divider" aria-hidden="true" />
+            {adminItems.map(([p, i, t]) => (
+              <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={p === 'admin' ? '管理工作台' : t}>
+                <span className="rail-icon">
+                  <Icon name={i} />
+                </span>
+                <span>{t}</span>
+              </NavLink>
+            ))}
+          </>
+        ) : null}
       </nav>
       <div className="sidebar-bottom rail-bottom">
         <button className="rail-item" onClick={onHelp} aria-label="帮助与反馈" title="小织 · 使用帮助">

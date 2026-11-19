@@ -38,42 +38,73 @@ export function VersionRow({ appId, appName, version: v, compact, onOpenApp, onP
   };
   const [noteOpen, setNoteOpen] = useState(false);
   return (
-    <article className={`version-row ${compact ? 'compact' : ''}`}>
-      <span className="timeline-dot">
-        <Icon name={v.isPublished ? 'cloud' : 'history'} />
-      </span>
+    <article className={`version-row ${compact ? 'compact' : ''} ${v.isCurrent ? 'is-current' : ''} ${v.isPublished ? 'is-published' : ''}`}>
+      {compact ? (
+        <span className="timeline-dot">
+          <Icon name={v.isPublished ? 'cloud' : 'history'} />
+        </span>
+      ) : (
+        <span className={`version-rail-badge ${v.isPublished ? 'online' : v.isCurrent ? 'current' : ''}`}>
+          V{v.number}
+        </span>
+      )}
       <div className="version-main">
-        <div className="version-top">
-          <span className="version-number">V{v.number}</span>
-          {v.note ? <span className="version-note">{v.note}</span> : null}
-          {!compact && onOpenApp ? (
-            <button className="version-app" onClick={onOpenApp}>
-              {appName}
-            </button>
-          ) : null}
-          {v.isCurrent ? <span className="tiny-badge current">当前版本</span> : null}
-          {v.isPublished ? <span className="tiny-badge online">线上版本</span> : null}
-          <small>{fmtTime(v.createdAt)}</small>
-        </div>
-        <h3>
-          {v.title}
-          {v.restoredFromNumber ? <small className="restored-from"> · 恢复自 V{v.restoredFromNumber}</small> : null}
-        </h3>
-        <div className="version-author">
-          <span className="mini-avatar">我</span>创作者<span>·</span>
-          {fmtDate(v.createdAt)} {fmtTime(v.createdAt)}
-        </div>
+        {compact ? (
+          <>
+            <div className="version-top">
+              <span className="version-number">V{v.number}</span>
+              {v.note ? <span className="version-note">{v.note}</span> : null}
+              {v.isCurrent ? <span className="tiny-badge current">当前版本</span> : null}
+              {v.isPublished ? <span className="tiny-badge online">线上版本</span> : null}
+            </div>
+            <h3>
+              {v.title}
+              {v.restoredFromNumber ? <small className="restored-from"> · 恢复自 V{v.restoredFromNumber}</small> : null}
+            </h3>
+            <div className="version-author">
+              <span className="mini-avatar">我</span>创作者<span>·</span>
+              <span>{fmtDate(v.createdAt)} {fmtTime(v.createdAt)}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="version-headline">
+              <h3 title={v.title}>
+                {v.title}
+                {v.restoredFromNumber ? <small className="restored-from"> · 恢复自 V{v.restoredFromNumber}</small> : null}
+              </h3>
+              {v.isCurrent ? <span className="tiny-badge current">当前版本</span> : null}
+              {v.isPublished ? <span className="tiny-badge online">线上版本</span> : null}
+              {v.note ? <span className="version-note">{v.note}</span> : null}
+            </div>
+            <div className="version-author">
+              {onOpenApp ? (
+                <>
+                  <button type="button" className="version-app-chip" onClick={onOpenApp}>
+                    <Icon name="grid" />
+                    <span>{appName}</span>
+                  </button>
+                  <span className="version-meta-sep" aria-hidden="true">·</span>
+                </>
+              ) : null}
+              <span>创作者</span>
+              <span className="version-meta-sep" aria-hidden="true">·</span>
+              <time>{fmtDate(v.createdAt)} {fmtTime(v.createdAt)}</time>
+            </div>
+          </>
+        )}
       </div>
       <div className="version-actions">
-        <button className="text-button" aria-label={`预览 ${appName} V${v.number}`} onClick={onPreview}>
+        <button type="button" className="text-button" aria-label={`预览 ${appName} V${v.number}`} onClick={onPreview}>
           <Icon name="eye" />
           {compact ? null : <span>预览</span>}
         </button>
-        <button className="text-button" disabled={v.isCurrent} aria-label={`恢复 ${appName} V${v.number}`} onClick={onRestore}>
+        <button type="button" className="text-button" disabled={v.isCurrent} aria-label={`恢复 ${appName} V${v.number}`} onClick={onRestore}>
           <Icon name="history" />
           {compact ? null : <span>恢复</span>}
         </button>
         <button
+          type="button"
           className={`icon-button bookmark ${fav ? 'is-starred' : ''}`}
           aria-label={`${fav ? '取消收藏' : '收藏'}版本 V${v.number}`}
           aria-pressed={fav}
@@ -81,7 +112,7 @@ export function VersionRow({ appId, appName, version: v, compact, onOpenApp, onP
         >
           <Icon name="book" />
         </button>
-        <button className="icon-button" aria-label={`给 V${v.number} 写备注`} title="备注" onClick={() => setNoteOpen(true)}>
+        <button type="button" className="icon-button" aria-label={`给 V${v.number} 写备注`} title="备注" onClick={() => setNoteOpen(true)}>
           <Icon name="edit" />
         </button>
       </div>

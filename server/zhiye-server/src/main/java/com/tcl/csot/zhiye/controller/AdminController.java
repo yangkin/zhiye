@@ -91,6 +91,21 @@ public class AdminController {
         return admin.updateSiteAccess(id, body == null ? Json.obj() : body, actor);
     }
 
+    @PostMapping("/apps/{id}/transfer")
+    public Map<String, Object> transferApp(@PathVariable String id,
+                                           @RequestBody(required = false) JsonNode body,
+                                           HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.transferApp(id, body == null ? Json.obj() : body, actor);
+    }
+
+    @PostMapping("/workspaces/handover")
+    public Map<String, Object> handoverWorkspace(@RequestBody(required = false) JsonNode body,
+                                                 HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.handoverWorkspace(body == null ? Json.obj() : body, actor);
+    }
+
     @PostMapping("/tasks/{id}/cancel")
     public Map<String, Object> cancelTask(@PathVariable String id, HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());

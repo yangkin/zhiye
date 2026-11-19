@@ -18,9 +18,13 @@ import { useDebounced } from '../lib/useDebounced';
 import { toast } from '../lib/store';
 import { DashEmptyBox, fmtBytes, fmtCompact, fmtDurationMs, fmtNum } from '../components/DashboardCharts';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
+import { Pagination, useClientPagination } from '../components/Pagination';
 import { Select } from '../components/Select';
 
-type MainTab = 'tasks' | 'sandboxes' | 'schemas' | 'events' | 'functions' | 'sources' | 'runtime';
+type MainTab = 'tasks' | 'events' | 'infra' | 'cloud';
+type RawTab = MainTab | 'sandboxes' | 'runtime' | 'functions' | 'sources' | 'schemas';
+type InfraSubTab = 'sandboxes' | 'runtime';
+type CloudSubTab = 'functions' | 'sources' | 'schemas';
 type DetailTab = 'events' | 'runner' | 'resources' | 'app';
 type EventFilter = 'all' | 'tool' | 'log' | 'verify' | 'thinking' | 'status' | 'collab';
 type LogLevelFilter = 'ALL' | 'ERROR' | 'WARN' | 'INFO';
@@ -76,6 +80,25 @@ function statusTone(status: string): 'ok' | 'err' | 'run' | 'muted' {
   if (status === 'FAILED') return 'err';
   if (status === 'CANCELLED') return 'muted';
   return 'run';
+}
+
+/** 解码 URL 编码路径并折叠超长本地工程前缀，让报错信息一眼可读 */
+function formatReadableError(raw: string | null | undefined): string {
+  if (!raw) return '';
+  let decoded = raw.replace(/(?:%[0-9A-Fa-f]{2})+/g, (m) => {
+    try {
+      return decodeURIComponent(m);
+    } catch {
+      return m;
+    }
+  });
+  decoded = decoded
+    .replace(/\/[^'")\s]*?\/runtime\/workspaces\/(task_[a-z0-9]+)\/file:\/+[^'")\s]*?\/zhiye\/packages\//gi, '工作区/$1 → packages/')
+    .replace(/file:\/+[^'")\s]*?\/runtime\/workspaces\/(task_[a-z0-9]+)\//gi, '工作区/$1/')
+    .replace(/\/[^'")\s]*?\/runtime\/workspaces\/(task_[a-z0-9]+)\//gi, '工作区/$1/')
+    .replace(/file:\/+[^'")\s]*?\/zhiye\/packages\//gi, 'packages/')
+    .replace(/\/[^'")\s]*?\/zhiye\/packages\//gi, 'packages/');
+  return decoded.trim();
 }
 
 function fmtDateTime(iso: string | null | undefined): string {
@@ -187,29 +210,25 @@ function OpsPager({
   limit,
   total,
   onChange,
+  compact = false,
 }: {
   offset: number;
   limit: number;
   total: number;
   onChange: (nextOffset: number) => void;
+  compact?: boolean;
 }) {
   if (total <= 0) return null;
-  const start = offset + 1;
-  const end = Math.min(offset + limit, total);
+  const page = Math.floor(offset / Math.max(1, limit)) + 1;
   return (
-    <div className="logs-pager">
-      <span>
-        第 {start}–{end} / {fmtNum(total)}
-      </span>
-      <div className="logs-pager-btns">
-        <button type="button" disabled={offset === 0} onClick={() => onChange(Math.max(0, offset - limit))}>
-          上一页
-        </button>
-        <button type="button" disabled={offset + limit >= total} onClick={() => onChange(offset + limit)}>
-          下一页
-        </button>
-      </div>
-    </div>
+    <Pagination
+      page={page}
+      pageSize={limit}
+      total={total}
+      compact={compact}
+      alwaysShowSummary
+      onPageChange={(nextPage) => onChange((nextPage - 1) * limit)}
+    />
   );
 }
 
@@ -217,44 +236,54 @@ export function LogsPage() {
   const metaQ = useMeta();
   const isAdmin = Boolean(metaQ.data?.auth?.admin);
   const [params, setParams] = useSearchParams();
-  const rawTab = params.get('tab');
-  const mainTab: MainTab =
-    rawTab === 'sandboxes' || rawTab === 'schemas' || rawTab === 'events' || rawTab === 'functions' || rawTab === 'sources' || (rawTab === 'runtime' && isAdmin)
-      ? rawTab
-      : 'tasks';
+  const rawTab = (params.get('tab') || 'tasks') as RawTab;
 
-  const setMainTab = (tab: MainTab) => {
+  const mainTab: MainTab =
+    rawTab === 'events'
+      ? 'events'
+      : rawTab === 'infra' || rawTab === 'sandboxes' || (rawTab === 'runtime' && isAdmin)
+        ? 'infra'
+        : rawTab === 'cloud' || rawTab === 'functions' || rawTab === 'sources' || rawTab === 'schemas'
+          ? 'cloud'
+          : 'tasks';
+
+  const infraSub: InfraSubTab = rawTab === 'runtime' && isAdmin ? 'runtime' : 'sandboxes';
+  const cloudSub: CloudSubTab =
+    rawTab === 'sources' ? 'sources' : rawTab === 'schemas' ? 'schemas' : 'functions';
+
+  const setTabParam = (tab: RawTab) => {
     const next = new URLSearchParams(params);
     if (tab === 'tasks') next.delete('tab');
     else next.set('tab', tab);
     setParams(next, { replace: true });
   };
 
+  const setMainTab = (tab: MainTab) => {
+    if (tab === 'tasks') setTabParam('tasks');
+    else if (tab === 'events') setTabParam('events');
+    else if (tab === 'infra') setTabParam(infraSub);
+    else setTabParam(cloudSub);
+  };
+
   const tabs: [MainTab, string][] = [
-    ['tasks', 'AI 任务全链路 Trace'],
-    ['sandboxes', '沙箱生命周期日志'],
-    ['events', '模型网关与异常追踪'],
-    ['schemas', '云库 Schema / DDL'],
-    ['functions', '云函数执行日志'],
-    ['sources', '数据源调用日志'],
-    ...(isAdmin ? ([['runtime', '集群服务日志与审计']] as [MainTab, string][]) : []),
+    ['tasks', '任务排查'],
+    ['events', '异常与网关'],
+    ['infra', isAdmin ? '沙箱与节点日志' : '沙箱日志'],
+    ['cloud', '云函数与数据源'],
   ];
 
   return (
     <div className="content-page logs-page">
-      <header className="dash-header-top">
+      <header className="dash-header-top logs-compact-header">
         <div className="dash-title-block">
-          <span className="overline">OBSERVABILITY · TRACE WATERFALL, SANDBOX LIFECYCLE &amp; LOG EXPLORER</span>
           <div className="dash-title-row">
-            <h1>全链路日志与 Trace 排查中心</h1>
+            <h1>日志排查中心</h1>
             <span className={`dash-scope-badge ${isAdmin ? 'platform' : 'workspace'}`}>
               <i className="dash-pulse-dot" aria-hidden="true" />
-              {isAdmin ? '全平台跨空间可观测视角' : '当前工作空间隔离视角'}
+              {isAdmin ? '全平台视角' : '当前工作空间'}
             </span>
           </div>
-          <p>
-            按全链路 Trace 视图透视任务排队、沙箱冷启动、AI 推理/工具调用、质检门禁耗时瀑布，联动沙箱生命周期台账、Runner 终端分级检索与集群多节点服务日志。
-          </p>
+          <p>聚焦任务错误定位、AI 过程事件与 Runner 终端，沙箱与云服务日志按类别分栏检索。</p>
         </div>
       </header>
 
@@ -286,13 +315,69 @@ export function LogsPage() {
         ))}
       </nav>
 
-      {mainTab === 'tasks' ? <TaskLogsWorkbench onJumpSandboxes={() => setMainTab('sandboxes')} /> : null}
-      {mainTab === 'sandboxes' ? <SandboxLogsView /> : null}
-      {mainTab === 'schemas' ? <SchemasView /> : null}
+      {mainTab === 'tasks' ? <TaskLogsWorkbench onJumpSandboxes={() => setTabParam('sandboxes')} /> : null}
       {mainTab === 'events' ? <PlatformEventsView /> : null}
-      {mainTab === 'functions' ? <FunctionLogsView /> : null}
-      {mainTab === 'sources' ? <SourceCallsView /> : null}
-      {mainTab === 'runtime' && isAdmin ? <RuntimeLogsView /> : null}
+      {mainTab === 'infra' ? (
+        <div className="logs-section-stack">
+          {isAdmin ? (
+            <div className="logs-segment-bar" role="tablist" aria-label="沙箱与节点切换">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={infraSub === 'sandboxes'}
+                className={infraSub === 'sandboxes' ? 'active' : ''}
+                onClick={() => setTabParam('sandboxes')}
+              >
+                沙箱生命周期台账
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={infraSub === 'runtime'}
+                className={infraSub === 'runtime' ? 'active' : ''}
+                onClick={() => setTabParam('runtime')}
+              >
+                节点服务日志与审计
+              </button>
+            </div>
+          ) : null}
+          {infraSub === 'runtime' && isAdmin ? <RuntimeLogsView /> : <SandboxLogsView />}
+        </div>
+      ) : null}
+      {mainTab === 'cloud' ? (
+        <div className="logs-section-stack">
+          <div className="logs-segment-bar" role="tablist" aria-label="云与数据源切换">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cloudSub === 'functions'}
+              className={cloudSub === 'functions' ? 'active' : ''}
+              onClick={() => setTabParam('functions')}
+            >
+              云函数执行日志
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cloudSub === 'sources'}
+              className={cloudSub === 'sources' ? 'active' : ''}
+              onClick={() => setTabParam('sources')}
+            >
+              数据源调用日志
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={cloudSub === 'schemas'}
+              className={cloudSub === 'schemas' ? 'active' : ''}
+              onClick={() => setTabParam('schemas')}
+            >
+              云库 Schema / DDL
+            </button>
+          </div>
+          {cloudSub === 'sources' ? <SourceCallsView /> : cloudSub === 'schemas' ? <SchemasView /> : <FunctionLogsView />}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -543,7 +628,7 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
             )}
           </div>
 
-          <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} />
+          <OpsPager offset={offset} limit={limit} total={data?.total ?? 0} onChange={setOffset} compact />
         </aside>
 
         <section className="logs-detail-pane" aria-label="任务全链路诊断" ref={detailPaneRef}>
@@ -579,6 +664,9 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
 
 function TaskListCard({ item, selected, onSelect }: { item: OpsTaskSummary; selected: boolean; onSelect: () => void }) {
   const tone = statusTone(item.status);
+  const shortErr = item.status === 'FAILED' && (item.errorCode || item.errorMessage)
+    ? formatReadableError(item.errorMessage) || item.errorCode || 'FAILED'
+    : '';
   return (
     <button
       type="button"
@@ -597,21 +685,21 @@ function TaskListCard({ item, selected, onSelect }: { item: OpsTaskSummary; sele
         <span>·</span>
         <span>{item.ownerName ? `${item.ownerName}${item.ownerLoginName ? `(${item.ownerLoginName})` : ''}` : item.workspaceId}</span>
         <span>·</span>
-        <span className="logs-mono">{item.id}</span>
+        <span>{fmtDurationMs(item.durationMs)}</span>
       </div>
-      {item.promptPreview ? <div className="logs-card-prompt">{item.promptPreview}</div> : null}
-      {item.status === 'FAILED' && (item.errorCode || item.errorMessage) ? (
-        <div className="logs-card-err">
+      {shortErr ? (
+        <div className="logs-card-err" title={shortErr}>
           <b>{item.errorCode || 'FAILED'}</b>
-          {item.errorMessage ? ` · ${item.errorMessage}` : ''}
+          {item.errorMessage ? ` · ${formatReadableError(item.errorMessage)}` : ''}
         </div>
+      ) : item.promptPreview ? (
+        <div className="logs-card-prompt">{item.promptPreview}</div>
       ) : null}
       <div className="logs-card-foot">
-        <span>{fmtDateTime(item.createdAt)}</span>
+        <span className="logs-mono">{fmtDateTime(item.createdAt)}</span>
         <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-          {item.toolErrorCount > 0 ? <em className="logs-mini-badge err">工具错 {item.toolErrorCount}</em> : null}
+          {item.toolErrorCount > 0 ? <em className="logs-mini-badge err">错 {item.toolErrorCount}</em> : null}
           {item.hasLogFile ? <em className="logs-mini-badge">Runner {fmtBytes(item.logFileBytes)}</em> : null}
-          <span>{fmtDurationMs(item.durationMs)}</span>
         </span>
       </div>
     </button>
@@ -644,6 +732,8 @@ function TaskDiagnosticPane({
   const [evQuery, setEvQuery] = useState<string>('');
   const [expandAllEvents, setExpandAllEvents] = useState<boolean>(false);
   const [compactStream, setCompactStream] = useState<boolean>(true);
+  const [hideStatus, setHideStatus] = useState<boolean>(true);
+  const [expandErrBanner, setExpandErrBanner] = useState<boolean>(false);
 
   const [runnerTail, setRunnerTail] = useState<number>(800);
   const [runnerQuery, setRunnerQuery] = useState<string>('');
@@ -758,15 +848,34 @@ function TaskDiagnosticPane({
 
   const filteredEvents = useMemo<DisplayEventRow[]>(() => {
     const q = evQuery.trim();
-    const matched = events.filter((e) => eventMatchesFilter(e, evFilter, onlyEvErrors, q));
+    const matched = events.filter((e) => {
+      if (hideStatus && evFilter === 'all' && !onlyEvErrors && !q && (e.type === 'status' || e.type === 'thinking_end')) {
+        return false;
+      }
+      return eventMatchesFilter(e, evFilter, onlyEvErrors, q);
+    });
     if (!compactStream || onlyEvErrors || q) return matched;
     return compactTraceEvents(matched);
-  }, [events, evFilter, onlyEvErrors, evQuery, compactStream]);
+  }, [events, evFilter, onlyEvErrors, evQuery, compactStream, hideStatus]);
+
+  const eventPager = useClientPagination(
+    filteredEvents,
+    50,
+    `${taskId}|${evFilter}|${onlyEvErrors}|${evQuery}|${hideStatus}|${compactStream}`,
+  );
 
   const jumpFirstErrorEvent = () => {
-    const el = eventListRef.current?.querySelector('.logs-ev-card.is-err');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    else toast('当前筛选视图下未包含错误事件');
+    const idx = filteredEvents.findIndex((e) => isEventError(e));
+    if (idx < 0) {
+      toast('当前筛选视图下未包含错误事件');
+      return;
+    }
+    const targetPage = Math.floor(idx / eventPager.pageSize) + 1;
+    if (targetPage !== eventPager.page) eventPager.setPage(targetPage);
+    window.setTimeout(() => {
+      const el = eventListRef.current?.querySelector('.logs-ev-card.is-err');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
   };
 
   const jumpFirstRunnerError = () => {
@@ -847,48 +956,56 @@ function TaskDiagnosticPane({
           </div>
         </div>
 
-        <div className="logs-meta-grid">
-          <div className="logs-meta-item">
-            <span>任务编号 (taskId)</span>
-            <button
-              type="button"
-              className="logs-copy-btn"
-              onClick={async () => toast((await copyText(task.id)) ? `已复制 ${task.id}` : '复制失败')}
-              title="点击复制 taskId"
-            >
-              <span>{task.id}</span>
-              <Icon name="copy" />
-            </button>
-          </div>
-          <div className="logs-meta-item">
-            <span>所属用户 / 工作空间</span>
-            <b title={`${task.ownerName} (${task.ownerLoginName}) · ${task.workspaceId}`}>
-              {task.ownerName ? `${task.ownerName}${task.ownerLoginName ? ` (${task.ownerLoginName})` : ''}` : '匿名空间'} · {task.workspaceId}
-            </b>
-          </div>
-          <div className="logs-meta-item">
-            <span>耗时 / Token / 模型</span>
-            <b>
-              {fmtDurationMs(task.durationMs)} · {fmtCompact(task.tokenUsed)} · {task.model || 'auto'}
-            </b>
-          </div>
-          <div className="logs-meta-item">
-            <span>创建 / 开始 / 结束</span>
-            <b title={`创建 ${fmtDateTime(task.createdAt)} / 开始 ${fmtDateTime(task.startedAt)} / 结束 ${fmtDateTime(task.finishedAt)}`}>
-              {fmtDateTime(task.createdAt)} → {task.finishedAt ? fmtDateTime(task.finishedAt) : task.phaseLabel || '进行中'}
-            </b>
-          </div>
+        <div className="logs-meta-strip">
+          <button
+            type="button"
+            className="logs-copy-btn"
+            onClick={async () => toast((await copyText(task.id)) ? `已复制 ${task.id}` : '复制失败')}
+            title="点击复制 taskId"
+          >
+            <span>{task.id}</span>
+            <Icon name="copy" />
+          </button>
+          <span className="logs-meta-sep" aria-hidden="true">·</span>
+          <span title={`${task.ownerName} (${task.ownerLoginName}) · ${task.workspaceId}`}>
+            {task.ownerName ? `${task.ownerName}${task.ownerLoginName ? ` (${task.ownerLoginName})` : ''}` : task.workspaceId}
+          </span>
+          <span className="logs-meta-sep" aria-hidden="true">·</span>
+          <span>耗时 <b>{fmtDurationMs(task.durationMs)}</b></span>
+          <span className="logs-meta-sep" aria-hidden="true">·</span>
+          <span>Token <b>{fmtCompact(task.tokenUsed)}</b> ({task.model || 'auto'})</span>
+          <span className="logs-meta-sep" aria-hidden="true">·</span>
+          <span title={`创建 ${fmtDateTime(task.createdAt)} / 开始 ${fmtDateTime(task.startedAt)} / 结束 ${fmtDateTime(task.finishedAt)}`}>
+            {fmtDateTime(task.createdAt)} → {task.finishedAt ? fmtDateTime(task.finishedAt) : task.phaseLabel || '进行中'}
+          </span>
         </div>
 
-        {task.errorCode || task.errorMessage ? (
-          <div className="logs-error-banner" role="alert">
-            <div className="logs-error-banner-head">
-              <span>失败诊断：{task.errorCode || 'FAILED'}（阶段：{task.phaseLabel || '未知'}）</span>
-              {task.leaseOwner ? <span className="logs-mono">Worker: {task.leaseOwner}</span> : null}
+        {task.errorCode || task.errorMessage ? (() => {
+          const readableErr = formatReadableError(task.errorMessage) || '无详细错误信息';
+          return (
+            <div className="logs-error-banner" role="alert">
+              <div className="logs-error-banner-head">
+                <span>失败诊断：{task.errorCode || 'FAILED'}（阶段：{task.phaseLabel || '未知'}）</span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                  {task.leaseOwner ? <span className="logs-mono">Worker: {task.leaseOwner}</span> : null}
+                  {readableErr.length > 160 ? (
+                    <button type="button" className="dash-link" onClick={() => setExpandErrBanner((v) => !v)}>
+                      {expandErrBanner ? '收起报错' : '展开完整报错'}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="dash-link"
+                    onClick={async () => toast((await copyText(task.errorMessage || task.errorCode || '')) ? '已复制错误信息' : '复制失败')}
+                  >
+                    复制报错
+                  </button>
+                </div>
+              </div>
+              <pre className={expandErrBanner ? 'expanded' : ''}>{readableErr}</pre>
             </div>
-            <pre>{task.errorMessage || '无详细错误信息'}</pre>
-          </div>
-        ) : null}
+          );
+        })() : null}
 
         {/* 执行阶段耗时瀑布图（Trace Waterfall） */}
         <TraceWaterfallBar
@@ -900,9 +1017,9 @@ function TaskDiagnosticPane({
         />
 
         {fullPrompt || baseDetail.messages.length > 0 ? (
-          <details className="logs-prompt-box" open={task.status === 'FAILED'}>
+          <details className="logs-prompt-box">
             <summary>
-              用户需求输入与对话补充（{baseDetail.messages.length} 条关联消息）
+              需求输入与补充（{baseDetail.messages.length} 条关联消息 · 点击展开）
             </summary>
             {fullPrompt ? <p>{fullPrompt}</p> : null}
             {baseDetail.messages.filter((m) => m.steer).map((m) => (
@@ -979,6 +1096,14 @@ function TaskDiagnosticPane({
               </div>
 
               <div className="logs-filter-right">
+                <button
+                  type="button"
+                  className={`logs-chip ${hideStatus ? 'active' : ''}`}
+                  onClick={() => setHideStatus((v) => !v)}
+                  title="隐藏常规百分比进度心跳，仅展示关键步骤与工具执行"
+                >
+                  {hideStatus ? '已隐藏心跳' : '显示心跳'}
+                </button>
                 <button type="button" className="logs-chip" onClick={() => setExpandAllEvents((v) => !v)}>
                   {expandAllEvents ? '全部收起' : '全部展开'}
                 </button>
@@ -988,7 +1113,7 @@ function TaskDiagnosticPane({
                   onClick={() => setCompactStream((v) => !v)}
                   title="合并成对的 tool start/end 与 thinking 阶段，折叠打字碎片"
                 >
-                  {compactStream ? `Trace 合并 (${filteredEvents.length})` : `原始流 (${filteredEvents.length})`}
+                  {compactStream ? `合并 (${filteredEvents.length})` : `原始 (${filteredEvents.length})`}
                 </button>
                 {eventStats.errors > 0 ? (
                   <button type="button" className="logs-chip err" onClick={jumpFirstErrorEvent}>
@@ -1002,9 +1127,17 @@ function TaskDiagnosticPane({
               <EmptyState title="当前筛选下无过程事件" desc="尝试切换事件类型或取消「仅看报错」过滤。" />
             ) : (
               <div className="logs-event-list" ref={eventListRef}>
-                {filteredEvents.map((ev) => (
+                {eventPager.pageItems.map((ev) => (
                   <EventCard key={`${ev.seq}-${expandAllEvents ? 'o' : 'c'}`} ev={ev} defaultOpen={expandAllEvents || isEventError(ev)} />
                 ))}
+                <Pagination
+                  page={eventPager.page}
+                  pageSize={eventPager.pageSize}
+                  total={eventPager.total}
+                  onPageChange={eventPager.setPage}
+                  onPageSizeChange={eventPager.setPageSize}
+                  pageSizeOptions={[25, 50, 100]}
+                />
               </div>
             )}
           </>
@@ -1554,8 +1687,29 @@ function EventCard({ ev, defaultOpen }: { ev: DisplayEventRow; defaultOpen: bool
 
   const typeCls = err ? 'err' : ev.type;
 
-  // 命令输出 (log) 直接以内嵌终端块展示，排查构建/测试输出最直观
+  // 命令输出 (log)：多行日志或报错直接以内嵌终端块展示；单行步骤标签（如 "▶ 入口检查"）收起为紧凑行避免黑条刷屏
   if (ev.type === 'log') {
+    const rawLine = formatReadableError(String(p.line ?? ''));
+    const hasBody = err || rawLine.includes('\n') || rawLine.length > 90;
+    if (!hasBody && !open) {
+      return (
+        <div className="logs-ev-card">
+          <div className="logs-ev-head">
+            <div className="logs-ev-left">
+              <span className="logs-ev-seq">#{ev.seq}</span>
+              <span className="logs-ev-type log">命令步骤</span>
+              <span className="logs-ev-summary logs-mono">{summary}</span>
+            </div>
+            <div className="logs-ev-right">
+              <span>{fmtClockMs(ev.createdAt)}</span>
+              <button type="button" className="logs-ev-toggle" onClick={() => setOpen(true)}>
+                详情
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={`logs-ev-card is-log ${err ? 'is-err' : ''}`}>
         <div className="logs-ev-head">
@@ -1566,9 +1720,14 @@ function EventCard({ ev, defaultOpen }: { ev: DisplayEventRow; defaultOpen: bool
           </div>
           <div className="logs-ev-right">
             <span>{fmtClockMs(ev.createdAt)}</span>
+            {!hasBody ? (
+              <button type="button" className="logs-ev-toggle" onClick={() => setOpen(false)}>
+                收起
+              </button>
+            ) : null}
           </div>
         </div>
-        <pre className="logs-term-inline">{String(p.line ?? '')}</pre>
+        <pre className="logs-term-inline">{rawLine}</pre>
       </div>
     );
   }
@@ -1608,7 +1767,7 @@ function EventCard({ ev, defaultOpen }: { ev: DisplayEventRow; defaultOpen: bool
                     <span>{c.name}</span>
                     <span className="logs-mini-badge">{c.skipped ? '已跳过' : c.ok ? '通过' : '未通过'}</span>
                   </div>
-                  {c.detail ? <pre>{c.detail}</pre> : null}
+                  {c.detail ? <pre>{formatReadableError(c.detail)}</pre> : null}
                 </div>
               ))}
             </div>
@@ -2076,6 +2235,7 @@ function RuntimeLogsView() {
   const [level, setLevel] = useState<LogLevelFilter>('ALL');
   const [wrapLines, setWrapLines] = useState<boolean>(true);
   const [q, setQ] = useState<string>('');
+  const [showOfflineNodes, setShowOfflineNodes] = useState<boolean>(false);
   const debouncedQ = useDebounced(q.trim(), 260);
   const termRef = useRef<HTMLDivElement>(null);
 
@@ -2093,23 +2253,49 @@ function RuntimeLogsView() {
 
   const data = rtQ.data;
   const promUrl = typeof window !== 'undefined' ? window.location.origin + (data?.prometheusEndpoint ?? '/api/meta/metrics/prometheus') : '/api/meta/metrics/prometheus';
+  const allNodes = data?.clusterNodes ?? [];
+  const onlineNodes = allNodes.filter((n) => !n.gracefulStop && n.status === 'online');
+  const offlineNodes = allNodes.filter((n) => n.gracefulStop || n.status !== 'online');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>集群运行期指标、节点心跳与 Prometheus 接入</h3>
-            <p>
-              沙箱引擎：<b className="logs-mono">{data?.sandboxProvider ?? '—'}</b> · 在线实例：
-              <b className="logs-mono">
-                {data?.clusterNodes?.length
-                  ? data.clusterNodes
-                      .map((n) => `${n.instanceId}(${n.gracefulStop ? 'stopped' : n.status})`)
-                      .join(', ')
-                  : (data?.metrics?.instances ?? []).join(', ') || '—'}
-              </b>
-            </p>
+            <h3>节点运行期指标与服务日志</h3>
+            <div className="logs-node-strip">
+              <span>沙箱引擎 <b className="logs-mono">{data?.sandboxProvider ?? '—'}</b></span>
+              <span className="logs-meta-sep" aria-hidden="true">·</span>
+              {onlineNodes.length > 0 ? (
+                onlineNodes.map((n) => (
+                  <span key={n.instanceId} className="logs-status ok">
+                    <i className="logs-live-dot" aria-hidden="true" />
+                    {n.instanceId}
+                  </span>
+                ))
+              ) : (
+                <span className="logs-mono">{(data?.metrics?.instances ?? []).join(', ') || '—'}</span>
+              )}
+              {offlineNodes.length > 0 ? (
+                <button
+                  type="button"
+                  className="logs-chip"
+                  style={{ height: 24, fontSize: 11 }}
+                  onClick={() => setShowOfflineNodes((v) => !v)}
+                >
+                  {showOfflineNodes ? `收起历史离线 (${offlineNodes.length})` : `历史离线节点 ${offlineNodes.length}`}
+                </button>
+              ) : null}
+            </div>
+            {showOfflineNodes && offlineNodes.length > 0 ? (
+              <div className="logs-offline-list">
+                {offlineNodes.map((n) => (
+                  <span key={n.instanceId} className="logs-mini-badge">
+                    {n.instanceId} ({n.gracefulStop ? 'stopped' : n.status})
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
@@ -2156,15 +2342,9 @@ function RuntimeLogsView() {
           <div>
             <span>任务日志目录</span>
             <b className="logs-mono" style={{ fontSize: 12 }}>logs/tasks/*.log</b>
-            <small title={data?.runtimeDir}>{data?.runtimeDir ?? '—'}</small>
+            <small title={data?.runtimeDir}>{formatReadableError(data?.runtimeDir) || '—'}</small>
           </div>
         </div>
-      </div>
-
-      <div className="logs-info-banner">
-        说明：Prometheus 负责抓取时序指标（如任务失败率、沙箱耗时、LLM 延迟）；Java 后端进程日志在本地启动模式下写入{' '}
-        <code className="logs-mono">runtime/logs/{'{api,site}'}.log</code>，在 Kubernetes 部署下输出到容器标准输出（stdout）由集群日志系统采集，而每个用户任务的开发过程日志始终沉淀在数据库{' '}
-        <code className="logs-mono">task_event</code> 与共享卷 <code className="logs-mono">logs/tasks/{'{taskId}'}.log</code> 中。
       </div>
 
       <div className="logs-filter-bar">
@@ -2574,6 +2754,7 @@ function PlatformEventsView() {
   const [range, setRange] = useState<OpsLogRange>('7d');
   const [category, setCategory] = useState<string>('ALL');
   const [onlyErrors, setOnlyErrors] = useState<boolean>(false);
+  const [hideRoutineSandbox, setHideRoutineSandbox] = useState<boolean>(true);
   const [q, setQ] = useState<string>('');
   const [offset, setOffset] = useState<number>(0);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -2595,7 +2776,20 @@ function PlatformEventsView() {
   });
 
   const data = evQ.data;
-  const items = data?.items ?? [];
+  const rawItems = data?.items ?? [];
+  const routineSandboxCount = useMemo(
+    () =>
+      rawItems.filter(
+        (i) => i.ok && i.category === 'sandbox' && (i.action === 'SANDBOX_READY' || i.action === 'SANDBOX_DESTROY'),
+      ).length,
+    [rawItems],
+  );
+  const items = useMemo(() => {
+    if (!hideRoutineSandbox || category === 'sandbox' || onlyErrors || debouncedQ) return rawItems;
+    return rawItems.filter(
+      (i) => !(i.ok && i.category === 'sandbox' && (i.action === 'SANDBOX_READY' || i.action === 'SANDBOX_DESTROY')),
+    );
+  }, [rawItems, hideRoutineSandbox, category, onlyErrors, debouncedQ]);
 
   return (
     <>
@@ -2658,9 +2852,19 @@ function PlatformEventsView() {
               <span>仅看失败与异常</span>
               <b>{fmtNum(data?.errorCount ?? 0)}</b>
             </button>
+            {category === 'ALL' && !onlyErrors && !debouncedQ ? (
+              <button
+                type="button"
+                className={`logs-chip ${hideRoutineSandbox ? 'active' : ''}`}
+                onClick={() => setHideRoutineSandbox((v) => !v)}
+                title="常规沙箱就绪/销毁事件可在「沙箱与节点日志」中专项查看"
+              >
+                <span>{hideRoutineSandbox ? `已隐藏常规沙箱启停 (${routineSandboxCount})` : '显示常规沙箱启停'}</span>
+              </button>
+            ) : null}
           </div>
           <div className="logs-filter-right">
-            <span style={{ fontSize: 12, color: '#6b647d' }}>共 {fmtNum(data?.total ?? 0)} 条</span>
+            <span style={{ fontSize: 12, color: '#6b647d' }}>当前显示 {fmtNum(items.length)} / {fmtNum(data?.total ?? 0)} 条</span>
             <button type="button" className="dash-action-btn" onClick={() => void evQ.refetch()} disabled={evQ.isFetching}>
               <Icon name="refresh" className={evQ.isFetching ? 'spinning' : ''} />
               <span>刷新</span>
@@ -2716,7 +2920,7 @@ function PlatformEventsView() {
                           <span className="dash-muted">{item.workspaceId || '—'}</span>
                         )}
                       </td>
-                      <td style={{ maxWidth: 380, wordBreak: 'break-word' }}>{item.summary}</td>
+                      <td style={{ maxWidth: 380, wordBreak: 'break-word' }}>{formatReadableError(item.summary)}</td>
                       <td>
                         {item.detail ? (
                           <button type="button" className="dash-link" onClick={() => setOpenId(openId === item.id ? null : item.id)}>

@@ -1557,6 +1557,40 @@ export interface AdminPublishedAppItem {
   updatedAt: string;
 }
 
+export interface AdminAppItem {
+  id: string;
+  workspaceId: string;
+  ownerLogin: string | null;
+  ownerName: string;
+  name: string;
+  slug: string;
+  type: string;
+  projectKind: string;
+  phase: string;
+  published: boolean;
+  publishedVersionId: string | null;
+  accessLevel: 'public' | 'login' | 'members' | string;
+  versionCount: number;
+  cloudEnabled: boolean;
+  totalPv: number;
+  todayPv: number;
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface AdminWorkspaceItem {
+  workspaceId: string;
+  ownerUserId: string | null;
+  ownerLogin: string | null;
+  ownerName: string;
+  appCount: number;
+  publishedCount: number;
+  deletedAppCount: number;
+  conversationCount: number;
+  dataSourceCount: number;
+  createdAt: string;
+}
+
 export interface AdminOverview {
   currentActor: string;
   ssoRestricted: boolean;
@@ -1570,6 +1604,8 @@ export interface AdminOverview {
   feedbacks: AdminFeedbackItem[];
   feedbackOpenCount: number;
   publishedApps?: AdminPublishedAppItem[];
+  allApps?: AdminAppItem[];
+  workspaces?: AdminWorkspaceItem[];
   deletedApps: AdminDeletedAppItem[];
   templates: AdminTemplateItem[];
   rateLimitStats: {
