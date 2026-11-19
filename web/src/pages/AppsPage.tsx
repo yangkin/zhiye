@@ -82,7 +82,7 @@ export function AppsPage() {
   };
 
   return (
-    <div className="content-page">
+    <div className="content-page apps-page">
       <div className="page-heading">
         <div>
           <span className="overline">YOUR IDEAS, TAKING SHAPE</span>

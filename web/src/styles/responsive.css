@@ -1,0 +1,159 @@
+/* ==========================================================================
+   全分辨率自适应宽屏布局（兼容 1280px 笔记本 / 1920x1080 / 2K / 4K 3840px 大屏）
+   统一覆盖固定 1280px / 1100px 窄容器限制，避免大屏左右大片留白，同时保持表单与阅读区比例协调
+   ========================================================================== */
+
+/* 1. 通用内容页容器（社区 / 应用 / 历史 / 看板 / 管理 / 日志）：流式铺展 + 动态安全边距 */
+.content-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 32px clamp(24px, 3vw, 64px) 48px;
+  box-sizing: border-box;
+}
+
+.content-page.dash-page {
+  padding-bottom: 56px;
+}
+
+.content-page.logs-page {
+  padding-bottom: 48px;
+}
+
+/* 2. 创造首页：外层容器流式展开让场景模板/社区网格铺满大屏，核心输入卡片居中保持舒适阅读宽度 */
+.create-page.cp,
+.create-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: clamp(28px, 6vh, 64px) clamp(24px, 3.5vw, 72px) 56px;
+  box-sizing: border-box;
+}
+
+.cp-card {
+  max-width: min(1040px, 100%);
+}
+
+.cp-ask,
+.cp-thread {
+  max-width: min(960px, 100%);
+}
+
+.create-page .inspiration-grid {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+
+/* 3. 卡片画廊网格（应用页 / 灵感社区 / 首页社区预告）：按屏幕宽度自动增列，防止大屏卡片被拉伸变形 */
+.apps-page .app-grid,
+.app-grid {
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.work-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.community-hero p {
+  max-width: 760px;
+}
+
+/* 4. 控制台细节舒展（看板 / 管理 / 日志 / 历史） */
+.dash-header-top p {
+  max-width: 960px;
+}
+
+.logs-search-box {
+  max-width: 560px;
+}
+
+.history-page .version-app-chip {
+  max-width: 340px;
+}
+
+.history-page .conversation-row-title {
+  max-width: 560px;
+}
+
+/* 5. FHD 1920px+ 宽屏增强 */
+@media (min-width: 1800px) {
+  .logs-split {
+    grid-template-columns: 400px minmax(0, 1fr);
+  }
+
+  .dash-kpi-grid-6 {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .conversation-stream,
+  .conversation-composer-inner {
+    max-width: 1040px;
+  }
+
+  .gov-sample-apps {
+    max-width: 480px;
+  }
+}
+
+/* 6. 2K / 4K（2560px ~ 3840px）超宽大屏增强 */
+@media (min-width: 2400px) {
+  .logs-split {
+    grid-template-columns: 460px minmax(0, 1fr);
+  }
+
+  .cp-card {
+    max-width: 1120px;
+  }
+
+  .create-page .inspiration-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .apps-page .app-grid,
+  .app-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 22px;
+  }
+
+  .work-grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 22px;
+  }
+
+  .gov-sample-apps {
+    max-width: 640px;
+  }
+
+  .conversation-stream,
+  .conversation-composer-inner {
+    max-width: 1160px;
+  }
+}
+
+/* 7. 中小屏与移动端回退保障 */
+@media (max-width: 960px) {
+  .content-page {
+    padding: 24px 20px 36px;
+  }
+
+  .create-page.cp,
+  .create-page {
+    padding: 20px 20px 36px;
+  }
+}
+
+@media (max-width: 720px) {
+  .apps-page .app-grid,
+  .app-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .work-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
