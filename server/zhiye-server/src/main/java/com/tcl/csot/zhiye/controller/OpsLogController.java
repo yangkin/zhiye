@@ -36,6 +36,8 @@ public class OpsLogController {
 
     @GetMapping("/tasks")
     public Map<String, Object> tasks(@RequestParam(defaultValue = "7d") String range,
+                                     @RequestParam(required = false) String startDate,
+                                     @RequestParam(required = false) String endDate,
                                      @RequestParam(defaultValue = "ALL") String status,
                                      @RequestParam(required = false) String type,
                                      @RequestParam(required = false) String workspaceId,
@@ -48,7 +50,7 @@ public class OpsLogController {
         String ws = principal.workspaceId();
         boolean isAdmin = adminAuth.isAdmin(req, ws);
         String effectiveWs = adminAuth.authorizeTaskLogWorkspace(req, ws, workspaceId, userId);
-        return opsLogs.listTasks(ws, range, status, type, effectiveWs, isAdmin ? userId : null, errorCode, q, limit, offset, isAdmin);
+        return opsLogs.listTasks(ws, range, startDate, endDate, status, type, effectiveWs, isAdmin ? userId : null, errorCode, q, limit, offset, isAdmin);
     }
 
     @GetMapping("/tasks/{id}")

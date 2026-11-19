@@ -195,7 +195,7 @@ async function verifyStatic(cwd, env) {
   const preview = await step('生成预览版', async () => {
     const dst = cleanDir(cwd, PREVIEW_DIR)
     copyTree(cwd, dst, { skip: skipProject })
-    const { annotateHtml } = await import(pathToFileURL(locPluginPath(env)).href)
+    const { annotateHtml } = await import(locPluginPath(env))
     const failed = []
     for (const rel of listHtml(dst)) {
       const abs = path.join(dst, rel)

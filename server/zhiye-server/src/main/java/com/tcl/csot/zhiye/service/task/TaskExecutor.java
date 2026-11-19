@@ -287,7 +287,8 @@ public class TaskExecutor {
             tasks.saveCheckpoint(new TaskRepository.Checkpoint(t.id(), ctx.workspace.toString(),
                     ctx.agentDir == null ? null : ctx.agentDir.toString(), ctx.sessionFile, ctx.draftApplied));
         } else cleanup(ctx);
-        tasks.finish(t.id(), "CANCELLED", "已停止", currentProgress(t.id()), null, null, savedVersion, null);
+        boolean won = tasks.finish(t.id(), "CANCELLED", "已停止", currentProgress(t.id()), null, null, savedVersion, null);
+        if (!won) return;
         recordTaskMetric(t, "CANCELLED", null);
         taskService.afterTerminal(t, "CANCELLED", null, null);
         events.emit(t.id(), "status", Map.of("status", "CANCELLED", "phaseLabel", "已停止", "progress", currentProgress(t.id())));
@@ -303,15 +304,21 @@ public class TaskExecutor {
             tasks.saveCheckpoint(new TaskRepository.Checkpoint(t.id(), ctx.workspace.toString(),
                     ctx.agentDir == null ? null : ctx.agentDir.toString(), ctx.sessionFile, ctx.draftApplied));
         } else cleanup(ctx);
+        // 先原子落终态，再执行 afterTerminal（以便排队消息 drainNext 能看到 current.terminal() == true 并可靠派发）
+        boolean won = tasks.finish(t.id(), "FAILED", "失败", currentProgress(t.id()), code, message, null, null);
+        if (!won) return;
         taskService.afterTerminal(t, "FAILED", code, message);
-        tasks.finish(t.id(), "FAILED", "失败", currentProgress(t.id()), code, message, null, null);
         recordTaskMetric(t, "FAILED", code);
         events.emit(t.id(), "status", Map.of("status", "FAILED", "phaseLabel", "失败", "progress", currentProgress(t.id())));
         events.emit(t.id(), "finished", taskService.finishedPayload("FAILED", null, code, message));
     }
 
     private void succeed(TaskContext ctx, String versionId, JsonNode result) {
-        tasks.finish(ctx.id(), "SUCCEEDED", "已完成", 100, null, null, versionId, result);
+        boolean won = tasks.finish(ctx.id(), "SUCCEEDED", "已完成", 100, null, null, versionId, result);
+        if (!won) {
+            cleanup(ctx);
+            return;
+        }
         taskService.afterTerminal(ctx.task, "SUCCEEDED", null, null);
         recordTaskMetric(ctx.task, "SUCCEEDED", null);
         events.emit(ctx.id(), "status", Map.of("status", "SUCCEEDED", "phaseLabel", "已完成", "progress", 100));
@@ -1251,6 +1258,7 @@ public class TaskExecutor {
                     "summary", "更新云数据库表结构失败：" + e.getMessage(),
                     "detail", com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e),
                     "state", "end", "ok", false));
+            return "⚠️ 云数据库表结构更新失败（已自动回滚，未产生半迁移状态）：" + e.getMessage() + "。请修正 `cloud/schema.sql` 后重试。";
         }
         return null;
     }

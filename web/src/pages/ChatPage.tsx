@@ -437,6 +437,20 @@ export function ChatPage() {
                       </span>
                       <Icon name="arrow" />
                     </Link>
+                  ) : (message.builtApp || stripBuildMarker(message.content) !== message.content) && !data?.appId ? (
+                    <button
+                      type="button"
+                      className="conv-app-card"
+                      disabled={building || Boolean(active)}
+                      onClick={() => void startBuild()}
+                    >
+                      <span className="conv-app-icon"><Icon name="refresh" className={building ? 'spinning' : ''} /></span>
+                      <span className="conv-app-info">
+                        <b>{building ? '正在创建应用…' : '创建应用未完成 · 点击重试'}</b>
+                        <small>{active ? `等待「${active.appName}」生成完成后可重试` : '直接基于已确认的会话方案重新创建应用'}</small>
+                      </span>
+                      <Icon name="arrow" />
+                    </button>
                   ) : null}
                 </div>
               </article>

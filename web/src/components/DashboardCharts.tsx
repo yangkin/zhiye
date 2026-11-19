@@ -469,8 +469,8 @@ export function Sparkline({ values, color = '#7953dc' }: { values: number[]; col
   );
 }
 
-/** 全链路转化漏斗：展示每步绝对量、相对首步占比与相邻步骤转化率。 */
-export function ConversionFunnel({ steps }: { steps: { key: string; label: string; count: number }[] }) {
+/** 全链路转化漏斗：优先展示后端同口径转化标注，避免独立渠道相除出现 >100% 的误导比率。 */
+export function ConversionFunnel({ steps }: { steps: { key: string; label: string; count: number; rateLabel?: string | null }[] }) {
   const max = Math.max(...steps.map((s) => s.count), 1);
   if (steps.every((s) => s.count === 0)) {
     return <DashEmptyBox icon="chart" title="当前范围暂无漏斗转化数据" />;
@@ -480,7 +480,11 @@ export function ConversionFunnel({ steps }: { steps: { key: string; label: strin
       {steps.map((s, idx) => {
         const w = s.count === 0 ? 2 : Math.max(6, (s.count / max) * 100);
         const prev = idx > 0 ? steps[idx - 1].count : 0;
-        const stepRate = idx > 0 && prev > 0 ? Math.round((s.count / prev) * 1000) / 10 : null;
+        const fallbackRate =
+          s.rateLabel === undefined && idx > 0 && prev > 0 && s.count <= prev
+            ? `较上步 ${Math.round((s.count / prev) * 1000) / 10}%`
+            : null;
+        const rateText = s.rateLabel ?? fallbackRate;
         return (
           <li key={s.key}>
             <div className="dash-funnel-meta">
@@ -489,7 +493,7 @@ export function ConversionFunnel({ steps }: { steps: { key: string; label: strin
                 {s.label}
               </span>
               <span className="dash-funnel-num">
-                {stepRate !== null ? <small>较上步 {stepRate}%</small> : null}
+                {rateText ? <small>{rateText}</small> : null}
                 <b>{fmtNum(s.count)}</b>
               </span>
             </div>

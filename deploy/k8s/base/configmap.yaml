@@ -27,6 +27,10 @@ data:
   ZHIYE_AUTH_MODE: anonymous
   ZHIYE_SSO_GATEWAY_URL: http://testmetis.csot.tcl.com
   ZHIYE_SSO_REDIRECT_URL: https://zhiye.example.com/access_token
+  # 平台首任管理员 SSO 登录名白名单（逗号分隔；上线后可在「管理 -> 角色权限」中动态授予其他员工）
+  ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin"
+  # 数据源代理允许访问的内网目标域名（逗号分隔，支持 *.csot.tcl.com）
+  ZHIYE_SOURCES_ALLOWED_HOSTS: ""
   # 五星AI岛：模型列表 / 默认模型 / 个人额度 / llm-gateway 路由（需要 sso，见 docs/fivestar-integration.md）
   ZHIYE_FIVESTAR_ENABLED: "false"
   ZHIYE_FIVESTAR_ORG: "31"

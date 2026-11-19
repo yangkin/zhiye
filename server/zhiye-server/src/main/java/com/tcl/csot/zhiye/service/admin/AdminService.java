@@ -59,6 +59,9 @@ public class AdminService {
     private final ObjectStore store;
     private final AdminAuthService adminAuth;
 
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.repo.GitService git;
+
     @Autowired
     public AdminService(JdbcClient jdbc,
                         QuotaService quota,
@@ -159,8 +162,12 @@ public class AdminService {
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("workspaceId", rs.getString("workspace_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
             m.put("maxApps", rs.getObject("max_apps", Integer.class));
             m.put("dailyTaskLimit", rs.getObject("daily_task_limit", Integer.class));
             m.put("maxConcurrentTasks", rs.getObject("max_concurrent_tasks", Integer.class));
@@ -190,8 +197,12 @@ public class AdminService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
             m.put("workspaceId", rs.getString("workspace_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
             m.put("conversationId", rs.getString("conversation_id"));
             m.put("content", rs.getString("content"));
             m.put("assetCount", rs.getInt("asset_count"));
@@ -218,8 +229,12 @@ public class AdminService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
             m.put("workspaceId", rs.getString("workspace_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
             m.put("name", rs.getString("name"));
             m.put("type", rs.getString("type"));
             m.put("projectKind", rs.getString("project_kind"));
@@ -390,8 +405,12 @@ public class AdminService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
             m.put("workspaceId", rs.getString("workspace_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
             m.put("name", rs.getString("name"));
             m.put("slug", rs.getString("slug"));
             m.put("type", rs.getString("type"));
@@ -426,8 +445,12 @@ public class AdminService {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", rs.getString("id"));
             m.put("workspaceId", rs.getString("workspace_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("workspace_id")));
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
             m.put("name", rs.getString("name"));
             m.put("slug", rs.getString("slug"));
             m.put("type", rs.getString("type"));
@@ -454,25 +477,48 @@ public class AdminService {
                        (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is null and a.published_version_id is not null) as published_count,
                        (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is not null) as deleted_app_count,
                        (select count(*) from conversation c where c.workspace_id = w.id) as conv_count,
-                       (select count(*) from data_source ds where ds.workspace_id = w.id and ds.deleted_at is null) as ds_count
+                       (select count(*) from data_source ds where ds.workspace_id = w.id and ds.deleted_at is null) as ds_count,
+                       greatest(
+                           w.created_at,
+                           coalesce((select max(a.updated_at) from app a where a.workspace_id = w.id), w.created_at),
+                           coalesce((select max(c.updated_at) from conversation c where c.workspace_id = w.id), w.created_at)
+                       ) as last_active_at,
+                       coalesce(
+                           (select jsonb_agg(s.name)::text from (
+                               select a.name from app a
+                               where a.workspace_id = w.id and a.deleted_at is null
+                               order by a.updated_at desc
+                               limit 3
+                           ) s),
+                           '[]'
+                       ) as sample_apps
                 from workspace w
                 left join app_user u on u.id = w.owner_user_id
                 where w.owner_user_id is not null
                    or exists(select 1 from app a where a.workspace_id = w.id)
                    or exists(select 1 from conversation c where c.workspace_id = w.id)
-                order by app_count desc, published_count desc, w.created_at desc
+                order by case when w.owner_user_id is not null then 0 else 1 end,
+                         app_count desc, published_count desc, last_active_at desc
                 limit 2000
                 """).query((rs, i) -> {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("workspaceId", rs.getString("id"));
-            m.put("ownerUserId", rs.getString("owner_user_id"));
-            m.put("ownerLogin", rs.getString("login_name"));
-            m.put("ownerName", displayName(rs.getString("real_name"), rs.getString("login_name"), rs.getString("id")));
+            String wsId = rs.getString("id");
+            String ownerUserId = rs.getString("owner_user_id");
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("workspaceId", wsId);
+            m.put("ownerUserId", ownerUserId);
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerBound", ownerUserId != null || (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, wsId));
             m.put("appCount", rs.getInt("app_count"));
             m.put("publishedCount", rs.getInt("published_count"));
             m.put("deletedAppCount", rs.getInt("deleted_app_count"));
             m.put("conversationCount", rs.getInt("conv_count"));
             m.put("dataSourceCount", rs.getInt("ds_count"));
+            m.put("sampleApps", Json.read(rs.getString("sample_apps")));
+            m.put("lastActiveAt", Db.iso(Db.ts(rs, "last_active_at")));
             m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
             return m;
         }).list();
@@ -606,7 +652,8 @@ public class AdminService {
         return Map.of("id", id, "deleted", true);
     }
 
-    /** 分诊与处理用户反馈 */
+    /** 分诊与处理用户反馈（同一事务完成状态更新与审计留痕，兼容 open/in_progress 下 resolved_at 为空） */
+    @Transactional
     public Map<String, Object> triageFeedback(String id, JsonNode body, String actor) {
         long exists = jdbc.sql("select count(*) from help_feedback where id = ?").param(id).query(Long.class).single();
         if (exists == 0) throw ApiException.notFound("反馈");
@@ -626,8 +673,9 @@ public class AdminService {
                 where id = ?
                 """).params(status, adminNote, resolved, id).update();
 
-        String resolvedAt = jdbc.sql("select resolved_at from help_feedback where id = ?")
-                .param(id).query((rs, i) -> Db.iso(Db.ts(rs, "resolved_at"))).single();
+        List<String> resolvedRows = jdbc.sql("select resolved_at from help_feedback where id = ?")
+                .param(id).query((rs, i) -> Db.iso(Db.ts(rs, "resolved_at"))).list();
+        String resolvedAt = resolvedRows.isEmpty() ? null : resolvedRows.get(0);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("status", status);
@@ -727,16 +775,24 @@ public class AdminService {
         }
 
         boolean includeConv = !body.has("includeConversation") || body.path("includeConversation").asBoolean(true);
+        boolean includeDs = !body.has("includeDataSources") || body.path("includeDataSources").asBoolean(true);
         String note = clip(body.path("note").asText("").trim(), 200);
 
-        transferSingleAppResources(appId, fromWs, targetWs, includeConv);
+        List<String> unboundSources = transferSingleAppResources(appId, fromWs, targetWs, includeConv, includeDs);
+
+        String fromOwner = workspaceOwnerLabel(fromWs);
+        String toOwner = workspaceOwnerLabel(targetWs);
 
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("name", app.name());
         detail.put("slug", app.slug());
         detail.put("fromWorkspaceId", fromWs);
         detail.put("toWorkspaceId", targetWs);
+        detail.put("fromOwner", fromOwner);
+        detail.put("toOwner", toOwner);
         detail.put("includeConversation", includeConv);
+        detail.put("includeDataSources", includeDs);
+        if (!unboundSources.isEmpty()) detail.put("unboundPrivateDataSources", unboundSources);
         if (!note.isEmpty()) detail.put("note", note);
         audit(actor, "APP_TRANSFER", "app", appId, detail);
 
@@ -745,7 +801,10 @@ public class AdminService {
         out.put("name", app.name());
         out.put("fromWorkspaceId", fromWs);
         out.put("toWorkspaceId", targetWs);
+        out.put("fromOwner", fromOwner);
+        out.put("toOwner", toOwner);
         out.put("transferred", true);
+        if (!unboundSources.isEmpty()) out.put("unboundDataSources", unboundSources);
         return out;
     }
 
@@ -789,6 +848,7 @@ public class AdminService {
 
         List<String> movedAppIds = new ArrayList<>();
         List<String> movedAppNames = new ArrayList<>();
+        List<String> unboundSources = new ArrayList<>();
         for (Map<String, String> row : sourceApps) {
             String aid = row.get("id");
             boolean isDeleted = "true".equals(row.get("deleted"));
@@ -797,7 +857,7 @@ public class AdminService {
             } else if (isDeleted && !includeTrash) {
                 continue;
             }
-            transferSingleAppResources(aid, fromWs, toWs, includeConversations);
+            unboundSources.addAll(transferSingleAppResources(aid, fromWs, toWs, includeConversations, includeDataSources));
             movedAppIds.add(aid);
             movedAppNames.add(row.get("name"));
         }
@@ -833,23 +893,32 @@ public class AdminService {
             jdbc.sql("update template set workspace_id = ? where workspace_id = ?").params(toWs, fromWs).update();
         }
 
+        String fromOwner = workspaceOwnerLabel(fromWs);
+        String toOwner = workspaceOwnerLabel(toWs);
+
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("fromWorkspaceId", fromWs);
         detail.put("toWorkspaceId", toWs);
+        detail.put("fromOwner", fromOwner);
+        detail.put("toOwner", toOwner);
         detail.put("transferredAppsCount", movedAppIds.size());
         detail.put("appNames", movedAppNames.size() > 20 ? movedAppNames.subList(0, 20) : movedAppNames);
         detail.put("movedConversations", movedStandaloneConvs);
         detail.put("movedDataSources", movedDataSources);
         detail.put("includeTrash", includeTrash);
+        if (!unboundSources.isEmpty()) detail.put("unboundPrivateDataSources", unboundSources);
         if (!note.isEmpty()) detail.put("note", note);
         audit(actor, "WORKSPACE_HANDOVER", "workspace", fromWs, detail);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("fromWorkspaceId", fromWs);
         out.put("toWorkspaceId", toWs);
+        out.put("fromOwner", fromOwner);
+        out.put("toOwner", toOwner);
         out.put("transferredAppsCount", movedAppIds.size());
         out.put("movedConversations", movedStandaloneConvs);
         out.put("movedDataSources", movedDataSources);
+        if (!unboundSources.isEmpty()) out.put("unboundDataSources", unboundSources);
         out.put("appNames", movedAppNames);
         return out;
     }
@@ -884,7 +953,7 @@ public class AdminService {
         throw ApiException.notFound("工作空间或员工账号 (" + ref + ")");
     }
 
-    private void transferSingleAppResources(String appId, String fromWs, String toWs, boolean includeConv) {
+    private List<String> transferSingleAppResources(String appId, String fromWs, String toWs, boolean includeConv, boolean includeDs) {
         long activeTasks = jdbc.sql("""
                 select count(*) from task
                 where app_id = ? and status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
@@ -941,28 +1010,50 @@ public class AdminService {
                     """).params(toWs, appId).update();
         }
 
-        // 若该应用绑定了仅被自己使用的私有数据源且目标空间无同名 key，一并随应用迁移
-        jdbc.sql("""
-                update data_source ds
-                set workspace_id = ?
-                where ds.workspace_id = ?
-                  and ds.deleted_at is null
-                  and ds.id in (select source_id from app_data_source where app_id = ?)
-                  and not exists (
-                      select 1 from app_data_source ads
-                      join app other_app on other_app.id = ads.app_id
-                      where ads.source_id = ds.id
-                        and ads.app_id <> ?
-                        and other_app.workspace_id = ?
-                        and other_app.deleted_at is null
-                  )
-                  and not exists (
-                      select 1 from data_source target_ds
-                      where target_ds.workspace_id = ?
-                        and target_ds.key = ds.key
-                        and target_ds.deleted_at is null
-                  )
-                """).params(toWs, fromWs, appId, appId, fromWs, toWs).update();
+        // 私有数据源权限边界控制：
+        // 1) 仅当 includeDs=true 时，才将仅被本应用独占且目标空间无同名 key 的私有源随应用迁走；
+        // 2) 对于未能迁走的源空间私有数据源（如未勾选迁移、被原空间其他应用共享、或目标空间存在同名冲突），
+        //    必须解除该应用对原空间私有源的绑定，严禁接收方应用继续持有原空间凭证。
+        if (includeDs) {
+            jdbc.sql("""
+                    update data_source ds
+                    set workspace_id = ?
+                    where ds.workspace_id = ?
+                      and ds.deleted_at is null
+                      and ds.id in (select source_id from app_data_source where app_id = ?)
+                      and not exists (
+                          select 1 from app_data_source ads
+                          join app other_app on other_app.id = ads.app_id
+                          where ads.source_id = ds.id
+                            and ads.app_id <> ?
+                            and other_app.workspace_id = ?
+                            and other_app.deleted_at is null
+                      )
+                      and not exists (
+                          select 1 from data_source target_ds
+                          where target_ds.workspace_id = ?
+                            and target_ds.key = ds.key
+                            and target_ds.deleted_at is null
+                      )
+                    """).params(toWs, fromWs, appId, appId, fromWs, toWs).update();
+        }
+
+        List<String> remainingPrivateKeys = jdbc.sql("""
+                select ds.key
+                from app_data_source ads
+                join data_source ds on ds.id = ads.source_id
+                where ads.app_id = ? and ds.workspace_id = ?
+                """).params(appId, fromWs).query(String.class).list();
+        if (!remainingPrivateKeys.isEmpty()) {
+            jdbc.sql("""
+                    delete from app_data_source ads
+                    using data_source ds
+                    where ads.source_id = ds.id
+                      and ads.app_id = ?
+                      and ds.workspace_id = ?
+                    """).params(appId, fromWs).update();
+        }
+        return remainingPrivateKeys;
     }
 
     /** 彻底永久清除回收站中的应用及其全部关联版本、任务与云存储资源 */
@@ -986,6 +1077,12 @@ public class AdminService {
                         "storagePrefix", rs.getString("storage_prefix") == null ? "" : rs.getString("storage_prefix")))
                 .optional();
 
+        // 在删除 version 前收集该应用引用的独立 build 记录，随后清理无其他应用引用的孤儿 build 与对象存储预览/发布产物
+        List<String> candidateBuildIds = jdbc.sql("""
+                select distinct build_id from version
+                where app_id = ? and build_id is not null
+                """).param(id).query(String.class).list();
+
         jdbc.sql("delete from task_message_queue where app_id = ?").param(id).update();
         jdbc.sql("delete from draft where app_id = ?").param(id).update();
         jdbc.sql("delete from message where app_id = ?").param(id).update();
@@ -1004,22 +1101,65 @@ public class AdminService {
         jdbc.sql("delete from asset where app_id = ?").param(id).update();
         jdbc.sql("delete from app where id = ?").param(id).update();
 
+        List<String> cleanupWarnings = new ArrayList<>();
+        int purgedBuilds = 0;
+        for (String bid : candidateBuildIds) {
+            long refs = jdbc.sql("select count(*) from version where build_id = ?").param(bid).query(Long.class).single();
+            if (refs > 0) continue;
+            var buildRow = jdbc.sql("select preview_prefix, publish_prefix from build where id = ?")
+                    .param(bid)
+                    .query((rs, i) -> Map.of(
+                            "preview", rs.getString("preview_prefix") == null ? "" : rs.getString("preview_prefix"),
+                            "publish", rs.getString("publish_prefix") == null ? "" : rs.getString("publish_prefix")))
+                    .optional();
+            jdbc.sql("delete from build where id = ?").param(bid).update();
+            purgedBuilds++;
+            if (buildRow.isPresent()) {
+                for (String pfx : List.of(buildRow.get().get("preview"), buildRow.get().get("publish"))) {
+                    if (pfx != null && !pfx.isBlank()) {
+                        try { store.deletePrefix(pfx.endsWith("/") ? pfx : pfx + "/"); }
+                        catch (Exception ex) { cleanupWarnings.add("build对象清理失败(" + pfx + "): " + ex.getMessage()); }
+                    }
+                }
+            }
+        }
+
         if (cloudRow.isPresent()) {
             String schema = cloudRow.get().get("schemaName");
             if (schema != null && schema.matches("^app_[a-z0-9_]+$")) {
                 try {
                     jdbc.sql("drop schema if exists " + schema + " cascade").update();
-                } catch (Exception ignored) {}
+                } catch (Exception ex) {
+                    cleanupWarnings.add("云数据库schema清理失败(" + schema + "): " + ex.getMessage());
+                }
             }
             String prefix = cloudRow.get().get("storagePrefix");
             if (prefix != null && !prefix.isBlank()) {
-                try { store.deletePrefix(prefix); } catch (Exception ignored) {}
+                try { store.deletePrefix(prefix); }
+                catch (Exception ex) { cleanupWarnings.add("云存储清理失败(" + prefix + "): " + ex.getMessage()); }
             }
         }
-        try { store.deletePrefix("apps/" + id + "/"); } catch (Exception ignored) {}
+        try { store.deletePrefix("apps/" + id + "/"); }
+        catch (Exception ex) { cleanupWarnings.add("应用存储清理失败: " + ex.getMessage()); }
+        if (git != null) {
+            try { git.deleteRepo(id); }
+            catch (Exception ex) { cleanupWarnings.add("Git仓库清理失败: " + ex.getMessage()); }
+        }
 
-        audit(actor, "APP_PURGE", "app", id, Map.of("name", app.name(), "workspaceId", app.workspaceId()));
-        return Map.of("id", id, "name", app.name(), "purged", true);
+        Map<String, Object> auditDetail = new LinkedHashMap<>();
+        auditDetail.put("name", app.name());
+        auditDetail.put("workspaceId", app.workspaceId());
+        auditDetail.put("purgedBuilds", purgedBuilds);
+        if (!cleanupWarnings.isEmpty()) auditDetail.put("cleanupWarnings", cleanupWarnings);
+        audit(actor, "APP_PURGE", "app", id, auditDetail);
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("id", id);
+        res.put("name", app.name());
+        res.put("purged", true);
+        res.put("purgedBuilds", purgedBuilds);
+        if (!cleanupWarnings.isEmpty()) res.put("cleanupWarnings", cleanupWarnings);
+        return res;
     }
 
     private void audit(String actor, String action, String targetType, String targetId, Map<String, Object> detail) {
@@ -1043,6 +1183,26 @@ public class AdminService {
 
     private static String clip(String s, int maxLen) {
         return s.length() > maxLen ? s.substring(0, maxLen) : s;
+    }
+
+    private String workspaceOwnerLabel(String wsId) {
+        return jdbc.sql("""
+                select u.real_name, u.login_name
+                from workspace w
+                left join app_user u on u.id = w.owner_user_id
+                where w.id = ?
+                """).param(wsId).query((rs, i) -> {
+            String real = rs.getString("real_name");
+            String login = rs.getString("login_name");
+            boolean hasReal = real != null && !real.isBlank();
+            boolean hasLogin = login != null && !login.isBlank();
+            if (hasReal && hasLogin && !real.trim().equalsIgnoreCase(login.trim())) {
+                return real.trim() + " (" + login.trim() + ")";
+            }
+            if (hasReal) return real.trim();
+            if (hasLogin) return login.trim();
+            return wsId;
+        }).optional().orElse(wsId);
     }
 
     private static String displayName(String realName, String loginName, String fallback) {

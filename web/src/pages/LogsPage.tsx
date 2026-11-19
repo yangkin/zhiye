@@ -392,26 +392,33 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
   const selectedTaskId = params.get('taskId') ?? '';
   const filterWorkspaceId = params.get('workspaceId') ?? '';
   const filterUserId = params.get('userId') ?? '';
+  const urlStartDate = params.get('startDate') ?? '';
+  const urlEndDate = params.get('endDate') ?? '';
+  const urlRange = params.get('range');
+  const initialRange: OpsLogRange =
+    urlRange === '24h' || urlRange === '7d' || urlRange === '30d' || urlRange === 'all' ? urlRange : '7d';
 
-  const [range, setRange] = useState<OpsLogRange>('7d');
+  const [range, setRange] = useState<OpsLogRange>(initialRange);
   const [status, setStatus] = useState<string>('ALL');
   const [type, setType] = useState<string>('ALL');
   const [errorCode, setErrorCode] = useState<string>('');
-  const [search, setSearch] = useState<string>('');
+  const [search, setSearch] = useState<string>(params.get('q') ?? '');
   const [offset, setOffset] = useState<number>(0);
   const [autoRefreshList, setAutoRefreshList] = useState<boolean>(false);
   const limit = 30;
   const debouncedSearch = useDebounced(search.trim(), 260);
-  const filterSignature = `${range}|${status}|${type}|${filterWorkspaceId}|${filterUserId}|${errorCode}|${debouncedSearch}|${offset}`;
+  const filterSignature = `${range}|${urlStartDate}|${urlEndDate}|${status}|${type}|${filterWorkspaceId}|${filterUserId}|${errorCode}|${debouncedSearch}|${offset}`;
   const lastFilterSignatureRef = useRef<string>(filterSignature);
   const listPaneRef = useRef<HTMLElement>(null);
   const detailPaneRef = useRef<HTMLElement>(null);
 
   const listQ = useQuery({
-    queryKey: ['ops-tasks', range, status, type, filterWorkspaceId, filterUserId, errorCode, debouncedSearch, offset],
+    queryKey: ['ops-tasks', range, urlStartDate, urlEndDate, status, type, filterWorkspaceId, filterUserId, errorCode, debouncedSearch, offset],
     queryFn: () =>
       api.opsTasks({
         range,
+        startDate: urlStartDate || undefined,
+        endDate: urlEndDate || undefined,
         status,
         type: type === 'ALL' ? undefined : type,
         workspaceId: filterWorkspaceId || undefined,
@@ -424,6 +431,14 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
     placeholderData: keepPreviousData,
     refetchInterval: autoRefreshList ? 4000 : false,
   });
+
+  const clearCustomDate = () => {
+    const next = new URLSearchParams(params);
+    next.delete('startDate');
+    next.delete('endDate');
+    setParams(next, { replace: true });
+    setOffset(0);
+  };
 
   const data = listQ.data;
   const items = data?.items ?? [];
@@ -553,15 +568,26 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
               }}
             />
 
-            <Select
-              ariaLabel="筛选时间范围"
-              value={range}
-              options={RANGE_OPTIONS}
-              onChange={(v) => {
-                setRange(v as OpsLogRange);
-                setOffset(0);
-              }}
-            />
+            {urlStartDate || urlEndDate ? (
+              <button
+                type="button"
+                className="logs-chip active"
+                onClick={clearCustomDate}
+                title="点击清除来自看板的自定义日期范围"
+              >
+                <span>日期：{urlStartDate || '…'} ~ {urlEndDate || '…'} ×</span>
+              </button>
+            ) : (
+              <Select
+                ariaLabel="筛选时间范围"
+                value={range}
+                options={RANGE_OPTIONS}
+                onChange={(v) => {
+                  setRange(v as OpsLogRange);
+                  setOffset(0);
+                }}
+              />
+            )}
 
             {(data?.errorCodes?.length ?? 0) > 0 ? (
               <Select
@@ -942,8 +968,23 @@ function TaskDiagnosticPane({
               type="button"
               className="dash-action-btn"
               onClick={() => {
-                downloadJson(`zhiye-diag-${task.id}.json`, { ...baseDetail, events, runnerLog });
-                toast('已导出完整任务诊断报告 JSON。');
+                const totalEv =
+                  Object.values(baseDetail.eventCounts ?? {}).reduce((acc, n) => acc + Number(n || 0), 0) || events.length;
+                const truncated = totalEv > events.length;
+                const exportMeta = {
+                  exportedEvents: events.length,
+                  totalEvents: totalEv,
+                  eventsTruncated: truncated,
+                  runnerTailLines: runnerLog?.lines?.length ?? 0,
+                  runnerTruncated: Boolean(runnerLog?.truncated),
+                  exportedAt: new Date().toISOString(),
+                };
+                downloadJson(`zhiye-diag-${task.id}.json`, { exportMeta, ...baseDetail, events, runnerLog });
+                toast(
+                  truncated
+                    ? `已导出诊断包（含已加载的 ${events.length}/${totalEv} 条事件，长任务已截断）。`
+                    : `已导出诊断包（共 ${events.length} 条事件${runnerLog?.exists ? `，Runner ${runnerLog.lines?.length ?? 0} 行` : ''}）。`,
+                );
               }}
             >
               <Icon name="download" />

@@ -38,6 +38,9 @@ zhiye:
       client-id: ${ZHIYE_SSO_CLIENT_ID:SSO-METIS}
       redirect-url: ${ZHIYE_SSO_REDIRECT_URL:http://127.0.0.1:18080/access_token}
       secure-cookie: ${ZHIYE_SSO_SECURE_COOKIE:true}
+  # 平台管理白名单（K8s 默认兜底允许 admin，可通过 ConfigMap 的 ZHIYE_ADMIN_ALLOW_LOGIN_NAMES 覆盖/追加）
+  admin:
+    allow-login-names: ${ZHIYE_ADMIN_ALLOW_LOGIN_NAMES:admin}
   storage:
     type: ${ZHIYE_STORAGE_TYPE:local}
     s3:

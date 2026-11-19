@@ -41,6 +41,8 @@ public class CloudService {
     private final String secretKey;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.transaction.support.TransactionTemplate txTemplate;
 
     public CloudService(JdbcClient jdbc, ObjectStore store, AppRepository apps, VersionRepository versions, GitService git) {
         this.jdbc = jdbc;
@@ -129,7 +131,7 @@ public class CloudService {
         }
     }
 
-    /** 任务成功后：已启用云服务的应用按新版本的 cloud/schema.sql 补建表/列；未启用返回 -1 */
+    /** 任务成功后：已启用云服务的应用按新版本的 cloud/schema.sql 事务性补建表/列（PG 支持事务 DDL，任一表失败全部回滚）；未启用返回 -1 */
     public synchronized int applySchema(String appId) {
         Cloud c = find(appId).orElse(null);
         if (c == null || !"on".equals(c.status)) return -1;
@@ -137,8 +139,15 @@ public class CloudService {
         List<String> ddlLog = new ArrayList<>();
         try {
             Schema sc = readSchema(appId);
-            for (TableDef t : sc.tables()) createTable(appId, c.schema, t, sc.policies().get(t.name()), ddlLog);
-            dropPlaceholder(appId, c.schema, sc, ddlLog);
+            Runnable applyAll = () -> {
+                for (TableDef t : sc.tables()) createTable(appId, c.schema, t, sc.policies().get(t.name()), ddlLog);
+                dropPlaceholder(appId, c.schema, sc, ddlLog);
+            };
+            if (txTemplate != null) {
+                txTemplate.executeWithoutResult(status -> applyAll.run());
+            } else {
+                applyAll.run();
+            }
             recordSchemaEvent("APPLY_SCHEMA", null, appId, c.schema, sc.tables(), ddlLog, t0, null);
             return sc.tables().size();
         } catch (Exception e) {

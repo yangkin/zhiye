@@ -375,6 +375,8 @@ export const api = {
   } = {}) => request<DashboardData>('/api/dashboard' + qs(opts)),
   opsTasks: (opts: {
     range?: OpsLogRange;
+    startDate?: string;
+    endDate?: string;
     status?: string;
     type?: string;
     workspaceId?: string;

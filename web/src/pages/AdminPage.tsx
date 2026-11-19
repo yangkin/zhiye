@@ -60,46 +60,44 @@ export function AdminPage() {
   const overview = adminQ.data;
 
   return (
-    <div className="content-page dash-page admin-console-page">
-      <header className="dash-header">
-        <div className="dash-header-top">
-          <div className="dash-title-block">
-            <span className="dash-eyebrow">ZHIYE ENTERPRISE GOVERNANCE &amp; ASSET CONSOLE</span>
-            <div className="dash-title-row">
-              <h1>织页平台管理工作台</h1>
-              <span className="dash-scope-badge platform">
-                <i className="dash-pulse-dot" aria-hidden="true" />
-                平台管理员专享
+    <div className="content-page dash-page">
+      <header className="dash-header-top">
+        <div className="dash-title-block">
+          <span className="overline">ZHIYE ENTERPRISE GOVERNANCE &amp; ASSET CONSOLE</span>
+          <div className="dash-title-row">
+            <h1>织页平台管理工作台</h1>
+            <span className="dash-scope-badge platform">
+              <i className="dash-pulse-dot" aria-hidden="true" />
+              平台管理员专享
+            </span>
+            {overview ? (
+              <span className="gov-actor-chip">
+                操作人 <code>{overview.currentActor}</code>
               </span>
-              {overview ? (
-                <span className="gov-actor-chip">
-                  操作人 <code>{overview.currentActor}</code>
-                </span>
-              ) : null}
-            </div>
-            <p>
-              集中处理人员离职与空间资产批量交接、单应用归属转移、线上站点权限风控、社区与反馈工单分诊、工作空间配额覆盖及操作审计留痕。
-            </p>
+            ) : null}
           </div>
-          <div className="dash-header-actions">
-            <button type="button" className="dash-action-btn" onClick={() => navigate('/dashboard')}>
-              <Icon name="chart" />
-              <span>统计看板</span>
-            </button>
-            <button type="button" className="dash-action-btn" onClick={() => navigate('/logs')}>
-              <Icon name="terminal" />
-              <span>日志排查</span>
-            </button>
-            <button
-              type="button"
-              className="dash-action-btn primary"
-              disabled={adminQ.isFetching}
-              onClick={() => void refreshAll()}
-            >
-              <Icon name="refresh" className={adminQ.isFetching ? 'spinning' : ''} />
-              <span>{adminQ.isFetching ? '刷新中…' : '刷新台账'}</span>
-            </button>
-          </div>
+          <p>
+            集中处理人员离职与空间资产批量交接、单应用归属转移、线上站点权限风控、社区与反馈工单分诊、工作空间配额覆盖及操作审计留痕。
+          </p>
+        </div>
+        <div className="dash-header-cta">
+          <button type="button" className="dash-action-btn" onClick={() => navigate('/dashboard')}>
+            <Icon name="chart" />
+            <span>统计看板</span>
+          </button>
+          <button type="button" className="dash-action-btn" onClick={() => navigate('/logs')}>
+            <Icon name="terminal" />
+            <span>日志排查</span>
+          </button>
+          <button
+            type="button"
+            className="dash-action-btn primary"
+            disabled={adminQ.isFetching}
+            onClick={() => void refreshAll()}
+          >
+            <Icon name="refresh" className={adminQ.isFetching ? 'spinning' : ''} />
+            <span>{adminQ.isFetching ? '刷新中…' : '刷新台账'}</span>
+          </button>
         </div>
       </header>
 

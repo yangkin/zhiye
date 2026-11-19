@@ -19,6 +19,10 @@ data:
   # 公司沙箱命名空间里指向同一 NAS 的 RWX PVC（占位）
   ZHIYE_SANDBOX_PVC: <共享 RWX PVC 名称>
   ZHIYE_NPM_REGISTRY: https://<npm 内网镜像>/
+  # 平台首任管理员 SSO 账号白名单（多个用英文逗号分隔）
+  ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin"
+  # 数据源代理允许访问的公司内网域名（按需增删）
+  ZHIYE_SOURCES_ALLOWED_HOSTS: "*.csot.tcl.com"
   # 以下仅 legacy k8s provider 回滚时使用（crun 普通运行时，不需要 runtimeClass）
   ZHIYE_RUNNER_PULL_POLICY: IfNotPresent
   ZHIYE_SANDBOX_RUNTIME_CLASS: ""

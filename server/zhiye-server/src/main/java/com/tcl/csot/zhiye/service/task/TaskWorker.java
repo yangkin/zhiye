@@ -38,6 +38,8 @@ public class TaskWorker {
     private final String owner = "worker-" + ProcessHandle.current().pid() + "-" + Ids.random(6);
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RuntimeMetricsService metrics;
     private final Set<String> running = ConcurrentHashMap.newKeySet();
     private final Semaphore permits;
     private volatile boolean stopped;
@@ -64,25 +66,39 @@ public class TaskWorker {
 
     private void loop() {
         while (!stopped) {
+            boolean acquired = false;
+            boolean handedOff = false;
             try {
                 if (!permits.tryAcquire()) { signals.awaitWork(props.task().pollMillis()); continue; }
+                acquired = true;
                 var claimed = tasks.claimNext(owner, props.task().leaseSeconds());
                 if (claimed.isEmpty()) {
                     permits.release();
+                    acquired = false;
                     signals.awaitWork(props.task().pollMillis());
                     continue;
                 }
                 TaskRow t = claimed.get();
                 running.add(t.id());
-                Threads.start("task-" + t.id(), () -> {
-                    try { executor.execute(t); }
-                    finally { running.remove(t.id()); permits.release(); signals.wakeWorker(); }
-                });
+                try {
+                    Threads.start("task-" + t.id(), () -> {
+                        try { executor.execute(t); }
+                        finally { running.remove(t.id()); permits.release(); signals.wakeWorker(); }
+                    });
+                    handedOff = true;
+                } catch (Throwable startErr) {
+                    running.remove(t.id());
+                    throw startErr;
+                }
             } catch (InterruptedException e) {
                 return;
             } catch (Exception e) {
                 log.warn("领取任务失败：{}", e.getMessage());
                 try { Thread.sleep(1000); } catch (InterruptedException ie) { return; }
+            } finally {
+                if (acquired && !handedOff) {
+                    permits.release();
+                }
             }
         }
     }
@@ -118,24 +134,32 @@ public class TaskWorker {
         if (!ok) log.info("任务 {} 的{}信号已过时，忽略", sig.taskId(), sig.kind());
     }
 
-    /** 租约过期的任务（工作进程挂掉）→ FAILED(worker_lost)，可以重试 */
+    /** 租约过期的任务（工作进程挂掉）→ FAILED(worker_lost)，按持有者与过期时间原子接管避免多副本重复终态 */
     @Scheduled(initialDelay = 2000, fixedDelay = 15000)
     public void reapExpired() {
         try {
             for (TaskRow t : tasks.expiredLeases()) {
                 if (running.contains(t.id())) continue;
-                log.warn("任务 {} 租约过期，标记为 worker_lost", t.id());
                 String status = "CANCELLING".equals(t.status()) ? "CANCELLED" : "FAILED";
+                String phaseLabel = "FAILED".equals(status) ? "失败" : "已停止";
                 String code = "FAILED".equals(status) ? "worker_lost" : null;
                 String msg = "FAILED".equals(status) ? "执行任务的工作进程已退出，请重试" : null;
-                tasks.finish(t.id(), status, "FAILED".equals(status) ? "失败" : "已停止", t.progress(), code, msg, null, null);
+                if (!tasks.reclaimExpiredAtomically(t.id(), t.leaseOwner(), status, phaseLabel, t.progress(), code, msg)) {
+                    continue;
+                }
+                log.warn("任务 {} 租约过期，已原子回收为 {}", t.id(), status);
+                if (metrics != null) {
+                    java.time.Instant ref = t.startedAt() != null ? t.startedAt() : t.createdAt();
+                    long ms = ref == null ? 0L : Math.max(0L, java.time.Duration.between(ref, java.time.Instant.now()).toMillis());
+                    metrics.recordTask(t.type(), status, code, ms);
+                }
                 if (platformLogs != null && "FAILED".equals(status)) {
                     platformLogs.error("sandbox", "WORKER_LOST", t.workspaceId(), null, t.appId(), t.id(), null, null,
                             "任务租约过期（原执行节点 " + t.leaseOwner() + " 可能已重启/退出），已标记为 worker_lost",
                             null, Map.of("leaseOwner", String.valueOf(t.leaseOwner()), "progress", t.progress()));
                 }
                 taskService.afterTerminal(t, status, code, msg);
-                events.emit(t.id(), "status", Map.of("status", status, "phaseLabel", "FAILED".equals(status) ? "失败" : "已停止", "progress", t.progress()));
+                events.emit(t.id(), "status", Map.of("status", status, "phaseLabel", phaseLabel, "progress", t.progress()));
                 events.emit(t.id(), "finished", taskService.finishedPayload(status, null, code, msg));
             }
         } catch (Exception e) {

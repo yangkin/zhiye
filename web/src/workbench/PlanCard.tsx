@@ -48,29 +48,52 @@ export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Ta
   const [error, setError] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyDoc = useRef(false);
+  const revRef = useRef(0);
+  const savedRevRef = useRef(0);
+  const latestDocRef = useRef(app.planDoc);
+  const inFlightSaveRef = useRef<Promise<void> | null>(null);
   const keyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!dirtyDoc.current) setDoc(app.planDoc);
+    if (!dirtyDoc.current && revRef.current === savedRevRef.current) {
+      setDoc(app.planDoc);
+      latestDocRef.current = app.planDoc;
+    }
   }, [app.planDoc]);
 
-  const saveDoc = useCallback(async (value: string) => {
+  const saveDoc = useCallback(async (value: string, targetRev?: number) => {
+    const rev = targetRev ?? revRef.current;
     timer.current = null;
+    const p = (async () => {
+      try {
+        const next = await api.patchApp(app.id, { planDoc: value });
+        if (rev >= savedRevRef.current) {
+          savedRevRef.current = rev;
+        }
+        if (rev === revRef.current) {
+          dirtyDoc.current = false;
+        }
+        qc.setQueryData(qk.app(app.id), next);
+      } catch (err) {
+        toast(errorMessage(err, '计划没有保存成功。'), 'error');
+        throw err;
+      }
+    })();
+    inFlightSaveRef.current = p;
     try {
-      const next = await api.patchApp(app.id, { planDoc: value });
-      dirtyDoc.current = false;
-      qc.setQueryData(qk.app(app.id), next);
-    } catch (err) {
-      toast(errorMessage(err, '计划没有保存成功。'), 'error');
-      throw err;
+      await p;
+    } finally {
+      if (inFlightSaveRef.current === p) inFlightSaveRef.current = null;
     }
   }, [app.id, qc]);
 
   const onDoc = (value: string) => {
     setDoc(value);
+    latestDocRef.current = value;
     dirtyDoc.current = true;
+    const nextRev = ++revRef.current;
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void saveDoc(value).catch(() => undefined), 600);
+    timer.current = setTimeout(() => void saveDoc(value, nextRev).catch(() => undefined), 600);
   };
 
   const patch = async (p: { style?: StyleId }) => {
@@ -90,7 +113,13 @@ export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Ta
     try {
       if (timer.current) {
         clearTimeout(timer.current);
-        await saveDoc(doc);
+        timer.current = null;
+      }
+      if (inFlightSaveRef.current) {
+        await inFlightSaveRef.current.catch(() => undefined);
+      }
+      if (dirtyDoc.current || savedRevRef.current < revRef.current) {
+        await saveDoc(latestDocRef.current, revRef.current);
       }
       keyRef.current ??= newIdempotencyKey();
       const task = await api.generate(app.id, keyRef.current);
@@ -101,7 +130,7 @@ export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Ta
     } finally {
       setStarting(false);
     }
-  }, [app.id, doc, onStarted, saveDoc, starting]);
+  }, [app.id, onStarted, saveDoc, starting]);
 
   // 自动执行倒计时（原型保留的交互；到 0 时调用与「立即执行」相同的接口）
   const execRef = useRef(execute);

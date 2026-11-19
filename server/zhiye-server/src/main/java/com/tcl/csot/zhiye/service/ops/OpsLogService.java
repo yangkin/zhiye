@@ -75,8 +75,33 @@ public class OpsLogService {
     public Map<String, Object> listTasks(String currentWs, String rangeParam, String statusParam, String typeParam,
                                          String workspaceIdParam, String userIdParam, String errorCodeParam,
                                          String qParam, int limitParam, int offsetParam, boolean includeActors) {
+        return listTasks(currentWs, rangeParam, null, null, statusParam, typeParam, workspaceIdParam, userIdParam, errorCodeParam, qParam, limitParam, offsetParam, includeActors);
+    }
+
+    public Map<String, Object> listTasks(String currentWs, String rangeParam, String startDateParam, String endDateParam,
+                                         String statusParam, String typeParam,
+                                         String workspaceIdParam, String userIdParam, String errorCodeParam,
+                                         String qParam, int limitParam, int offsetParam, boolean includeActors) {
         String range = normalizeRange(rangeParam, "7d");
         OffsetDateTime sinceTs = sinceTimestamp(range);
+        OffsetDateTime customStartTs = null;
+        OffsetDateTime customEndTs = null;
+        String cleanStart = clean(startDateParam);
+        String cleanEnd = clean(endDateParam);
+        if (cleanStart != null || cleanEnd != null) {
+            try {
+                java.time.ZoneId shanghai = java.time.ZoneId.of("Asia/Shanghai");
+                if (cleanStart != null) {
+                    customStartTs = java.time.LocalDate.parse(cleanStart).atStartOfDay(shanghai).toOffsetDateTime();
+                }
+                if (cleanEnd != null) {
+                    customEndTs = java.time.LocalDate.parse(cleanEnd).plusDays(1).atStartOfDay(shanghai).toOffsetDateTime();
+                }
+            } catch (Exception ignored) {
+                customStartTs = null;
+                customEndTs = null;
+            }
+        }
         String status = clean(statusParam);
         String type = clean(typeParam);
         String wsId = clean(workspaceIdParam);
@@ -88,7 +113,16 @@ public class OpsLogService {
 
         StringBuilder baseWhere = new StringBuilder(" where 1=1 ");
         List<Object> baseParams = new ArrayList<>();
-        if (sinceTs != null) {
+        if (customStartTs != null || customEndTs != null) {
+            if (customStartTs != null) {
+                baseWhere.append(" and t.created_at >= ? ");
+                baseParams.add(customStartTs);
+            }
+            if (customEndTs != null) {
+                baseWhere.append(" and t.created_at < ? ");
+                baseParams.add(customEndTs);
+            }
+        } else if (sinceTs != null) {
             baseWhere.append(" and t.created_at >= ? ");
             baseParams.add(sinceTs);
         }

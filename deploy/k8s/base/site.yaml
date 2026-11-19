@@ -67,8 +67,15 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
+            # 云函数在 site 进程执行：按 Git 提交只读检出仓库源码，并把 Deno 编译缓存写到独立可写卷（根文件系统保持只读）
+            - { name: runtime, mountPath: /var/lib/zhiye/runtime/repos, subPath: repos, readOnly: true }
+            - { name: deno-cache, mountPath: /var/lib/zhiye/runtime/deno-cache }
             - { name: tmp, mountPath: /tmp }
       volumes:
+        - name: runtime
+          persistentVolumeClaim: { claimName: zhiye-runtime }
+        - name: deno-cache
+          emptyDir: { sizeLimit: 512Mi }
         - name: tmp
           emptyDir: { sizeLimit: 1Gi }
 ---

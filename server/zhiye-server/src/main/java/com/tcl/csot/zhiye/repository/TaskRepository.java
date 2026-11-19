@@ -100,14 +100,28 @@ public class TaskRepository {
                 .param(id).update() > 0;
     }
 
-    public void finish(String id, String status, String label, int progress, String errorCode, String errorMessage,
-                       String resultVersionId, JsonNode result) {
-        jdbc.sql("""
+    /** 原子置终态：仅当任务仍处于非终态时更新，返回 true 表示本次调用赢得终态写入权。 */
+    public boolean finish(String id, String status, String label, int progress, String errorCode, String errorMessage,
+                          String resultVersionId, JsonNode result) {
+        return jdbc.sql("""
                 update task set status = ?, phase_label = ?, progress = ?, error_code = ?, error_message = ?, result_version_id = ?,
                   result = ?::jsonb, finished_at = now(), lease_owner = null, lease_until = null
                 where id = ? and status not in ('SUCCEEDED','FAILED','CANCELLED')
                 """).params(status, label, progress, errorCode, errorMessage, resultVersionId,
-                result == null ? null : Json.write(result), id).update();
+                result == null ? null : Json.write(result), id).update() > 0;
+    }
+
+    /** 原子回收已过期租约任务：核对 lease_owner 与 lease_until，避免多副本并发回收产生重复终态事件。 */
+    public boolean reclaimExpiredAtomically(String id, String expectedLeaseOwner, String status, String label,
+                                            int progress, String errorCode, String errorMessage) {
+        return jdbc.sql("""
+                update task set status = ?, phase_label = ?, progress = ?, error_code = ?, error_message = ?,
+                  finished_at = now(), lease_owner = null, lease_until = null
+                where id = ?
+                  and status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                  and lease_owner is not distinct from ?
+                  and (lease_until is null or lease_until < now())
+                """).params(status, label, progress, errorCode, errorMessage, id, expectedLeaseOwner).update() > 0;
     }
 
     public List<TaskRow> expiredLeases() {

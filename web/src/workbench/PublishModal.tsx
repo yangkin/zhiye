@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { ApiError, api, errorMessage } from '../api/client';
+import { useCallback, useRef, useState } from 'react';
+import { ApiError, api, errorMessage, type AccessLevel } from '../api/client';
 import { useInvalidateApp } from '../api/queries';
 import { waitForTask } from '../api/sse';
 import type { AppDetail, Task } from '../api/types';
@@ -8,7 +8,7 @@ import { copyText } from '../lib/format';
 import { toast } from '../lib/store';
 import { Modal } from '../components/Modal';
 import { useQuery } from '@tanstack/react-query';
-import { AccessForm } from './CloudConsole';
+import { ACCESS_OPTIONS, AccessForm, type AccessFormState } from './CloudConsole';
 
 interface Props {
   app: AppDetail;
@@ -19,18 +19,34 @@ interface Props {
   onClose: () => void;
 }
 
+function formatEffectiveAccess(level: AccessLevel, membersCount: number): string {
+  const opt = ACCESS_OPTIONS.find((o) => o.value === level);
+  const label = opt?.label ?? level;
+  if (level === 'members') return `${label}（白名单 ${membersCount} 人 + 创建者）`;
+  return label;
+}
+
 export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, onClose }: Props) {
   const invalidate = useInvalidateApp();
   const [step, setStep] = useState<'confirm' | 'working' | 'done'>('confirm');
   const [label, setLabel] = useState('');
   const [error, setError] = useState('');
   const [siteUrl, setSiteUrl] = useState(app.siteUrl);
+  const [effectiveAccess, setEffectiveAccess] = useState<{ level: AccessLevel; membersCount: number }>({ level: 'public', membersCount: 0 });
   const v = app.currentVersion;
   const needsSave = hasLocalDraft || app.hasDraft;
   const cloud = useQuery({ queryKey: ['cloud', app.id], queryFn: () => api.cloudStatus(app.id) });
   const cloudOn = cloud.data?.enabled ?? false;
   const [blocked, setBlocked] = useState<{ tables: string[]; sso: boolean }>({ tables: [], sso: false });
   const onBlocked = useCallback((tables: string[], sso: boolean) => setBlocked({ tables, sso }), []);
+  const accessStateRef = useRef<AccessFormState | null>(null);
+  const [accessReady, setAccessReady] = useState(false);
+  const [accessErr, setAccessErr] = useState(false);
+  const onAccessStateChange = useCallback((st: AccessFormState) => {
+    accessStateRef.current = st;
+    setAccessReady(!st.loading && !st.error);
+    setAccessErr(st.error);
+  }, []);
 
   const saveDraftFirst = async () => {
     setLabel('正在保存未提交的编辑…');
@@ -44,9 +60,22 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
   };
 
   const publish = async () => {
+    const acc = accessStateRef.current;
+    if (!acc || acc.loading || acc.error) {
+      setError('访问设置尚未加载完成，请稍后重试。');
+      return;
+    }
     setStep('working');
     setError('');
     try {
+      let finalLevel: AccessLevel = acc.level;
+      let finalMembersCount = acc.membersCount;
+      if (acc.dirty) {
+        setLabel('正在保存访问范围…');
+        const saved = await acc.save();
+        finalLevel = saved.level;
+        finalMembersCount = saved.members.length;
+      }
       if (needsSave) await saveDraftFirst();
       setLabel('正在发布…');
       let res;
@@ -60,9 +89,10 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
         } else throw err;
       }
       setSiteUrl(res.siteUrl);
+      setEffectiveAccess({ level: finalLevel, membersCount: finalMembersCount });
       invalidate(app.id);
       setStep('done');
-      toast('发布完成，线上版本已更新。');
+      toast('发布完成，线上版本与访问范围已生效。');
     } catch (err) {
       invalidate(app.id);
       setError(errorMessage(err));
@@ -102,6 +132,16 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
           <i>✦</i>
         </div>
         <h3 className="center">{app.name}</h3>
+        <div className="publish-detail">
+          <span>
+            线上版本
+            <b>{v ? `V${v.number} · ${v.title}` : '已发布'}</b>
+          </span>
+          <span>
+            实际生效访问范围
+            <b>{formatEffectiveAccess(effectiveAccess.level, effectiveAccess.membersCount)}</b>
+          </span>
+        </div>
         <label className="field-label">访问地址</label>
         <div className="copy-field">
           <span>{siteUrl}</span>
@@ -133,7 +173,11 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
               取消
             </button>
           )}
-          <button className="primary-button" disabled={step === 'working' || !v || blocked.tables.length > 0} onClick={() => void publish()}>
+          <button
+            className="primary-button"
+            disabled={step === 'working' || !v || blocked.tables.length > 0 || !accessReady || accessErr}
+            onClick={() => void publish()}
+          >
             {step === 'working' ? label || '正在发布…' : online ? '重新发布' : '确认发布'} <Icon name="arrow" />
           </button>
         </>
@@ -156,7 +200,7 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
       </div>
       <div className="publish-access">
         <label className="field-label">谁能打开</label>
-        <AccessForm appId={app.id} compact onBlocked={onBlocked} />
+        <AccessForm appId={app.id} compact onBlocked={onBlocked} onStateChange={onAccessStateChange} />
       </div>
       {/* 只留一条最要紧的提示 */}
       {blocked.tables.length ? (

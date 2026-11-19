@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import { qk } from '../api/queries';
 import type {
@@ -13,6 +13,7 @@ import type {
 } from '../api/types';
 import { confirmDialog } from './ConfirmDialog';
 import { Modal } from './Modal';
+import { OwnerPicker, formatOwnerIdentity, type OwnerPickerOption } from './OwnerPicker';
 import { Pagination, useClientPagination } from './Pagination';
 import { Select } from './Select';
 import { Icon, type IconName } from '../lib/icons';
@@ -22,16 +23,34 @@ import { DashEmptyBox, DashPanelHead, fmtCompact, fmtNum } from './DashboardChar
 
 export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops';
 
-function OwnerBadge({ ownerName, workspaceId }: { ownerName?: string | null; workspaceId: string }) {
-  const cleanName = ownerName?.trim();
-  const hasRealName = Boolean(cleanName && cleanName !== workspaceId);
-  return hasRealName ? (
-    <>
-      <span>{cleanName}</span>
-      <div><code>{workspaceId}</code></div>
-    </>
-  ) : (
-    <code>{workspaceId}</code>
+function OwnerBadge({
+  ownerName,
+  ownerRealName,
+  ownerLogin,
+  workspaceId,
+}: {
+  ownerName?: string | null;
+  ownerRealName?: string | null;
+  ownerLogin?: string | null;
+  workspaceId: string;
+}) {
+  const info = formatOwnerIdentity({ ownerRealName, ownerLogin, ownerName, workspaceId });
+  return (
+    <div className="owner-cell">
+      <div className="owner-cell-main">
+        {info.bound ? (
+          <>
+            <span className="owner-cell-name">{info.primary}</span>
+            {info.account ? <code className="owner-cell-acct">{info.account}</code> : null}
+          </>
+        ) : (
+          <span className="owner-cell-anon">未绑定账号</span>
+        )}
+      </div>
+      <div className="owner-cell-ws">
+        <code>{workspaceId}</code>
+      </div>
+    </div>
   );
 }
 
@@ -113,6 +132,8 @@ export interface TransferAppTarget {
   slug: string;
   workspaceId: string;
   ownerName?: string | null;
+  ownerRealName?: string | null;
+  ownerLogin?: string | null;
 }
 
 export function AdminGovernancePanel({
@@ -150,8 +171,9 @@ export function AdminGovernancePanel({
     }
   };
 
-  // 离职 / 批量交接状态
+  // 离职 / 批量交接状态（默认收起，带 ?fromWs= 参数或用户主动点击时展开，让高频应用检索首屏直接可见）
   const [handoverFromWs, setHandoverFromWs] = useState(searchParams.get('fromWs') ?? '');
+  const [showBatchHandover, setShowBatchHandover] = useState(Boolean(searchParams.get('fromWs')));
   const [handoverToWs, setHandoverToWs] = useState('');
   const [handoverIncludeConv, setHandoverIncludeConv] = useState(true);
   const [handoverIncludeDs, setHandoverIncludeDs] = useState(true);
@@ -160,10 +182,14 @@ export function AdminGovernancePanel({
   const [handoverPartial, setHandoverPartial] = useState(false);
   const [handoverSelectedApps, setHandoverSelectedApps] = useState<string[]>([]);
 
+  const myWsQ = useQuery({ queryKey: qk.workspace, queryFn: api.workspace });
+  const myWorkspaceId = myWsQ.data?.id ?? '';
+
   useEffect(() => {
     const fw = searchParams.get('fromWs');
     if (fw) {
       setHandoverFromWs(fw);
+      setShowBatchHandover(true);
       setGovTabState('handover');
     }
   }, [searchParams]);
@@ -174,7 +200,10 @@ export function AdminGovernancePanel({
   const [transferIncludeConv, setTransferIncludeConv] = useState(true);
   const [transferNote, setTransferNote] = useState('');
 
-  // 全平台应用台账过滤
+  // 全平台应用台账 / 人员资产花名册视图与过滤
+  const [ledgerView, setLedgerView] = useState<'owners' | 'apps'>('apps');
+  const [ownerQuery, setOwnerQuery] = useState('');
+  const [ownerBindFilter, setOwnerBindFilter] = useState<'all' | 'bound' | 'unbound'>('all');
   const [appLedgerQuery, setAppLedgerQuery] = useState('');
   const [appLedgerStatus, setAppLedgerStatus] = useState<'all' | 'published' | 'draft'>('all');
   const [appLedgerWs, setAppLedgerWs] = useState('');
@@ -215,65 +244,142 @@ export function AdminGovernancePanel({
     }
   };
 
-  // 合并所有可选工作空间（优先使用 overview.workspaces，兜底合并 dashboard.workspaces / allApps / customQuotas）
+  // 合并所有可选工作空间（优先使用 overview.workspaces，兜底合并 dashboard.workspaces / allApps）
   const workspaceOptions = useMemo(() => {
     const map = new Map<
       string,
       {
         workspaceId: string;
         ownerName: string;
+        ownerRealName: string | null;
+        ownerLogin: string | null;
+        ownerBound: boolean;
         appCount: number;
         publishedCount: number;
         deletedAppCount: number;
         conversationCount: number;
         dataSourceCount: number;
+        sampleApps: string[];
+        lastActiveAt: string | null;
       }
     >();
     for (const w of overview?.workspaces ?? []) {
+      const bound = Boolean(w.ownerBound ?? (w.ownerUserId || w.ownerLogin || w.ownerRealName));
       map.set(w.workspaceId, {
         workspaceId: w.workspaceId,
         ownerName: w.ownerName || w.workspaceId,
+        ownerRealName: w.ownerRealName ?? (bound && w.ownerName !== w.workspaceId ? w.ownerName : null),
+        ownerLogin: w.ownerLogin ?? null,
+        ownerBound: bound,
         appCount: w.appCount,
         publishedCount: w.publishedCount,
         deletedAppCount: w.deletedAppCount,
         conversationCount: w.conversationCount,
         dataSourceCount: w.dataSourceCount,
+        sampleApps: Array.isArray(w.sampleApps) ? w.sampleApps : [],
+        lastActiveAt: w.lastActiveAt ?? w.createdAt ?? null,
       });
     }
     for (const w of dashboard?.workspaces ?? []) {
       if (!map.has(w.workspaceId)) {
+        const bound = Boolean(w.loginName || (w.ownerName && w.ownerName !== w.workspaceId));
         map.set(w.workspaceId, {
           workspaceId: w.workspaceId,
           ownerName: w.ownerName || w.workspaceId,
+          ownerRealName: bound ? (w.ownerName ?? null) : null,
+          ownerLogin: w.loginName ?? null,
+          ownerBound: bound,
           appCount: w.apps,
           publishedCount: w.published,
           deletedAppCount: 0,
           conversationCount: 0,
           dataSourceCount: 0,
+          sampleApps: [],
+          lastActiveAt: w.lastActiveAt ?? null,
         });
       }
     }
     for (const a of overview?.allApps ?? []) {
-      if (!map.has(a.workspaceId)) {
+      const existing = map.get(a.workspaceId);
+      if (!existing) {
+        const bound = Boolean(a.ownerBound ?? (a.ownerLogin || a.ownerRealName || (a.ownerName && a.ownerName !== a.workspaceId)));
         map.set(a.workspaceId, {
           workspaceId: a.workspaceId,
           ownerName: a.ownerName || a.workspaceId,
+          ownerRealName: a.ownerRealName ?? null,
+          ownerLogin: a.ownerLogin ?? null,
+          ownerBound: bound,
           appCount: 1,
           publishedCount: a.published ? 1 : 0,
           deletedAppCount: 0,
           conversationCount: 0,
           dataSourceCount: 0,
+          sampleApps: [a.name],
+          lastActiveAt: a.updatedAt ?? null,
         });
+      } else if (existing.sampleApps.length < 3 && !existing.sampleApps.includes(a.name)) {
+        existing.sampleApps = [...existing.sampleApps, a.name];
       }
     }
     return Array.from(map.values());
   }, [overview?.workspaces, overview?.allApps, dashboard?.workspaces]);
 
-  const formatWsOptionLabel = (w: { workspaceId: string; ownerName: string; appCount: number; publishedCount: number }) => {
-    const hasName = w.ownerName && w.ownerName !== w.workspaceId;
-    const prefix = hasName ? `${w.ownerName} (${w.workspaceId})` : w.workspaceId;
-    return `${prefix} · ${w.appCount} 应用 / ${w.publishedCount} 线上`;
-  };
+  const workspacePickerOptions = useMemo<OwnerPickerOption[]>(
+    () =>
+      workspaceOptions.map((w) => ({
+        value: w.workspaceId,
+        workspaceId: w.workspaceId,
+        ownerRealName: w.ownerRealName,
+        ownerLogin: w.ownerLogin,
+        ownerName: w.ownerName,
+        ownerBound: w.ownerBound,
+        appCount: w.appCount,
+        publishedCount: w.publishedCount,
+        sampleApps: w.sampleApps,
+      })),
+    [workspaceOptions],
+  );
+
+  // 接收方选项：在已有空间之外，补充尚未初始化空间的 SSO 员工账号（后端按工号自动创建空间）
+  const receiverPickerOptions = useMemo<OwnerPickerOption[]>(() => {
+    const existingLogins = new Set(
+      workspaceOptions.map((w) => (w.ownerLogin ?? '').trim().toLowerCase()).filter(Boolean),
+    );
+    const extraUsers: OwnerPickerOption[] = (overview?.users ?? [])
+      .filter((u) => u.loginName && !existingLogins.has(u.loginName.trim().toLowerCase()))
+      .map((u) => ({
+        value: u.loginName,
+        workspaceId: null,
+        ownerRealName: u.realName,
+        ownerLogin: u.loginName,
+        ownerName: u.realName,
+        ownerBound: true,
+        appCount: 0,
+        publishedCount: 0,
+        sampleApps: [],
+        unprovisioned: true,
+      }));
+    return [...workspacePickerOptions, ...extraUsers];
+  }, [workspacePickerOptions, workspaceOptions, overview?.users]);
+
+  const boundWorkspaceCount = useMemo(
+    () => workspaceOptions.filter((w) => w.ownerBound).length,
+    [workspaceOptions],
+  );
+
+  const filteredOwners = useMemo(() => {
+    const q = ownerQuery.trim().toLowerCase();
+    return workspaceOptions.filter((w) => {
+      if (ownerBindFilter === 'bound' && !w.ownerBound) return false;
+      if (ownerBindFilter === 'unbound' && w.ownerBound) return false;
+      if (!q) return true;
+      return [w.ownerRealName, w.ownerLogin, w.ownerName, w.workspaceId, ...w.sampleApps]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [workspaceOptions, ownerQuery, ownerBindFilter]);
 
   // 源空间下的应用列表（用于批量交接预览与勾选）
   const sourceWorkspaceInfo = useMemo(
@@ -304,6 +410,8 @@ export function AdminGovernancePanel({
         a.slug.toLowerCase().includes(q) ||
         a.workspaceId.toLowerCase().includes(q) ||
         (a.ownerName ?? '').toLowerCase().includes(q) ||
+        (a.ownerRealName ?? '').toLowerCase().includes(q) ||
+        (a.ownerLogin ?? '').toLowerCase().includes(q) ||
         a.type.toLowerCase().includes(q)
       );
     });
@@ -347,7 +455,9 @@ export function AdminGovernancePanel({
         a.name.toLowerCase().includes(q) ||
         a.slug.toLowerCase().includes(q) ||
         a.workspaceId.toLowerCase().includes(q) ||
-        a.ownerName.toLowerCase().includes(q)
+        a.ownerName.toLowerCase().includes(q) ||
+        (a.ownerRealName ?? '').toLowerCase().includes(q) ||
+        (a.ownerLogin ?? '').toLowerCase().includes(q)
       );
     });
   }, [overview?.publishedApps, siteQuery, siteLevelFilter]);
@@ -402,10 +512,13 @@ export function AdminGovernancePanel({
     const q = trashQuery.trim().toLowerCase();
     if (!q) return list;
     return list.filter((a) =>
-      `${a.name} ${a.type} ${a.ownerName ?? ''} ${a.workspaceId}`.toLowerCase().includes(q),
+      `${a.name} ${a.type} ${a.ownerRealName ?? ''} ${a.ownerLogin ?? ''} ${a.ownerName ?? ''} ${a.workspaceId}`
+        .toLowerCase()
+        .includes(q),
     );
   }, [overview?.deletedApps, trashQuery]);
 
+  const ownersPager = useClientPagination(filteredOwners, 10, `${ownerBindFilter}|${ownerQuery}`);
   const allAppsPager = useClientPagination(filteredAllApps, 10, `${appLedgerStatus}|${appLedgerWs}|${appLedgerQuery}`);
   const quotaPager = useClientPagination(overview?.customQuotas ?? [], 10);
   const userPager = useClientPagination(filteredUsers, 10, `${userRoleFilter}|${userQuery}`);
@@ -425,44 +538,44 @@ export function AdminGovernancePanel({
   const submitSingleTransfer = async () => {
     if (!transferTarget) return;
     if (!transferToWs) {
-      toast('请选择接收工作空间', 'error');
+      toast('请选择接手同事或目标工作空间', 'error');
       return;
     }
     if (transferToWs === transferTarget.workspaceId) {
       toast('接收空间与当前归属空间相同', 'error');
       return;
     }
+    const targetOpt = receiverPickerOptions.find((o) => o.value === transferToWs);
+    const targetLabel = targetOpt ? formatOwnerIdentity(targetOpt).displayLabel : transferToWs;
     await runAction(`transfer-${transferTarget.id}`, async () => {
       await api.adminTransferApp(transferTarget.id, {
         targetWorkspaceId: transferToWs,
         includeConversation: transferIncludeConv,
         note: transferNote.trim() || undefined,
       });
-      toast(`已将应用「${transferTarget.name}」无损转移至 ${transferToWs}`, 'ok');
+      toast(`已将应用「${transferTarget.name}」无损转移至 ${targetLabel}`, 'ok');
       setTransferTarget(null);
     });
   };
 
   const submitBatchHandover = async () => {
     if (!handoverFromWs || !handoverToWs) {
-      toast('请选择交出空间与接收空间', 'error');
+      toast('请选择交出方与接收方', 'error');
       return;
     }
     if (handoverFromWs === handoverToWs) {
-      toast('交出空间与接收空间不能相同', 'error');
+      toast('交出方与接收方不能相同', 'error');
       return;
     }
     if (handoverPartial && handoverSelectedApps.length === 0) {
       toast('请至少勾选 1 个需要交接的应用', 'error');
       return;
     }
-    const fromLabel = sourceWorkspaceInfo?.ownerName && sourceWorkspaceInfo.ownerName !== handoverFromWs
-      ? `${sourceWorkspaceInfo.ownerName} (${handoverFromWs})`
+    const fromLabel = sourceWorkspaceInfo
+      ? formatOwnerIdentity(sourceWorkspaceInfo).displayLabel
       : handoverFromWs;
-    const toInfo = workspaceOptions.find((w) => w.workspaceId === handoverToWs);
-    const toLabel = toInfo?.ownerName && toInfo.ownerName !== handoverToWs
-      ? `${toInfo.ownerName} (${handoverToWs})`
-      : handoverToWs;
+    const toInfo = receiverPickerOptions.find((w) => w.value === handoverToWs);
+    const toLabel = toInfo ? formatOwnerIdentity(toInfo).displayLabel : handoverToWs;
     const targetAppCount = handoverPartial ? handoverSelectedApps.length : (sourceWorkspaceInfo?.appCount ?? sourceWorkspaceApps.length);
 
     const ok = await confirmDialog({
@@ -546,7 +659,24 @@ export function AdminGovernancePanel({
   const rateLimitBuckets = overview.rateLimitStats.buckets.length;
   const customQuotaCount = overview.customQuotas.length;
   const ssoUserCount = overview.users?.length ?? 0;
-  const runtimeIssues = activeTaskCount + rateLimitBuckets;
+
+  const fbOpenOnlyCount = useMemo(
+    () => (overview.feedbacks ?? []).filter((f) => f.status === 'open').length,
+    [overview.feedbacks],
+  );
+  const fbInProgressCount = useMemo(
+    () => (overview.feedbacks ?? []).filter((f) => f.status === 'in_progress').length,
+    [overview.feedbacks],
+  );
+  const fbResolvedCount = useMemo(
+    () => (overview.feedbacks ?? []).filter((f) => f.status === 'resolved').length,
+    [overview.feedbacks],
+  );
+  const fbIgnoredCount = useMemo(
+    () => (overview.feedbacks ?? []).filter((f) => f.status === 'ignored').length,
+    [overview.feedbacks],
+  );
+  const fbUnclosedCount = fbOpenOnlyCount + fbInProgressCount;
 
   const pulseItems: {
     tab: GovTab;
@@ -561,9 +691,9 @@ export function AdminGovernancePanel({
     {
       tab: 'handover',
       icon: 'grid',
-      label: '资产交接与转移',
+      label: '资产台账与交接',
       value: fmtNum(allAppsCount),
-      sub: `${fmtNum(workspaceOptions.length)} 个活跃空间 · 支持离职交接`,
+      sub: `${fmtNum(workspaceOptions.length)} 个活跃空间 · 支持转移与离职交接`,
       tone: 'violet',
     },
     {
@@ -578,11 +708,11 @@ export function AdminGovernancePanel({
       tab: 'feedback',
       icon: 'help',
       label: '反馈与社区治理',
-      value: overview.feedbackOpenCount > 0 ? `${fmtNum(overview.feedbackOpenCount)} 待办` : fmtNum(overview.templates.length),
-      sub: `反馈 ${fmtNum(overview.feedbacks.length)} 条 · 社区模板 ${fmtNum(overview.templates.length)}`,
+      value: fbUnclosedCount > 0 ? `${fmtNum(fbUnclosedCount)} 未结` : fmtNum(overview.templates.length),
+      sub: `待处理 ${fmtNum(fbOpenOnlyCount)} · 跟进中 ${fmtNum(fbInProgressCount)} · 模板 ${fmtNum(overview.templates.length)}`,
       tone: 'amber',
-      alert: overview.feedbackOpenCount > 0,
-      healthy: overview.feedbackOpenCount === 0,
+      alert: fbOpenOnlyCount > 0,
+      healthy: fbUnclosedCount === 0,
     },
     {
       tab: 'trash',
@@ -596,13 +726,36 @@ export function AdminGovernancePanel({
       tab: 'ops',
       icon: 'lock',
       label: '运行风控与配额权限',
-      value: runtimeIssues === 0 ? '正常' : `${fmtNum(runtimeIssues)} 异常`,
-      sub: `配额覆盖 ${customQuotaCount} · SSO 账号 ${ssoUserCount} · 429 拦截 ${fmtNum(rateLimitRejected)}`,
-      tone: runtimeIssues > 0 ? 'rose' : 'slate',
+      value:
+        rateLimitRejected > 0
+          ? `${fmtNum(rateLimitRejected)} 拦截`
+          : activeTaskCount > 0
+            ? `${fmtNum(activeTaskCount)} 运行中`
+            : '正常',
+      sub: `运行任务 ${activeTaskCount} · 429 拦截 ${fmtNum(rateLimitRejected)} · 配额 ${customQuotaCount} · SSO ${ssoUserCount}`,
+      tone: rateLimitRejected > 0 ? 'rose' : 'slate',
       alert: rateLimitRejected > 0,
-      healthy: runtimeIssues === 0 && rateLimitRejected === 0,
+      healthy: rateLimitRejected === 0,
     },
   ];
+
+  const handlePulseKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const ids = pulseItems.map((it) => it.tab);
+    const idx = ids.indexOf(govTab);
+    if (idx < 0) return;
+    let nextIdx = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIdx = (idx + 1) % ids.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nextIdx = (idx - 1 + ids.length) % ids.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = ids.length - 1;
+    if (nextIdx >= 0) {
+      e.preventDefault();
+      const nextTab = ids[nextIdx];
+      setGovTab(nextTab);
+      const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+      buttons[nextIdx]?.focus();
+    }
+  };
 
   return (
     <section className="dash-section gov-workbench" aria-label="平台管理工作台">
@@ -620,13 +773,19 @@ export function AdminGovernancePanel({
         </div>
       ) : null}
 
-      {/* 一体化交互脉冲导航卡（既是全局状态概览，也是 5 大管理模块切换器） */}
-      <div className="gov-pulse-grid" role="tablist" aria-label="管理工作台模块切换">
+      {/* 一体化交互脉冲导航卡（既是全局状态概览，也是 5 大管理模块切换器，支持键盘方向键切换） */}
+      <div
+        className="gov-pulse-grid"
+        role="tablist"
+        aria-label="管理工作台模块切换"
+        onKeyDown={handlePulseKeyDown}
+      >
         {pulseItems.map((item) => (
           <button
             key={item.tab}
             type="button"
             role="tab"
+            tabIndex={govTab === item.tab ? 0 : -1}
             aria-selected={govTab === item.tab}
             className={`gov-pulse-card ${govTab === item.tab ? 'active' : ''} ${item.alert ? 'is-alert' : ''}`}
             onClick={() => setGovTab(item.tab)}
@@ -651,213 +810,279 @@ export function AdminGovernancePanel({
       </div>
 
       {/* ====================================================================
-         模块 1：资产交接与转移（人员离职批量交接 + 全平台应用台账 & 单应用转移）
+         模块 1：资产台账与交接（高频全平台应用检索置于首屏，低频离职批量交接可按需展开）
          ==================================================================== */}
       {govTab === 'handover' ? (
         <div className="gov-stack">
-          {/* 1A. 人员离职 / 空间资产批量交接工作台 */}
-          <div className="dash-panel gov-handover-panel">
-            <DashPanelHead
-              icon="undo"
-              tone="violet"
-              title="人员离职 / 空间资产无损批量交接"
-              sub="支持将离职或调岗人员名下的全部应用（含已发布站点域名、版本历史、云数据库表）、创造会话与私有数据源一键划转至接手人空间，线上服务 0 中断"
-            />
+          {/* 1A. 人员离职 / 空间资产批量交接工作台（按需展开或带 ?fromWs= 参数自动展开） */}
+          {showBatchHandover ? (
+            <div className="dash-panel gov-handover-panel">
+              <DashPanelHead
+                icon="undo"
+                tone="violet"
+                title="人员离职 / 空间资产无损批量交接"
+                sub="支持将离职或调岗人员名下的全部应用（含已发布站点域名、版本历史、云数据库表）、创造会话与私有数据源一键划转至接手人空间，线上服务 0 中断"
+                right={
+                  <button
+                    type="button"
+                    className="subtle-button dash-compact-btn"
+                    onClick={() => setShowBatchHandover(false)}
+                  >
+                    收起批量交接
+                  </button>
+                }
+              />
 
-            <div className="gov-handover-grid">
-              {/* 左侧：交出方选择与实时资产盘点 */}
-              <div className="gov-handover-box">
-                <div className="gov-handover-step">
-                  <span className="gov-step-num">1</span>
-                  <b>选择交出方（离职人员 / 源工作空间）</b>
-                </div>
-                <Select
-                  ariaLabel="选择交出方工作空间"
-                  value={handoverFromWs}
-                  placeholder="选择需要交出资产的工作空间…"
-                  options={[
-                    { value: '', label: '选择交出工作空间…' },
-                    ...workspaceOptions.map((w) => ({
-                      value: w.workspaceId,
-                      label: formatWsOptionLabel(w),
-                    })),
-                  ]}
-                  onChange={setHandoverFromWs}
-                />
+              <div className="gov-handover-grid">
+                {/* 左侧：交出方选择与实时资产盘点 */}
+                <div className="gov-handover-box">
+                  <div className="gov-handover-step">
+                    <span className="gov-step-num">1</span>
+                    <b>选择交出方（离职员工姓名 / 账号）</b>
+                  </div>
+                  <OwnerPicker
+                    ariaLabel="选择交出方人员或工作空间"
+                    value={handoverFromWs}
+                    placeholder="搜姓名、账号（如 yangkai37）或空间…"
+                    options={workspacePickerOptions}
+                    onChange={setHandoverFromWs}
+                  />
 
-                {sourceWorkspaceInfo ? (
-                  <div className="gov-inventory-card">
-                    <div className="gov-inventory-head">
-                      <span>
-                        源空间资产盘点：<code>{sourceWorkspaceInfo.workspaceId}</code>
-                      </span>
-                      <button
-                        type="button"
-                        className="dash-link"
-                        onClick={() => setHandoverPartial((v) => !v)}
-                      >
-                        {handoverPartial ? '改为整空间全量交接' : `按需勾选应用 (${sourceWorkspaceApps.length})`}
-                      </button>
-                    </div>
-                    <div className="gov-inventory-stats">
-                      <div>
-                        <span>在用应用</span>
-                        <b>{fmtNum(sourceWorkspaceInfo.appCount)}</b>
+                  {sourceWorkspaceInfo ? (
+                    <div className="gov-inventory-card">
+                      <div className="gov-inventory-head">
+                        <span>
+                          交出方资产盘点：<b>{formatOwnerIdentity(sourceWorkspaceInfo).displayLabel}</b>
+                          {sourceWorkspaceInfo.ownerBound ? (
+                            <> <code>{sourceWorkspaceInfo.workspaceId}</code></>
+                          ) : null}
+                        </span>
+                        <button
+                          type="button"
+                          className="dash-link"
+                          onClick={() => setHandoverPartial((v) => !v)}
+                        >
+                          {handoverPartial ? '改为整空间全量交接' : `按需勾选应用 (${sourceWorkspaceApps.length})`}
+                        </button>
                       </div>
-                      <div>
-                        <span>已发布站点</span>
-                        <b>{fmtNum(sourceWorkspaceInfo.publishedCount)}</b>
+                      <div className="gov-inventory-stats">
+                        <div>
+                          <span>在用应用</span>
+                          <b>{fmtNum(sourceWorkspaceInfo.appCount)}</b>
+                        </div>
+                        <div>
+                          <span>已发布站点</span>
+                          <b>{fmtNum(sourceWorkspaceInfo.publishedCount)}</b>
+                        </div>
+                        <div>
+                          <span>创造页会话</span>
+                          <b>{fmtNum(sourceWorkspaceInfo.conversationCount)}</b>
+                        </div>
+                        <div>
+                          <span>私有数据源</span>
+                          <b>{fmtNum(sourceWorkspaceInfo.dataSourceCount)}</b>
+                        </div>
+                        <div>
+                          <span>回收站应用</span>
+                          <b>{fmtNum(sourceWorkspaceInfo.deletedAppCount)}</b>
+                        </div>
                       </div>
-                      <div>
-                        <span>创造页会话</span>
-                        <b>{fmtNum(sourceWorkspaceInfo.conversationCount)}</b>
-                      </div>
-                      <div>
-                        <span>私有数据源</span>
-                        <b>{fmtNum(sourceWorkspaceInfo.dataSourceCount)}</b>
-                      </div>
-                      <div>
-                        <span>回收站应用</span>
-                        <b>{fmtNum(sourceWorkspaceInfo.deletedAppCount)}</b>
-                      </div>
-                    </div>
 
-                    {handoverPartial && sourceWorkspaceApps.length > 0 ? (
-                      <div className="gov-app-checklist">
-                        <div className="gov-app-checklist-bar">
-                          <span>已选 {handoverSelectedApps.length} / {sourceWorkspaceApps.length} 个应用</span>
-                          <div style={{ display: 'flex', gap: 10 }}>
-                            <button
-                              type="button"
-                              className="dash-link"
-                              onClick={() => setHandoverSelectedApps(sourceWorkspaceApps.map((a) => a.id))}
-                            >
-                              全选
-                            </button>
-                            <button
-                              type="button"
-                              className="dash-link"
-                              onClick={() => setHandoverSelectedApps([])}
-                            >
-                              清空
-                            </button>
+                      {handoverPartial && sourceWorkspaceApps.length > 0 ? (
+                        <div className="gov-app-checklist">
+                          <div className="gov-app-checklist-bar">
+                            <span>已选 {handoverSelectedApps.length} / {sourceWorkspaceApps.length} 个应用</span>
+                            <div style={{ display: 'flex', gap: 10 }}>
+                              <button
+                                type="button"
+                                className="dash-link"
+                                onClick={() => setHandoverSelectedApps(sourceWorkspaceApps.map((a) => a.id))}
+                              >
+                                全选
+                              </button>
+                              <button
+                                type="button"
+                                className="dash-link"
+                                onClick={() => setHandoverSelectedApps([])}
+                              >
+                                清空
+                              </button>
+                            </div>
+                          </div>
+                          <div className="gov-app-checklist-items">
+                            {sourceWorkspaceApps.map((a) => {
+                              const checked = handoverSelectedApps.includes(a.id);
+                              return (
+                                <label key={a.id} className={`gov-check-item ${checked ? 'checked' : ''}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setHandoverSelectedApps((prev) => [...prev, a.id]);
+                                      } else {
+                                        setHandoverSelectedApps((prev) => prev.filter((id) => id !== a.id));
+                                      }
+                                    }}
+                                  />
+                                  <span className="gov-check-name">{a.name}</span>
+                                  <code>{a.slug}</code>
+                                  {a.published ? <span className="dash-pill ok">已发布</span> : <span className="dash-tag">草稿</span>}
+                                </label>
+                              );
+                            })}
                           </div>
                         </div>
-                        <div className="gov-app-checklist-items">
-                          {sourceWorkspaceApps.map((a) => {
-                            const checked = handoverSelectedApps.includes(a.id);
-                            return (
-                              <label key={a.id} className={`gov-check-item ${checked ? 'checked' : ''}`}>
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={(e) => {
-                                    if (e.target.checked) {
-                                      setHandoverSelectedApps((prev) => [...prev, a.id]);
-                                    } else {
-                                      setHandoverSelectedApps((prev) => prev.filter((id) => id !== a.id));
-                                    }
-                                  }}
-                                />
-                                <span className="gov-check-name">{a.name}</span>
-                                <code>{a.slug}</code>
-                                {a.published ? <span className="dash-pill ok">已发布</span> : <span className="dash-tag">草稿</span>}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="gov-handover-hint">
-                    选择源空间后，将自动盘点其名下的应用、线上站点、会话文档与私有数据源。
-                  </div>
-                )}
-              </div>
-
-              {/* 右侧：接收方选择、迁移范围与执行 */}
-              <div className="gov-handover-box">
-                <div className="gov-handover-step">
-                  <span className="gov-step-num">2</span>
-                  <b>选择接收方（接手同事 / 目标工作空间）与交接项</b>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="gov-handover-hint">
+                      选择源空间后，将自动盘点其名下的应用、线上站点、会话文档与私有数据源。
+                    </div>
+                  )}
                 </div>
-                <Select
-                  ariaLabel="选择接收方工作空间"
-                  value={handoverToWs}
-                  placeholder="选择接手人的目标工作空间…"
-                  options={[
-                    { value: '', label: '选择接收工作空间…' },
-                    ...workspaceOptions
-                      .filter((w) => w.workspaceId !== handoverFromWs)
-                      .map((w) => ({
-                        value: w.workspaceId,
-                        label: formatWsOptionLabel(w),
-                      })),
-                  ]}
-                  onChange={setHandoverToWs}
-                />
 
-                <div className="gov-handover-options">
-                  <label className="gov-option-check">
-                    <input
-                      type="checkbox"
-                      checked={handoverIncludeConv}
-                      onChange={(e) => setHandoverIncludeConv(e.target.checked)}
-                    />
-                    <span>同步迁移关联的创造页会话与需求文档</span>
-                  </label>
-                  <label className="gov-option-check">
-                    <input
-                      type="checkbox"
-                      checked={handoverIncludeDs}
-                      onChange={(e) => setHandoverIncludeDs(e.target.checked)}
-                    />
-                    <span>同步迁移绑定的私有数据源配置</span>
-                  </label>
-                  {!handoverPartial ? (
+                {/* 右侧：接收方选择、迁移范围与执行 */}
+                <div className="gov-handover-box">
+                  <div className="gov-handover-step">
+                    <span className="gov-step-num">2</span>
+                    <b>选择接收方（接手同事姓名 / 账号）与交接项</b>
+                  </div>
+                  <OwnerPicker
+                    ariaLabel="选择接收方人员或工作空间"
+                    value={handoverToWs}
+                    placeholder="搜接手人姓名、账号（如 yangkai37）或空间…"
+                    options={receiverPickerOptions.filter((w) => w.value !== handoverFromWs)}
+                    onChange={setHandoverToWs}
+                  />
+
+                  <div className="gov-handover-options">
                     <label className="gov-option-check">
                       <input
                         type="checkbox"
-                        checked={handoverIncludeTrash}
-                        onChange={(e) => setHandoverIncludeTrash(e.target.checked)}
+                        checked={handoverIncludeConv}
+                        onChange={(e) => setHandoverIncludeConv(e.target.checked)}
                       />
-                      <span>包含回收站中已删除的应用（{sourceWorkspaceInfo?.deletedAppCount ?? 0} 个）</span>
+                      <span>同步迁移关联的创造页会话与需求文档</span>
                     </label>
-                  ) : null}
-                </div>
+                    <label className="gov-option-check">
+                      <input
+                        type="checkbox"
+                        checked={handoverIncludeDs}
+                        onChange={(e) => setHandoverIncludeDs(e.target.checked)}
+                      />
+                      <span>同步迁移绑定的私有数据源配置</span>
+                    </label>
+                    {!handoverPartial ? (
+                      <label className="gov-option-check">
+                        <input
+                          type="checkbox"
+                          checked={handoverIncludeTrash}
+                          onChange={(e) => setHandoverIncludeTrash(e.target.checked)}
+                        />
+                        <span>包含回收站中已删除的应用（{sourceWorkspaceInfo?.deletedAppCount ?? 0} 个）</span>
+                      </label>
+                    ) : null}
+                  </div>
 
-                <div className="gov-handover-foot">
-                  <input
-                    type="text"
-                    className="gov-note-input"
-                    maxLength={200}
-                    placeholder="交接说明 / 工单备注（如：张三离职应用交接给李四，写入审计台账）"
-                    value={handoverNote}
-                    onChange={(e) => setHandoverNote(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="primary-button"
-                    disabled={!handoverFromWs || !handoverToWs || handoverFromWs === handoverToWs || busyKey === 'handover-batch'}
-                    onClick={() => void submitBatchHandover()}
-                  >
-                    {busyKey === 'handover-batch' ? '正在交接…' : '执行无损交接'}
-                  </button>
+                  <div className="gov-handover-foot">
+                    <input
+                      type="text"
+                      className="gov-note-input"
+                      maxLength={200}
+                      placeholder="交接说明 / 工单备注（如：张三离职应用交接给李四，写入审计台账）"
+                      value={handoverNote}
+                      onChange={(e) => setHandoverNote(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="primary-button"
+                      disabled={!handoverFromWs || !handoverToWs || handoverFromWs === handoverToWs || busyKey === 'handover-batch'}
+                      onClick={() => void submitBatchHandover()}
+                    >
+                      {busyKey === 'handover-batch' ? '正在交接…' : '执行无损交接'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          ) : null}
 
-          {/* 1B. 全平台应用资产总台账 & 单应用定向转移 */}
+          {/* 1B. 全平台资产台账：支持「按应用台账」与「按人员 / 空间花名册」双视角切换 */}
           <div className="dash-panel">
             <DashPanelHead
-              icon="grid"
+              icon={ledgerView === 'owners' ? 'community' : 'grid'}
               tone="indigo"
-              title={`全平台应用资产台账与定向转移（${filteredAllApps.length} / ${allAppsCount} 个）`}
-              sub="涵盖全平台所有在用应用（含已发布站点与草稿），支持按空间检索并一键将单个应用定向移交给任意工作空间"
+              title={
+                ledgerView === 'owners'
+                  ? `人员与空间资产花名册（${filteredOwners.length} / ${workspaceOptions.length} 个空间）`
+                  : `全平台应用资产台账与定向转移（${filteredAllApps.length} / ${allAppsCount} 个）`
+              }
+              sub={
+                ledgerView === 'owners'
+                  ? `按归属人（姓名 / 账号）聚合盘点名下应用、线上站点与代表作品（已绑定账号 ${boundWorkspaceCount} 个），点击行内「离职交接」一键划转`
+                  : '展示应用归属人（姓名 / 账号）、发布状态与访问量，支持按姓名 / 账号筛选、单应用定向移交或展开人员离职批量交接'
+              }
               right={
                 <div className="dash-toolbar-group">
+                  <div className="gov-view-switch" role="tablist" aria-label="资产台账视图切换">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={ledgerView === 'apps'}
+                      className={ledgerView === 'apps' ? 'active' : ''}
+                      onClick={() => setLedgerView('apps')}
+                    >
+                      按应用 ({allAppsCount})
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={ledgerView === 'owners'}
+                      className={ledgerView === 'owners' ? 'active' : ''}
+                      onClick={() => setLedgerView('owners')}
+                    >
+                      按人员 / 空间 ({workspaceOptions.length})
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className={`dash-action-btn ${showBatchHandover ? '' : 'primary'}`}
+                    onClick={() => setShowBatchHandover((v) => !v)}
+                  >
+                    <Icon name="undo" />
+                    <span>{showBatchHandover ? '收起批量交接' : '人员离职 / 批量交接'}</span>
+                  </button>
+                </div>
+              }
+            />
+
+            {/* 二级紧凑筛选栏（避免顶部工具栏在 1280px 下拥挤换行） */}
+            <div className="gov-subfilter-bar">
+              {ledgerView === 'owners' ? (
+                <>
+                  <Select
+                    ariaLabel="按账号绑定状态筛选"
+                    value={ownerBindFilter}
+                    onChange={(v) => setOwnerBindFilter(v as typeof ownerBindFilter)}
+                    options={[
+                      { value: 'all', label: `全部空间 (${workspaceOptions.length})` },
+                      { value: 'bound', label: `已绑定账号 (${boundWorkspaceCount})` },
+                      { value: 'unbound', label: `未绑定匿名 (${Math.max(0, workspaceOptions.length - boundWorkspaceCount)})` },
+                    ]}
+                  />
+                  <label className="dash-search">
+                    <Icon name="search" />
+                    <input
+                      aria-label="搜索人员或工作空间"
+                      placeholder="搜姓名、账号（如 yangkai37）或应用名…"
+                      value={ownerQuery}
+                      onChange={(e) => setOwnerQuery(e.target.value)}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
                   <Select
                     ariaLabel="按发布状态筛选应用"
                     value={appLedgerStatus}
@@ -868,36 +1093,144 @@ export function AdminGovernancePanel({
                       { value: 'draft', label: `仅未发布草稿 (${Math.max(0, allAppsCount - publishedCount)})` },
                     ]}
                   />
-                  <Select
-                    ariaLabel="按工作空间筛选应用"
+                  <OwnerPicker
+                    ariaLabel="按归属人或空间筛选应用"
                     value={appLedgerWs}
+                    allowEmpty
+                    compact
+                    emptyOptionLabel="全部人员 / 空间"
+                    options={workspacePickerOptions}
                     onChange={setAppLedgerWs}
-                    options={[
-                      { value: '', label: '全部工作空间' },
-                      ...workspaceOptions.map((w) => ({
-                        value: w.workspaceId,
-                        label: formatWsOptionLabel(w),
-                      })),
-                    ]}
                   />
                   <label className="dash-search">
                     <Icon name="search" />
                     <input
                       aria-label="搜索全平台应用"
-                      placeholder="搜应用名 / slug / 空间…"
+                      placeholder="搜应用名 / slug / 姓名 / 账号…"
                       value={appLedgerQuery}
                       onChange={(e) => setAppLedgerQuery(e.target.value)}
                     />
                   </label>
-                </div>
-              }
-            />
-            {filteredAllApps.length === 0 ? (
+                </>
+              )}
+            </div>
+
+            {ledgerView === 'owners' ? (
+              filteredOwners.length === 0 ? (
+                <GovHealthyBanner
+                  icon="community"
+                  tone="muted"
+                  title="当前筛选条件下暂无匹配的人员或空间"
+                  desc="可尝试清空搜索词或切换账号绑定筛选条件"
+                />
+              ) : (
+                <>
+                  <div className="dash-table-wrap">
+                    <table className="dash-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">归属人（姓名 / 账号）</th>
+                          <th scope="col">名下代表应用</th>
+                          <th scope="col">资产统计</th>
+                          <th scope="col">最近活跃</th>
+                          <th scope="col">资产交接与操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ownersPager.pageItems.map((w) => (
+                          <tr key={w.workspaceId}>
+                            <td>
+                              <OwnerBadge
+                                ownerName={w.ownerName}
+                                ownerRealName={w.ownerRealName}
+                                ownerLogin={w.ownerLogin}
+                                workspaceId={w.workspaceId}
+                              />
+                            </td>
+                            <td>
+                              {w.sampleApps.length > 0 ? (
+                                <div className="gov-sample-apps">
+                                  {w.sampleApps.map((name) => (
+                                    <span key={name} className="dash-tag">{name}</span>
+                                  ))}
+                                  {w.appCount > w.sampleApps.length ? (
+                                    <span className="dash-muted">+{w.appCount - w.sampleApps.length}</span>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                <span className="dash-muted">暂无在用应用</span>
+                              )}
+                            </td>
+                            <td>
+                              <div>
+                                <b>{fmtNum(w.appCount)}</b> 应用 · <b>{fmtNum(w.publishedCount)}</b> 线上
+                              </div>
+                              <div className="dash-muted" style={{ fontSize: 12 }}>
+                                会话 {fmtNum(w.conversationCount)} · 数据源 {fmtNum(w.dataSourceCount)}
+                                {w.deletedAppCount > 0 ? ` · 回收站 ${fmtNum(w.deletedAppCount)}` : ''}
+                              </div>
+                            </td>
+                            <td className="dash-nowrap">{w.lastActiveAt ? fmtTime(w.lastActiveAt) : '—'}</td>
+                            <td className="dash-nowrap">
+                              <div className="dash-action-row">
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  onClick={() => {
+                                    setHandoverFromWs(w.workspaceId);
+                                    setShowBatchHandover(true);
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  }}
+                                >
+                                  离职交接
+                                </button>
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  onClick={() => {
+                                    setAppLedgerWs(w.workspaceId);
+                                    setLedgerView('apps');
+                                  }}
+                                >
+                                  看名下应用
+                                </button>
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  onClick={() => {
+                                    const existing = overview.customQuotas.find((q) => q.workspaceId === w.workspaceId) ?? null;
+                                    onOpenQuotaModal({
+                                      workspaceId: w.workspaceId,
+                                      ownerName: formatOwnerIdentity(w).displayLabel,
+                                      custom: existing,
+                                    });
+                                  }}
+                                >
+                                  配额
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <Pagination
+                    page={ownersPager.page}
+                    pageSize={ownersPager.pageSize}
+                    total={ownersPager.total}
+                    onPageChange={ownersPager.setPage}
+                    onPageSizeChange={ownersPager.setPageSize}
+                    pageSizeOptions={[10, 20, 50]}
+                  />
+                </>
+              )
+            ) : filteredAllApps.length === 0 ? (
               <GovHealthyBanner
                 icon="grid"
                 tone="muted"
                 title="当前筛选条件下暂无匹配应用"
-                desc="可尝试清空搜索词或切换工作空间 / 发布状态筛选条件"
+                desc="可尝试清空搜索词或切换归属人 / 发布状态筛选条件"
               />
             ) : (
               <>
@@ -906,7 +1239,7 @@ export function AdminGovernancePanel({
                     <thead>
                       <tr>
                         <th scope="col">应用名称 / 子域 Slug</th>
-                        <th scope="col">当前归属人 / 空间</th>
+                        <th scope="col">归属人（姓名 / 账号）</th>
                         <th scope="col">发布与云服务状态</th>
                         <th scope="col">版本 / 累计 PV</th>
                         <th scope="col">最近更新</th>
@@ -923,7 +1256,12 @@ export function AdminGovernancePanel({
                             </div>
                           </td>
                           <td>
-                            <OwnerBadge ownerName={app.ownerName} workspaceId={app.workspaceId} />
+                            <OwnerBadge
+                              ownerName={app.ownerName}
+                              ownerRealName={app.ownerRealName}
+                              ownerLogin={app.ownerLogin}
+                              workspaceId={app.workspaceId}
+                            />
                           </td>
                           <td>
                             <div className="dash-action-row">
@@ -953,18 +1291,35 @@ export function AdminGovernancePanel({
                                     slug: app.slug,
                                     workspaceId: app.workspaceId,
                                     ownerName: app.ownerName,
+                                    ownerRealName: app.ownerRealName,
+                                    ownerLogin: app.ownerLogin,
                                   })
                                 }
                               >
                                 转移归属
                               </button>
-                              <button
-                                type="button"
-                                className="dash-link"
-                                onClick={() => navigate('/apps/' + encodeURIComponent(app.id))}
-                              >
-                                工作台
-                              </button>
+                              {app.workspaceId === myWorkspaceId ? (
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  onClick={() => navigate('/apps/' + encodeURIComponent(app.id))}
+                                >
+                                  工作台
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  title="跨空间应用受作者工作台隔离保护，点击查看该应用的全部生成与构建任务日志"
+                                  onClick={() =>
+                                    navigate(
+                                      `/logs?workspaceId=${encodeURIComponent(app.workspaceId)}&q=${encodeURIComponent(app.name)}`,
+                                    )
+                                  }
+                                >
+                                  任务日志
+                                </button>
+                              )}
                               {app.published ? (
                                 <button
                                   type="button"
@@ -1095,7 +1450,12 @@ export function AdminGovernancePanel({
                           </div>
                         </td>
                         <td>
-                          <OwnerBadge ownerName={site.ownerName} workspaceId={site.workspaceId} />
+                          <OwnerBadge
+                            ownerName={site.ownerName}
+                            ownerRealName={site.ownerRealName}
+                            ownerLogin={site.ownerLogin}
+                            workspaceId={site.workspaceId}
+                          />
                         </td>
                         <td>
                           {fmtNum(site.todayPv)} / <b>{fmtNum(site.totalPv)}</b>
@@ -1131,6 +1491,8 @@ export function AdminGovernancePanel({
                                   slug: site.slug,
                                   workspaceId: site.workspaceId,
                                   ownerName: site.ownerName,
+                                  ownerRealName: site.ownerRealName,
+                                  ownerLogin: site.ownerLogin,
                                 })
                               }
                             >
@@ -1193,10 +1555,10 @@ export function AdminGovernancePanel({
                   {(
                     [
                       ['all', `全部 (${overview.feedbacks.length})`],
-                      ['open', `待处理 (${overview.feedbackOpenCount})`],
-                      ['in_progress', '跟进中'],
-                      ['resolved', '已解决'],
-                      ['ignored', '已忽略'],
+                      ['open', `待处理 (${fbOpenOnlyCount})`],
+                      ['in_progress', `跟进中 (${fbInProgressCount})`],
+                      ['resolved', `已解决 (${fbResolvedCount})`],
+                      ['ignored', `已忽略 (${fbIgnoredCount})`],
                     ] as const
                   ).map(([val, lbl]) => (
                     <button
@@ -1432,7 +1794,12 @@ export function AdminGovernancePanel({
                             <span className="dash-tag" style={{ marginLeft: 6 }}>{a.type}</span>
                           </td>
                           <td>
-                            <OwnerBadge ownerName={a.ownerName} workspaceId={a.workspaceId} />
+                            <OwnerBadge
+                              ownerName={a.ownerName}
+                              ownerRealName={a.ownerRealName}
+                              ownerLogin={a.ownerLogin}
+                              workspaceId={a.workspaceId}
+                            />
                           </td>
                           <td>{fmtNum(a.versionCount)}</td>
                           <td className="dash-nowrap">{fmtTime(a.deletedAt)}</td>
@@ -1600,17 +1967,12 @@ export function AdminGovernancePanel({
               sub="针对重点团队或异常空间单独调整应用数量、每日任务数与并发数上限"
               right={
                 <div className="dash-admin-inline-form">
-                  <Select
-                    ariaLabel="选择工作空间调整配额"
+                  <OwnerPicker
+                    ariaLabel="选择人员或工作空间调整配额"
                     value={quotaPickWs}
-                    placeholder="选择工作空间…"
-                    options={[
-                      { value: '', label: '选择工作空间…' },
-                      ...workspaceOptions.map((w) => ({
-                        value: w.workspaceId,
-                        label: formatWsOptionLabel(w),
-                      })),
-                    ]}
+                    compact
+                    placeholder="搜姓名、账号或空间…"
+                    options={workspacePickerOptions}
                     onChange={setQuotaPickWs}
                   />
                   <button
@@ -1623,7 +1985,9 @@ export function AdminGovernancePanel({
                       const wsRow = workspaceOptions.find((w) => w.workspaceId === quotaPickWs);
                       onOpenQuotaModal({
                         workspaceId: quotaPickWs,
-                        ownerName: existing?.ownerName ?? wsRow?.ownerName,
+                        ownerName: wsRow
+                          ? formatOwnerIdentity(wsRow).displayLabel
+                          : existing?.ownerName,
                         custom: existing,
                       });
                     }}
@@ -1657,7 +2021,12 @@ export function AdminGovernancePanel({
                       {quotaPager.pageItems.map((q) => (
                         <tr key={q.workspaceId}>
                           <td>
-                            <OwnerBadge ownerName={q.ownerName} workspaceId={q.workspaceId} />
+                            <OwnerBadge
+                              ownerName={q.ownerName}
+                              ownerRealName={q.ownerRealName}
+                              ownerLogin={q.ownerLogin}
+                              workspaceId={q.workspaceId}
+                            />
                           </td>
                           <td>
                             <b>{q.maxApps ?? overview.defaultQuota.maxApps}</b>{' '}
@@ -2055,26 +2424,24 @@ export function AdminGovernancePanel({
                 应用：<b>{transferTarget.name}</b>（<code>{transferTarget.slug}</code>）
               </div>
               <div style={{ marginTop: 4 }}>
-                当前归属：{transferTarget.ownerName && transferTarget.ownerName !== transferTarget.workspaceId ? `${transferTarget.ownerName} · ` : ''}
-                <code>{transferTarget.workspaceId}</code>
+                {(() => {
+                  const cur = formatOwnerIdentity(transferTarget);
+                  return (
+                    <>
+                      当前归属：<b>{cur.displayLabel}</b>
+                      {cur.bound ? <> · <code>{transferTarget.workspaceId}</code></> : null}
+                    </>
+                  );
+                })()}
               </div>
             </div>
             <label>
-              <span>接收方（接手同事 / 目标工作空间）</span>
-              <Select
-                ariaLabel="选择接收工作空间"
-                className="field"
+              <span>接收方（接手同事姓名 / 账号）</span>
+              <OwnerPicker
+                ariaLabel="选择接收方人员或工作空间"
                 value={transferToWs}
-                placeholder="选择接收工作空间…"
-                options={[
-                  { value: '', label: '选择接收工作空间…' },
-                  ...workspaceOptions
-                    .filter((w) => w.workspaceId !== transferTarget.workspaceId)
-                    .map((w) => ({
-                      value: w.workspaceId,
-                      label: formatWsOptionLabel(w),
-                    })),
-                ]}
+                placeholder="搜接手人姓名、账号（如 yangkai37）或空间…"
+                options={receiverPickerOptions.filter((w) => w.value !== transferTarget.workspaceId)}
                 onChange={setTransferToWs}
               />
             </label>

@@ -11,6 +11,7 @@ import { confirmDialog } from '../components/ConfirmDialog';
 import { Select } from '../components/Select';
 import { Pagination, useClientPagination } from '../components/Pagination';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
+import { formatOwnerIdentity } from '../components/OwnerPicker';
 import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import {
@@ -399,7 +400,13 @@ export function DashboardPage() {
 
   const sortedWorkspaces = useMemo(() => {
     const qText = wsQuery.trim().toLowerCase();
-    const list = (data?.workspaces ?? []).filter((w) => !qText || w.workspaceId.toLowerCase().includes(qText) || w.ownerName.toLowerCase().includes(qText));
+    const list = (data?.workspaces ?? []).filter(
+      (w) =>
+        !qText ||
+        w.workspaceId.toLowerCase().includes(qText) ||
+        (w.ownerName ?? '').toLowerCase().includes(qText) ||
+        (w.loginName ?? '').toLowerCase().includes(qText),
+    );
     list.sort((a, b) => {
       if (wsSort === 'tasks') return b.tasks - a.tasks || b.apps - a.apps;
       if (wsSort === 'pv') return b.pv - a.pv || b.apps - a.apps;
@@ -462,6 +469,17 @@ export function DashboardPage() {
               const sp = new URLSearchParams();
               if (filterWorkspaceId) sp.set('workspaceId', filterWorkspaceId);
               if (filterUserId) sp.set('userId', filterUserId);
+              if (range === 'custom' && appliedStart && appliedEnd) {
+                sp.set('startDate', appliedStart);
+                sp.set('endDate', appliedEnd);
+              } else if (range === 'today') {
+                sp.set('range', '24h');
+              } else if (range === '7d' || range === '30d' || range === 'all') {
+                sp.set('range', range);
+              } else if (range === '90d' && data?.meta.startDate && data?.meta.endDate) {
+                sp.set('startDate', data.meta.startDate);
+                sp.set('endDate', data.meta.endDate);
+              }
               navigate('/logs' + (sp.size ? '?' + sp.toString() : ''));
             }}
           >
@@ -915,12 +933,30 @@ export function DashboardPage() {
                           {visibleWorkspaces.map((w) => {
                             const isFiltered = filterWorkspaceId === w.workspaceId;
                             const customQ = customQuotaByWs.get(w.workspaceId) ?? null;
+                            const ownerInfo = formatOwnerIdentity({
+                              ownerName: w.ownerName,
+                              ownerLogin: w.loginName,
+                              workspaceId: w.workspaceId,
+                            });
                             return (
                               <tr key={w.workspaceId} className={isFiltered ? 'dash-row-highlight' : ''}>
                                 <td>
-                                  <code>{w.workspaceId}</code>
-                                  {w.ownerName ? <span className="dash-tag" style={{ marginLeft: 6 }}>{w.ownerName}</span> : null}
-                                  {customQ ? <span className="dash-pill cloud" style={{ marginLeft: 6 }}>自定义配额</span> : null}
+                                  <div className="owner-cell">
+                                    <div className="owner-cell-main">
+                                      {ownerInfo.bound ? (
+                                        <>
+                                          <span className="owner-cell-name">{ownerInfo.primary}</span>
+                                          {ownerInfo.account ? <code className="owner-cell-acct">{ownerInfo.account}</code> : null}
+                                        </>
+                                      ) : (
+                                        <span className="owner-cell-anon">未绑定账号</span>
+                                      )}
+                                      {customQ ? <span className="dash-pill cloud">自定义配额</span> : null}
+                                    </div>
+                                    <div className="owner-cell-ws">
+                                      <code>{w.workspaceId}</code>
+                                    </div>
+                                  </div>
                                 </td>
                                 <td><b>{fmtNum(w.apps)}</b> <span className="dash-muted">({fmtNum(w.published)})</span></td>
                                 <td>{fmtNum(w.tasks)} <span className="dash-muted">({fmtNum(w.rangeTasks)})</span></td>

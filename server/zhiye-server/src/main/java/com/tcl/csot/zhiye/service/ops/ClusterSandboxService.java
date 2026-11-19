@@ -104,6 +104,12 @@ public class ClusterSandboxService {
     private PlatformLogService platformLogs;
 
     @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.task.TaskService taskService;
+
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.task.TaskEvents taskEvents;
+
+    @Autowired(required = false)
     private SandboxManager openSandboxManager;
 
     @Autowired(required = false)
@@ -970,38 +976,53 @@ public class ClusterSandboxService {
         return Map.of("ok", true, "purgedCount", purged, "instanceId", cleanTarget == null ? "all_offline" : cleanTarget);
     }
 
-    /** 立即回收所有租约已超时的卡死任务（释放应用单任务写锁并记入操作审计） */
+    /** 立即回收所有租约已超时的卡死任务（原子清除租约、触发终态收尾与队列续跑，并记入操作审计） */
     public Map<String, Object> reclaimExpiredLeases(String actor) {
-        List<String> expiredIds = jdbc.sql("""
-                select id from task
+        List<com.tcl.csot.zhiye.entity.TaskRow> expired = jdbc.sql("""
+                select * from task
                 where status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
                   and (lease_until is null or lease_until < now())
                 order by created_at asc
                 limit 100
-                """).query(String.class).list();
-        int reclaimed = 0;
-        for (String tid : expiredIds) {
+                """).query(com.tcl.csot.zhiye.entity.TaskRow::map).list();
+        List<String> reclaimedIds = new ArrayList<>();
+        for (var t : expired) {
             int n = jdbc.sql("""
                     update task set
                       status = 'FAILED',
                       error_code = coalesce(error_code, 'WORKER_LOST'),
                       error_message = coalesce(error_message, '任务租约已超时，由管理员手动回收释放应用写锁'),
                       phase_label = '租约超时已回收',
-                      finished_at = coalesce(finished_at, now())
+                      finished_at = coalesce(finished_at, now()),
+                      lease_owner = null,
+                      lease_until = null
                     where id = ?
                       and status in ('PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')
+                      and lease_owner is not distinct from ?
                       and (lease_until is null or lease_until < now())
-                    """).param(tid).update();
-            reclaimed += n;
+                    """).params(t.id(), t.leaseOwner()).update();
+            if (n > 0) {
+                reclaimedIds.add(t.id());
+                try {
+                    if (taskService != null) {
+                        taskService.afterTerminal(t, "FAILED", "WORKER_LOST", "任务租约已超时，由管理员手动回收释放应用写锁");
+                    }
+                    if (taskEvents != null && taskService != null) {
+                        taskEvents.emit(t.id(), "status", Map.of("status", "FAILED", "phaseLabel", "租约超时已回收", "progress", t.progress()));
+                        taskEvents.emit(t.id(), "finished", taskService.finishedPayload("FAILED", null, "WORKER_LOST", "任务租约已超时，由管理员手动回收释放应用写锁"));
+                    }
+                } catch (Exception ignored) {}
+            }
         }
+        int reclaimed = reclaimedIds.size();
         try {
             jdbc.sql("""
                     insert into admin_audit_log (id, actor, action, target_type, target_id, detail)
                     values (?, ?, 'TASK_LEASE_RECLAIM', 'task', 'expired_leases', ?::jsonb)
                     """).params("aud_" + Ids.random(10), actor,
-                    Json.write(Map.of("reclaimedCount", reclaimed, "taskIds", expiredIds))).update();
+                    Json.write(Map.of("reclaimedCount", reclaimed, "taskIds", reclaimedIds))).update();
         } catch (Exception ignored) {}
-        return Map.of("ok", true, "reclaimedCount", reclaimed, "taskIds", expiredIds);
+        return Map.of("ok", true, "reclaimedCount", reclaimed, "taskIds", reclaimedIds);
     }
 
     // ================= 内部采样与控制面辅助 =================

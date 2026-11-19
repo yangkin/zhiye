@@ -19,6 +19,7 @@ patches:
   - patch: '[{"op":"replace","path":"/spec/csi/volumeHandle","value":"zhiye-runtime-sandbox"}]'
     target: { kind: PersistentVolume, name: zhiye-runtime-sandbox }
   - path: config.yaml
+  - path: ingress-patch.yaml
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment

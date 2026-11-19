@@ -571,34 +571,80 @@ public class DashboardService {
         return m;
     }
 
-    /** 全链路转化漏斗（按时间窗与人筛选） */
+    /** 全链路同口径转化漏斗（按时间窗与人筛选；严格区分同批转化与独立渠道，杜绝 >100% 误导比率） */
     private List<Map<String, Object>> funnelSection(FilterCtx ctx) {
         String wsPred = ctx.wsPred("workspace_id");
         String aPred = ctx.wsPred("a.workspace_id");
+        String cPred = ctx.wsPred("c.workspace_id");
         return jdbc.sql("""
                 select
-                  (select count(*) from conversation where %s and deleted_at is null and created_at >= ? and created_at < ?) as convs,
-                  (select count(*) from app where %s and deleted_at is null and created_at >= ? and created_at < ?) as apps,
-                  (select count(*) from app where %s and deleted_at is null and created_at >= ? and created_at < ? and phase = 'ready') as ready,
-                  (select count(*) from app where %s and deleted_at is null and created_at >= ? and created_at < ? and published_version_id is not null) as published,
-                  (select count(distinct p.app_id) from app_pageview_daily p join app a on a.id = p.app_id where %s and a.deleted_at is null and p.day >= ? and p.day <= ? and p.pv > 0) as visited,
-                  (select count(*) from app_cloud c join app a on a.id = c.app_id where %s and a.deleted_at is null and c.status = 'on' and coalesce(c.enabled_at, c.created_at) >= ? and coalesce(c.enabled_at, c.created_at) < ?) as cloud
-                """.formatted(wsPred, wsPred, wsPred, wsPred, aPred, aPred))
+                  (select count(*) from conversation c where %s and c.deleted_at is null and c.created_at >= ? and c.created_at < ?) as convs,
+                  (select count(distinct ac.conversation_id)
+                     from app_conversation ac
+                     join conversation c on c.id = ac.conversation_id
+                     join app a on a.id = ac.app_id
+                    where %s and c.deleted_at is null and a.deleted_at is null
+                      and c.created_at >= ? and c.created_at < ?) as convs_to_apps,
+                  (select count(*) from app a where %s and a.deleted_at is null and a.created_at >= ? and a.created_at < ?) as apps,
+                  (select count(*) from app a where %s and a.deleted_at is null and a.created_at >= ? and a.created_at < ? and a.phase = 'ready') as ready,
+                  (select count(*) from app a where %s and a.deleted_at is null and a.created_at >= ? and a.created_at < ? and a.published_version_id is not null) as published,
+                  (select count(distinct p.app_id)
+                     from app_pageview_daily p
+                     join app a on a.id = p.app_id
+                    where %s and a.deleted_at is null
+                      and a.created_at >= ? and a.created_at < ?
+                      and a.published_version_id is not null
+                      and p.day >= ? and p.day <= ? and p.pv > 0) as visited,
+                  (select count(*)
+                     from app_cloud cl
+                     join app a on a.id = cl.app_id
+                    where %s and a.deleted_at is null and cl.status = 'on'
+                      and a.created_at >= ? and a.created_at < ?) as cloud
+                """.formatted(cPred, cPred, aPred, aPred, aPred, aPred, aPred))
                 .params(concat(
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
-                        ctx.wsParams(), new Object[]{ctx.start, ctx.end},
+                        ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
+                        ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs, ctx.start, ctx.end},
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs}
-                )).query((rs, i) -> List.<Map<String, Object>>of(
-                        Map.of("key", "conversations", "label", "发起创造会话", "count", rs.getLong("convs")),
-                        Map.of("key", "apps", "label", "创建应用项目", "count", rs.getLong("apps")),
-                        Map.of("key", "ready", "label", "首版生成就绪", "count", rs.getLong("ready")),
-                        Map.of("key", "published", "label", "发布上线部署", "count", rs.getLong("published")),
-                        Map.of("key", "visited", "label", "产生真实访问", "count", rs.getLong("visited")),
-                        Map.of("key", "cloud", "label", "启用共享云服务", "count", rs.getLong("cloud"))
-                )).single();
+                )).query((rs, i) -> {
+                    long convs = rs.getLong("convs");
+                    long convsToApps = rs.getLong("convs_to_apps");
+                    long apps = rs.getLong("apps");
+                    long ready = rs.getLong("ready");
+                    long published = rs.getLong("published");
+                    long visited = rs.getLong("visited");
+                    long cloud = rs.getLong("cloud");
+                    return List.<Map<String, Object>>of(
+                            funnelStep("conversations", "发起创造会话", convs,
+                                    convs > 0 ? "转应用 " + pct1(convsToApps, convs) + "%（" + convsToApps + "）" : null),
+                            funnelStep("apps", "窗口新建应用（含导入/直建）", apps, null),
+                            funnelStep("ready", "首版生成就绪", ready,
+                                    apps > 0 ? "就绪率 " + pct1(ready, apps) + "%" : null),
+                            funnelStep("published", "发布上线部署", published,
+                                    ready > 0 ? "较就绪 " + pct1(published, ready) + "%" : null),
+                            funnelStep("visited", "已发布且有访问", visited,
+                                    published > 0 ? "较发布 " + pct1(visited, published) + "%" : null),
+                            funnelStep("cloud", "启用共享云服务", cloud,
+                                    apps > 0 ? "占新建应用 " + pct1(cloud, apps) + "%" : null)
+                    );
+                }).single();
+    }
+
+    private static Map<String, Object> funnelStep(String key, String label, long count, String rateLabel) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("key", key);
+        m.put("label", label);
+        m.put("count", count);
+        if (rateLabel != null) m.put("rateLabel", rateLabel);
+        return m;
+    }
+
+    private static double pct1(long part, long total) {
+        if (total <= 0) return 0.0;
+        return Math.min(100.0, Math.round((part * 1000.0) / total) / 10.0);
     }
 
     private Map<String, Object> trendsSection(FilterCtx ctx) {

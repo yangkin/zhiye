@@ -278,6 +278,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     }
     // 运行中的补充要求进入队列，由后端在当前任务结束后创建后续修改任务。
     if (runningTaskId) {
+      const ctxNow = useChat.getState().elementContext;
+      const hasElement = Boolean(ctxNow && ctxNow.appId === app.id);
+      if (chatAssets.length > 0 || chatSkills.length > 0 || hasElement) {
+        setError('排队消息暂不支持同时携带附件、技能或选中页面元素；请等当前任务完成后直接发送，或先移除附件/元素后再排队。');
+        return;
+      }
       setSending(true);
       setError('');
       try {

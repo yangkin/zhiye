@@ -126,9 +126,15 @@ class AdminGovernanceTest extends IntegrationTest {
         assertThat(tplDel.path("deleted").asBoolean()).isTrue();
         assertThat(c.get("/api/templates/" + tplId).status()).isEqualTo(404);
 
-        // 5. 反馈分诊状态与备注
+        // 5. 反馈分诊状态与备注（先验证 in_progress 下 resolved_at 为 null 不抛异常且写入审计，再验证 resolved）
         JsonNode fb = c.ok(c.post("/api/help/feedback", Map.of("content", "治理看板反馈分诊测试问题")));
         String fbId = fb.path("id").asText();
+        JsonNode triagedInProgress = c.ok(c.send("PATCH", "/api/admin/feedbacks/" + fbId,
+                Map.of("status", "in_progress", "adminNote", "正在排查原因"), ADMIN_HEADERS));
+        assertThat(triagedInProgress.path("status").asText()).isEqualTo("in_progress");
+        assertThat(triagedInProgress.path("adminNote").asText()).isEqualTo("正在排查原因");
+        assertThat(triagedInProgress.path("resolvedAt").isNull()).isTrue();
+
         JsonNode triaged = c.ok(c.send("PATCH", "/api/admin/feedbacks/" + fbId,
                 Map.of("status", "resolved", "adminNote", "已在 v2.1 修复"), ADMIN_HEADERS));
         assertThat(triaged.path("status").asText()).isEqualTo("resolved");

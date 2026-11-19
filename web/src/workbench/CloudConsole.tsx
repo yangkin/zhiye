@@ -29,12 +29,32 @@ const splitLogins = (s: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+export interface AccessFormState {
+  loading: boolean;
+  error: boolean;
+  dirty: boolean;
+  level: AccessLevel;
+  membersCount: number;
+  save: () => Promise<SiteAccess>;
+}
+
 /** 发布访问设置：发布弹窗和数据控制台共用 */
 /**
  * compact：发布弹窗里用，不显示说明和不一致警告，由发布弹窗通过 onBlocked 合成一条提示。
  * onBlocked：选中的访问级别下哪些表无法使用（需要登录身份），空数组表示可以发布。
+ * onStateChange：向发布弹窗同步加载态、未保存状态与保存方法，避免未落库的权限选择被发布跳过。
  */
-export function AccessForm({ appId, compact = false, onBlocked }: { appId: string; compact?: boolean; onBlocked?: (tables: string[], ssoAvailable: boolean) => void }) {
+export function AccessForm({
+  appId,
+  compact = false,
+  onBlocked,
+  onStateChange,
+}: {
+  appId: string;
+  compact?: boolean;
+  onBlocked?: (tables: string[], ssoAvailable: boolean) => void;
+  onStateChange?: (state: AccessFormState) => void;
+}) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: accessKey(appId), queryFn: () => api.access(appId) });
   const [level, setLevel] = useState<AccessLevel>('public');
@@ -48,24 +68,43 @@ export function AccessForm({ appId, compact = false, onBlocked }: { appId: strin
     setMembers(q.data.members.join('\n'));
     setAdmins(q.data.admins.join('\n'));
   }, [q.data]);
-  if (q.isLoading) return <LoadingState label="正在读取访问设置…" />;
-  if (q.error) return <ErrorState message={errorMessage(q.error)} onRetry={() => q.refetch()} />;
-  const a = q.data as SiteAccess;
-  const dirty = level !== a.level || members !== a.members.join('\n') || admins !== a.admins.join('\n');
-  const save = async () => {
+
+  const a = q.data as SiteAccess | undefined;
+  const dirty = Boolean(a && (level !== a.level || members !== a.members.join('\n') || admins !== a.admins.join('\n')));
+  const memberList = useMemo(() => splitLogins(members), [members]);
+
+  const save = async (): Promise<SiteAccess> => {
     setBusy(true);
     setErr('');
     try {
       const next = await api.saveAccess(appId, { level, members: splitLogins(members), admins: splitLogins(admins) });
       qc.setQueryData(accessKey(appId), next);
       void qc.invalidateQueries({ queryKey: consoleKey(appId) });
-      toast('访问设置已保存，线上站点立即生效。');
+      if (!compact) toast('访问设置已保存，线上站点立即生效。');
+      return next;
     } catch (e) {
       setErr(errorMessage(e));
+      throw e;
     } finally {
       setBusy(false);
     }
   };
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  useEffect(() => {
+    onStateChange?.({
+      loading: q.isLoading,
+      error: Boolean(q.error),
+      dirty,
+      level,
+      membersCount: memberList.length,
+      save: () => saveRef.current(),
+    });
+  }, [q.isLoading, q.error, dirty, level, memberList.length, onStateChange]);
+
+  if (q.isLoading) return <LoadingState label="正在读取访问设置…" />;
+  if (q.error || !a) return <ErrorState message={errorMessage(q.error)} onRetry={() => q.refetch()} />;
   const mismatch = level === 'public' && a.tablesNeedingLogin.length > 0;
   return (
     <>
@@ -118,12 +157,17 @@ export function AccessForm({ appId, compact = false, onBlocked }: { appId: strin
           {err}
         </p>
       ) : null}
-      {dirty ? (
+      {dirty && !compact ? (
         <div className="cc-access-save">
-          <button className="primary-button" disabled={busy} onClick={() => void save()}>
+          <button className="primary-button" disabled={busy} onClick={() => void save().catch(() => undefined)}>
             {busy ? '正在保存…' : '保存访问设置'}
           </button>
         </div>
+      ) : null}
+      {dirty && compact ? (
+        <p className="cc-hint" style={{ marginTop: 6 }}>
+          点击「确认发布」时将先保存此访问范围，保存失败会自动暂停发布。
+        </p>
       ) : null}
     </div>
     </>

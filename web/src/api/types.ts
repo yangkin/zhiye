@@ -1448,6 +1448,8 @@ export type AdminFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'ignored
 export interface AdminCustomQuota {
   workspaceId: string;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   maxApps: number | null;
   dailyTaskLimit: number | null;
@@ -1464,6 +1466,8 @@ export interface AdminFeedbackItem {
   id: string;
   workspaceId: string;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   conversationId: string | null;
   content: string;
@@ -1478,6 +1482,8 @@ export interface AdminDeletedAppItem {
   id: string;
   workspaceId: string;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   name: string;
   type: string;
@@ -1545,6 +1551,8 @@ export interface AdminPublishedAppItem {
   id: string;
   workspaceId: string;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   name: string;
   slug: string;
@@ -1561,6 +1569,8 @@ export interface AdminAppItem {
   id: string;
   workspaceId: string;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   name: string;
   slug: string;
@@ -1582,12 +1592,16 @@ export interface AdminWorkspaceItem {
   workspaceId: string;
   ownerUserId: string | null;
   ownerLogin: string | null;
+  ownerRealName?: string | null;
+  ownerBound?: boolean;
   ownerName: string;
   appCount: number;
   publishedCount: number;
   deletedAppCount: number;
   conversationCount: number;
   dataSourceCount: number;
+  sampleApps?: string[];
+  lastActiveAt?: string | null;
   createdAt: string;
 }
 

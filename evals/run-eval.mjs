@@ -105,6 +105,8 @@ async function runLive() {
   const chrome = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/chromium', process.env.ZHIYE_CHROME_PATH].find((p) => p && existsSync(p))
   const out = []
   for (const c of targetCases) {
+    // 每条基准用例分配独立匿名工作空间，避免 12 条用例共享同一空间触发默认 10 应用配额上限
+    cookieJar.length = 0
     const started = Date.now()
     let appId = null
     let task = null
@@ -112,6 +114,7 @@ async function runLive() {
     let contract = { passed: false, errors: [] }
     let previewOk = null
     let liveFlow = null
+    const isWebCase = ['template', 'vue', 'vite', 'static'].includes(c.expect?.projectKind)
     try {
       const created = await req('POST', '/api/apps', {
         type: c.type, mode: c.mode || '快速', prompt: c.prompt, model: 'auto', assetIds: [],
@@ -133,13 +136,19 @@ async function runLive() {
       const app = await req('GET', `/api/apps/${appId}`)
       const vid = app?.currentVersion?.id
       if (task?.status === 'SUCCEEDED' && vid) {
-        if (app.previewUrl) {
+        if (isWebCase && !app.previewUrl) {
+          previewOk = false
+        } else if (app.previewUrl) {
           try {
             const pr = await fetch(app.previewUrl)
             const html = await pr.text()
             previewOk = pr.ok && html.includes('<html')
-            if (previewOk && chrome && (c.liveFlow || ['template', 'vue'].includes(c.expect?.projectKind))) {
-              liveFlow = await runLiveFlow(app.previewUrl, c.liveFlow || { probeControls: true }, { chromePath: chrome })
+            if (previewOk && (c.liveFlow || ['template', 'vue'].includes(c.expect?.projectKind))) {
+              if (!chrome) {
+                liveFlow = { ok: false, error: 'ENV_BLOCKED: 未找到 Chrome/Chromium，无法执行浏览器实机断言' }
+              } else {
+                liveFlow = await runLiveFlow(app.previewUrl, c.liveFlow || { probeControls: true }, { chromePath: chrome })
+              }
             }
           } catch { previewOk = false }
         }
@@ -163,7 +172,7 @@ async function runLive() {
     } catch (e) {
       contract = { passed: false, errors: [e.message] }
     }
-    const passed = task?.status === 'SUCCEEDED' && contract.passed && (previewOk !== false)
+    const passed = task?.status === 'SUCCEEDED' && contract.passed && (isWebCase ? previewOk === true : previewOk !== false) && (!liveFlow || liveFlow.ok === true)
     out.push({
       id: c.id,
       name: c.name,
