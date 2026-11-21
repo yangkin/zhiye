@@ -12,10 +12,12 @@ import type {
   DashboardData,
 } from '../api/types';
 import { confirmDialog } from './ConfirmDialog';
+import { DetailDrawer } from './DetailDrawer';
 import { Modal } from './Modal';
 import { OwnerPicker, formatOwnerIdentity, type OwnerPickerOption } from './OwnerPicker';
 import { Pagination, useClientPagination } from './Pagination';
 import { Select } from './Select';
+import { WorkspaceProfileDrawer } from './WorkspaceProfileDrawer';
 import { Icon, type IconName } from '../lib/icons';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
@@ -194,8 +196,9 @@ export function AdminGovernancePanel({
     }
   }, [searchParams]);
 
-  // 单应用转移弹窗状态
+  // 单应用转移抽屉状态 + 员工/空间 360° 细查抽屉状态
   const [transferTarget, setTransferTarget] = useState<TransferAppTarget | null>(null);
+  const [profileWsId, setProfileWsId] = useState<string | null>(null);
   const [transferToWs, setTransferToWs] = useState('');
   const [transferIncludeConv, setTransferIncludeConv] = useState(true);
   const [transferNote, setTransferNote] = useState('');
@@ -1173,6 +1176,13 @@ export function AdminGovernancePanel({
                             <td className="dash-nowrap">{w.lastActiveAt ? fmtTime(w.lastActiveAt) : '—'}</td>
                             <td className="dash-nowrap">
                               <div className="dash-action-row">
+                                <button
+                                  type="button"
+                                  className="dash-link"
+                                  onClick={() => setProfileWsId(w.workspaceId)}
+                                >
+                                  360° 细查
+                                </button>
                                 <button
                                   type="button"
                                   className="dash-link"
@@ -2396,13 +2406,17 @@ export function AdminGovernancePanel({
         </div>
       ) : null}
 
-      {/* 单应用归属转移弹窗 */}
-      {transferTarget ? (
-        <Modal
-          title="转移应用归属"
-          overline="APP OWNERSHIP TRANSFER"
-          onClose={() => setTransferTarget(null)}
-          footer={
+      {/* 单应用归属转移右侧抽屉 */}
+      <DetailDrawer
+        open={Boolean(transferTarget)}
+        width={540}
+        title="转移应用归属"
+        badge={transferTarget ? <code className="owner-cell-acct">{transferTarget.slug}</code> : null}
+        sub="APP OWNERSHIP TRANSFER · 线上域名、版本历史、云表数据与独占数据源将无损迁移"
+        onClose={() => setTransferTarget(null)}
+        footerHint="本次归属转移将实时写入不可篡改管理审计日志"
+        footer={
+          transferTarget ? (
             <>
               <button type="button" className="subtle-button" onClick={() => setTransferTarget(null)}>
                 取消
@@ -2416,14 +2430,16 @@ export function AdminGovernancePanel({
                 {busyKey === `transfer-${transferTarget.id}` ? '转移中…' : '确认转移归属'}
               </button>
             </>
-          }
-        >
+          ) : null
+        }
+      >
+        {transferTarget ? (
           <div className="dash-modal-form">
-            <div className="dash-modal-target">
+            <div className="dash-modal-target xa-drawer-target-card">
               <div>
                 应用：<b>{transferTarget.name}</b>（<code>{transferTarget.slug}</code>）
               </div>
-              <div style={{ marginTop: 4 }}>
+              <div style={{ marginTop: 6 }}>
                 {(() => {
                   const cur = formatOwnerIdentity(transferTarget);
                   return (
@@ -2467,8 +2483,20 @@ export function AdminGovernancePanel({
               转移后，该应用的线上域名、所有历史版本、云数据库表及绑定的独占私有数据源将完整保留，线上站点不会中断。
             </p>
           </div>
-        </Modal>
-      ) : null}
+        ) : null}
+      </DetailDrawer>
+
+      {/* 员工 / 工作空间 360° 细查右侧抽屉 */}
+      <WorkspaceProfileDrawer
+        workspaceId={profileWsId}
+        onClose={() => setProfileWsId(null)}
+        onStartHandover={(wsId) => {
+          setHandoverFromWs(wsId);
+          setShowBatchHandover(true);
+          setGovTab('handover');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
 
       {/* 反馈分诊弹窗 */}
       {triageTarget ? (
@@ -2588,10 +2616,14 @@ export function AdminQuotaModal({
   };
 
   return (
-    <Modal
+    <DetailDrawer
+      open
+      width={520}
       title="调整工作空间配额"
-      overline="WORKSPACE QUOTA"
+      badge={<code className="owner-cell-acct">{target.workspaceId}</code>}
+      sub="WORKSPACE QUOTA OVERRIDE · 保存后即时生效"
       onClose={onClose}
+      footerHint="配额变更将实时写入管理操作审计日志"
       footer={
         <>
           <button type="button" className="subtle-button" onClick={onClose}>
@@ -2604,9 +2636,8 @@ export function AdminQuotaModal({
       }
     >
       <div className="dash-modal-form">
-        <div className="dash-modal-target">
-          工作空间：<code>{target.workspaceId}</code>
-          {target.ownerName ? `（${target.ownerName}）` : ''}
+        <div className="dash-modal-target xa-drawer-target-card">
+          归属对象：<b>{target.ownerName || target.workspaceId}</b> · <code>{target.workspaceId}</code>
         </div>
         <div className="dash-modal-grid3">
           <label>
@@ -2645,6 +2676,6 @@ export function AdminQuotaModal({
           />
         </label>
       </div>
-    </Modal>
+    </DetailDrawer>
   );
 }

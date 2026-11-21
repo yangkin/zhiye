@@ -25,7 +25,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -522,6 +526,157 @@ public class AdminService {
             m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
             return m;
         }).list();
+    }
+
+    /** 员工 / 工作空间 360° 细查档案（含近 30 日活跃趋势、应用类型分布、名下应用列表与任务/发布活动时间线） */
+    public Map<String, Object> workspaceProfile(String wsId) {
+        var wsOpt = jdbc.sql("""
+                select w.id, w.owner_user_id, w.created_at,
+                       u.login_name, u.real_name, u.email, u.last_login_at,
+                       (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is null) as app_count,
+                       (select count(*) from app a where a.workspace_id = w.id and a.deleted_at is null and a.published_version_id is not null) as published_count,
+                       (select count(*) from conversation c where c.workspace_id = w.id and c.deleted_at is null) as conv_count,
+                       (select count(*) from data_source ds where ds.workspace_id = w.id and ds.deleted_at is null) as ds_count
+                from workspace w
+                left join app_user u on u.id = w.owner_user_id
+                where w.id = ?
+                """).param(wsId).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            String uid = rs.getString("owner_user_id");
+            m.put("workspaceId", rs.getString("id"));
+            m.put("ownerUserId", uid);
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerEmail", rs.getString("email"));
+            m.put("ownerBound", uid != null || (login != null && !login.isBlank()) || (real != null && !real.isBlank()));
+            m.put("ownerName", displayName(real, login, wsId));
+            m.put("appCount", rs.getInt("app_count"));
+            m.put("publishedCount", rs.getInt("published_count"));
+            m.put("conversationCount", rs.getInt("conv_count"));
+            m.put("dataSourceCount", rs.getInt("ds_count"));
+            m.put("lastLoginAt", Db.iso(Db.ts(rs, "last_login_at")));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).optional();
+        if (wsOpt.isEmpty()) throw ApiException.notFound("工作空间");
+        Map<String, Object> owner = wsOpt.get();
+
+        ZoneId zone = ZoneId.of("Asia/Shanghai");
+        LocalDate today = LocalDate.now(zone);
+        LocalDate start30 = today.minusDays(29);
+        OffsetDateTime startTs = start30.atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime endTs = today.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
+
+        Map<LocalDate, Long> tasksByDay = new HashMap<>();
+        jdbc.sql("""
+                select (created_at at time zone 'Asia/Shanghai')::date as d, count(*) as c
+                from task where workspace_id = ? and created_at >= ? and created_at < ?
+                group by 1
+                """).params(wsId, startTs, endTs).query((rs, i) -> {
+            tasksByDay.put(rs.getObject("d", LocalDate.class), rs.getLong("c"));
+            return null;
+        }).list();
+
+        Map<LocalDate, Long> pvByDay = new HashMap<>();
+        jdbc.sql("""
+                select p.day as d, coalesce(sum(p.pv), 0) as c
+                from app_pageview_daily p join app a on a.id = p.app_id
+                where a.workspace_id = ? and a.deleted_at is null and p.day >= ? and p.day <= ?
+                group by 1
+                """).params(wsId, start30, today).query((rs, i) -> {
+            pvByDay.put(rs.getObject("d", LocalDate.class), rs.getLong("c"));
+            return null;
+        }).list();
+
+        List<Map<String, Object>> daily30d = new ArrayList<>(30);
+        int activeDays30d = 0;
+        long totalPv30d = 0;
+        long totalTasks30d = 0;
+        for (LocalDate d = start30; !d.isAfter(today); d = d.plusDays(1)) {
+            long tc = tasksByDay.getOrDefault(d, 0L);
+            long pc = pvByDay.getOrDefault(d, 0L);
+            if (tc > 0 || pc > 0) activeDays30d++;
+            totalTasks30d += tc;
+            totalPv30d += pc;
+            daily30d.add(Map.of("date", d.toString(), "tasks", tc, "pv", pc));
+        }
+
+        long okTasks30d = jdbc.sql("select count(*) from task where workspace_id = ? and created_at >= ? and created_at < ? and status = 'SUCCEEDED'")
+                .params(wsId, startTs, endTs).query(Long.class).single();
+        long termTasks30d = jdbc.sql("select count(*) from task where workspace_id = ? and created_at >= ? and created_at < ? and status in ('SUCCEEDED','FAILED','CANCELLED')")
+                .params(wsId, startTs, endTs).query(Long.class).single();
+        owner.put("activeDays30d", activeDays30d);
+        owner.put("totalPv30d", totalPv30d);
+        owner.put("totalTasks30d", totalTasks30d);
+        owner.put("taskSuccessRate30d", termTasks30d == 0 ? 0.0 : Math.round((double) okTasks30d * 1000.0 / termTasks30d) / 10.0);
+
+        List<Map<String, Object>> typeBreakdown = jdbc.sql("""
+                select coalesce(nullif(type, ''), '通用应用') as k, count(*) as c
+                from app where workspace_id = ? and deleted_at is null
+                group by 1 order by 2 desc
+                """).param(wsId).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("key", rs.getString("k"));
+            m.put("count", rs.getLong("c"));
+            return m;
+        }).list();
+
+        List<Map<String, Object>> wsApps = jdbc.sql("""
+                select a.id, a.name, a.slug, a.type, a.phase,
+                       (a.published_version_id is not null) as published,
+                       coalesce((select sum(p.pv) from app_pageview_daily p where p.app_id = a.id), 0) as total_pv,
+                       a.updated_at
+                from app a
+                where a.workspace_id = ? and a.deleted_at is null
+                order by a.updated_at desc
+                limit 30
+                """).param(wsId).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", rs.getString("id"));
+            m.put("name", rs.getString("name"));
+            m.put("slug", rs.getString("slug"));
+            m.put("type", rs.getString("type"));
+            m.put("phase", rs.getString("phase"));
+            m.put("published", rs.getBoolean("published"));
+            m.put("totalPv", rs.getLong("total_pv"));
+            m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+            return m;
+        }).list();
+
+        List<Map<String, Object>> timeline = jdbc.sql("""
+                select t.id, t.type, t.status, t.error_code, t.error_message,
+                       t.app_id, coalesce(a.name, '') as app_name,
+                       coalesce(extract(epoch from (t.finished_at - t.started_at)) * 1000, 0)::bigint as duration_ms,
+                       t.created_at
+                from task t
+                left join app a on a.id = t.app_id
+                where t.workspace_id = ?
+                order by t.created_at desc
+                limit 40
+                """).param(wsId).query((rs, i) -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", rs.getString("id"));
+            m.put("kind", "task");
+            m.put("taskType", rs.getString("type"));
+            m.put("status", rs.getString("status"));
+            m.put("errorCode", rs.getString("error_code"));
+            m.put("errorMessage", rs.getString("error_message"));
+            m.put("appId", rs.getString("app_id"));
+            m.put("appName", rs.getString("app_name"));
+            m.put("durationMs", rs.getLong("duration_ms"));
+            m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+            return m;
+        }).list();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("owner", owner);
+        out.put("daily30d", daily30d);
+        out.put("typeBreakdown", typeBreakdown);
+        out.put("apps", wsApps);
+        out.put("timeline", timeline);
+        return out;
     }
 
     /** 设置或重置指定工作空间的自定义配额 */

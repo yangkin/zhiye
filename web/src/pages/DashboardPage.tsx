@@ -11,13 +11,22 @@ import { confirmDialog } from '../components/ConfirmDialog';
 import { Select } from '../components/Select';
 import { Pagination, useClientPagination } from '../components/Pagination';
 import { AdminGovernancePanel, AdminQuotaModal, type QuotaModalTarget } from '../components/AdminGovernancePanel';
+import {
+  CalendarHeatmap,
+  CohortRetentionMatrix,
+  MicroSparkBar,
+  PolarRoseChart,
+  SankeyFlowChart,
+  SectionHeading,
+  StackedAreaChart,
+  TrapezoidFunnel,
+} from '../components/AnalyticsCharts';
 import { formatOwnerIdentity } from '../components/OwnerPicker';
 import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import {
   BreakdownBars,
   CHART_PALETTE,
-  ConversionFunnel,
   DashEmptyBox,
   DashPanelHead,
   DonutChart,
@@ -235,7 +244,10 @@ export function DashboardPage() {
   const [filterUserId, setFilterUserId] = useState('');
   const [section, setSection] = useState<SectionTab>('all');
   const [trendMetric, setTrendMetric] = useState<TrendMetric>('tasks');
-  const [chartKind, setChartKind] = useState<'line' | 'bar'>('bar');
+  const [chartKind, setChartKind] = useState<'line' | 'bar' | 'area'>('bar');
+  const [areaMode, setAreaMode] = useState<'value' | 'percent'>('value');
+  const [calMetric, setCalMetric] = useState<'total' | 'tasks' | 'pv' | 'apps'>('total');
+  const [healthTab, setHealthTab] = useState<'zombie' | 'stalled'>('zombie');
   const [appQuery, setAppQuery] = useState('');
   const [appTypeFilter, setAppTypeFilter] = useState('');
   const [appSort, setAppSort] = useState<'pv' | 'versions' | 'tasks'>('pv');
@@ -658,15 +670,45 @@ export function DashboardPage() {
             </div>
           ) : null}
 
-          {/* 1. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比，仅在「全部维度」展示） */}
+          {/* X-APM 风格顶部章节锚点导览条（仅在总览模式下展示，大屏一键直达 5 大分析板块） */}
+          {section === 'all' ? (
+            <div className="xa-anchor-bar" aria-label="章节快速导航">
+              <div className="xa-anchor-links">
+                {[
+                  ['sec-kpi', '01', '核心指标'],
+                  ['sec-funnel', '02', '转化漏斗与趋势'],
+                  ['sec-calendar', '03', '活跃日历与24h时段'],
+                  ['sec-sankey', '04', '任务流向桑基图'],
+                  ['sec-health', '05', '留存矩阵与资产健康'],
+                ].map(([id, n, lbl]) => (
+                  <a key={id} href={`#${id}`} className="xa-anchor-pill">
+                    <i>{n}</i>
+                    <span>{lbl}</span>
+                  </a>
+                ))}
+              </div>
+              <span className="xa-anchor-meta">
+                共 {fmtNum(data.overview.workspacesProductive)} 有产出空间 · {fmtNum(data.overview.appsTotal)} 应用 · {fmtNum(data.overview.tasksTotal)} 任务
+              </span>
+            </div>
+          ) : null}
+
+          {/* 01. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比，仅在「全部维度」展示） */}
           {section === 'all' ? (
             <section className="dash-section" aria-label="核心管理 KPI">
+              <SectionHeading
+                id="sec-kpi"
+                num="01"
+                title="核心北极星指标"
+                sub="默认对比当前窗口与上一等长周期的真实环比变化（全平台实盘统计）"
+              />
               <div className="dash-kpi-grid-6">
               <KpiCard
                 title="活跃空间与用户"
                 value={fmtNum(data.overview.workspacesActiveRange)}
                 unit={`活跃 / ${fmtNum(data.overview.workspacesProductive)} 有产出（库内 ${fmtNum(data.overview.workspacesTotal)}）`}
-                accent="#7953dc"
+                accent="#2563eb"
+                delta={range === 'all' ? null : calcDelta(data.overview.workspacesActiveRange, data.overview.workspacesPrevRange ?? 0)}
                 spark={daily.map((d) => d.activeWorkspaces)}
                 details={[
                   `产出率 ${data.overview.workspacesTotal ? Math.round((data.overview.workspacesProductive / data.overview.workspacesTotal) * 1000) / 10 : 0}%`,
@@ -678,7 +720,7 @@ export function DashboardPage() {
                 title="应用资产与发布"
                 value={fmtNum(data.overview.appsTotal)}
                 unit={`已发布 ${fmtNum(data.overview.appsPublished)}（发布率 ${data.overview.appsTotal ? Math.round((data.overview.appsPublished / data.overview.appsTotal) * 1000) / 10 : 0}%）`}
-                accent="#2f9e8f"
+                accent="#10b981"
                 delta={range === 'all' ? null : calcDelta(data.overview.appsRange, data.overview.appsPrevRange)}
                 spark={daily.map((d) => d.appsCreated)}
                 details={[
@@ -691,7 +733,7 @@ export function DashboardPage() {
                 title="AI 任务吞吐与 SLA"
                 value={fmtNum(data.overview.tasksTotal)}
                 unit={`成功率 ${data.overview.taskSuccessRate}%`}
-                accent="#4a7bd0"
+                accent="#4f46e5"
                 delta={range === 'all' ? null : calcDelta(data.overview.tasksRange, data.overview.tasksPrevRange)}
                 spark={daily.map((d) => d.tasksTotal)}
                 details={[
@@ -703,7 +745,8 @@ export function DashboardPage() {
                 title="版本构建与云调用"
                 value={fmtNum(data.overview.versionsTotal)}
                 unit={`部署 ${fmtNum(data.overview.deploymentsTotal)} · 构建 ${fmtNum(data.overview.buildsTotal)}`}
-                accent="#d9822b"
+                accent="#f59e0b"
+                delta={range === 'all' ? null : calcDelta(data.overview.versionsRange, data.overview.versionsPrevRange ?? 0)}
                 spark={daily.map((d) => d.versions)}
                 details={[
                   `云函数 ${fmtCompact(data.overview.fnCallsTotal)}`,
@@ -715,7 +758,7 @@ export function DashboardPage() {
                 title="站点访问流量 (PV)"
                 value={fmtCompact(data.overview.pvTotal)}
                 unit={`今日 ${fmtNum(data.overview.pvToday)} · 昨日 ${fmtNum(data.overview.pvYesterday)}`}
-                accent="#9b6fd6"
+                accent="#7c3aed"
                 delta={range === 'all' ? null : calcDelta(data.overview.pvRange, data.overview.pvPrevRange)}
                 spark={daily.map((d) => d.pv)}
                 details={[
@@ -728,7 +771,7 @@ export function DashboardPage() {
                 title="质检、云服务与反馈"
                 value={`${overallVerifyRate}%`}
                 unit={`质检通过率（${fmtNum(totalVerifyChecks)} 次门禁）`}
-                accent="#c7527c"
+                accent="#ec4899"
                 spark={daily.map((d) => d.versions)}
                 details={[
                   `版本 ${fmtNum(data.overview.versionsTotal)} · 部署 ${fmtNum(data.overview.deploymentsTotal)}`,
@@ -746,71 +789,372 @@ export function DashboardPage() {
           ) : null}
           {isAdmin && section === 'cluster' ? <ClusterSandboxPanel /> : null}
 
-          {/* 2. 核心转化漏斗 + 多维每日趋势（总览与增长页均展示，高信号视觉锚点） */}
+          {/* 02. 对称梯形转化漏斗 + 多维每日趋势（含堆叠面积构成） */}
           {section === 'all' || section === 'growth' ? (
             <section className="dash-section" aria-label="转化漏斗与每日趋势">
-              <div className="dash-hero-split">
+              <SectionHeading
+                id="sec-funnel"
+                num="02"
+                title="转化漏斗与多维趋势构成"
+                sub="同口径对称梯形漏斗 + 流失定位洞察，右侧支持折线 / 柱状 / 多维堆叠面积切换"
+              />
+              <div className="dash-hero-split xa-split-wide">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
                       <h2>全链路创作转化漏斗</h2>
-                      <p>对话构想 → 创建应用 → 就绪 → 发布 → 访问 → 启用云服务</p>
+                      <p>对话构想 → 新建应用 → 首版就绪 → 发布上线 → 真实访问 → 云服务</p>
                     </div>
                   </header>
-                  <ConversionFunnel steps={data.funnel} />
+                  <TrapezoidFunnel steps={data.funnel} />
                 </div>
 
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h2>多维度每日趋势</h2>
-                      <p>按 Asia/Shanghai 时区对每日核心指标补零对齐，支持 6 类指标切换。</p>
+                      <h2>多维度每日趋势与构成</h2>
+                      <p>按 Asia/Shanghai 时区补零对齐，支持 6 类指标与全链路堆叠面积占比视图</p>
                     </div>
-                    <div className="seg-control small" role="radiogroup" aria-label="图表形式">
-                      <button type="button" role="radio" aria-checked={chartKind === 'line'} className={chartKind === 'line' ? 'active' : ''} onClick={() => setChartKind('line')}>
-                        折线图
+                    <div className="dash-toolbar-group">
+                      {chartKind === 'area' ? (
+                        <div className="seg-control small" role="radiogroup" aria-label="堆叠口径">
+                          <button type="button" role="radio" aria-checked={areaMode === 'value'} className={areaMode === 'value' ? 'active' : ''} onClick={() => setAreaMode('value')}>
+                            总量
+                          </button>
+                          <button type="button" role="radio" aria-checked={areaMode === 'percent'} className={areaMode === 'percent' ? 'active' : ''} onClick={() => setAreaMode('percent')}>
+                            占比
+                          </button>
+                        </div>
+                      ) : null}
+                      <div className="seg-control small" role="radiogroup" aria-label="图表形式">
+                        <button type="button" role="radio" aria-checked={chartKind === 'bar'} className={chartKind === 'bar' ? 'active' : ''} onClick={() => setChartKind('bar')}>
+                          柱状图
+                        </button>
+                        <button type="button" role="radio" aria-checked={chartKind === 'line'} className={chartKind === 'line' ? 'active' : ''} onClick={() => setChartKind('line')}>
+                          折线图
+                        </button>
+                        <button type="button" role="radio" aria-checked={chartKind === 'area'} className={chartKind === 'area' ? 'active' : ''} onClick={() => setChartKind('area')}>
+                          堆叠面积
+                        </button>
+                      </div>
+                    </div>
+                  </header>
+                  {chartKind === 'area' ? (
+                    <StackedAreaChart
+                      mode={areaMode}
+                      data={daily.map((d) => ({
+                        date: d.date,
+                        tasksSucceeded: d.tasksSucceeded,
+                        tasksFailed: d.tasksFailed,
+                        appsCreated: d.appsCreated,
+                        deployments: d.deployments,
+                      }))}
+                      series={[
+                        { key: 'tasksSucceeded', label: '成功任务', color: '#2563eb' },
+                        { key: 'appsCreated', label: '新建应用', color: '#10b981' },
+                        { key: 'deployments', label: '发布部署', color: '#8b5cf6' },
+                        { key: 'tasksFailed', label: '失败任务', color: '#ef4444' },
+                      ]}
+                    />
+                  ) : (
+                    <>
+                      <div
+                        className="dash-metric-pills"
+                        role="tablist"
+                        aria-label="趋势指标"
+                        onKeyDown={(e) =>
+                          handleTabListKeyDown(
+                            e,
+                            TREND_METRICS.map(([m]) => m),
+                            trendMetric,
+                            setTrendMetric,
+                          )
+                        }
+                      >
+                        {TREND_METRICS.map(([m, label]) => (
+                          <button
+                            key={m}
+                            type="button"
+                            role="tab"
+                            tabIndex={trendMetric === m ? 0 : -1}
+                            aria-selected={trendMetric === m}
+                            className={trendMetric === m ? 'active' : ''}
+                            onClick={() => setTrendMetric(m)}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <MultiTrendChart
+                        data={trendConfig.points}
+                        kind={chartKind}
+                        primaryLabel={trendConfig.primaryLabel}
+                        secondaryLabel={trendConfig.secondaryLabel}
+                        primaryColor={trendConfig.primaryColor}
+                        secondaryColor={trendConfig.secondaryColor}
+                        unit={trendConfig.unit}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* 03. 近 140 天活跃日历热力图 + 24 小时极坐标玫瑰图 */}
+          {section === 'all' || section === 'growth' ? (
+            <section className="dash-section" aria-label="活跃日历热力图与时段玫瑰图">
+              <SectionHeading
+                id="sec-calendar"
+                num="03"
+                title="平台活跃日历与 24 小时时段分布"
+                sub="左图回溯近半年（26 周）每日活动强度，右图按早/中/夜班表盘呈现 24h 任务触发高峰"
+              />
+              <div className="xa-grid-cal-polar">
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>近 180 天每日活跃日历热力图</h3>
+                      <p>一眼识别工作周波峰、节假日低谷与版本推广节点，悬停查看当日明细</p>
+                    </div>
+                    <div className="seg-control small" role="radiogroup" aria-label="日历指标">
+                      {(
+                        [
+                          ['total', '综合活跃'],
+                          ['tasks', 'AI 任务'],
+                          ['pv', '访问 PV'],
+                          ['apps', '新建应用'],
+                        ] as const
+                      ).map(([k, lbl]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          role="radio"
+                          aria-checked={calMetric === k}
+                          className={calMetric === k ? 'active' : ''}
+                          onClick={() => setCalMetric(k)}
+                        >
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </header>
+                  <CalendarHeatmap days={data.calendarHeatmap ?? []} metric={calMetric} />
+                </div>
+
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>24 小时任务触发极坐标玫瑰图</h3>
+                      <p>按 Asia/Shanghai 小时分布，色系区分早/中/夜班</p>
+                    </div>
+                  </header>
+                  <PolarRoseChart hours={data.hourly} />
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {/* 04. 任务全链路三段桑基流向图 */}
+          {section === 'all' || section === 'agent' ? (
+            <section className="dash-section" aria-label="任务全链路桑基流向图">
+              <SectionHeading
+                id="sec-sankey"
+                num="04"
+                title="创作任务流向与失败归因（桑基图）"
+                sub="从创作入口 → 应用形态 → 最终执行结果（成功 / 构建失败 / 模型异常 / 取消）透明追踪流量去向"
+              />
+              <div className="dash-panel">
+                <SankeyFlowChart flow={data.sankeyFlow} />
+              </div>
+            </section>
+          ) : null}
+
+          {/* 05. 员工/空间留存 Cohort 矩阵 + 资产健康度与僵尸治理 */}
+          {section === 'all' || section === 'growth' || section === 'apps' ? (
+            <section className="dash-section" aria-label="留存分析与资产健康度治理">
+              <SectionHeading
+                id="sec-health"
+                num="05"
+                title="空间复访留存矩阵与资产健康治理"
+                sub="左图追踪新增空间的次日～第 7 日真实回访留存；右图自动识别僵尸站点（7 日 0 访问）与异常停滞应用"
+              />
+              <div className="dash-grid-2">
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>留存 Cohort 热力矩阵（第 1 日 ～ 第 7 日）</h3>
+                      <p>行 = 首次活跃批次日，列 = 第 N 日仍持续创作或运行任务的空间留存率</p>
+                    </div>
+                  </header>
+                  <CohortRetentionMatrix cohort={data.cohortRetention} />
+                </div>
+
+                <div className="dash-panel">
+                  <header className="dash-panel-head compact">
+                    <div>
+                      <h3>应用资产健康度与僵尸清单</h3>
+                      <p>在用 {fmtNum(data.assetHealth?.totalActive)} 个 · 就绪 {fmtNum(data.assetHealth?.readyCount)} · 已发布 {fmtNum(data.assetHealth?.publishedCount)} · 近 7 日有访问 {fmtNum(data.assetHealth?.active7dCount)}</p>
+                    </div>
+                    <div className="seg-control small" role="radiogroup" aria-label="健康治理清单">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={healthTab === 'zombie'}
+                        className={healthTab === 'zombie' ? 'active' : ''}
+                        onClick={() => setHealthTab('zombie')}
+                      >
+                        僵尸站点 ({fmtNum(data.assetHealth?.zombie7dCount)})
                       </button>
-                      <button type="button" role="radio" aria-checked={chartKind === 'bar'} className={chartKind === 'bar' ? 'active' : ''} onClick={() => setChartKind('bar')}>
-                        柱状图
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={healthTab === 'stalled'}
+                        className={healthTab === 'stalled' ? 'active' : ''}
+                        onClick={() => setHealthTab('stalled')}
+                      >
+                        异常停滞 ({fmtNum(data.assetHealth?.stalledCount)})
                       </button>
                     </div>
                   </header>
-                  <div
-                    className="dash-metric-pills"
-                    role="tablist"
-                    aria-label="趋势指标"
-                    onKeyDown={(e) =>
-                      handleTabListKeyDown(
-                        e,
-                        TREND_METRICS.map(([m]) => m),
-                        trendMetric,
-                        setTrendMetric,
-                      )
-                    }
-                  >
-                    {TREND_METRICS.map(([m, label]) => (
-                      <button
-                        key={m}
-                        type="button"
-                        role="tab"
-                        tabIndex={trendMetric === m ? 0 : -1}
-                        aria-selected={trendMetric === m}
-                        className={trendMetric === m ? 'active' : ''}
-                        onClick={() => setTrendMetric(m)}
-                      >
-                        {label}
-                      </button>
-                    ))}
+
+                  <div className="xa-health-strip">
+                    <div className="xa-health-kpi">
+                      <span>就绪率</span>
+                      <b>
+                        {data.assetHealth && data.assetHealth.totalActive > 0
+                          ? `${((data.assetHealth.readyCount / data.assetHealth.totalActive) * 100).toFixed(1)}%`
+                          : '0%'}
+                      </b>
+                    </div>
+                    <div className="xa-health-kpi">
+                      <span>发布率</span>
+                      <b>
+                        {data.assetHealth && data.assetHealth.totalActive > 0
+                          ? `${((data.assetHealth.publishedCount / data.assetHealth.totalActive) * 100).toFixed(1)}%`
+                          : '0%'}
+                      </b>
+                    </div>
+                    <div className="xa-health-kpi ok">
+                      <span>7 日活跃站</span>
+                      <b>{fmtNum(data.assetHealth?.active7dCount)}</b>
+                    </div>
+                    <div className="xa-health-kpi warn">
+                      <span>7 日 0 访问僵尸</span>
+                      <b>{fmtNum(data.assetHealth?.zombie7dCount)}</b>
+                    </div>
                   </div>
-                  <MultiTrendChart
-                    data={trendConfig.points}
-                    kind={chartKind}
-                    primaryLabel={trendConfig.primaryLabel}
-                    secondaryLabel={trendConfig.secondaryLabel}
-                    primaryColor={trendConfig.primaryColor}
-                    secondaryColor={trendConfig.secondaryColor}
-                    unit={trendConfig.unit}
-                  />
+
+                  {healthTab === 'zombie' ? (
+                    (data.assetHealth?.zombieSites.length ?? 0) === 0 ? (
+                      <DashEmptyBox icon="check" title="全部已发布站点近 7 日均有真实访问" />
+                    ) : (
+                      <div className="dash-table-wrap">
+                        <table className="dash-table xa-compact-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">僵尸站点 / Slug</th>
+                              <th scope="col">归属人</th>
+                              <th scope="col">累计 PV / 最后访问</th>
+                              {isAdmin ? <th scope="col">处置</th> : null}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(data.assetHealth?.zombieSites ?? []).slice(0, 7).map((z) => {
+                              const owner = formatOwnerIdentity({
+                                ownerName: z.ownerName,
+                                ownerLogin: z.ownerLogin,
+                                workspaceId: z.workspaceId,
+                              });
+                              return (
+                                <tr key={z.id} className="xa-row-zombie">
+                                  <td>
+                                    <b>{z.name}</b> <span className="xa-zombie-badge">僵尸</span>
+                                    <div><code>{z.slug}</code></div>
+                                  </td>
+                                  <td>
+                                    {owner.bound ? (
+                                      <span>{owner.primary} {owner.account ? <code className="owner-cell-acct">{owner.account}</code> : null}</span>
+                                    ) : (
+                                      <code className="dash-muted">{z.workspaceId}</code>
+                                    )}
+                                  </td>
+                                  <td className="dash-nowrap">
+                                    <b>{fmtNum(z.totalPv)}</b> · <span className="dash-muted">{z.lastPvDay ?? '从未访问'}</span>
+                                  </td>
+                                  {isAdmin ? (
+                                    <td className="dash-nowrap">
+                                      <button
+                                        type="button"
+                                        className="dash-link"
+                                        onClick={() => navigate('/admin?tab=sites')}
+                                      >
+                                        去风控
+                                      </button>
+                                    </td>
+                                  ) : null}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  ) : (data.assetHealth?.stalledApps.length ?? 0) === 0 ? (
+                    <DashEmptyBox icon="check" title="当前无失败或停滞态应用" />
+                  ) : (
+                    <div className="dash-table-wrap">
+                      <table className="dash-table xa-compact-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">异常应用</th>
+                            <th scope="col">归属人</th>
+                            <th scope="col">状态 / 更新</th>
+                            {isAdmin ? <th scope="col">排查</th> : null}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(data.assetHealth?.stalledApps ?? []).slice(0, 7).map((s) => {
+                            const owner = formatOwnerIdentity({
+                              ownerName: s.ownerName,
+                              ownerLogin: s.ownerLogin,
+                              workspaceId: s.workspaceId,
+                            });
+                            return (
+                              <tr key={s.id} className="xa-row-zombie">
+                                <td>
+                                  <b>{s.name}</b>
+                                  <div><code>{s.slug}</code></div>
+                                </td>
+                                <td>
+                                  {owner.bound ? (
+                                    <span>{owner.primary} {owner.account ? <code className="owner-cell-acct">{owner.account}</code> : null}</span>
+                                  ) : (
+                                    <code className="dash-muted">{s.workspaceId}</code>
+                                  )}
+                                </td>
+                                <td className="dash-nowrap">
+                                  <span className="dash-pill err">{labelOf(PHASE_LABELS, s.phase)}</span>{' '}
+                                  <span className="dash-muted">{fmtTime(s.updatedAt)}</span>
+                                </td>
+                                {isAdmin ? (
+                                  <td className="dash-nowrap">
+                                    <button
+                                      type="button"
+                                      className="dash-link"
+                                      onClick={() => navigate(`/logs?workspaceId=${encodeURIComponent(s.workspaceId)}&q=${encodeURIComponent(s.name)}`)}
+                                    >
+                                      看日志
+                                    </button>
+                                  </td>
+                                ) : null}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
@@ -925,6 +1269,7 @@ export function DashboardPage() {
                             <th scope="col">任务 (窗口)</th>
                             <th scope="col">成功率</th>
                             <th scope="col">PV (今日)</th>
+                            <th scope="col">近 7 日活跃</th>
                             <th scope="col">最近活跃</th>
                             <th scope="col">操作</th>
                           </tr>
@@ -962,6 +1307,7 @@ export function DashboardPage() {
                                 <td>{fmtNum(w.tasks)} <span className="dash-muted">({fmtNum(w.rangeTasks)})</span></td>
                                 <td><span className={w.successRate >= 80 ? 'dash-ok' : w.successRate < 50 && w.tasks > 0 ? 'dash-err' : ''}>{w.successRate}%</span></td>
                                 <td><b>{fmtNum(w.pv)}</b> <span className="dash-muted">({fmtNum(w.todayPv)})</span></td>
+                                <td><MicroSparkBar values={w.trend7d} color="#2563eb" /></td>
                                 <td className="dash-nowrap">{w.lastActiveAt ? fmtTime(w.lastActiveAt) : '-'}</td>
                                 <td>
                                   <div className="dash-action-row">
@@ -1181,6 +1527,7 @@ export function DashboardPage() {
                             <th scope="col">版本</th>
                             <th scope="col">任务</th>
                             <th scope="col">今日 / 累计 PV</th>
+                            <th scope="col">近 7 日 PV</th>
                             {isAdmin ? <th scope="col">治理操作</th> : null}
                           </tr>
                         </thead>
@@ -1214,6 +1561,7 @@ export function DashboardPage() {
                               <td>{fmtNum(a.versions)}</td>
                               <td>{fmtNum(a.tasks)}</td>
                               <td>{fmtNum(a.todayPv)} / <b>{fmtNum(a.totalPv)}</b></td>
+                              <td><MicroSparkBar values={a.trend7d} color="#10b981" /></td>
                               {isAdmin ? (
                                 <td>
                                   <div className="dash-action-row">

@@ -564,6 +564,8 @@ export const api = {
 
   // 管理控制台治理与运维
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  adminWorkspaceProfile: (wsId: string) =>
+    request<import('./types').AdminWorkspaceProfile>(`/api/admin/workspaces/${enc(wsId)}/profile`),
   adminUpdateQuota: (
     wsId: string,
     body: {

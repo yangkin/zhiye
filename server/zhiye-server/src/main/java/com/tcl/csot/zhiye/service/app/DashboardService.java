@@ -163,6 +163,10 @@ public class DashboardService {
         out.put("funnel", funnelSection(ctx));
         out.put("trends", trendsSection(ctx));
         out.put("hourly", hourlySection(ctx));
+        out.put("calendarHeatmap", calendarHeatmapSection(ctx));
+        out.put("cohortRetention", cohortRetentionSection(ctx));
+        out.put("sankeyFlow", sankeyFlowSection(ctx));
+        out.put("assetHealth", assetHealthSection(ctx, today));
         out.put("workspaces", workspacesSection(ctx));
         out.put("apps", appsSection(ctx, today));
         out.put("tasks", tasksSection(ctx));
@@ -351,6 +355,20 @@ public class DashboardService {
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs},
                         ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs}
                 )).query(Long.class).single();
+        long wsActivePrev = jdbc.sql("""
+                select count(distinct workspace_id) from (
+                  select workspace_id from app where %s and deleted_at is null and updated_at >= ? and updated_at < ?
+                  union
+                  select workspace_id from task where %s and created_at >= ? and created_at < ?
+                  union
+                  select workspace_id from conversation where %s and deleted_at is null and updated_at >= ? and updated_at < ?
+                ) t
+                """.formatted(wsPred, wsPred, wsPred))
+                .params(concat(
+                        ctx.wsParams(), new Object[]{ctx.prevStartTs, ctx.startTs},
+                        ctx.wsParams(), new Object[]{ctx.prevStartTs, ctx.startTs},
+                        ctx.wsParams(), new Object[]{ctx.prevStartTs, ctx.startTs}
+                )).query(Long.class).single();
         long ssoUsers = ctx.userId != null ? 1L
                 : (ctx.wsId != null
                 ? jdbc.sql("select count(distinct owner_user_id) from workspace where id = ? and owner_user_id is not null").param(ctx.wsId).query(Long.class).single()
@@ -359,6 +377,7 @@ public class DashboardService {
         m.put("workspacesTotal", wsTotal);
         m.put("workspacesProductive", wsProductive);
         m.put("workspacesActiveRange", wsActiveRange);
+        m.put("workspacesPrevRange", wsActivePrev);
         m.put("ssoUsersTotal", ssoUsers);
 
         // 应用统计（在所选时间窗内新建的应用为主口径，同时记录历史总数）
@@ -493,6 +512,8 @@ public class DashboardService {
         m.put("versionsTotal", count("select count(*) from version v join app a on a.id = v.app_id where " + aPred + " and a.deleted_at is null and v.created_at >= ? and v.created_at < ?",
                 concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs})));
         m.put("versionsRange", m.get("versionsTotal"));
+        m.put("versionsPrevRange", count("select count(*) from version v join app a on a.id = v.app_id where " + aPred + " and a.deleted_at is null and v.created_at >= ? and v.created_at < ?",
+                concat(ctx.wsParams(), new Object[]{ctx.prevStartTs, ctx.startTs})));
         m.put("deploymentsTotal", count("select count(*) from deployment d join app a on a.id = d.app_id where " + aPred + " and a.deleted_at is null and d.created_at >= ? and d.created_at < ?",
                 concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs})));
         m.put("buildsTotal", count("select count(*) from build b join app a on a.id = b.app_id where " + aPred + " and a.deleted_at is null and b.created_at >= ? and b.created_at < ?",
@@ -781,8 +802,326 @@ public class DashboardService {
         return out;
     }
 
+    /** 每日活跃日历热力图（固定回溯 182 天 / 26 周，真实统计任务、新建应用与站点访问） */
+    private List<Map<String, Object>> calendarHeatmapSection(FilterCtx ctx) {
+        LocalDate end = ctx.end;
+        LocalDate start = end.minusDays(181);
+        OffsetDateTime sTs = start.atStartOfDay(ZONE).toOffsetDateTime();
+        OffsetDateTime eTs = end.plusDays(1).atStartOfDay(ZONE).toOffsetDateTime();
+        String wsPred = ctx.wsPred("workspace_id");
+        String aPred = ctx.wsPred("a.workspace_id");
+
+        Map<LocalDate, Long> tasksByDay = queryDailyTsCounts(
+                "select (created_at at time zone 'Asia/Shanghai')::date as d, count(*) as c from task where " + wsPred + " and created_at >= ? and created_at < ? group by 1",
+                ctx.wsParams(), sTs, eTs);
+        Map<LocalDate, Long> appsByDay = queryDailyTsCounts(
+                "select (created_at at time zone 'Asia/Shanghai')::date as d, count(*) as c from app where " + wsPred + " and deleted_at is null and created_at >= ? and created_at < ? group by 1",
+                ctx.wsParams(), sTs, eTs);
+        Map<LocalDate, Long> pvByDay = new HashMap<>();
+        jdbc.sql("""
+                select p.day as d, coalesce(sum(p.pv), 0) as c
+                from app_pageview_daily p join app a on a.id = p.app_id
+                where %s and a.deleted_at is null and p.day >= ? and p.day <= ?
+                group by 1
+                """.formatted(aPred))
+                .params(concat(ctx.wsParams(), new Object[]{start, end}))
+                .query((rs, i) -> {
+                    pvByDay.put(rs.getObject("d", LocalDate.class), rs.getLong("c"));
+                    return null;
+                }).list();
+
+        List<Map<String, Object>> days = new ArrayList<>(140);
+        for (LocalDate d = start; !d.isAfter(end); d = d.plusDays(1)) {
+            long t = tasksByDay.getOrDefault(d, 0L);
+            long a = appsByDay.getOrDefault(d, 0L);
+            long pv = pvByDay.getOrDefault(d, 0L);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", d.toString());
+            row.put("tasks", t);
+            row.put("apps", a);
+            row.put("pv", pv);
+            row.put("total", t + a + pv);
+            days.add(row);
+        }
+        return days;
+    }
+
+    /** 员工 / 工作空间留存 Cohort 矩阵（基于真实首次活跃日期与次日 ~ 第 7 日回访活跃） */
+    private Map<String, Object> cohortRetentionSection(FilterCtx ctx) {
+        String wsPred = ctx.wsPred("workspace_id");
+        Map<String, Set<LocalDate>> activeByWs = new HashMap<>();
+        jdbc.sql("""
+                select workspace_id, d from (
+                  select workspace_id, (created_at at time zone 'Asia/Shanghai')::date as d from app where %s and deleted_at is null
+                  union
+                  select workspace_id, (created_at at time zone 'Asia/Shanghai')::date as d from task where %s
+                  union
+                  select workspace_id, (created_at at time zone 'Asia/Shanghai')::date as d from conversation where %s and deleted_at is null
+                ) u
+                """.formatted(wsPred, wsPred, wsPred))
+                .params(concat(ctx.wsParams(), ctx.wsParams(), ctx.wsParams()))
+                .query((rs, i) -> {
+                    String wid = rs.getString("workspace_id");
+                    LocalDate d = rs.getObject("d", LocalDate.class);
+                    if (wid != null && d != null) {
+                        activeByWs.computeIfAbsent(wid, k -> new HashSet<>()).add(d);
+                    }
+                    return null;
+                }).list();
+
+        // 按首次活跃日期分组
+        Map<LocalDate, List<String>> cohorts = new TreeMap<>();
+        for (var e : activeByWs.entrySet()) {
+            LocalDate first = e.getValue().stream().min(LocalDate::compareTo).orElse(null);
+            if (first != null && !first.isAfter(ctx.end)) {
+                cohorts.computeIfAbsent(first, k -> new ArrayList<>()).add(e.getKey());
+            }
+        }
+
+        // 取最近最多 10 个有新增空间的批次日期
+        List<LocalDate> allCohortDates = new ArrayList<>(cohorts.keySet());
+        List<LocalDate> recentDates = allCohortDates.size() > 10
+                ? allCohortDates.subList(allCohortDates.size() - 10, allCohortDates.size())
+                : allCohortDates;
+
+        int[] offsets = {1, 2, 3, 4, 5, 6, 7};
+        long[] sumRetained = new long[offsets.length];
+        long[] sumEligible = new long[offsets.length];
+        long totalNew = 0;
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (LocalDate d : recentDates) {
+            List<String> wsList = cohorts.getOrDefault(d, List.of());
+            int n = wsList.size();
+            totalNew += n;
+            List<Double> rates = new ArrayList<>(offsets.length);
+            for (int idx = 0; idx < offsets.length; idx++) {
+                LocalDate target = d.plusDays(offsets[idx]);
+                if (target.isAfter(ctx.end)) {
+                    rates.add(null);
+                } else {
+                    long hit = 0;
+                    for (String wid : wsList) {
+                        if (activeByWs.getOrDefault(wid, Set.of()).contains(target)) hit++;
+                    }
+                    sumRetained[idx] += hit;
+                    sumEligible[idx] += n;
+                    rates.add(n == 0 ? 0.0 : round1((double) hit * 100.0 / n));
+                }
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", d.toString());
+            row.put("newUsers", n);
+            row.put("rates", rates);
+            rows.add(row);
+        }
+
+        List<Double> avgRates = new ArrayList<>(offsets.length);
+        for (int idx = 0; idx < offsets.length; idx++) {
+            avgRates.add(sumEligible[idx] == 0 ? null : round1((double) sumRetained[idx] * 100.0 / sumEligible[idx]));
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("offsets", offsets);
+        out.put("totalNew", totalNew);
+        out.put("avgRates", avgRates);
+        out.put("rows", rows);
+        return out;
+    }
+
+    /** 创作任务三段桑基流向图（创作入口 → 应用形态 → 最终执行结果） */
+    private Map<String, Object> sankeyFlowSection(FilterCtx ctx) {
+        String tPred = ctx.wsPred("t.workspace_id");
+        List<Map<String, Object>> raw = jdbc.sql("""
+                select
+                  case t.type
+                    when 'create' then '首次生成'
+                    when 'generate' then '首次生成'
+                    when 'plan' then '方案规划'
+                    when 'chat' then '对话迭代'
+                    when 'modify' then '对话迭代'
+                    when 'import' then '代码导入'
+                    when 'import_code' then '代码导入'
+                    when 'visual_save' then '可视化编辑'
+                    when 'code_save' then '代码直编'
+                    when 'fix' then '一键修复'
+                    when 'clone' then '社区复刻'
+                    when 'template_clone' then '社区复刻'
+                    else coalesce(nullif(t.type, ''), '其他任务')
+                  end as src,
+                  coalesce(nullif(a.type, ''), '通用应用') as mid,
+                  case
+                    when t.status = 'SUCCEEDED' then '构建成功就绪'
+                    when t.status = 'CANCELLED' then '用户取消/中止'
+                    when t.status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING') then '执行中'
+                    when coalesce(t.error_code, '') like '%%MODEL%%' or coalesce(t.error_code, '') like '%%RATE%%' or coalesce(t.error_code, '') like '%%QUOTA%%' then '模型/网关异常'
+                    when coalesce(t.error_code, '') like '%%BUILD%%' or coalesce(t.error_code, '') like '%%VERIFY%%' or coalesce(t.error_code, '') like '%%INSTALL%%' then '构建/校验失败'
+                    else '其他执行失败'
+                  end as dst,
+                  count(*) as cnt
+                from task t
+                left join app a on a.id = t.app_id
+                where %s and t.created_at >= ? and t.created_at < ?
+                group by 1, 2, 3
+                order by cnt desc
+                """.formatted(tPred))
+                .params(concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs}))
+                .query((rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("src", rs.getString("src"));
+                    m.put("mid", rs.getString("mid"));
+                    m.put("dst", rs.getString("dst"));
+                    m.put("cnt", rs.getLong("cnt"));
+                    return m;
+                }).list();
+
+        Map<String, Long> col0 = new LinkedHashMap<>();
+        Map<String, Long> col1 = new LinkedHashMap<>();
+        Map<String, Long> col2 = new LinkedHashMap<>();
+        Map<String, Long> link01 = new LinkedHashMap<>();
+        Map<String, Long> link12 = new LinkedHashMap<>();
+        List<Map<String, Object>> topPaths = new ArrayList<>();
+        long total = 0;
+
+        for (var r : raw) {
+            String s = (String) r.get("src");
+            String m = (String) r.get("mid");
+            String d = (String) r.get("dst");
+            long c = ((Number) r.get("cnt")).longValue();
+            total += c;
+            col0.merge(s, c, Long::sum);
+            col1.merge(m, c, Long::sum);
+            col2.merge(d, c, Long::sum);
+            link01.merge(s + "||" + m, c, Long::sum);
+            link12.merge(m + "||" + d, c, Long::sum);
+            if (topPaths.size() < 5) {
+                Map<String, Object> p = new LinkedHashMap<>();
+                p.put("path", List.of(s, m, d));
+                p.put("count", c);
+                topPaths.add(p);
+            }
+        }
+
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        col0.forEach((k, v) -> nodes.add(Map.of("id", "0:" + k, "col", 0, "label", k, "value", v)));
+        col1.forEach((k, v) -> nodes.add(Map.of("id", "1:" + k, "col", 1, "label", k, "value", v)));
+        col2.forEach((k, v) -> nodes.add(Map.of("id", "2:" + k, "col", 2, "label", k, "value", v)));
+
+        List<Map<String, Object>> links = new ArrayList<>();
+        link01.forEach((k, v) -> {
+            String[] parts = k.split("\\|\\|", 2);
+            links.add(Map.of("source", "0:" + parts[0], "target", "1:" + parts[1], "value", v));
+        });
+        link12.forEach((k, v) -> {
+            String[] parts = k.split("\\|\\|", 2);
+            links.add(Map.of("source", "1:" + parts[0], "target", "2:" + parts[1], "value", v));
+        });
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("total", total);
+        out.put("nodes", nodes);
+        out.put("links", links);
+        out.put("topPaths", topPaths);
+        return out;
+    }
+
+    /** 平台应用资产健康度与僵尸站点治理清单 */
+    private Map<String, Object> assetHealthSection(FilterCtx ctx, LocalDate today) {
+        String aPred = ctx.wsPred("a.workspace_id");
+        LocalDate d7 = today.minusDays(6);
+
+        var agg = jdbc.sql("""
+                select
+                  count(*) as total_active,
+                  count(*) filter (where a.phase = 'ready') as ready_cnt,
+                  count(*) filter (where a.published_version_id is not null) as published_cnt,
+                  count(*) filter (where a.published_version_id is not null and exists (
+                    select 1 from app_pageview_daily p where p.app_id = a.id and p.day >= ? and p.pv > 0
+                  )) as active_7d_cnt,
+                  count(*) filter (where a.published_version_id is not null and not exists (
+                    select 1 from app_pageview_daily p where p.app_id = a.id and p.day >= ? and p.pv > 0
+                  )) as zombie_7d_cnt,
+                  count(*) filter (where a.phase in ('failed', 'stopped')) as stalled_cnt
+                from app a
+                where %s and a.deleted_at is null
+                """.formatted(aPred))
+                .params(concat(new Object[]{d7, d7}, ctx.wsParams()))
+                .query((rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("totalActive", rs.getLong("total_active"));
+                    m.put("readyCount", rs.getLong("ready_cnt"));
+                    m.put("publishedCount", rs.getLong("published_cnt"));
+                    m.put("active7dCount", rs.getLong("active_7d_cnt"));
+                    m.put("zombie7dCount", rs.getLong("zombie_7d_cnt"));
+                    m.put("stalledCount", rs.getLong("stalled_cnt"));
+                    return m;
+                }).single();
+
+        List<Map<String, Object>> zombieSites = jdbc.sql("""
+                select a.id, a.workspace_id, a.name, a.slug, a.type, a.updated_at,
+                  coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
+                  coalesce(u.login_name, '') as owner_login,
+                  coalesce((select sum(p.pv) from app_pageview_daily p where p.app_id = a.id), 0) as total_pv,
+                  (select max(p.day) from app_pageview_daily p where p.app_id = a.id and p.pv > 0) as last_pv_day
+                from app a
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                where %s and a.deleted_at is null and a.published_version_id is not null
+                  and not exists (select 1 from app_pageview_daily p where p.app_id = a.id and p.day >= ? and p.pv > 0)
+                order by last_pv_day asc nulls first, a.updated_at asc
+                limit 12
+                """.formatted(aPred))
+                .params(concat(ctx.wsParams(), new Object[]{d7}))
+                .query((rs, i) -> {
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("id", rs.getString("id"));
+                    r.put("workspaceId", rs.getString("workspace_id"));
+                    r.put("name", rs.getString("name"));
+                    r.put("slug", rs.getString("slug"));
+                    r.put("type", rs.getString("type"));
+                    r.put("ownerName", rs.getString("owner_name"));
+                    r.put("ownerLogin", rs.getString("owner_login"));
+                    r.put("totalPv", rs.getLong("total_pv"));
+                    LocalDate lastDay = rs.getObject("last_pv_day", LocalDate.class);
+                    r.put("lastPvDay", lastDay == null ? null : lastDay.toString());
+                    r.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+                    return r;
+                }).list();
+
+        List<Map<String, Object>> stalledApps = jdbc.sql("""
+                select a.id, a.workspace_id, a.name, a.slug, a.type, a.phase, a.updated_at,
+                  coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
+                  coalesce(u.login_name, '') as owner_login
+                from app a
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                where %s and a.deleted_at is null and a.phase in ('failed', 'stopped')
+                order by a.updated_at desc
+                limit 12
+                """.formatted(aPred))
+                .params(ctx.wsParams())
+                .query((rs, i) -> {
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("id", rs.getString("id"));
+                    r.put("workspaceId", rs.getString("workspace_id"));
+                    r.put("name", rs.getString("name"));
+                    r.put("slug", rs.getString("slug"));
+                    r.put("type", rs.getString("type"));
+                    r.put("phase", rs.getString("phase"));
+                    r.put("ownerName", rs.getString("owner_name"));
+                    r.put("ownerLogin", rs.getString("owner_login"));
+                    r.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+                    return r;
+                }).list();
+
+        Map<String, Object> out = new LinkedHashMap<>(agg);
+        out.put("zombieSites", zombieSites);
+        out.put("stalledApps", stalledApps);
+        return out;
+    }
+
     private List<Map<String, Object>> workspacesSection(FilterCtx ctx) {
-        return jdbc.sql("""
+        List<Map<String, Object>> list = jdbc.sql("""
                 select w.id,
                   w.owner_user_id,
                   coalesce(nullif(u.real_name, ''), u.login_name, '') as owner_name,
@@ -858,6 +1197,30 @@ public class DashboardService {
                     r.put("lastActiveAt", Db.iso(Db.ts(rs, "last_active_at")));
                     return r;
                 }).list();
+
+        // 批量补齐近 7 日每日任务微柱图数组
+        if (!list.isEmpty()) {
+            LocalDate d7 = ctx.end.minusDays(6);
+            OffsetDateTime d7Ts = d7.atStartOfDay(ZONE).toOffsetDateTime();
+            Map<String, Map<LocalDate, Long>> ws7d = new HashMap<>();
+            jdbc.sql("""
+                    select workspace_id, (created_at at time zone 'Asia/Shanghai')::date as d, count(*) as c
+                    from task
+                    where created_at >= ? and created_at < ?
+                    group by 1, 2
+                    """).params(d7Ts, ctx.endTs).query((rs, i) -> {
+                ws7d.computeIfAbsent(rs.getString("workspace_id"), k -> new HashMap<>())
+                        .put(rs.getObject("d", LocalDate.class), rs.getLong("c"));
+                return null;
+            }).list();
+            for (var r : list) {
+                Map<LocalDate, Long> byDay = ws7d.getOrDefault(r.get("workspaceId"), Map.of());
+                List<Long> arr = new ArrayList<>(7);
+                for (int k = 0; k < 7; k++) arr.add(byDay.getOrDefault(d7.plusDays(k), 0L));
+                r.put("trend7d", arr);
+            }
+        }
+        return list;
     }
 
     private Map<String, Object> appsSection(FilterCtx ctx, LocalDate today) {
@@ -893,7 +1256,7 @@ public class DashboardService {
         m.put("byMode", groupCounts("select mode as k, count(*) as c from app where " + wsPred + " and deleted_at is null and created_at >= ? and created_at < ? group by 1 order by 2 desc", winWs));
         m.put("byStyle", groupCounts("select style as k, count(*) as c from app where " + wsPred + " and deleted_at is null and created_at >= ? and created_at < ? group by 1 order by 2 desc", winWs));
 
-        m.put("topApps", jdbc.sql("""
+        List<Map<String, Object>> topApps = jdbc.sql("""
                 select a.id, a.workspace_id, a.name, a.type, a.project_kind, a.phase, a.style,
                   (a.published_version_id is not null) as published,
                   coalesce(ac.status = 'on', false) as cloud_enabled,
@@ -948,7 +1311,25 @@ public class DashboardService {
                     r.put("todayPv", rs.getLong("today_pv"));
                     r.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
                     return r;
-                }).list());
+                }).list();
+
+        if (!topApps.isEmpty()) {
+            LocalDate d7 = today.minusDays(6);
+            Map<String, Map<LocalDate, Long>> pv7d = new HashMap<>();
+            jdbc.sql("select app_id, day, pv from app_pageview_daily where day >= ? and day <= ?")
+                    .params(d7, today).query((rs, i) -> {
+                        pv7d.computeIfAbsent(rs.getString("app_id"), k -> new HashMap<>())
+                                .put(rs.getObject("day", LocalDate.class), rs.getLong("pv"));
+                        return null;
+                    }).list();
+            for (var r : topApps) {
+                Map<LocalDate, Long> byDay = pv7d.getOrDefault(r.get("id"), Map.of());
+                List<Long> arr = new ArrayList<>(7);
+                for (int k = 0; k < 7; k++) arr.add(byDay.getOrDefault(d7.plusDays(k), 0L));
+                r.put("trend7d", arr);
+            }
+        }
+        m.put("topApps", topApps);
         return m;
     }
 

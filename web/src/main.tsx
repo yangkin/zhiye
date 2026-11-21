@@ -14,6 +14,7 @@ import './styles/timeline.css';
 import './styles/community.css';
 import './styles/dashboard.css';
 import './styles/logs.css';
+import './styles/analytics.css';
 import './styles/responsive.css';
 
 const queryClient = new QueryClient({

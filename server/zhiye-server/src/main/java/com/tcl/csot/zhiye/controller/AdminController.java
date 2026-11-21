@@ -59,6 +59,12 @@ public class AdminController {
         return admin.updateQuota(wsId, body == null ? Json.obj() : body, actor);
     }
 
+    @GetMapping("/workspaces/{wsId}/profile")
+    public Map<String, Object> workspaceProfile(@PathVariable String wsId, HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return admin.workspaceProfile(wsId);
+    }
+
     @PostMapping("/apps/{id}/unpublish")
     public Map<String, Object> unpublishApp(@PathVariable String id, HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());

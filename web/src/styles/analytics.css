@@ -1,0 +1,1024 @@
+/* ==========================================================================
+   X-APM 标杆级企业数据可视化与右侧抽屉样式 (AnalyticsCharts & DetailDrawer)
+   ========================================================================== */
+
+/* 顶部章节锚点快速导航条 */
+.xa-anchor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e5e9f2;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+}
+
+.xa-anchor-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.xa-anchor-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  text-decoration: none;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.xa-anchor-pill:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.xa-anchor-pill i {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-anchor-meta {
+  font-size: 12px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 编号分节头（01 核心指标 / 02 转化漏斗...） */
+.xa-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 12px;
+  scroll-margin-top: 20px;
+}
+
+.xa-section-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.xa-section-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-section-title h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.2px;
+}
+
+.xa-section-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.xa-section-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 环比徽标 & 表内微柱图 */
+.xa-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-delta.up {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.xa-delta.down {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.xa-delta.flat {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.xa-micro-bars {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* 蓝底自动诊断洞察条 */
+.xa-insight-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.xa-insight-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+.xa-insight-text b {
+  color: #0f172a;
+}
+
+.xa-empty-inline {
+  padding: 28px 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #64748b;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px dashed #e2e8f0;
+}
+
+/* 02. 梯形漏斗 + 右侧步骤明细表 */
+.dash-hero-split.xa-split-wide {
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+}
+
+.xa-funnel-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 310px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.xa-funnel-svg-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.xa-funnel-svg {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  overflow: visible;
+}
+
+.xa-funnel-step {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.xa-funnel-detail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.xa-compact-table th,
+.xa-compact-table td {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.xa-compact-table th.num,
+.xa-compact-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-step-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.xa-step-name {
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.xa-row-hover td {
+  background: #f8fafc;
+}
+
+.xa-drop-alert {
+  color: #dc2626 !important;
+  font-weight: 700;
+}
+
+/* 03. 日历热力图 + 24h 极坐标玫瑰图 */
+.xa-grid-cal-polar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
+  gap: 16px;
+}
+
+.xa-cal-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.xa-cal-scroll {
+  overflow-x: auto;
+  padding: 4px 0;
+}
+
+.xa-cal-scroll svg {
+  display: block;
+}
+
+.xa-cal-svg {
+  width: 100%;
+  max-width: 920px;
+  height: auto;
+}
+
+.xa-cal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12px;
+  color: #475569;
+}
+
+.xa-cal-hover-info b {
+  color: #0f172a;
+}
+
+.xa-cal-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.xa-cal-legend i {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+
+/* 24 小时极坐标玫瑰图 */
+.xa-polar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.xa-polar-meta {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: #475569;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.xa-polar-meta b {
+  color: #0f172a;
+}
+
+.xa-polar-body {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.xa-polar-svg {
+  width: 100%;
+  max-width: 246px;
+  height: auto;
+}
+
+.xa-polar-svg path {
+  cursor: pointer;
+  transition: fill-opacity 0.14s ease;
+}
+
+.xa-polar-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.xa-polar-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.xa-polar-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+/* 04. 三段桑基流向图 */
+.xa-sankey-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.95fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.xa-sankey-chart {
+  min-width: 0;
+}
+
+.xa-sankey-col-heads {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  padding: 0 12px 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.xa-sankey-col-heads span:nth-child(2) {
+  text-align: center;
+}
+
+.xa-sankey-col-heads span:nth-child(3) {
+  text-align: right;
+  padding-right: 40px;
+}
+
+.xa-sankey-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.xa-sankey-svg path {
+  transition: fill-opacity 0.16s ease;
+  cursor: pointer;
+}
+
+.xa-sankey-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e8edf5;
+}
+
+.xa-sankey-side-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12.5px;
+  color: #0f172a;
+}
+
+.xa-sankey-side-head span {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.xa-path-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.xa-path-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #edf1f7;
+}
+
+.xa-rank-dot {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xa-rank-dot.top {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.xa-path-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.xa-path-crumbs {
+  font-size: 12px;
+  color: #1e293b;
+  line-height: 1.45;
+}
+
+.xa-path-crumbs i {
+  font-style: normal;
+  color: #94a3b8;
+  margin: 0 3px;
+}
+
+.xa-path-crumbs b.err {
+  color: #dc2626;
+}
+
+.xa-path-copy small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 05. Cohort 留存热力矩阵 & 资产健康僵尸治理 */
+.xa-stacked-wrap,
+.xa-cohort-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.xa-cohort-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-cohort-table th {
+  padding: 6px 8px;
+  font-weight: 600;
+  color: #475569;
+  font-size: 11.5px;
+  text-align: left;
+  border-bottom: 1px solid #e8edf5;
+}
+
+.xa-cohort-table th.num,
+.xa-cohort-table td.num {
+  text-align: right;
+}
+
+.xa-cohort-table td {
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: #1e293b;
+}
+
+.xa-cohort-avg td:first-child,
+.xa-cohort-avg td:nth-child(2) {
+  background: #f1f5f9;
+}
+
+.xa-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.xa-health-kpi {
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e8edf5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.xa-health-kpi span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.xa-health-kpi b {
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-health-kpi.ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.xa-health-kpi.ok b {
+  color: #047857;
+}
+
+.xa-health-kpi.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.xa-health-kpi.warn b {
+  color: #b45309;
+}
+
+.xa-row-zombie td {
+  background: #fffdf2;
+}
+
+.xa-row-zombie:hover td {
+  background: #fef9c3;
+}
+
+.xa-zombie-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  margin-left: 5px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   X-APM 风格右侧滑出抽屉 (DetailDrawer & WorkspaceProfileDrawer)
+   ========================================================================== */
+
+.xa-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgba(15, 23, 42, 0.36);
+  backdrop-filter: blur(2px);
+  display: flex;
+  justify-content: flex-end;
+  animation: xa-fade-in 0.16s ease;
+}
+
+@keyframes xa-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes xa-slide-in {
+  from { transform: translateX(28px); opacity: 0.9; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.xa-drawer {
+  height: 100dvh;
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -16px 0 42px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  animation: xa-slide-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.xa-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid #e8edf5;
+  background: #fafbfd;
+}
+
+.xa-drawer-head-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.xa-drawer-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.xa-drawer-title-row h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.xa-drawer-sub {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.xa-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 24px;
+}
+
+.xa-drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 22px;
+  border-top: 1px solid #e8edf5;
+  background: #fafbfd;
+}
+
+.xa-drawer-foot-hint {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.xa-drawer-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.xa-drawer-target-card {
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #1e293b;
+}
+
+.xa-drawer-loading,
+.xa-drawer-error {
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.xa-drawer-error {
+  color: #dc2626;
+}
+
+/* 员工 360° 档案内部布局 */
+.xa-profile-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.xa-drawer-hero {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8faff 0%, #ffffff 100%);
+  border: 1px solid #dbeafe;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.xa-drawer-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.xa-drawer-kpis div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.xa-drawer-kpis span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.xa-drawer-kpis b {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-drawer-bars-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+.xa-drawer-bars-head small {
+  color: #94a3b8;
+}
+
+.xa-drawer-bars {
+  display: grid;
+  grid-template-columns: repeat(30, minmax(0, 1fr));
+  gap: 3px;
+  height: 48px;
+  align-items: end;
+}
+
+.xa-drawer-bar-col {
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.xa-drawer-bar-col i {
+  display: block;
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: #e2e8f0;
+}
+
+.xa-drawer-bar-col i.on {
+  background: #2563eb;
+}
+
+.xa-profile-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.95fr);
+  gap: 14px;
+}
+
+.xa-profile-card {
+  padding: 14px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid #e8edf5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.xa-profile-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.xa-profile-card-head small {
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.xa-profile-app-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.xa-profile-app-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  font-size: 12px;
+}
+
+.xa-profile-app-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.xa-profile-app-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.xa-timeline li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: #334155;
+  border: 1px solid transparent;
+}
+
+.xa-timeline li:hover {
+  background: #f8fafc;
+}
+
+.xa-timeline li.is-err {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.xa-tl-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex: none;
+}
+
+.xa-tl-dot.ok {
+  background: #10b981;
+}
+
+.xa-tl-dot.err {
+  background: #ef4444;
+}
+
+.xa-tl-time {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.xa-tl-tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: #eef2ff;
+  color: #3730a3;
+  white-space: nowrap;
+}
+
+.xa-tl-tag.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.xa-tl-tag.err {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.xa-tl-desc {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.xa-tl-desc b {
+  color: #0f172a;
+  flex-shrink: 0;
+  max-width: 56%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xa-tl-desc small {
+  color: #b91c1c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xa-tl-errcode {
+  background: #fee2e2;
+  color: #b91c1c;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  flex: none;
+}
+
+.xa-tl-dur {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 响应式回退 */
+@media (max-width: 1280px) {
+  .dash-hero-split.xa-split-wide,
+  .xa-grid-cal-polar,
+  .xa-sankey-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .xa-funnel-layout,
+  .xa-profile-split {
+    grid-template-columns: 1fr;
+  }
+  .xa-health-strip,
+  .xa-drawer-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

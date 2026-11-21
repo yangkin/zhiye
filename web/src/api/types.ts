@@ -685,6 +685,7 @@ export interface DashboardData {
     workspacesTotal: number;
     workspacesProductive: number;
     workspacesActiveRange: number;
+    workspacesPrevRange?: number;
     ssoUsersTotal: number;
     appsTotal: number;
     appsRange: number;
@@ -719,6 +720,7 @@ export interface DashboardData {
     taskP95DurationSec: number;
     versionsTotal: number;
     versionsRange: number;
+    versionsPrevRange?: number;
     deploymentsTotal: number;
     buildsTotal: number;
     modelCallsTotal: number;
@@ -744,11 +746,55 @@ export interface DashboardData {
     templatesPublished: number;
     skillhubInstalled: number;
   };
-  funnel: { key: string; label: string; count: number }[];
+  funnel: { key: string; label: string; count: number; baseKey?: string | null; rateLabel?: string | null; rateText?: string | null; subNote?: string | null }[];
   trends: {
     daily: DashboardDailyRow[];
   };
   hourly: { hour: number; total: number; succeeded: number; failed: number }[];
+  calendarHeatmap?: { date: string; tasks: number; apps: number; pv: number; total: number }[];
+  cohortRetention?: {
+    offsets: number[];
+    totalNew: number;
+    avgRates: (number | null)[];
+    rows: { date: string; newUsers: number; rates: (number | null)[] }[];
+  };
+  sankeyFlow?: {
+    total: number;
+    nodes: { id: string; col: number; label: string; value: number }[];
+    links: { source: string; target: string; value: number }[];
+    topPaths: { path: string[]; count: number }[];
+  };
+  assetHealth?: {
+    totalActive: number;
+    readyCount: number;
+    publishedCount: number;
+    active7dCount: number;
+    zombie7dCount: number;
+    stalledCount: number;
+    zombieSites: {
+      id: string;
+      workspaceId: string;
+      name: string;
+      slug: string;
+      type: string;
+      ownerName: string;
+      ownerLogin: string;
+      totalPv: number;
+      lastPvDay: string | null;
+      updatedAt: string;
+    }[];
+    stalledApps: {
+      id: string;
+      workspaceId: string;
+      name: string;
+      slug: string;
+      type: string;
+      phase: string;
+      ownerName: string;
+      ownerLogin: string;
+      updatedAt: string;
+    }[];
+  };
   workspaces: {
     workspaceId: string;
     userId: string | null;
@@ -764,6 +810,7 @@ export interface DashboardData {
     pv: number;
     todayPv: number;
     lastActiveAt: string | null;
+    trend7d?: number[];
   }[];
   apps: {
     byType: { key: string; count: number; published: number; pv: number }[];
@@ -789,6 +836,7 @@ export interface DashboardData {
       totalPv: number;
       todayPv: number;
       updatedAt: string;
+      trend7d?: number[];
     }[];
   };
   tasks: {
@@ -1631,4 +1679,50 @@ export interface AdminOverview {
     buckets: AdminRateLimitBucket[];
   };
   auditLogs: AdminAuditLogItem[];
+}
+
+export interface AdminWorkspaceProfile {
+  owner: {
+    workspaceId: string;
+    ownerUserId: string | null;
+    ownerLogin: string | null;
+    ownerRealName: string | null;
+    ownerEmail: string | null;
+    ownerBound: boolean;
+    ownerName: string;
+    appCount: number;
+    publishedCount: number;
+    conversationCount: number;
+    dataSourceCount: number;
+    activeDays30d: number;
+    totalPv30d: number;
+    totalTasks30d: number;
+    taskSuccessRate30d: number;
+    lastLoginAt: string | null;
+    createdAt: string;
+  };
+  daily30d: { date: string; tasks: number; pv: number }[];
+  typeBreakdown: { key: string; count: number }[];
+  apps: {
+    id: string;
+    name: string;
+    slug: string;
+    type: string;
+    phase: string;
+    published: boolean;
+    totalPv: number;
+    updatedAt: string;
+  }[];
+  timeline: {
+    id: string;
+    kind: string;
+    taskType: string;
+    status: string;
+    errorCode: string | null;
+    errorMessage: string | null;
+    appId: string | null;
+    appName: string;
+    durationMs: number;
+    createdAt: string;
+  }[];
 }
