@@ -36,6 +36,94 @@ async function startViteDevServer(cwd) {
   }
 }
 
+/**
+ * 宽屏（>=1600px）居中窄容器检测（在页面上下文中执行）：
+ * 1. Pattern A：外层布局壳（含侧边栏 + 主区）整体套了 max-w-[1440px] mx-auto，导致左右两侧大片留白；
+ * 2. Pattern B：左侧导航栏贴边，但右侧主工作区（<main> 或其内部包裹层）套了 max-w-5xl/6xl mx-auto，导致主区左右大片留白。
+ * 仅对存在可见 <aside> 或 <table> 的后台/看板/台账类应用生效，不误报单列登录页或小型计算器。
+ */
+export function wideLayoutCheckInPage() {
+  const vw = window.innerWidth
+  if (vw < 1600) return null
+  const visible = (el) => {
+    const b = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    return b.width > 0 && b.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'
+  }
+  const aside = Array.from(document.querySelectorAll('aside')).find((el) => visible(el) && el.getBoundingClientRect().width >= 120 && el.getBoundingClientRect().width <= 420)
+  const hasTable = Array.from(document.querySelectorAll('table')).some((el) => visible(el))
+  if (!aside && !hasTable) return null
+
+  const all = Array.from(document.body.querySelectorAll('*')).filter((el) => !el.closest('[data-zhiye-editor-ui]') && visible(el))
+  const isContentTag = (tag) =>
+    tag === 'ASIDE' || tag === 'TABLE' || tag === 'MAIN' || tag === 'HEADER' || tag === 'SECTION' ||
+    tag === 'H1' || tag === 'H2' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SVG'
+
+  // Pattern A：整页外层内容（含侧边栏）居中缩窄
+  const outerNodes = all.filter((el) => {
+    const tag = el.tagName
+    if (tag === 'HTML' || tag === 'BODY') return false
+    const b = el.getBoundingClientRect()
+    return isContentTag(tag) && b.width < vw - 16 && b.width >= 40 && b.top < window.innerHeight
+  })
+  if (outerNodes.length >= 2) {
+    let minL = vw
+    let maxR = 0
+    for (const el of outerNodes) {
+      const b = el.getBoundingClientRect()
+      if (b.left < minL) minL = b.left
+      if (b.right > maxR) maxR = b.right
+    }
+    const leftGap = Math.round(minL)
+    const rightGap = Math.round(vw - maxR)
+    const usedRatio = (maxR - minL) / vw
+    if (leftGap >= 100 && rightGap >= 100 && usedRatio < 0.85) {
+      return { kind: 'outer', leftGap, rightGap, usedPct: Math.round(usedRatio * 100) }
+    }
+  }
+
+  // Pattern B：左侧导航栏已贴边，但右侧主工作区内部内容被 max-w-* mx-auto 居中锁窄
+  if (aside) {
+    const ab = aside.getBoundingClientRect()
+    if (ab.left < 60 && vw - ab.right >= 1100) {
+      const workLeft = ab.right
+      const workW = vw - workLeft
+      const workNodes = all.filter((el) => {
+        if (el.closest('aside')) return false
+        const tag = el.tagName
+        if (tag === 'HTML' || tag === 'BODY' || tag === 'MAIN') return false
+        const b = el.getBoundingClientRect()
+        return isContentTag(tag) && b.left >= workLeft - 2 && b.width < workW - 24 && b.width >= 36 && b.top < window.innerHeight
+      })
+      if (workNodes.length >= 2) {
+        let minL = vw
+        let maxR = workLeft
+        for (const el of workNodes) {
+          const b = el.getBoundingClientRect()
+          if (b.left < minL) minL = b.left
+          if (b.right > maxR) maxR = b.right
+        }
+        const leftGap = Math.round(minL - workLeft)
+        const rightGap = Math.round(vw - maxR)
+        const usedRatio = (maxR - minL) / workW
+        if (leftGap >= 110 && rightGap >= 110 && usedRatio < 0.84) {
+          return { kind: 'workspace', leftGap, rightGap, usedPct: Math.round(usedRatio * 100) }
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+export function formatWideLayoutIssue(hit) {
+  if (!hit) return null
+  if (hit.kind === 'workspace') {
+    return `宽屏 1920px 下右侧主工作区未铺满（内容仅占主区 ${hit.usedPct}% 宽度，左空 ${hit.leftGap}px、右空 ${hit.rightGap}px），请去掉 <main> 及其内部包裹层的 max-w-* mx-auto，改为 w-full 流式铺展`
+  }
+  return `宽屏 1920px 下外层布局未铺满（仅占 ${hit.usedPct}% 宽度，左侧留白 ${hit.leftGap}px、右侧留白 ${hit.rightGap}px），请去掉最外层 max-w-* mx-auto 窄容器，改为 w-full 让侧边栏与主内容区贴边铺展`
+}
+
 /** 返回 { ok, text, image?, mimeType? }；构建失败或没有浏览器时 ok=false，text 说明原因 */
 export async function takeScreenshot(cwd, { projectKind = 'template', route = '', device = 'desktop', fullPage = false } = {}, env = process.env) {
   const chromePath = env.ZHIYE_CHROME_PATH
@@ -103,48 +191,17 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
           clipped.push(desc(el))
       }
       const pick = (sel, n) => Array.from(document.querySelectorAll(sel)).filter(visible).slice(0, n).map((e) => (e.innerText || e.getAttribute('aria-label') || e.getAttribute('placeholder') || '').trim().replace(/\s+/g, ' ').slice(0, 40)).filter(Boolean)
-      // 宽屏（>=1600px）留白检测：后台/看板如果把侧边栏或主工作区锁在 max-w-[1440px] mx-auto，左右会各空出一大块
-      let narrowCentered = null
-      if (vw >= 1600) {
-        const isAppShell = !!document.querySelector('aside, nav, table, [class*="sidebar"], [class*="dashboard"]')
-        if (isAppShell) {
-          const contentNodes = all.filter((el) => {
-            if (!visible(el)) return false
-            const tag = el.tagName
-            if (tag === 'HTML' || tag === 'BODY') return false
-            const b = el.getBoundingClientRect()
-            // 忽略占满整屏的背景包裹层，只看实际承载内容的区块（文字、表格、侧边栏、卡片、按钮）
-            const hasDirectContent =
-              tag === 'ASIDE' || tag === 'TABLE' || tag === 'MAIN' || tag === 'HEADER' || tag === 'SECTION' ||
-              tag === 'H1' || tag === 'H2' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SVG'
-            return hasDirectContent && b.width < vw - 16 && b.width >= 40 && b.top < window.innerHeight
-          })
-          if (contentNodes.length >= 2) {
-            let minL = vw
-            let maxR = 0
-            for (const el of contentNodes) {
-              const b = el.getBoundingClientRect()
-              if (b.left < minL) minL = b.left
-              if (b.right > maxR) maxR = b.right
-            }
-            const leftGap = Math.round(minL)
-            const rightGap = Math.round(vw - maxR)
-            const usedRatio = (maxR - minL) / vw
-            if (leftGap >= 110 && rightGap >= 110 && usedRatio < 0.84) {
-              narrowCentered = { leftGap, rightGap, usedPct: Math.round(usedRatio * 100) }
-            }
-          }
-        }
-      }
       return {
         title: document.title,
         scrollWidth: document.documentElement.scrollWidth, vw, height: document.documentElement.scrollHeight,
         hasViewport: !!document.querySelector('meta[name="viewport"]'),
         headings: pick('h1,h2,h3', 12), buttons: pick('button,a[role=button],[role=tab]', 20), inputs: pick('input,textarea,select', 12),
         text: (document.body.innerText || '').trim().replace(/\n{3,}/g, '\n\n').slice(0, 1500),
-        overflow, clipped, narrowCentered,
+        overflow, clipped,
       }
     }).catch((e) => { errors.push(`无法读取页面：${String(e.message).split('\n')[0]}`); return null })
+    const wideHit = info ? await page.evaluate(wideLayoutCheckInPage).catch(() => null) : null
+    if (info && wideHit) info.narrowCentered = wideHit
     const shot = await page.screenshot({ type: 'jpeg', quality: 70, fullPage: false, ...(fullPage ? { clip: { x: 0, y: 0, width: dev.viewport.width, height: Math.min(info?.height || dev.viewport.height, 2400) }, fullPage: true } : {}) })
     await ctx.close().catch(() => {})
     const lines = [`截图（${dev.label}${r ? '，' + r : ''}）`]
@@ -161,8 +218,8 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
       if (info.overflow.length) issues.push(`超出屏幕右侧的元素：${info.overflow.join('，')}`)
       if (info.clipped.length) issues.push(`文字被截断（没有省略号）：${info.clipped.join('，')}`)
       if (info.narrowCentered) {
-        const { leftGap, rightGap, usedPct } = info.narrowCentered
-        issues.push(`宽屏下内容区未铺满（仅占 ${usedPct}% 宽度，左侧留白 ${leftGap}px、右侧留白 ${rightGap}px），请去掉外层 max-w-* mx-auto 窄容器，改为 w-full 流式布局使侧边栏与主区贴边铺展`)
+        const msg = formatWideLayoutIssue(info.narrowCentered)
+        if (msg) issues.push(msg)
       }
       if (!info.text) issues.push('页面没有任何可见文字（可能是空白页）')
       lines.push(issues.length ? `⚠ 布局问题：\n- ${issues.join('\n- ')}` : '没有检测到横向溢出或文字截断。')

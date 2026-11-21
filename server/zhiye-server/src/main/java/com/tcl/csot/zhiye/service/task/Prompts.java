@@ -37,7 +37,7 @@ public final class Prompts {
         sb.append("""
                 - 使用 Tailwind 类名写样式；不要引用任何外部网络资源（字体、图片、CDN 脚本）
                 - 界面文字全部使用中文；按钮、表单都要有真实可用的交互和明确反馈
-                - 电脑全分辨率流式适配（1280px 笔记本 / 1440px / 1920px 办公屏 / 2K / 4K 大屏）：业务后台、管理台账、数据看板的外层壳（含左侧导航 + 主内容区）必须使用 `w-full` 铺满浏览器左右边缘，严禁给外层布局壳或主工作区套 `max-w-5xl` / `max-w-6xl` / `max-w-7xl` / `max-w-[1280px]` / `max-w-[1440px]` + `mx-auto` 造成宽屏左右大片留白；表格外层必包 `overflow-x-auto`，表头、状态胶囊、单号、日期与操作列加 `whitespace-nowrap` 防止竖排折行
+                - 电脑全分辨率流式适配（1280px 笔记本 / 1440px / 1920px 办公屏 / 2K / 4K 大屏）：业务后台、管理台账、数据看板不仅外层壳（左侧导航 + 主内容区）必须 `w-full` 贴边，**`<main>` 右侧主工作区内部也不得套 `max-w-4xl` / `max-w-5xl` / `max-w-6xl` / `max-w-7xl` / `max-w-[1280px]` / `max-w-[1440px]` + `mx-auto`**（杜绝整页居中留白和「侧边栏贴左、右侧表格/卡片却缩在中间一小条」两种大屏留白）；表格外层必包 `overflow-x-auto`，表头、状态胶囊、单号、日期与操作列加 `whitespace-nowrap` 防止竖排折行
                 - 不要修改依赖（package.json），不要启动开发服务器
                 """);
         sb.append(com.tcl.csot.zhiye.constants.Capabilities.GENERATE);

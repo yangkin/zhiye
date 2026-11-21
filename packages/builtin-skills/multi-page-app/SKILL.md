@@ -33,8 +33,8 @@ export default function App() {
 
 ## 布局
 - **全宽流式布局（严禁外层居中窄盒）**：
-  - ✅ 正确：`<div className="flex min-h-screen w-full">` + 左侧 `<aside className="w-56 shrink-0 ...">` 紧贴浏览器左边缘 + 右侧 `<main className="flex-1 min-w-0 w-full px-6 py-6">` 流式铺满至浏览器右边缘（适配 1280px 笔记本、1440px、1920px 办公屏和 2K/4K 大屏，绝无两侧大片空白）。
-  - ❌ 严禁：`<div className="mx-auto max-w-[1440px] flex">` 或 `<main className="mx-auto max-w-6xl">` / `max-w-7xl`（在 1920/2K/4K 全屏或大屏显示器上会导致左右两边出现大块空白！）。
+  - ✅ 正确：`<div className="flex min-h-screen w-full">` + 左侧 `<aside className="w-56 shrink-0 ...">` 紧贴浏览器左边缘 + 右侧 `<main className="flex-1 min-w-0 w-full px-6 py-6">` 内部直接 `w-full` 铺满至浏览器右边缘（适配 1280px 笔记本、1440px、1920px 办公屏和 2K/4K 大屏，绝无两侧大片空白）。
+  - ❌ 严禁：`<div className="mx-auto max-w-[1440px] flex">` 或 `<main className="flex-1"><div className="mx-auto max-w-5xl">` / `max-w-6xl` / `max-w-7xl`（无论是整页居中还是侧边栏贴边但右侧主区缩在中间一小条，都会导致 1920/2K/4K 大屏大片空白，且会被 1920 宽屏校验拦截！）。
   - `< 1024px`（`lg:` 以下）侧边栏自动收起为顶部标题栏 + 抽屉菜单。
 - 每个页面顶部：标题 + 一句说明 + 右侧主操作按钮（如「新增设备」），支持 `flex-wrap gap-3` 避免窄屏按钮挤压。
 - 列表页：搜索框 + 筛选下拉（`flex-wrap gap-2`）+ 带 `overflow-x-auto` 的表格；表头、状态胶囊、单号、日期与操作列按钮均加 `whitespace-nowrap` 防止被挤成竖排；行操作（查看、编辑、删除）放在最后一列，不要调用浏览器原生 `window.confirm()` / `alert()` / `prompt()`（沙箱预览会静默拦截）。

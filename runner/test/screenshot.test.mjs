@@ -39,16 +39,26 @@ test('截图自查：宽屏 1920×1080 检出 max-w-[1440px] mx-auto 两侧留�
     const bad = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
     assert.equal(bad.ok, true, bad.text)
     assert.match(bad.text, /宽屏 1920×1080/)
-    assert.match(bad.text, /宽屏下内容区未铺满/)
+    assert.match(bad.text, /外层布局未铺满/)
+
+    // Pattern B：左侧边栏贴边，但右侧 <main> 内部套了 max-w-5xl mx-auto（如设备点检记录系统）
+    writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><head><title>设备点检记录系统</title></head><body style="margin:0;background:#f4f3fb">
+      <div style="width:100%;display:flex;min-height:100vh">
+        <aside style="width:210px;background:#fff;padding:16px">设备列表</aside>
+        <main style="flex:1;padding:24px"><div style="max-width:960px;margin:0 auto"><h1>设备列表</h1><table style="width:100%"><tr><th>编号</th></tr><tr><td>SB-001</td></tr></table></div></main>
+      </div></body></html>`)
+    const badInner = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
+    assert.equal(badInner.ok, true, badInner.text)
+    assert.match(badInner.text, /右侧主工作区未铺满/)
 
     writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><head><title>研发协同台</title></head><body style="margin:0;background:#eef5f1">
       <div style="width:100%;display:flex;min-height:100vh">
         <aside style="width:220px;background:#fff;padding:16px">导航栏</aside>
-        <main style="flex:1;padding:24px"><h1>交付看板</h1><table><tr><th>项目</th></tr><tr><td>测试</td></tr></table></main>
+        <main style="flex:1;padding:24px"><h1>交付看板</h1><table style="width:100%"><tr><th>项目</th></tr><tr><td>测试</td></tr></table></main>
       </div></body></html>`)
     const good = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
     assert.equal(good.ok, true, good.text)
-    assert.doesNotMatch(good.text, /宽屏下内容区未铺满/)
+    assert.doesNotMatch(good.text, /未铺满/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

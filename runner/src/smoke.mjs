@@ -4,6 +4,7 @@ import { createReadStream, existsSync, readFileSync, statSync, mkdtempSync, rmSy
 import path from 'node:path'
 import os from 'node:os'
 import { log } from './util.mjs'
+import { wideLayoutCheckInPage, formatWideLayoutIssue } from './screenshot.mjs'
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -219,11 +220,22 @@ export async function smokeTest(dir, { requireRoot = false, captureShot = false,
     }
 
     let screenshot = null
-    if (captureShot && errors.length === 0) {
+    if (requireRoot && errors.length === 0) {
       try {
-        // 以 1920×1080 宽屏采集首屏截图送视觉评审，既看清全貌又能及时发现窄容器居中导致的大屏两侧留白
+        // 宽屏（1920×1080）巡检 + 首屏截图：同时拦截「外层套 max-w-[1440px] mx-auto」与「侧边栏贴边但主工作区套 max-w-5xl mx-auto」两种宽屏大留白
         await page.setViewportSize({ width: 1920, height: 1080 }).catch(() => {})
         await page.waitForTimeout(200)
+        const wideHit = await page.evaluate(wideLayoutCheckInPage).catch(() => null)
+        if (wideHit) {
+          const msg = formatWideLayoutIssue(wideHit)
+          if (msg) errors.push(msg)
+        }
+        if (captureShot && errors.length === 0) {
+          screenshot = (await page.screenshot({ type: 'jpeg', quality: 60, fullPage: false })).toString('base64')
+        }
+      } catch {}
+    } else if (captureShot && errors.length === 0) {
+      try {
         screenshot = (await page.screenshot({ type: 'jpeg', quality: 60, fullPage: false })).toString('base64')
       } catch {}
     }
