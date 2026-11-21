@@ -61,8 +61,8 @@
 .cp-tabs button:hover { background: #ffffffc8; color: #1d1533; }
 .cp-tabs button.selected { background: #fff; color: #1d1533; font-weight: 700; box-shadow: 0 4px 16px #4e3a8a1c; }
 
-.cp-composer.composer { max-width: none; margin: 0; padding: 20px 22px 14px; border-radius: 20px; border: 1px solid #ece8f3; background: #ffffffeb; backdrop-filter: blur(14px); box-shadow: 0 12px 34px #51408c12; }
-.cp-composer.composer textarea { font-size: 15px; line-height: 1.8; min-height: 128px; max-height: 300px; color: #2d253d; }
+.cp-composer.composer { max-width: none; margin: 0; padding: clamp(14px, 1.8vh, 20px) clamp(16px, 1.6vw, 22px) 12px; border-radius: 20px; border: 1px solid #ece8f3; background: #ffffffeb; backdrop-filter: blur(14px); box-shadow: 0 12px 34px #51408c12; }
+.cp-composer.composer textarea { font-size: clamp(14px, 0.95vw, 15.5px); line-height: 1.75; min-height: clamp(88px, 13.5vh, 132px); max-height: clamp(144px, 24vh, 260px); color: #2d253d; }
 .cp-composer.composer textarea::placeholder { color: #a199b0; }
 .cp-composer .send-button { width: 42px; height: 42px; border-radius: 14px; }
 

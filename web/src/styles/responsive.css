@@ -20,23 +20,23 @@
   padding-bottom: 48px;
 }
 
-/* 2. 创造首页：外层容器流式展开让场景模板/社区网格铺满大屏，核心输入卡片居中保持舒适阅读宽度 */
+/* 2. 创造首页：外层容器流式展开让场景模板/社区网格铺满大屏，核心输入卡片按视口平滑自适应 */
 .create-page.cp,
 .create-page {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: clamp(28px, 6vh, 64px) clamp(24px, 3.5vw, 72px) 56px;
+  padding: clamp(20px, 4.5vh, 56px) clamp(24px, 3.5vw, 72px) 56px;
   box-sizing: border-box;
 }
 
 .cp-card {
-  max-width: min(1080px, 100%);
+  max-width: min(100%, clamp(840px, 66vw, 1340px));
 }
 
 .cp-ask,
 .cp-thread {
-  max-width: min(1040px, 100%);
+  max-width: min(100%, clamp(800px, 62vw, 1240px));
 }
 
 .create-page .inspiration-grid {
@@ -306,17 +306,6 @@
 }
 
 /* 8. FHD 1920px+ 宽屏增强 */
-@media (min-width: 1600px) {
-  .cp-card {
-    max-width: min(1220px, 100%);
-  }
-
-  .cp-ask,
-  .cp-thread {
-    max-width: min(1160px, 100%);
-  }
-}
-
 @media (min-width: 1800px) {
   .logs-split {
     grid-template-columns: 400px minmax(0, 1fr);
@@ -356,15 +345,6 @@
 @media (min-width: 2400px) {
   .logs-split {
     grid-template-columns: 460px minmax(0, 1fr);
-  }
-
-  .cp-card {
-    max-width: 1360px;
-  }
-
-  .cp-ask,
-  .cp-thread {
-    max-width: 1260px;
   }
 
   /* 4K 下用更饱满的卡片宽度，避免 10 张模板挤成一排细条 */

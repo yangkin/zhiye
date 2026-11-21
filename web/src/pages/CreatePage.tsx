@@ -155,12 +155,22 @@ export function CreatePage() {
     textarea.current?.focus();
   }, []);
 
-  // 输入框随内容自动增高（128px ~ 300px），点场景模板或写多行需求不再被截断
+  // 输入框高度按屏幕视口高度自适应（短屏笔记本克制不挤掉下方模板，大屏舒展展开），随窗口缩放实时调整
   useLayoutEffect(() => {
-    const el = textarea.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(300, Math.max(128, el.scrollHeight))}px`;
+    const syncHeight = () => {
+      const el = textarea.current;
+      if (!el) return;
+      const vh = window.innerHeight || 800;
+      const minH = Math.round(Math.min(132, Math.max(88, vh * 0.135)));
+      const maxH = Math.round(Math.min(260, Math.max(144, vh * 0.24)));
+      el.style.minHeight = `${minH}px`;
+      el.style.maxHeight = `${maxH}px`;
+      el.style.height = 'auto';
+      el.style.height = `${Math.min(maxH, Math.max(minH, el.scrollHeight))}px`;
+    };
+    syncHeight();
+    window.addEventListener('resize', syncHeight);
+    return () => window.removeEventListener('resize', syncHeight);
   }, [f.prompt]);
 
   /** 聊清楚了，用这段对话里的需求开始做 */
@@ -218,7 +228,12 @@ export function CreatePage() {
     const prev = f.prompt.trim();
     f.set({ prompt: text });
     if (prev && prev !== text.trim()) toast('已换成推荐的需求', 'ok', { label: '撤销', run: () => useCreateForm.getState().set({ prompt: prev }) });
-    setTimeout(() => textarea.current?.focus(), 0);
+    setTimeout(() => {
+      const el = textarea.current;
+      if (!el) return;
+      el.focus();
+      el.scrollTop = 0;
+    }, 0);
   };
 
   return (
