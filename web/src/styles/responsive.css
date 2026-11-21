@@ -31,12 +31,12 @@
 }
 
 .cp-card {
-  max-width: min(1040px, 100%);
+  max-width: min(1080px, 100%);
 }
 
 .cp-ask,
 .cp-thread {
-  max-width: min(960px, 100%);
+  max-width: min(1040px, 100%);
 }
 
 .create-page .inspiration-grid {
@@ -306,6 +306,17 @@
 }
 
 /* 8. FHD 1920px+ 宽屏增强 */
+@media (min-width: 1600px) {
+  .cp-card {
+    max-width: min(1220px, 100%);
+  }
+
+  .cp-ask,
+  .cp-thread {
+    max-width: min(1160px, 100%);
+  }
+}
+
 @media (min-width: 1800px) {
   .logs-split {
     grid-template-columns: 400px minmax(0, 1fr);
@@ -348,12 +359,12 @@
   }
 
   .cp-card {
-    max-width: 1220px;
+    max-width: 1360px;
   }
 
   .cp-ask,
   .cp-thread {
-    max-width: 1100px;
+    max-width: 1260px;
   }
 
   /* 4K 下用更饱满的卡片宽度，避免 10 张模板挤成一排细条 */

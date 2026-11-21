@@ -55,16 +55,16 @@
 .cp-glow i:nth-child(3) { background: #a9d4ff; left: calc(var(--glow-x, 20%) - 20%); top: 40%; height: 80%; width: 28%; opacity: .35; animation: cp-drift 12s ease-in-out infinite alternate-reverse; }
 @keyframes cp-drift { from { transform: translate(-6%, -4%) scale(1); } to { transform: translate(8%, 6%) scale(1.12); } }
 
-.cp-tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 140px 8px 4px; }
-.cp-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 20px; border: 0; border-radius: 16px; background: transparent; color: #5e566c; font-size: 14px; cursor: pointer; transition: background .2s, color .2s, box-shadow .2s; }
-.cp-tabs button .icon { width: 16px; height: 16px; }
-.cp-tabs button:hover { background: #ffffffa8; color: #2c2240; }
-.cp-tabs button.selected { background: #fff; color: #2c2240; font-weight: 600; box-shadow: 0 4px 14px #4e3a8a14; }
+.cp-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 144px 10px 6px; }
+.cp-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 20px; border: 0; border-radius: 16px; background: transparent; color: #362d4d; font-size: 15px; font-weight: 600; letter-spacing: -.1px; cursor: pointer; transition: background .2s, color .2s, box-shadow .2s; }
+.cp-tabs button .icon { width: 17px; height: 17px; stroke-width: 1.9; }
+.cp-tabs button:hover { background: #ffffffc8; color: #1d1533; }
+.cp-tabs button.selected { background: #fff; color: #1d1533; font-weight: 700; box-shadow: 0 4px 16px #4e3a8a1c; }
 
-.cp-composer.composer { max-width: none; margin: 0; padding: 18px 18px 12px; border-radius: 20px; border: 1px solid #ece8f3; background: #ffffffe6; backdrop-filter: blur(14px); box-shadow: 0 10px 30px #51408c0f; }
-.cp-composer.composer textarea { font-size: 14.5px; line-height: 1.8; min-height: 96px; color: #3a304a; }
-.cp-composer.composer textarea::placeholder { color: #aaa2b7; }
-.cp-composer .send-button { width: 40px; height: 40px; border-radius: 14px; }
+.cp-composer.composer { max-width: none; margin: 0; padding: 20px 22px 14px; border-radius: 20px; border: 1px solid #ece8f3; background: #ffffffeb; backdrop-filter: blur(14px); box-shadow: 0 12px 34px #51408c12; }
+.cp-composer.composer textarea { font-size: 15px; line-height: 1.8; min-height: 128px; max-height: 300px; color: #2d253d; }
+.cp-composer.composer textarea::placeholder { color: #a199b0; }
+.cp-composer .send-button { width: 42px; height: 42px; border-radius: 14px; }
 
 /* ---------- 小织 ---------- */
 .cp-pet { position: absolute; right: 30px; top: -80px; z-index: 2; }

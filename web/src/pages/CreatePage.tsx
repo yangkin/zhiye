@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { useNavigate } from 'react-router-dom';
@@ -155,6 +155,14 @@ export function CreatePage() {
     textarea.current?.focus();
   }, []);
 
+  // 输入框随内容自动增高（128px ~ 300px），点场景模板或写多行需求不再被截断
+  useLayoutEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(300, Math.max(128, el.scrollHeight))}px`;
+  }, [f.prompt]);
+
   /** 聊清楚了，用这段对话里的需求开始做 */
   const buildFromThread = async () => {
     const asks = thread.filter((t) => t.role === 'user' && t.content.trim());
@@ -306,7 +314,7 @@ export function CreatePage() {
         <textarea
           ref={textarea}
           id="home-prompt"
-          rows={3}
+          rows={4}
           placeholder="直接说说你的想法，边聊边做，不用先选类型…"
           maxLength={3000}
           aria-label="应用需求"
