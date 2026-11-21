@@ -6,7 +6,10 @@ description: 业务表单（录入、编辑、校验）和数据表格（搜索�
 
 ## 表单
 - 用受控组件 + 一个 `errors` 对象；提交时整体校验，字段失焦时单独校验，错误显示在字段下方（红色小字）。
-- 必填项标签后加红色 `*`；日期用 `<input type="date">`，枚举用 `<select>`，多行说明用 `<textarea>`。
+- 必填项标签后加红色 `*`；日期用 `<input type="date">`，多行说明用 `<textarea>`。
+- **统一自定义下拉（禁止原生 `<select>`）**：表单枚举和列表筛选下拉**严禁使用浏览器原生 `<select>`**（macOS/Windows 会弹出系统自带的深灰原生菜单，与浅色/暗色页面风格严重割裂）；统一使用模板已预置的自定义下拉组件：
+  - React：`import { Select } from './components/Select'`（支持 `value`、`options: { value, label, hint? }[] | string[]`、`onChange`、`placeholder`、`className`）
+  - Vue：`import CustomSelect from './components/CustomSelect.vue'`（支持 `v-model`、`options`、`placeholder`）
 - 提交按钮在提交中禁用并显示「保存中…」；成功后给出明确反馈（顶部提示条或回到列表并高亮新行）。
 - 编辑和新增共用一个表单组件，用 `initialValue` 区分。
 

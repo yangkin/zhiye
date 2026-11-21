@@ -22,6 +22,7 @@ const TEMPLATE = `
 ## 项目结构（Vite 7 + React 19 + TypeScript 5.9 + Tailwind CSS 4）
 - 只修改 src/、public/、index.html，以及需要时的 skill/（技能：SKILL.md、scripts/、references/）和 docs/（Markdown 技术文档）；不要修改 package.json、vite.config.ts、tsconfig.json。
 - 入口组件是 src/App.tsx（默认导出 App）；可复用组件放在 src/components/，每个组件一个 .tsx 文件。
+- **统一下拉框组件（禁止原生 \`<select>\`）**：模板已预置自定义下拉组件 \`src/components/Select.tsx\`（\`import { Select } from './components/Select'\`，props 为 \`value\`、\`options\`、\`onChange\`、\`placeholder\`、\`className\`）；所有表单选择、筛选下拉、角色切换一律使用该组件（可按页面主题色微调样式），**不要写浏览器原生 \`<select>\`**，避免弹出深灰系统菜单破坏页面视觉统一。
 - src/main.tsx 负责挂载，一般不需要改；src/index.css 里已经 @import "tailwindcss"。
 - 样式用 Tailwind 类名。只能使用模板已预装的依赖（不要引入其他库，也不要改 package.json）：
   - react、react-dom
@@ -39,6 +40,7 @@ const VUE = `
 ## 项目结构（Vite 7 + Vue 3.5 + TypeScript 5.9 + Tailwind CSS 4）
 - 只修改 src/、public/、index.html，以及需要时的 docs/（Markdown 技术文档）；不要修改 package.json、vite.config.ts、tsconfig.json。
 - 入口组件是 src/App.vue；可复用组件放在 src/components/，每个组件一个 .vue 单文件组件。src/main.ts 负责挂载（createApp(App).mount('#app')），需要路由时在这里 app.use(router)。
+- **统一下拉框组件（禁止原生 \`<select>\`）**：模板已预置自定义下拉组件 \`src/components/CustomSelect.vue\`（支持 \`v-model\`、\`options\`、\`placeholder\`）；所有表单与筛选下拉一律使用自定义下拉组件，**不要写浏览器原生 \`<select>\`**。
 - 组件统一用 \`<script setup lang="ts">\` + 组合式 API（ref / reactive / computed / watch / onMounted），props 用 defineProps<{...}>()，事件用 defineEmits；不要用选项式 API，不要写 JSX。
 - 样式用 Tailwind 类名（src/style.css 里已经 @import "tailwindcss"），不要用 <style scoped> 写大段样式。只能使用模板已预装的依赖（不要引入其他库，也不要改 package.json）：
   - vue
