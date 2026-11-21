@@ -9,7 +9,14 @@
 .tl-text p{margin:0 0 8px}
 .tl-text ul,.tl-text ol{margin:0 0 8px;padding-left:18px}
 .tl-text li{margin:2px 0}
-.tl-text code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:var(--st-raised);border-radius:4px;padding:1px 5px}
+/* 覆盖 .progress-card ol / .progress-card li 的 flex 布局，避免流式 Markdown 列表把文字和 <code> 拆成竖排单字列 */
+.progress-card .tl-text ul,.timeline .tl-text ul{display:block;list-style:disc outside;margin:0 0 10px;padding-left:18px;gap:0}
+.progress-card .tl-text ol,.timeline .tl-text ol{display:block;list-style:decimal outside;margin:0 0 10px;padding-left:18px;gap:0}
+.progress-card .tl-text li,.timeline .tl-text li{display:list-item;align-items:initial;gap:0;margin:3px 0;font-size:inherit;line-height:1.85;color:var(--st-ink)}
+.progress-card .tl-text li>span,.timeline .tl-text li>span{display:inline}
+.progress-card .tl-text li>p,.timeline .tl-text li>p{margin:0 0 4px}
+.progress-card .tl-text li>p:last-child,.timeline .tl-text li>p:last-child{margin-bottom:0}
+.tl-text code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;background:var(--st-raised);border-radius:4px;padding:1px 5px;display:inline;overflow-wrap:anywhere}
 .tl-text pre{background:var(--st-raised);border-radius:8px;padding:10px 12px;overflow:auto;margin:0 0 8px}
 .tl-text pre code{background:none;padding:0}
 .tl-text h1,.tl-text h2,.tl-text h3,.tl-text h4{font-size:12px;font-weight:600;margin:12px 0 6px;color:var(--st-ink)}
@@ -38,9 +45,11 @@ button.tl-step:hover{background:var(--st-raised)}
 .tl-verify{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .tl-verify .tl-step{width:auto;border:1px solid var(--st-line);padding:3px 8px;font-size:11px}
 .tl-verify .tl-step.ok{color:var(--st-success);border-color:var(--st-line)}
-.tl-verify .tl-step.bad{color:var(--st-danger);border-color:var(--st-danger-line)}
+.tl-verify .tl-step.bad{color:var(--st-danger);border-color:var(--st-danger-line);background:var(--st-danger-soft);flex-wrap:wrap;align-items:flex-start;width:100%;padding:7px 10px;row-gap:4px}
+.tl-verify .tl-step.bad .tl-mark{margin-top:2px}
+.tl-verify .tl-step.bad .tl-step-text{white-space:normal;font-weight:500}
 .tl-verify .tl-step.skip{color:var(--st-muted)}
-.tl-check-detail{display:block;width:100%;font-size:12px;color:var(--st-muted);margin-top:2px}
+.tl-check-detail{display:block;flex:0 0 100%;width:100%;font-size:11.5px;line-height:1.65;color:var(--st-ink-2);margin-top:2px;padding-left:22px;word-break:break-word}
 
 /* 思考过程 */
 .tl-thinking{margin:2px 0}

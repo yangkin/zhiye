@@ -206,8 +206,11 @@ export class Agent {
         break
       case 'message_update': {
         const ae = e.assistantMessageEvent
-        if (ae?.type === 'text_delta' && ae.delta) emitEvent({ type: 'agent_text', delta: ae.delta })
-        else if (ae?.type === 'thinking_start') this.thinking.start()
+        if (ae?.type === 'text_delta' && ae.delta) {
+          // 正文开始前先冲刷并结束未收尾的思考块，避免延迟刷新的思考气泡把一句话截成两半
+          this.thinking.end()
+          emitEvent({ type: 'agent_text', delta: ae.delta })
+        } else if (ae?.type === 'thinking_start') this.thinking.start()
         else if (ae?.type === 'thinking_delta') this.thinking.delta(ae.delta)
         else if (ae?.type === 'thinking_end') this.thinking.end()
         break
