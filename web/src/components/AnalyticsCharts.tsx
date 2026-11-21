@@ -269,6 +269,7 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
     : null;
 
   return (
+    <div className="xa-funnel-host">
     <div className="xa-funnel-layout">
       <div className="xa-funnel-svg-wrap">
         <svg viewBox={`0 0 ${svgW} ${svgH}`} className="xa-funnel-svg" role="img" aria-label="全链路梯形转化漏斗">
@@ -386,6 +387,7 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
           </InsightBox>
         ) : null}
       </div>
+    </div>
     </div>
   );
 }
