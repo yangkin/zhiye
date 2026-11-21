@@ -13,7 +13,7 @@ interface ModalProps {
   className?: string;
 }
 
-export function Modal({ title, children, footer, wide, onClose, overline = 'ZHIYE WORKSPACE', className = '' }: ModalProps) {
+export function Modal({ title, children, footer, wide, onClose, overline = '', className = '' }: ModalProps) {
   useEscape(onClose);
   const box = useRef<HTMLElement>(null);
   useDialogFocus(box);
@@ -22,7 +22,7 @@ export function Modal({ title, children, footer, wide, onClose, overline = 'ZHIY
       <section ref={box} className={`modal ${wide ? 'modal-wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <div>
-            <span className="overline">{overline}</span>
+            {overline ? <span className="overline">{overline}</span> : null}
             <h2>{title}</h2>
           </div>
           <button className="icon-button" aria-label="关闭" onClick={onClose}>

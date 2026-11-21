@@ -60,13 +60,9 @@ export function HistoryPage() {
       <header className="dash-header-top history-header-compact">
         <div className="dash-title-block">
           <div className="dash-title-row">
-            <h1>版本与创作记录</h1>
-            <span className="dash-scope-badge workspace">
-              <i className="dash-pulse-dot" aria-hidden="true" />
-              每一步都有迹可循
-            </span>
+            <h1>历史记录</h1>
           </div>
-          <p>按时间线回溯应用版本、对话文档与回收站，支持一键预览、收藏备注与无损回滚。</p>
+          <p>查看应用版本、对话记录与回收站，支持预览、备注与回滚。</p>
         </div>
       </header>
       <HistoryStats />

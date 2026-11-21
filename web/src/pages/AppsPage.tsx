@@ -85,13 +85,12 @@ export function AppsPage() {
     <div className="content-page apps-page">
       <div className="page-heading">
         <div>
-          <span className="overline">YOUR IDEAS, TAKING SHAPE</span>
-          <h1>每个好想法，都在这里。</h1>
-          <p>管理你的应用，继续未完的创作。</p>
+          <h1>我的应用</h1>
+          <p>管理已创建的应用，查看发布状态与访问数据。</p>
         </div>
         <button className="primary-button" onClick={() => navigate('/create')}>
           <Icon name="plus" />
-          创造新应用
+          新建应用
         </button>
       </div>
       <AppsKpiGrid

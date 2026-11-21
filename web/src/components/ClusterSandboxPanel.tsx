@@ -289,16 +289,16 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
       <section className="dash-section" aria-label="集群与沙箱实时拓扑摘要">
         <div className="dash-sec-title-row">
           <div className="dash-sec-title">
-            <h2>集群多副本拓扑与沙箱控制面</h2>
+            <h2>集群与沙箱状态</h2>
             <p>
-              当前沙箱引擎：<code className="dash-code">{PROVIDER_LABELS[data.sandboxProvider] ?? data.sandboxProvider}</code> ·{' '}
-              {sbxSum.controlPlaneMessage || '控制面正常'}
+              沙箱引擎：<code className="dash-code">{PROVIDER_LABELS[data.sandboxProvider] ?? data.sandboxProvider}</code> ·{' '}
+              {sbxSum.controlPlaneMessage || '运行正常'}
             </p>
           </div>
           {onOpenClusterTab ? (
-            <button type="button" className="dash-action-btn primary" onClick={onOpenClusterTab}>
+            <button type="button" className="dash-action-btn" onClick={onOpenClusterTab}>
               <Icon name="terminal" />
-              <span>进入集群与沙箱指挥台 ({fmtNum(sbxSum.total)} 活跃沙箱)</span>
+              <span>查看集群详情 ({fmtNum(sbxSum.total)} 活跃)</span>
             </button>
           ) : null}
         </div>
@@ -540,8 +540,8 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>近 24 小时集群运行期每小时趋势（跨实例持久化汇总）</h3>
-              <p>来源于全集群各副本写入的 PostgreSQL runtime_metric_event 原始遥测明细</p>
+              <h3>近 24 小时运行趋势</h3>
+              <p>汇总全集群各节点按小时统计的任务与模型请求量</p>
             </div>
             <div className="seg-control small" role="radiogroup" aria-label="运行期趋势切换">
               <button
@@ -582,8 +582,8 @@ export function ClusterSandboxPanel({ compact = false, onOpenClusterTab }: { com
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>全链路延迟 SLA 与故障码分布（7 天滑动窗口）</h3>
-              <p>精确评估任务端到端耗时、沙箱冷启动延迟与上游模型网关 P95</p>
+              <h3>近 7 天耗时与错误分布</h3>
+              <p>统计任务耗时、沙箱冷启动与模型接口 P95</p>
             </div>
           </header>
           <div className="dash-sla-grid">

@@ -49,12 +49,12 @@
 .dash-scope-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 6px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .dash-pulse-dot {
@@ -90,13 +90,15 @@
 }
 
 .dash-scope-badge.platform {
-  background: #ece4fb;
-  color: #5b3db5;
+  background: #f3f1f8;
+  color: #4b435e;
+  border: 1px solid #e5e0f0;
 }
 
 .dash-scope-badge.workspace {
-  background: #e8f6ef;
-  color: #20724d;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
 }
 
 .dash-header-cta {
@@ -2676,8 +2678,8 @@
 .gov-pulse-card {
   text-align: left;
   background: #ffffff;
-  border: 1px solid #e7e2f2;
-  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
   padding: 13px 15px;
   display: flex;
   flex-direction: column;
@@ -2687,19 +2689,19 @@
 }
 
 .gov-pulse-card:hover {
-  border-color: #c8b8eb;
-  background: #fcfbff;
+  border-color: #cbd5e1;
+  background: #fafbfc;
 }
 
 .gov-pulse-card.active {
   border-color: #7953dc;
-  background: #f7f4fe;
-  box-shadow: 0 2px 12px rgba(121, 83, 220, 0.1);
+  background: #faf8ff;
+  box-shadow: 0 0 0 1px rgba(121, 83, 220, 0.18);
 }
 
 .gov-pulse-card.is-alert:not(.active) {
-  border-color: #f3c6a5;
-  background: #fffcf7;
+  border-color: #f3d0c8;
+  background: #fffdfb;
 }
 
 .gov-pulse-top {

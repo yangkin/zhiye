@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import { useMeta } from '../api/queries';
 import type {
@@ -12,7 +12,7 @@ import type {
   OpsTaskSummary,
   SandboxItem,
 } from '../api/types';
-import { Icon } from '../lib/icons';
+import { Icon, type IconName } from '../lib/icons';
 import { copyText, downloadUrl, handleTabListKeyDown } from '../lib/format';
 import { useDebounced } from '../lib/useDebounced';
 import { toast } from '../lib/store';
@@ -62,17 +62,17 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
-  status: '阶段状态',
-  tool: '工具调用',
-  log: '命令输出',
-  verify: '质检门禁',
-  thinking: '推理思考',
+  status: '阶段',
+  tool: '工具',
+  log: '输出',
+  verify: '检查',
+  thinking: '思考',
   thinking_end: '思考完成',
-  agent_text: '回复正文',
-  steer: '中途补充',
-  confirm: '人工确认',
-  todo: '待办规划',
-  finished: '任务结束',
+  agent_text: '回复',
+  steer: '补充',
+  confirm: '确认',
+  todo: '待办',
+  finished: '结束',
 };
 
 function statusTone(status: string): 'ok' | 'err' | 'run' | 'muted' {
@@ -233,6 +233,8 @@ function OpsPager({
 }
 
 export function LogsPage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const metaQ = useMeta();
   const isAdmin = Boolean(metaQ.data?.auth?.admin);
   const [params, setParams] = useSearchParams();
@@ -265,55 +267,174 @@ export function LogsPage() {
     else setTabParam(cloudSub);
   };
 
-  const tabs: [MainTab, string][] = [
-    ['tasks', '任务排查'],
-    ['events', '异常与网关'],
-    ['infra', isAdmin ? '沙箱与节点日志' : '沙箱日志'],
-    ['cloud', '云函数与数据源'],
+  // 轻量 7 天摘要查询，驱动顶部 4 联切换卡（与平台管理工作台保持统一交互骨架）
+  const taskSumQ = useQuery({
+    queryKey: ['ops-summary-tasks'],
+    queryFn: () => api.opsTasks({ range: '7d', limit: 1 }),
+    staleTime: 30_000,
+  });
+  const evSumQ = useQuery({
+    queryKey: ['ops-summary-events'],
+    queryFn: () => api.opsEvents({ range: '7d', limit: 1 }),
+    staleTime: 30_000,
+  });
+  const sbxSumQ = useQuery({
+    queryKey: ['ops-summary-sandboxes'],
+    queryFn: () => api.opsSandboxes({ range: '7d', limit: 1 }),
+    staleTime: 30_000,
+  });
+  const fnSumQ = useQuery({
+    queryKey: ['ops-summary-functions'],
+    queryFn: () => api.opsFunctionLogs({ range: '7d', limit: 1 }),
+    staleTime: 30_000,
+  });
+  const srcSumQ = useQuery({
+    queryKey: ['ops-summary-sources'],
+    queryFn: () => api.opsSourceCalls({ range: '7d', limit: 1 }),
+    staleTime: 30_000,
+  });
+
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAll = async () => {
+    setRefreshing(true);
+    try {
+      await qc.invalidateQueries({
+        predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('ops-'),
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const taskTotal = taskSumQ.data?.summary?.total ?? 0;
+  const taskFailed = taskSumQ.data?.summary?.failed ?? 0;
+  const taskActive = taskSumQ.data?.summary?.active ?? 0;
+  const evTotal = evSumQ.data?.total ?? 0;
+  const evErrors = evSumQ.data?.errorCount ?? 0;
+  const sbxTotal = sbxSumQ.data?.summary?.total ?? 0;
+  const sbxActive = sbxSumQ.data?.summary?.active ?? 0;
+  const sbxFailed = sbxSumQ.data?.summary?.failed ?? 0;
+  const sbxAvgMs = sbxSumQ.data?.summary?.avgStartupMs ?? 0;
+  const fnTotal = fnSumQ.data?.total ?? 0;
+  const srcTotal = srcSumQ.data?.total ?? 0;
+  const cloudErrs = (fnSumQ.data?.errorCount ?? 0) + (srcSumQ.data?.errorCount ?? 0);
+
+  const overviewCards: {
+    id: MainTab;
+    icon: IconName;
+    label: string;
+    value: string;
+    sub: string;
+    alert?: boolean;
+  }[] = [
+    {
+      id: 'tasks',
+      icon: 'terminal',
+      label: '任务日志',
+      value: fmtNum(taskTotal),
+      sub:
+        taskActive > 0
+          ? `进行中 ${fmtNum(taskActive)} · 近 7 天失败 ${fmtNum(taskFailed)}`
+          : `近 7 天成功 ${fmtNum(taskSumQ.data?.summary?.succeeded ?? 0)} · 失败 ${fmtNum(taskFailed)}`,
+    },
+    {
+      id: 'events',
+      icon: 'alert',
+      label: '异常与网关',
+      value: evErrors > 0 ? `${fmtNum(evErrors)} 异常` : fmtNum(evTotal),
+      sub: `近 7 天共 ${fmtNum(evTotal)} 条事件 · 异常 ${fmtNum(evErrors)} 条`,
+      alert: evErrors > 0,
+    },
+    {
+      id: 'infra',
+      icon: 'code',
+      label: isAdmin ? '沙箱与节点日志' : '沙箱日志',
+      value: fmtNum(sbxTotal),
+      sub:
+        sbxFailed > 0
+          ? `活跃 ${fmtNum(sbxActive)} · 启动失败 ${fmtNum(sbxFailed)}`
+          : `当前活跃 ${fmtNum(sbxActive)} · 平均冷启动 ${fmtDurationMs(sbxAvgMs)}`,
+      alert: sbxFailed > 0,
+    },
+    {
+      id: 'cloud',
+      icon: 'cloud',
+      label: '云函数与数据源',
+      value: fmtNum(fnTotal + srcTotal),
+      sub: `云函数 ${fmtNum(fnTotal)} · 数据源 ${fmtNum(srcTotal)}${cloudErrs > 0 ? ` · 失败 ${fmtNum(cloudErrs)}` : ''}`,
+    },
   ];
 
   return (
-    <div className="content-page logs-page">
-      <header className="dash-header-top logs-compact-header">
+    <div className="content-page dash-page logs-page">
+      <header className="dash-header-top">
         <div className="dash-title-block">
           <div className="dash-title-row">
-            <h1>日志排查中心</h1>
+            <h1>运行日志</h1>
             <span className={`dash-scope-badge ${isAdmin ? 'platform' : 'workspace'}`}>
-              <i className="dash-pulse-dot" aria-hidden="true" />
-              {isAdmin ? '全平台视角' : '当前工作空间'}
+              {isAdmin ? '全平台' : '当前空间'}
             </span>
           </div>
-          <p>聚焦任务错误定位、AI 过程事件与 Runner 终端，沙箱与云服务日志按类别分栏检索。</p>
+          <p>查询任务执行过程、网关异常、沙箱记录与云服务调用日志。</p>
+        </div>
+        <div className="dash-header-cta">
+          <button type="button" className="dash-action-btn" onClick={() => navigate('/dashboard')}>
+            <Icon name="chart" />
+            <span>数据看板</span>
+          </button>
+          {isAdmin ? (
+            <button type="button" className="dash-action-btn" onClick={() => navigate('/admin')}>
+              <Icon name="settings" />
+              <span>平台管理</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="dash-action-btn primary"
+            disabled={refreshing}
+            onClick={() => void refreshAll()}
+          >
+            <Icon name="refresh" className={refreshing ? 'spinning' : ''} />
+            <span>{refreshing ? '刷新中…' : '刷新日志'}</span>
+          </button>
         </div>
       </header>
 
-      <nav
-        className="dash-nav-bar logs-tabs"
+      <div
+        className="gov-pulse-grid logs-overview-grid"
         role="tablist"
-        aria-label="日志排查模块"
+        aria-label="日志模块切换"
         onKeyDown={(e) =>
           handleTabListKeyDown(
             e,
-            tabs.map(([id]) => id),
+            overviewCards.map((c) => c.id),
             mainTab,
             setMainTab,
           )
         }
       >
-        {tabs.map(([id, label]) => (
+        {overviewCards.map((card) => (
           <button
-            key={id}
+            key={card.id}
             type="button"
             role="tab"
-            tabIndex={mainTab === id ? 0 : -1}
-            aria-selected={mainTab === id}
-            className={mainTab === id ? 'active' : ''}
-            onClick={() => setMainTab(id)}
+            tabIndex={mainTab === card.id ? 0 : -1}
+            aria-selected={mainTab === card.id}
+            className={`gov-pulse-card ${mainTab === card.id ? 'active' : ''} ${card.alert ? 'is-alert' : ''}`}
+            onClick={() => setMainTab(card.id)}
           >
-            {label}
+            <div className="gov-pulse-top">
+              <span className="gov-pulse-label">
+                <Icon name={card.icon} />
+                <span>{card.label}</span>
+              </span>
+              {card.alert ? <i className="gov-dot alert" aria-hidden="true" /> : null}
+            </div>
+            <strong className={card.alert ? 'is-alert' : ''}>{card.value}</strong>
+            <small>{card.sub}</small>
           </button>
         ))}
-      </nav>
+      </div>
 
       {mainTab === 'tasks' ? <TaskLogsWorkbench onJumpSandboxes={() => setTabParam('sandboxes')} /> : null}
       {mainTab === 'events' ? <PlatformEventsView /> : null}
@@ -328,7 +449,7 @@ export function LogsPage() {
                 className={infraSub === 'sandboxes' ? 'active' : ''}
                 onClick={() => setTabParam('sandboxes')}
               >
-                沙箱生命周期台账
+                沙箱记录
               </button>
               <button
                 type="button"
@@ -337,7 +458,7 @@ export function LogsPage() {
                 className={infraSub === 'runtime' ? 'active' : ''}
                 onClick={() => setTabParam('runtime')}
               >
-                节点服务日志与审计
+                服务日志与审计
               </button>
             </div>
           ) : null}
@@ -354,7 +475,7 @@ export function LogsPage() {
               className={cloudSub === 'functions' ? 'active' : ''}
               onClick={() => setTabParam('functions')}
             >
-              云函数执行日志
+              云函数日志
             </button>
             <button
               type="button"
@@ -363,7 +484,7 @@ export function LogsPage() {
               className={cloudSub === 'sources' ? 'active' : ''}
               onClick={() => setTabParam('sources')}
             >
-              数据源调用日志
+              数据源调用
             </button>
             <button
               type="button"
@@ -372,7 +493,7 @@ export function LogsPage() {
               className={cloudSub === 'schemas' ? 'active' : ''}
               onClick={() => setTabParam('schemas')}
             >
-              云库 Schema / DDL
+              Schema 变更
             </button>
           </div>
           {cloudSub === 'sources' ? <SourceCallsView /> : cloudSub === 'schemas' ? <SchemasView /> : <FunctionLogsView />}
@@ -920,7 +1041,7 @@ function TaskDiagnosticPane({
     return { counts, errors };
   }, [events]);
 
-  if (detailQ.isLoading) return <LoadingState label="正在装载全链路诊断日志…" />;
+  if (detailQ.isLoading) return <LoadingState label="正在加载任务日志…" />;
   if (detailQ.error || !baseDetail || !task) {
     return <ErrorState message={errorMessage(detailQ.error)} onRetry={() => void detailQ.refetch()} />;
   }
@@ -1060,7 +1181,7 @@ function TaskDiagnosticPane({
         {fullPrompt || baseDetail.messages.length > 0 ? (
           <details className="logs-prompt-box">
             <summary>
-              需求输入与补充（{baseDetail.messages.length} 条关联消息 · 点击展开）
+              输入与补充（{baseDetail.messages.length} 条关联消息 · 点击展开）
             </summary>
             {fullPrompt ? <p>{fullPrompt}</p> : null}
             {baseDetail.messages.filter((m) => m.steer).map((m) => (
@@ -1119,8 +1240,8 @@ function TaskDiagnosticPane({
                     { value: '__errors__', label: `仅看报错 (${eventStats.errors})` },
                     { value: 'tool', label: `工具调用 (${eventStats.counts.tool ?? 0})` },
                     { value: 'log', label: `命令输出 (${eventStats.counts.log ?? 0})` },
-                    { value: 'verify', label: `质检门禁 (${eventStats.counts.verify ?? 0})` },
-                    { value: 'thinking', label: `推理思考 (${eventStats.counts.thinking ?? 0})` },
+                    { value: 'verify', label: `自动检查 (${eventStats.counts.verify ?? 0})` },
+                    { value: 'thinking', label: `思考过程 (${eventStats.counts.thinking ?? 0})` },
                     { value: 'status', label: `阶段状态 (${(eventStats.counts.status ?? 0) + (eventStats.counts.finished ?? 0)})` },
                     { value: 'collab', label: `确认 / 补充 (${(eventStats.counts.confirm ?? 0) + (eventStats.counts.steer ?? 0) + (eventStats.counts.todo ?? 0)})` },
                   ]}
@@ -1701,7 +1822,7 @@ function EventCard({ ev, defaultOpen }: { ev: DisplayEventRow; defaultOpen: bool
       case 'verify': {
         const checks = Array.isArray(p.checks) ? p.checks : [];
         const bad = checks.filter((c: Record<string, unknown>) => !c?.ok && !c?.skipped).length;
-        return `门禁检查 ${checks.length} 项${bad > 0 ? `（${bad} 项未通过）` : '（全部通过）'}`;
+        return `自动检查 ${checks.length} 项${bad > 0 ? `（${bad} 项未通过）` : '（全部通过）'}`;
       }
       case 'thinking':
         return `推理思考（${String(p.text ?? '').length} 字${typeof p.durationMs === 'number' ? ` · ${(p.durationMs / 1000).toFixed(1)}s` : ''}）`;
@@ -2303,7 +2424,7 @@ function RuntimeLogsView() {
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>节点运行期指标与服务日志</h3>
+            <h3>服务运行指标与日志</h3>
             <div className="logs-node-strip">
               <span>沙箱引擎 <b className="logs-mono">{data?.sandboxProvider ?? '—'}</b></span>
               <span className="logs-meta-sep" aria-hidden="true">·</span>
@@ -2380,7 +2501,7 @@ function RuntimeLogsView() {
             <b>{fmtNum(data?.metrics?.alerts?.length ?? 0)}</b>
             <small>{data?.metrics?.alerts?.map((a) => a.code).join(' · ') || '运行正常'}</small>
           </div>
-          <div>
+          <div className="logs-runtime-dir">
             <span>任务日志目录</span>
             <b className="logs-mono" style={{ fontSize: 12 }}>logs/tasks/*.log</b>
             <small title={data?.runtimeDir}>{formatReadableError(data?.runtimeDir) || '—'}</small>
@@ -2669,7 +2790,7 @@ function SchemasView() {
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>Schema / DDL 执行与变更日志（create schema / create table / alter table / drop）</h3>
+            <h3>云库 Schema 变更日志</h3>
             <p>完整记录每次启用云服务或任务提交后执行的 PostgreSQL DDL 语句与失败堆栈</p>
           </div>
         </header>
@@ -2735,7 +2856,7 @@ function SchemasView() {
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>当前库内应用 Schema 注册清单（app_cloud）</h3>
+            <h3>已注册 Schema 列表</h3>
             <p>实时反映各应用独立的 PostgreSQL Schema、启用状态与当前已建表名</p>
           </div>
         </header>
@@ -2916,7 +3037,7 @@ function PlatformEventsView() {
 
       <div className="dash-panel">
         {evQ.isLoading ? (
-          <LoadingState label="正在读取全链路网关与异常日志…" />
+          <LoadingState label="正在加载网关与异常日志…" />
         ) : evQ.error ? (
           <ErrorState message={errorMessage(evQ.error)} onRetry={() => void evQ.refetch()} />
         ) : items.length === 0 ? (
@@ -3031,9 +3152,9 @@ function TraceWaterfallBar({
     <div className="logs-waterfall-card">
       <div className="logs-wf-top">
         <div className="logs-wf-title">
-          <b>全链路 Trace 阶段瀑布图</b>
+          <b>执行耗时</b>
           <span>
-            排队 {fmtDurationMs(queueWaitMs)} → 沙箱启动 {fmtDurationMs(startupMs)} → Agent/工具执行 {fmtDurationMs(workMs)}
+            排队 {fmtDurationMs(queueWaitMs)} · 沙箱启动 {fmtDurationMs(startupMs)} · 执行 {fmtDurationMs(workMs)}
           </span>
         </div>
         <div className="logs-wf-badges">
@@ -3042,15 +3163,15 @@ function TraceWaterfallBar({
             {toolErrs.length > 0 ? <em className="err">错 {toolErrs.length}</em> : null}
           </button>
           <button type="button" className="logs-wf-pill" onClick={() => onJumpTab('events')}>
-            质检门禁 <b>{verifyEvents.length}</b>
-            {verifyBad > 0 ? <em className="err">挂 {verifyBad}</em> : null}
+            自动检查 <b>{verifyEvents.length}</b>
+            {verifyBad > 0 ? <em className="err">未通过 {verifyBad}</em> : null}
           </button>
           {sandbox ? (
             <button
               type="button"
               className="logs-wf-pill"
               onClick={() => (onJumpSandboxes ? onJumpSandboxes() : onJumpTab('resources'))}
-              title={`归属副本 ${sandbox.ownerInstance} · 点击查看沙箱台账`}
+              title={`归属副本 ${sandbox.ownerInstance} · 点击查看沙箱记录`}
             >
               沙箱 <code>{sandbox.sandboxId}</code> · {sandbox.provider}
             </button>
@@ -3188,16 +3309,16 @@ function SandboxLogsView() {
       <div className="dash-panel">
         <header className="dash-panel-head compact">
           <div>
-            <h3>沙箱全生命周期台账（creating → active → destroyed/failed）</h3>
-            <p>完整记录每个沙箱的冷启动耗时、归属副本、进程/Pod 引用、峰值资源采样及销毁操刀人/原因</p>
+            <h3>沙箱记录</h3>
+            <p>记录每次沙箱启动耗时、所属节点与退出原因</p>
           </div>
         </header>
         {sbxQ.isLoading ? (
-          <LoadingState label="正在读取沙箱生命周期日志…" />
+          <LoadingState label="正在加载沙箱记录…" />
         ) : sbxQ.error ? (
           <ErrorState message={errorMessage(sbxQ.error)} onRetry={() => void sbxQ.refetch()} />
         ) : items.length === 0 ? (
-          <EmptyState title="暂无沙箱生命周期记录" desc="运行任意 AI 开发任务后，沙箱创建与销毁轨迹会自动归档于此。" />
+          <EmptyState title="暂无沙箱记录" desc="运行开发任务后，沙箱的启动与退出记录会展示在这里。" />
         ) : (
           <div className="dash-table-wrap">
             <table className="dash-table">
@@ -3208,8 +3329,8 @@ function SandboxLogsView() {
                   <th scope="col">关联任务 / 应用</th>
                   <th scope="col">状态</th>
                   <th scope="col">冷启动 / 存活</th>
-                  <th scope="col">归属副本 / 作者</th>
-                  <th scope="col">销毁原因 / 操刀人</th>
+                  <th scope="col">所属节点 / 作者</th>
+                  <th scope="col">退出原因 / 操作人</th>
                 </tr>
               </thead>
               <tbody>
@@ -3245,7 +3366,7 @@ function SandboxLogsView() {
                     </td>
                     <td>
                       <div>{sb.destroyReason || '—'}</div>
-                      {sb.destroyedBy ? <small style={{ color: '#7c7491' }}>操刀人: {sb.destroyedBy}</small> : null}
+                      {sb.destroyedBy ? <small style={{ color: '#7c7491' }}>操作人: {sb.destroyedBy}</small> : null}
                     </td>
                   </tr>
                 ))}
@@ -3260,8 +3381,8 @@ function SandboxLogsView() {
         <div className="dash-panel">
           <header className="dash-panel-head compact">
             <div>
-              <h3>沙箱控制面事件流水（就绪 / 销毁 / 对账清理 / 启动异常 · {events.length} 条）</h3>
-              <p>来自 platform_event_log (category = sandbox)</p>
+              <h3>沙箱事件流水（{events.length} 条）</h3>
+              <p>记录沙箱就绪、销毁、对账清理与启动异常事件</p>
             </div>
           </header>
           <div className="dash-table-wrap">

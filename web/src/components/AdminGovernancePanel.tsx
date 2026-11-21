@@ -694,25 +694,25 @@ export function AdminGovernancePanel({
     {
       tab: 'handover',
       icon: 'grid',
-      label: '资产台账与交接',
+      label: '应用与交接',
       value: fmtNum(allAppsCount),
-      sub: `${fmtNum(workspaceOptions.length)} 个活跃空间 · 支持转移与离职交接`,
+      sub: `${fmtNum(workspaceOptions.length)} 个空间 · 归属转移与交接`,
       tone: 'violet',
     },
     {
       tab: 'sites',
       icon: 'globe',
-      label: '线上站点风控',
+      label: '已发布站点',
       value: fmtNum(publishedCount),
-      sub: '权限收紧、归属转移与紧急下线',
+      sub: '权限调整与下线管理',
       tone: 'teal',
     },
     {
       tab: 'feedback',
       icon: 'help',
-      label: '反馈与社区治理',
+      label: '反馈与社区',
       value: fbUnclosedCount > 0 ? `${fmtNum(fbUnclosedCount)} 未结` : fmtNum(overview.templates.length),
-      sub: `待处理 ${fmtNum(fbOpenOnlyCount)} · 跟进中 ${fmtNum(fbInProgressCount)} · 模板 ${fmtNum(overview.templates.length)}`,
+      sub: `待处理 ${fmtNum(fbOpenOnlyCount)} · 跟进中 ${fmtNum(fbInProgressCount)} · 作品 ${fmtNum(overview.templates.length)}`,
       tone: 'amber',
       alert: fbOpenOnlyCount > 0,
       healthy: fbUnclosedCount === 0,
@@ -722,20 +722,20 @@ export function AdminGovernancePanel({
       icon: 'trash',
       label: '回收站与审计',
       value: fmtNum(deletedCount),
-      sub: `不可篡改审计 ${fmtNum(overview.auditLogs.length)} 条`,
+      sub: `审计日志 ${fmtNum(overview.auditLogs.length)} 条`,
       tone: 'indigo',
     },
     {
       tab: 'ops',
       icon: 'lock',
-      label: '运行风控与配额权限',
+      label: '配额与运行',
       value:
         rateLimitRejected > 0
           ? `${fmtNum(rateLimitRejected)} 拦截`
           : activeTaskCount > 0
             ? `${fmtNum(activeTaskCount)} 运行中`
             : '正常',
-      sub: `运行任务 ${activeTaskCount} · 429 拦截 ${fmtNum(rateLimitRejected)} · 配额 ${customQuotaCount} · SSO ${ssoUserCount}`,
+      sub: `任务 ${activeTaskCount} · 限流 ${fmtNum(rateLimitRejected)} · 配额 ${customQuotaCount} · SSO ${ssoUserCount}`,
       tone: rateLimitRejected > 0 ? 'rose' : 'slate',
       alert: rateLimitRejected > 0,
       healthy: rateLimitRejected === 0,
@@ -798,13 +798,7 @@ export function AdminGovernancePanel({
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
               </span>
-              {item.alert ? (
-                <i className="gov-dot alert" aria-hidden="true" />
-              ) : item.healthy ? (
-                <i className="gov-dot ok" aria-hidden="true" />
-              ) : (
-                <i className={`gov-dot ${item.tone}`} aria-hidden="true" />
-              )}
+              {item.alert ? <i className="gov-dot alert" aria-hidden="true" /> : null}
             </div>
             <strong className={item.alert ? 'is-alert' : item.healthy ? 'is-ok' : ''}>{item.value}</strong>
             <small>{item.sub}</small>
@@ -823,8 +817,8 @@ export function AdminGovernancePanel({
               <DashPanelHead
                 icon="undo"
                 tone="violet"
-                title="人员离职 / 空间资产无损批量交接"
-                sub="支持将离职或调岗人员名下的全部应用（含已发布站点域名、版本历史、云数据库表）、创造会话与私有数据源一键划转至接手人空间，线上服务 0 中断"
+                title="批量交接应用"
+                sub="将指定人员名下的应用、会话与私有数据源转移到接手人空间，不影响已发布站点访问"
                 right={
                   <button
                     type="button"
@@ -1018,13 +1012,13 @@ export function AdminGovernancePanel({
               tone="indigo"
               title={
                 ledgerView === 'owners'
-                  ? `人员与空间资产花名册（${filteredOwners.length} / ${workspaceOptions.length} 个空间）`
-                  : `全平台应用资产台账与定向转移（${filteredAllApps.length} / ${allAppsCount} 个）`
+                  ? `空间列表（${filteredOwners.length} / ${workspaceOptions.length}）`
+                  : `全部应用（${filteredAllApps.length} / ${allAppsCount}）`
               }
               sub={
                 ledgerView === 'owners'
-                  ? `按归属人（姓名 / 账号）聚合盘点名下应用、线上站点与代表作品（已绑定账号 ${boundWorkspaceCount} 个），点击行内「离职交接」一键划转`
-                  : '展示应用归属人（姓名 / 账号）、发布状态与访问量，支持按姓名 / 账号筛选、单应用定向移交或展开人员离职批量交接'
+                  ? `按人员与空间查看应用数量与发布状态（已绑定账号 ${boundWorkspaceCount} 个）`
+                  : '查看应用归属、发布状态与访问量，支持单应用转移或批量交接'
               }
               right={
                 <div className="dash-toolbar-group">
@@ -1403,8 +1397,8 @@ export function AdminGovernancePanel({
           <DashPanelHead
             icon="globe"
             tone="teal"
-            title={`全平台已发布站点巡检与访问风控（${filteredPublishedApps.length} 个）`}
-            sub="检索所有正在对外提供服务的线上站点，支持直接收紧访问权限、转移归属人或紧急下线"
+            title={`已发布站点（${filteredPublishedApps.length}）`}
+            sub="调整线上站点访问权限、转移归属或下线站点"
             right={
               <div className="dash-toolbar-group">
                 <Select
@@ -1558,8 +1552,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="help"
               tone="amber"
-              title={`用户问题反馈分诊台（${filteredFeedbacks.length} 条）`}
-              sub="跟踪小织问题上报处理状态、指派解决说明并自动闭环计时"
+              title={`用户反馈（${filteredFeedbacks.length} 条）`}
+              sub="查看并跟进员工上报的问题与建议"
               right={
                 <div className="seg-control small" role="radiogroup" aria-label="反馈状态筛选">
                   {(
@@ -1638,8 +1632,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="community"
               tone="rose"
-              title={`灵感社区内容治理（${filteredTemplates.length} / ${overview.templates.length} 个）`}
-              sub="设置精选置顶后将在灵感社区默认列表中优先排序展示，违规作品可一键下架"
+              title={`社区作品（${filteredTemplates.length} / ${overview.templates.length}）`}
+              sub="设置精选置顶或下架社区作品"
               right={
                 <label className="dash-search">
                   <Icon name="search" />
@@ -1762,8 +1756,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="trash"
               tone="amber"
-              title={`已删除应用回收站（${filteredDeletedApps.length} / ${deletedCount} 个）`}
-              sub="支持跨空间一键恢复用户误删除的应用及其历史版本，或彻底清除释放存储"
+              title={`应用回收站（${filteredDeletedApps.length} / ${deletedCount}）`}
+              sub="恢复已删除的应用或彻底清理"
               right={
                 <label className="dash-search">
                   <Icon name="search" />
@@ -1878,8 +1872,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="history"
               tone="slate"
-              title={`管理操作审计日志（${filteredAuditLogs.length} / 最近 ${overview.auditLogs.length} 条）`}
-              sub="所有应用归属转移、离职批量交接、权限变更、配额覆盖、站点风控/下线、应用恢复/清除与任务干预均已落库留痕"
+              title={`操作审计（${filteredAuditLogs.length} / 最近 ${overview.auditLogs.length} 条）`}
+              sub="记录应用转移、权限变更、配额调整与站点下线等管理操作"
               right={
                 <div className="dash-toolbar-group">
                   <Select
@@ -1973,8 +1967,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="settings"
               tone="violet"
-              title={`工作空间自定义配额覆盖（${customQuotaCount} 个）`}
-              sub="针对重点团队或异常空间单独调整应用数量、每日任务数与并发数上限"
+              title={`自定义配额（${customQuotaCount}）`}
+              sub="为指定空间单独设置应用数、每日任务与并发上限"
               right={
                 <div className="dash-admin-inline-form">
                   <OwnerPicker
@@ -2108,8 +2102,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="lock"
               tone="slate"
-              title={`SSO 账号与管理员权限（${filteredUsers.length}）`}
-              sub="查看统一登录员工账号，按需授予或撤销平台管理员权限（变更实时落库审计）"
+              title={`账号与权限（${filteredUsers.length}）`}
+              sub="管理企业登录账号与平台管理员角色"
               right={
                 <div className="dash-toolbar-group">
                   <Select
@@ -2243,11 +2237,11 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="play"
               tone="indigo"
-              title={`运行中 / 排队任务运维干预（${activeTaskCount} 个）`}
-              sub="实时监控正在执行或排队的 AI 任务，遇到异常卡死或死循环时可直达过程日志或立即强停"
+              title={`运行中任务（${activeTaskCount}）`}
+              sub="查看正在执行或排队的任务，异常时可跳转日志或停止"
               right={
                 <button type="button" className="subtle-button dash-compact-btn" onClick={() => navigate('/logs')}>
-                  前往全链路日志 →
+                  查看任务日志 →
                 </button>
               }
             />
@@ -2323,8 +2317,8 @@ export function AdminGovernancePanel({
             <DashPanelHead
               icon="alert"
               tone="rose"
-              title="限流窗口监控与应急清理"
-              sub={`活跃滑窗 ${fmtNum(overview.rateLimitStats.activeWindowHits ?? overview.rateLimitStats.totalHits)} · 24h 放行 ${fmtNum(overview.rateLimitStats.allowed24h ?? 0)} · 24h 拦截 ${fmtNum(rateLimitRejected)}`}
+              title="限流状态"
+              sub={`当前窗口 ${fmtNum(overview.rateLimitStats.activeWindowHits ?? overview.rateLimitStats.totalHits)} · 近 24h 放行 ${fmtNum(overview.rateLimitStats.allowed24h ?? 0)} · 拦截 ${fmtNum(rateLimitRejected)}`}
               right={
                 <button
                   type="button"
@@ -2412,9 +2406,9 @@ export function AdminGovernancePanel({
         width={540}
         title="转移应用归属"
         badge={transferTarget ? <code className="owner-cell-acct">{transferTarget.slug}</code> : null}
-        sub="APP OWNERSHIP TRANSFER · 线上域名、版本历史、云表数据与独占数据源将无损迁移"
+        sub="域名、版本历史、云表数据与独占数据源将一并迁移"
         onClose={() => setTransferTarget(null)}
-        footerHint="本次归属转移将实时写入不可篡改管理审计日志"
+        footerHint="本次操作将记录到管理审计日志"
         footer={
           transferTarget ? (
             <>
@@ -2502,7 +2496,6 @@ export function AdminGovernancePanel({
       {triageTarget ? (
         <Modal
           title="处理用户反馈"
-          overline="FEEDBACK TRIAGE"
           onClose={() => setTriageTarget(null)}
           footer={
             <>
@@ -2621,9 +2614,9 @@ export function AdminQuotaModal({
       width={520}
       title="调整工作空间配额"
       badge={<code className="owner-cell-acct">{target.workspaceId}</code>}
-      sub="WORKSPACE QUOTA OVERRIDE · 保存后即时生效"
+      sub="保存后即时生效"
       onClose={onClose}
-      footerHint="配额变更将实时写入管理操作审计日志"
+      footerHint="配额变更将记录到管理审计日志"
       footer={
         <>
           <button type="button" className="subtle-button" onClick={onClose}>

@@ -52,11 +52,8 @@ export function CommunityPage() {
     <div className="content-page community-page">
       <section className="community-hero">
         <div>
-          <span className="overline">MADE BY 华星织友</span>
-          <h1>
-            欢迎来到织页<b>灵感社区</b>
-          </h1>
-          <p>同事们亲手织好的应用都在这里。看看效果，点个赞，喜欢就「使用模板」，复刻一份改成你自己的。</p>
+          <h1>灵感社区</h1>
+          <p>浏览同事分享的应用作品，支持预览效果、点赞收藏或直接复刻为自己的模板。</p>
         </div>
         <button className="primary-button" onClick={() => navigate('/apps')}>
           <Icon name="share" />

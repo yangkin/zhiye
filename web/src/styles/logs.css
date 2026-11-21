@@ -668,18 +668,18 @@
   border-radius: 5px;
   font-size: 11px;
   font-weight: 600;
-  background: #f1edf9;
-  color: #5b3db5;
+  background: #f1f5f9;
+  color: #475569;
   flex: none;
 }
 
-.logs-ev-type.tool { background: #e8f1ff; color: #2457a6; }
-.logs-ev-type.log { background: #262335; color: #e2def5; }
-.logs-ev-type.verify { background: #e7f6f1; color: #1c6b53; }
-.logs-ev-type.thinking { background: #f5effc; color: #6c46b8; }
-.logs-ev-type.status { background: #f1eff6; color: #544d68; }
-.logs-ev-type.finished { background: #ece4fb; color: #462c91; }
-.logs-ev-type.err { background: #fdecef; color: #a6253b; }
+.logs-ev-type.tool { background: #eff6ff; color: #1d4ed8; }
+.logs-ev-type.log { background: #1e293b; color: #e2e8f0; }
+.logs-ev-type.verify { background: #ecfdf5; color: #047857; }
+.logs-ev-type.thinking { background: #f3f4f6; color: #4b5563; }
+.logs-ev-type.status { background: #f1f5f9; color: #475569; }
+.logs-ev-type.finished { background: #eef2ff; color: #4338ca; }
+.logs-ev-type.err { background: #fef2f2; color: #b91c1c; }
 
 .logs-ev-summary {
   color: #1f1c29;
@@ -1340,4 +1340,37 @@ mark.logs-hl {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+/* 日志首页 4 联交互概览卡（与管理后台 5 联卡保持同一套工程风视觉骨架） */
+.gov-pulse-grid.logs-overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+@media (max-width: 1020px) {
+  .gov-pulse-grid.logs-overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .gov-pulse-grid.logs-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.logs-runtime-dir {
+  min-width: 0;
+}
+
+.logs-runtime-dir small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logs-wf-track {
+  height: 6px !important;
 }

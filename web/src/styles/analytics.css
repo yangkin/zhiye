@@ -2,108 +2,110 @@
    X-APM 标杆级企业数据可视化与右侧抽屉样式 (AnalyticsCharts & DetailDrawer)
    ========================================================================== */
 
-/* 顶部章节锚点快速导航条 */
+/* 顶部章节锚点快速导航条（低存在感克制样式，避免与主 Tab 栏视觉打架） */
 .xa-anchor-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 8px 14px;
-  margin-bottom: 14px;
-  border-radius: 10px;
-  background: #ffffff;
-  border: 1px solid #e5e9f2;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.03);
+  padding: 6px 2px 10px;
+  margin-bottom: 4px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #ece8f3;
+  box-shadow: none;
 }
 
 .xa-anchor-links {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .xa-anchor-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 4px 10px;
-  border-radius: 7px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 500;
-  color: #334155;
+  color: #5b556b;
   text-decoration: none;
   transition: background 0.14s ease, color 0.14s ease;
 }
 
 .xa-anchor-pill:hover {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #f3f1f8;
+  color: #1f1c29;
 }
 
 .xa-anchor-pill i {
   font-style: normal;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: #2563eb;
-  background: #eff6ff;
-  padding: 1px 5px;
-  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8b839e;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   font-variant-numeric: tabular-nums;
 }
 
 .xa-anchor-meta {
   font-size: 12px;
-  color: #64748b;
+  color: #7c758e;
   font-variant-numeric: tabular-nums;
 }
 
-/* 编号分节头（01 核心指标 / 02 转化漏斗...） */
+/* 章节头：克制排版层级（去除突兀的实心亮蓝序号方章） */
 .xa-section-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  margin: 4px 0 12px;
+  margin: 4px 0 10px;
   scroll-margin-top: 20px;
 }
 
 .xa-section-title {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .xa-section-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 6px;
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  min-width: auto;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #8c84a1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .xa-section-title h2 {
   margin: 0;
   font-size: 15.5px;
   font-weight: 600;
-  color: #0f172a;
+  color: #18181b;
   letter-spacing: -0.2px;
 }
 
 .xa-section-sub {
   font-size: 12px;
-  color: #64748b;
+  color: #6b657c;
 }
 
 .xa-section-right {
@@ -144,7 +146,7 @@
   vertical-align: middle;
 }
 
-/* 蓝底自动诊断洞察条 */
+/* 克制中性说明提示条 */
 .xa-insight-box {
   display: flex;
   align-items: flex-start;
@@ -152,9 +154,9 @@
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #eff6ff;
-  border: 1px solid #dbeafe;
-  color: #1e3a8a;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #334155;
   font-size: 12px;
   line-height: 1.6;
 }
@@ -165,8 +167,8 @@
   align-items: center;
   padding: 1px 7px;
   border-radius: 5px;
-  background: #2563eb;
-  color: #ffffff;
+  background: #e2e8f0;
+  color: #334155;
   font-size: 11px;
   font-weight: 600;
   margin-top: 1px;
@@ -1058,26 +1060,28 @@
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
 }
 
-/* 2. 吸顶章节锚点条（滚动联动高亮 + 磨砂毛玻璃） */
+/* 2. 吸顶章节锚点条（克制中性导航条） */
 .xa-anchor-bar.sticky {
   position: sticky;
   top: 8px;
   z-index: 25;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(12px);
-  border: 1px solid #dfe6f2;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+  padding: 6px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid #e7e4ef;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
 }
 
 .xa-anchor-pill.active {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #f1eef9;
+  color: #4f359e;
   font-weight: 600;
 }
 
 .xa-anchor-pill.active i {
-  background: #2563eb;
-  color: #ffffff;
+  background: transparent;
+  color: #5b3db5;
 }
 
 .xa-anchor-right {

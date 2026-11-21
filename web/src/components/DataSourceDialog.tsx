@@ -32,7 +32,7 @@ export function DataSourceDialog() {
   };
   const title = view.kind === 'edit' ? (view.source ? '编辑数据源' : '登记数据源') : view.kind === 'test' ? `试调用 · ${view.source.name}` : view.kind === 'agw' ? 'API 网关' : '数据源';
   return (
-    <Modal title={title} overline="DATA SOURCES" onClose={close} className="source-modal">
+    <Modal title={title} onClose={close} className="source-modal">
       {view.kind === 'list' ? (
         <SourceList onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} onAgw={() => setView({ kind: 'agw' })} />
       ) : view.kind === 'edit' ? (

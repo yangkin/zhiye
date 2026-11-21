@@ -319,7 +319,6 @@ export function VersionSheet({
       <section ref={sheet} className="history-sheet" role="dialog" aria-modal="true" aria-label="版本历史">
         <header>
           <div>
-            <span className="overline">EVERY STEP MATTERS</span>
             <h2>版本历史</h2>
             <p>
               {appName} · {versions.length} 个版本

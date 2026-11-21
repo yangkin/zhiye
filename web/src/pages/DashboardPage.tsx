@@ -56,13 +56,13 @@ const RANGES: [Exclude<DashboardRange, 'custom'>, string][] = [
 ];
 
 const SECTION_TABS: [SectionTab, string][] = [
-  ['all', '概览总览'],
+  ['all', '概览'],
   ['cluster', '集群与沙箱'],
-  ['growth', '增长与空间排行'],
-  ['apps', '应用资产与流量'],
-  ['agent', 'Agent 编排与质检'],
-  ['infra', '云服务、反馈与运行监控'],
-  ['admin', '治理与运维'],
+  ['growth', '增长与排行'],
+  ['apps', '应用与流量'],
+  ['agent', '任务与检查'],
+  ['infra', '云服务与反馈'],
+  ['admin', '平台管理'],
 ];
 
 const TREND_METRICS: [TrendMetric, string][] = [
@@ -457,26 +457,27 @@ export function DashboardPage() {
 
   return (
     <div className="content-page dash-page">
-      {/* 顶部管理指挥舱标题与操作按钮 */}
       <header className="dash-header-top">
         <div className="dash-title-block">
-          <span className="overline">ZHIYE ADMIN OBSERVABILITY &amp; OPERATIONS CONSOLE</span>
           <div className="dash-title-row">
-            <h1>织页平台管理看板</h1>
+            <h1>数据看板</h1>
             <span className={`dash-scope-badge ${scope}`}>
-              <i className="dash-pulse-dot" aria-hidden="true" />
               {!isAdmin
-                ? '当前工作空间统计（个人隔离视角）'
+                ? '当前空间'
                 : filterWorkspaceId || filterUserId
-                  ? `已按人员/空间筛选 · ${data?.meta.filterLabel ?? ''}`
-                  : '全平台实时统计'}
+                  ? `已筛选 · ${data?.meta.filterLabel ?? ''}`
+                  : '全平台'}
             </span>
           </div>
-          <p>
-            面向平台运营、研发与运维的全维度指挥舱：覆盖空间生产力、创作漏斗、Agent 工具遥测与质量门禁、故障根因诊断、云服务能力与集群实例健康度。
-          </p>
+          <p>查看空间活跃、应用发布、任务执行与系统运行状态。</p>
         </div>
         <div className="dash-header-cta">
+          {isAdmin ? (
+            <button type="button" className="dash-action-btn" onClick={() => navigate('/admin')}>
+              <Icon name="settings" />
+              <span>平台管理</span>
+            </button>
+          ) : null}
           <button
             type="button"
             className="dash-action-btn"
@@ -499,11 +500,11 @@ export function DashboardPage() {
             }}
           >
             <Icon name="terminal" />
-            <span>日志排查</span>
+            <span>运行日志</span>
           </button>
           <button type="button" className="dash-action-btn" onClick={() => void q.refetch()} disabled={q.isFetching}>
             <Icon name="refresh" className={q.isFetching ? 'spinning' : ''} />
-            <span>{q.isFetching ? '刷新中…' : '刷新数据'}</span>
+            <span>{q.isFetching ? '刷新中…' : '刷新'}</span>
           </button>
           <button
             type="button"
@@ -525,7 +526,7 @@ export function DashboardPage() {
             onClick={() => {
               if (!data) return;
               downloadBlob(`zhiye-admin-snapshot-${data.meta.range}-${data.meta.endDate}.json`, JSON.stringify(data, null, 2), 'application/json;charset=utf-8');
-              toast('已导出全量管理看板快照 JSON。');
+              toast('已导出数据看板快照 JSON。');
             }}
           >
             <Icon name="download" />
@@ -623,7 +624,7 @@ export function DashboardPage() {
       </nav>
 
       {q.isLoading ? (
-        <LoadingState label="正在聚合全平台多维运营与遥测数据…" />
+        <LoadingState label="正在加载看板数据…" />
       ) : q.error || !data ? (
         <ErrorState message={errorMessage(q.error)} onRetry={() => void q.refetch()} />
       ) : (
@@ -673,35 +674,33 @@ export function DashboardPage() {
             </div>
           ) : null}
 
-          {/* X-APM 风格吸顶滚动联动章节锚点条（仅在总览模式下展示，大屏一键直达 5 大分析板块） */}
           {section === 'all' ? (
             <StickyAnchorBar
               items={[
                 ['sec-kpi', '01', '核心指标'],
-                ['sec-funnel', '02', '转化漏斗与趋势'],
-                ['sec-calendar', '03', '活跃日历与24h时段'],
-                ['sec-sankey', '04', '任务流向桑基图'],
-                ['sec-health', '05', '留存矩阵与资产健康'],
+                ['sec-funnel', '02', '漏斗与趋势'],
+                ['sec-calendar', '03', '活跃日历'],
+                ['sec-sankey', '04', '任务流向'],
+                ['sec-health', '05', '留存与健康'],
               ]}
               meta={`${data.meta.startDate.slice(5)} ~ ${data.meta.endDate.slice(5)} · ${fmtNum(data.overview.workspacesProductive)} 空间 · ${fmtNum(data.overview.appsTotal)} 应用 · ${fmtNum(data.overview.tasksTotal)} 任务`}
             />
           ) : null}
 
-          {/* 01. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比，仅在「全部维度」展示） */}
           {section === 'all' ? (
-            <section className="dash-section" aria-label="核心管理 KPI">
+            <section className="dash-section" aria-label="核心指标">
               <SectionHeading
                 id="sec-kpi"
                 num="01"
-                title="核心北极星指标"
-                sub="默认对比当前窗口与上一等长周期的真实环比变化（全平台实盘统计）"
+                title="核心指标"
+                sub="对比上一等长周期的变化"
               />
               <div className="dash-kpi-grid-6">
               <KpiCard
                 title="活跃空间与用户"
                 value={fmtNum(data.overview.workspacesActiveRange)}
-                unit={`活跃 / ${fmtNum(data.overview.workspacesProductive)} 有产出（库内 ${fmtNum(data.overview.workspacesTotal)}）`}
-                accent="#2563eb"
+                unit={`活跃 / ${fmtNum(data.overview.workspacesProductive)} 有产出（共 ${fmtNum(data.overview.workspacesTotal)}）`}
+                accent="#5b5fc7"
                 delta={range === 'all' ? null : calcDelta(data.overview.workspacesActiveRange, data.overview.workspacesPrevRange ?? 0)}
                 spark={daily.map((d) => d.activeWorkspaces)}
                 details={[
@@ -711,10 +710,10 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="应用资产与发布"
+                title="应用与发布"
                 value={fmtNum(data.overview.appsTotal)}
                 unit={`已发布 ${fmtNum(data.overview.appsPublished)}（发布率 ${data.overview.appsTotal ? Math.round((data.overview.appsPublished / data.overview.appsTotal) * 1000) / 10 : 0}%）`}
-                accent="#10b981"
+                accent="#0d9488"
                 delta={range === 'all' ? null : calcDelta(data.overview.appsRange, data.overview.appsPrevRange)}
                 spark={daily.map((d) => d.appsCreated)}
                 details={[
@@ -724,22 +723,22 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="AI 任务吞吐与 SLA"
+                title="任务执行"
                 value={fmtNum(data.overview.tasksTotal)}
                 unit={`成功率 ${data.overview.taskSuccessRate}%`}
-                accent="#4f46e5"
+                accent="#6366f1"
                 delta={range === 'all' ? null : calcDelta(data.overview.tasksRange, data.overview.tasksPrevRange)}
                 spark={daily.map((d) => d.tasksTotal)}
                 details={[
-                  `成 ${fmtNum(data.overview.tasksSucceeded)} · 败 ${fmtNum(data.overview.tasksFailed)} · 消 ${fmtNum(data.overview.tasksCancelled)}`,
+                  `成功 ${fmtNum(data.overview.tasksSucceeded)} · 失败 ${fmtNum(data.overview.tasksFailed)} · 取消 ${fmtNum(data.overview.tasksCancelled)}`,
                   `P50 ${data.overview.taskP50DurationSec}s / P90 ${data.overview.taskP90DurationSec}s / P95 ${data.overview.taskP95DurationSec}s`,
                 ]}
               />
               <KpiCard
-                title="版本构建与云调用"
+                title="版本与云调用"
                 value={fmtNum(data.overview.versionsTotal)}
                 unit={`部署 ${fmtNum(data.overview.deploymentsTotal)} · 构建 ${fmtNum(data.overview.buildsTotal)}`}
-                accent="#f59e0b"
+                accent="#64748b"
                 delta={range === 'all' ? null : calcDelta(data.overview.versionsRange, data.overview.versionsPrevRange ?? 0)}
                 spark={daily.map((d) => d.versions)}
                 details={[
@@ -749,10 +748,10 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="站点访问流量 (PV)"
+                title="站点访问量 (PV)"
                 value={fmtCompact(data.overview.pvTotal)}
                 unit={`今日 ${fmtNum(data.overview.pvToday)} · 昨日 ${fmtNum(data.overview.pvYesterday)}`}
-                accent="#7c3aed"
+                accent="#6d54c7"
                 delta={range === 'all' ? null : calcDelta(data.overview.pvRange, data.overview.pvPrevRange)}
                 spark={daily.map((d) => d.pv)}
                 details={[
@@ -762,15 +761,15 @@ export function DashboardPage() {
                 ]}
               />
               <KpiCard
-                title="质检、云服务与反馈"
+                title="自动检查与云服务"
                 value={`${overallVerifyRate}%`}
-                unit={`质检通过率（${fmtNum(totalVerifyChecks)} 次门禁）`}
-                accent="#ec4899"
+                unit={`检查通过率（${fmtNum(totalVerifyChecks)} 项）`}
+                accent="#475569"
                 spark={daily.map((d) => d.versions)}
                 details={[
                   `版本 ${fmtNum(data.overview.versionsTotal)} · 部署 ${fmtNum(data.overview.deploymentsTotal)}`,
                   `云服务 ${fmtNum(data.overview.cloudEnabledApps)} · 表 ${fmtNum(data.overview.cloudTablesTotal)}`,
-                  `用户反馈 ${fmtNum(data.overview.helpFeedbackTotal)} · 社区 ${fmtNum(data.overview.templatesPublished)}`,
+                  `反馈 ${fmtNum(data.overview.helpFeedbackTotal)} · 社区 ${fmtNum(data.overview.templatesPublished)}`,
                 ]}
               />
               </div>
@@ -783,21 +782,20 @@ export function DashboardPage() {
           ) : null}
           {isAdmin && section === 'cluster' ? <ClusterSandboxPanel /> : null}
 
-          {/* 02. 对称梯形转化漏斗 + 多维每日趋势（含堆叠面积构成） */}
           {section === 'all' || section === 'growth' ? (
             <section className="dash-section" aria-label="转化漏斗与每日趋势">
               <SectionHeading
                 id="sec-funnel"
                 num="02"
-                title="转化漏斗与多维趋势构成"
-                sub="同口径对称梯形漏斗 + 流失定位洞察，右侧支持折线 / 柱状 / 多维堆叠面积切换"
+                title="转化漏斗与每日趋势"
+                sub="各环节转化与按日趋势变化"
               />
               <div className="dash-hero-split xa-split-wide">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h2>全链路创作转化漏斗</h2>
-                      <p>对话构想 → 新建应用 → 首版就绪 → 发布上线 → 真实访问 → 云服务</p>
+                      <h2>应用转化漏斗</h2>
+                      <p>对话 → 新建应用 → 首版就绪 → 发布上线 → 产生访问 → 启用云服务</p>
                     </div>
                   </header>
                   <TrapezoidFunnel steps={data.funnel} />
@@ -806,8 +804,8 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h2>多维度每日趋势与构成</h2>
-                      <p>按 Asia/Shanghai 时区补零对齐，支持 6 类指标与全链路堆叠面积占比视图</p>
+                      <h2>每日趋势</h2>
+                      <p>按日统计（东八区），可切换柱状、折线与堆叠面积图</p>
                     </div>
                     <div className="dash-toolbar-group">
                       {chartKind === 'area' ? (
@@ -895,21 +893,20 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 03. 近 140 天活跃日历热力图 + 24 小时极坐标玫瑰图 */}
           {section === 'all' || section === 'growth' ? (
-            <section className="dash-section" aria-label="活跃日历热力图与时段玫瑰图">
+            <section className="dash-section" aria-label="活跃日历与时段分布">
               <SectionHeading
                 id="sec-calendar"
                 num="03"
-                title="平台活跃日历与 24 小时时段分布"
-                sub="左图回溯近半年（26 周）每日活动强度，右图按早/中/夜班表盘呈现 24h 任务触发高峰"
+                title="活跃日历与时段分布"
+                sub="近 26 周活跃度与 24 小时任务分布"
               />
               <div className="xa-grid-cal-polar">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>近 180 天每日活跃日历热力图</h3>
-                      <p>一眼识别工作周波峰、节假日低谷与版本推广节点，悬停查看当日明细</p>
+                      <h3>近 180 天活跃日历</h3>
+                      <p>悬停可查看当日活跃明细</p>
                     </div>
                     <div className="seg-control small" role="radiogroup" aria-label="日历指标">
                       {(
@@ -939,8 +936,8 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>24 小时任务触发极坐标玫瑰图</h3>
-                      <p>按 Asia/Shanghai 小时分布，色系区分早/中/夜班</p>
+                      <h3>24 小时任务分布</h3>
+                      <p>按小时统计任务触发次数</p>
                     </div>
                   </header>
                   <PolarRoseChart hours={data.hourly} />
@@ -949,14 +946,13 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 04. 任务全链路三段桑基流向图 */}
           {section === 'all' || section === 'agent' ? (
-            <section className="dash-section" aria-label="任务全链路桑基流向图">
+            <section className="dash-section" aria-label="任务流向分布">
               <SectionHeading
                 id="sec-sankey"
                 num="04"
-                title="创作任务流向与失败归因（桑基图）"
-                sub="从创作入口 → 应用形态 → 最终执行结果（成功 / 构建失败 / 模型异常 / 取消）透明追踪流量去向"
+                title="任务流向与结果分布"
+                sub="任务类型 → 应用形态 → 执行结果"
               />
               <div className="dash-panel">
                 <SankeyFlowChart
@@ -974,21 +970,20 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 05. 员工/空间留存 Cohort 矩阵 + 资产健康度与僵尸治理 */}
           {section === 'all' || section === 'growth' || section === 'apps' ? (
-            <section className="dash-section" aria-label="留存分析与资产健康度治理">
+            <section className="dash-section" aria-label="留存与低活跃应用">
               <SectionHeading
                 id="sec-health"
                 num="05"
-                title="空间复访留存矩阵与资产健康治理"
-                sub="左图追踪新增空间的次日～第 7 日真实回访留存；右图自动识别僵尸站点（7 日 0 访问）与异常停滞应用"
+                title="留存与低活跃应用"
+                sub="新增空间 7 日留存、近期无访问站点与异常应用"
               />
               <div className="dash-grid-2">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>留存 Cohort 热力矩阵（第 1 日 ～ 第 7 日）</h3>
-                      <p>行 = 首次活跃批次日，列 = 第 N 日仍持续创作或运行任务的空间留存率</p>
+                      <h3>7 日留存</h3>
+                      <p>按首次活跃日期统计第 1 日至第 7 日回访比例</p>
                     </div>
                   </header>
                   <CohortRetentionMatrix cohort={data.cohortRetention} />
@@ -997,7 +992,7 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>应用资产健康度与僵尸清单</h3>
+                      <h3>低活跃与异常应用</h3>
                       <p>在用 {fmtNum(data.assetHealth?.totalActive)} 个 · 就绪 {fmtNum(data.assetHealth?.readyCount)} · 已发布 {fmtNum(data.assetHealth?.publishedCount)} · 近 7 日有访问 {fmtNum(data.assetHealth?.active7dCount)}</p>
                     </div>
                     <div className="seg-control small" role="radiogroup" aria-label="健康治理清单">
@@ -1186,7 +1181,7 @@ export function DashboardPage() {
                     应用资产与流量 <b>{fmtNum(data.overview.appsTotal)}</b> →
                   </button>
                   <button type="button" className="xa-dock-btn" onClick={() => setSection('agent')}>
-                    Agent 编排与质检 <b>{overallVerifyRate}%</b> →
+                    任务与检查 <b>{overallVerifyRate}%</b> →
                   </button>
                   <button type="button" className="xa-dock-btn" onClick={() => setSection('infra')}>
                     云服务与监控 <b>{fmtNum(data.overview.cloudEnabledApps)}</b> →
@@ -1352,10 +1347,9 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 3. 应用资产画像与排行 */}
           {show('apps') ? (
-            <section className="dash-section" aria-label="应用资产画像与排行">
-              <SectionTitle title="全平台应用资产画像与流量排行" sub="按创造类型、项目形态、生命周期、创建模式与来源、设计风格深度拆解全平台 384+ 应用资产。" />
+            <section className="dash-section" aria-label="应用分布与排行">
+              <SectionTitle title="应用分布与访问排行" sub="按类型、项目形态、状态和风格统计应用分布与访问量。" />
 
               <div className="dash-grid-2">
                 <div className="dash-panel">
@@ -1615,18 +1609,17 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 4. Agent 编排、工具遥测、质检门禁与故障诊断 */}
           {show('agent') ? (
-            <section className="dash-section" aria-label="Agent 编排与质检遥测">
-              <SectionTitle title="Agent 编排效能、工具遥测与质量门禁" sub="深度剖析 2.9 万+任务事件流：Agent 工具调用成功率、构建/冒烟/视觉质检通过率、人工确认卡、分时段高峰与失败根因。" />
+            <section className="dash-section" aria-label="任务执行与自动检查">
+              <SectionTitle title="任务执行与自动检查" sub="统计工具调用成功率、自动检查通过率、分时段分布与失败原因。" />
 
               <div className="dash-grid-2">
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>任务 SLA 健康度与编排事件</h3>
+                      <h3>任务耗时与状态</h3>
                       <p>
-                        总任务 {fmtNum(data.overview.tasksTotal)} · 重试 {fmtNum(data.tasks.retries)} · Steer {fmtNum(data.tasks.steerCount)} · 检查点 {fmtNum(data.tasks.checkpointsCount)} · 事件流 {fmtNum(data.tasks.eventsCount)}
+                        总任务 {fmtNum(data.overview.tasksTotal)} · 重试 {fmtNum(data.tasks.retries)} · 补充 {fmtNum(data.tasks.steerCount)} · 检查点 {fmtNum(data.tasks.checkpointsCount)} · 事件 {fmtNum(data.tasks.eventsCount)}
                       </p>
                     </div>
                   </header>
@@ -1662,12 +1655,12 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>Agent 工具调用遥测（Tool Telemetry）</h3>
-                      <p>统计 bash / write / edit / read / screenshot / cloud 等工具调用量与成功率</p>
+                      <h3>工具调用统计</h3>
+                      <p>bash / write / edit / read / screenshot / cloud 等工具的调用量与成功率</p>
                     </div>
                   </header>
                   {data.agentTelemetry.tools.length === 0 ? (
-                    <DashEmptyBox icon="terminal" title="暂无工具调用遥测数据" />
+                    <DashEmptyBox icon="terminal" title="暂无工具调用数据" />
                   ) : (
                     <div className="dash-table-wrap">
                       <table className="dash-table">
@@ -1710,19 +1703,19 @@ export function DashboardPage() {
                 <div className="dash-panel">
                   <header className="dash-panel-head compact">
                     <div>
-                      <h3>自动化质检门禁通过率（Quality Gates）</h3>
-                      <p>覆盖类型检查、构建预览/发布版、Chromium 冒烟测试、视觉自查与技能格式校验</p>
+                      <h3>自动检查通过率</h3>
+                      <p>类型检查、构建、冒烟测试、页面自查与格式校验</p>
                     </div>
                   </header>
                   {data.agentTelemetry.verifyChecks.length === 0 ? (
-                    <DashEmptyBox icon="check" title="暂无质检门禁记录" />
+                    <DashEmptyBox icon="check" title="暂无自动检查记录" />
                   ) : (
                     <div className="dash-scroll-list" style={{ maxHeight: 310 }}>
                       <div className="dash-table-wrap">
                         <table className="dash-table">
                           <thead>
                             <tr>
-                              <th scope="col">门禁检查项</th>
+                              <th scope="col">检查项</th>
                               <th scope="col">总次数</th>
                               <th scope="col">通过 / 未通过</th>
                               <th scope="col">通过率</th>
@@ -1950,10 +1943,9 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 5. 云服务、数据源、对话、反馈、社区与运行监控 */}
           {show('infra') ? (
-            <section className="dash-section" aria-label="云服务、数据源、用户反馈与运行监控">
-              <SectionTitle title="版本部署、云服务合规、数据源、用户反馈与运行监控" sub="覆盖全平台 BaaS 数据表与站内安全权限、Deno 云函数、AGW 数据源、会话转化、用户上报反馈与实例延迟。" />
+            <section className="dash-section" aria-label="版本、云服务与反馈">
+              <SectionTitle title="版本、云服务与反馈" sub="统计版本构建、云数据库与权限、云函数、数据源调用及用户反馈。" />
 
               <div className="dash-grid-3">
                 <div className="dash-panel">
@@ -2693,11 +2685,7 @@ function KpiCard({
     <article className="dash-kpi">
       <div className="dash-kpi-top">
         <span>{title}</span>
-        {delta ? (
-          <em className={`dash-delta ${delta.tone}`}>{delta.text}</em>
-        ) : (
-          <i style={{ background: accent }} aria-hidden="true" />
-        )}
+        {delta ? <em className={`dash-delta ${delta.tone}`}>{delta.text}</em> : null}
       </div>
       <div className="dash-kpi-val">
         <b>{value}</b>

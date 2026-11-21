@@ -63,31 +63,25 @@ export function AdminPage() {
     <div className="content-page dash-page">
       <header className="dash-header-top">
         <div className="dash-title-block">
-          <span className="overline">ZHIYE ENTERPRISE GOVERNANCE &amp; ASSET CONSOLE</span>
           <div className="dash-title-row">
-            <h1>织页平台管理工作台</h1>
-            <span className="dash-scope-badge platform">
-              <i className="dash-pulse-dot" aria-hidden="true" />
-              平台管理员专享
-            </span>
+            <h1>平台管理</h1>
+            <span className="dash-scope-badge platform">管理员</span>
             {overview ? (
               <span className="gov-actor-chip">
-                操作人 <code>{overview.currentActor}</code>
+                当前操作人 <code>{overview.currentActor}</code>
               </span>
             ) : null}
           </div>
-          <p>
-            集中处理人员离职与空间资产批量交接、单应用归属转移、线上站点权限风控、社区与反馈工单分诊、工作空间配额覆盖及操作审计留痕。
-          </p>
+          <p>管理应用归属、已发布站点权限、用户反馈、空间配额与操作审计。</p>
         </div>
         <div className="dash-header-cta">
           <button type="button" className="dash-action-btn" onClick={() => navigate('/dashboard')}>
             <Icon name="chart" />
-            <span>统计看板</span>
+            <span>数据看板</span>
           </button>
           <button type="button" className="dash-action-btn" onClick={() => navigate('/logs')}>
             <Icon name="terminal" />
-            <span>日志排查</span>
+            <span>运行日志</span>
           </button>
           <button
             type="button"
@@ -96,7 +90,7 @@ export function AdminPage() {
             onClick={() => void refreshAll()}
           >
             <Icon name="refresh" className={adminQ.isFetching ? 'spinning' : ''} />
-            <span>{adminQ.isFetching ? '刷新中…' : '刷新台账'}</span>
+            <span>{adminQ.isFetching ? '刷新中…' : '刷新'}</span>
           </button>
         </div>
       </header>

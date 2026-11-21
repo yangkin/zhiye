@@ -52,7 +52,7 @@ export function SkillHubMarket({ picked, onPick, onClose }: Props) {
   };
 
   return (
-    <Modal title="SkillHub 技能市场" overline="COMPANY SKILLHUB" onClose={onClose} wide className="skillhub-market">
+    <Modal title="SkillHub 技能市场" onClose={onClose} wide className="skillhub-market">
       <form
         className="skillhub-market-tools"
         onSubmit={(e) => {

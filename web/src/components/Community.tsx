@@ -136,7 +136,6 @@ export function PublishWorkModal({ app, onClose }: { app: AppSummary; onClose: (
   return (
     <Modal
       title="发布到灵感社区"
-      overline="SHARE YOUR WORK"
       onClose={onClose}
       footer={
         <>
