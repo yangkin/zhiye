@@ -5,7 +5,7 @@ description: 用 recharts 做数据看板和统计图（折线、柱状、饼图
 # 数据看板与图表
 
 ## 布局
-- 整体使用流式满宽容器（`w-full`），适配 1280px 笔记本、1920px 办公屏和 2K/4K 大屏，不要套窄 `max-w-5xl` 导致大屏两侧空荡。
+- 整体使用全宽流式布局（`w-full`），严禁在外层套 `max-w-5xl` / `max-w-6xl` / `max-w-7xl` / `max-w-[1440px]` + `mx-auto`，确保在 1280px 笔记本、1920px 办公屏和 2K/4K 大屏都能贴边铺满、无两侧大块空白。
 - 顶部一行指标卡（3～6 个）：使用响应式网格（如 `grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6 gap-4`），大号等宽数字（`tabular-nums`）+ 名称 + 同比/环比（上升绿色、下降红色，用 lucide-react 的 TrendingUp / TrendingDown）。
 - 下面是图表网格：窄屏 1 列、桌面 2 列、超宽大屏按需 2～3 列（`grid grid-cols-1 lg:grid-cols-2 gap-4`）；每个图表放在白底圆角卡片里，卡片有标题和一句说明，外层设 `min-w-0` 防止 ResponsiveContainer 撑破网格。
 - 需要筛选时，筛选条（时间范围、部门、产线等）放在指标卡上方并使用 `flex-wrap gap-2`，筛选结果同时影响指标卡和所有图表。

@@ -15,7 +15,7 @@ description: 业务表单（录入、编辑、校验）和数据表格（搜索�
 - 表头可点击排序（显示 ↑ ↓）；每页 20 条，底部「共 N 条 · 第 x/y 页」。
 - 状态列用彩色标签（如 运行=绿、停机=黄、报废=灰），不要只用文字颜色；所有状态标签、表头 `<th>`、单号、日期、金额与操作列按钮必须加 `whitespace-nowrap shrink-0`，严禁在较窄视口下把状态胶囊压成竖排两行。
 - 空结果显示「没有符合条件的记录」并提供「清空筛选」。
-- 表格外层**始终**包裹 `overflow-x-auto w-full`（适配 850px 预览窗、1280px 笔记本与手机横向滚动），表格主容器不限制 `max-w-4xl`/`max-w-5xl` 以便在 1920/4K 宽屏舒展展示；筛选栏使用 `flex flex-wrap items-center gap-2` 自动折行不挤压。
+- 表格外层**始终**包裹 `overflow-x-auto w-full`（适配 1280px 笔记本与较窄窗格横向滚动），主内容区严禁套 `max-w-5xl` / `max-w-6xl` / `max-w-7xl` / `max-w-[1440px]` + `mx-auto`，保证在 1920 / 2K / 4K 宽屏舒展铺满；筛选栏使用 `flex flex-wrap items-center gap-2` 自动折行不挤压。
 
 ## 数据
 - 主键用 `crypto.randomUUID()`；创建时间、修改时间自动填（dayjs）。

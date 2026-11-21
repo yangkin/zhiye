@@ -28,6 +28,32 @@ test('截图自查：发现横向溢出和文字截断，返回截图和摘要',
   assert.match(m.text, /手机 390×844/)
 })
 
+test('截图自查：宽屏 1920×1080 检出 max-w-[1440px] mx-auto 两侧留白，满宽流式布局放行', { skip: !existsSync(CHROME) && '没有 Chrome' }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'shot-wide-'))
+  try {
+    writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><head><title>研发协同台</title></head><body style="margin:0;background:#eef5f1">
+      <div style="max-width:1440px;margin:0 auto;display:flex;min-height:100vh">
+        <aside style="width:220px;background:#fff;padding:16px">导航栏</aside>
+        <main style="flex:1;padding:24px"><h1>交付看板</h1><table><tr><th>项目</th></tr><tr><td>测试</td></tr></table></main>
+      </div></body></html>`)
+    const bad = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
+    assert.equal(bad.ok, true, bad.text)
+    assert.match(bad.text, /宽屏 1920×1080/)
+    assert.match(bad.text, /宽屏下内容区未铺满/)
+
+    writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><head><title>研发协同台</title></head><body style="margin:0;background:#eef5f1">
+      <div style="width:100%;display:flex;min-height:100vh">
+        <aside style="width:220px;background:#fff;padding:16px">导航栏</aside>
+        <main style="flex:1;padding:24px"><h1>交付看板</h1><table><tr><th>项目</th></tr><tr><td>测试</td></tr></table></main>
+      </div></body></html>`)
+    const good = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
+    assert.equal(good.ok, true, good.text)
+    assert.doesNotMatch(good.text, /宽屏下内容区未铺满/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('截图自查：没有浏览器时给出说明', async () => {
   const r = await takeScreenshot('/tmp', { projectKind: 'static' }, { ZHIYE_CHROME_PATH: '/nope' })
   assert.equal(r.ok, false)

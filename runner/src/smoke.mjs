@@ -221,6 +221,9 @@ export async function smokeTest(dir, { requireRoot = false, captureShot = false,
     let screenshot = null
     if (captureShot && errors.length === 0) {
       try {
+        // 以 1920×1080 宽屏采集首屏截图送视觉评审，既看清全貌又能及时发现窄容器居中导致的大屏两侧留白
+        await page.setViewportSize({ width: 1920, height: 1080 }).catch(() => {})
+        await page.waitForTimeout(200)
         screenshot = (await page.screenshot({ type: 'jpeg', quality: 60, fullPage: false })).toString('base64')
       } catch {}
     }

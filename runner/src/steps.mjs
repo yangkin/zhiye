@@ -212,7 +212,7 @@ export function toolSummary(cwd, name, args = {}, { created } = {}) {
     }
     case 'todo_write': return '更新待办清单'
     case 'request_confirm': return args.kind === 'cloud' ? '启用 织页云服务' : '请求确认'
-    case 'screenshot': return `截图自查 · ${args.device === 'mobile' ? '手机' : '桌面'}${args.route ? ' ' + String(args.route).slice(0, 40) : ''}`
+    case 'screenshot': return `截图自查 · ${args.device === 'mobile' ? '手机' : args.device === 'wide' ? '宽屏 1920' : '桌面'}${args.route ? ' ' + String(args.route).slice(0, 40) : ''}`
     default: return `调用工具 ${name}`
   }
 }
@@ -404,7 +404,7 @@ export function createScreenshotExtension({ cwd, projectKind, env = process.env,
       description: '构建当前代码并在无头浏览器里打开，返回页面截图和文字摘要（标题、按钮、可见文字、横向溢出 / 文字截断等布局问题、控制台报错）。改完界面后用它检查效果；需要看手机效果时 device 填 mobile；多页面应用用 route 指定 hash 路由（如 #/orders）。',
       parameters: Type.Object({
         route: Type.Optional(Type.String({ description: '要打开的页面：hash 路由（如 #/orders）；不填打开首页' })),
-        device: Type.Optional(Type.Union([Type.Literal('desktop'), Type.Literal('mobile')], { description: 'desktop = 1280×800（默认），mobile = 390×844' })),
+        device: Type.Optional(Type.Union([Type.Literal('desktop'), Type.Literal('wide'), Type.Literal('mobile')], { description: 'desktop = 1280×800（默认），wide = 1920×1080（宽屏，检查大屏留白），mobile = 390×844' })),
         fullPage: Type.Optional(Type.Boolean({ description: '截整页（最长 2400px），默认只截首屏' })),
       }),
       async execute(_id, params, _signal, _onUpdate, ctx) {

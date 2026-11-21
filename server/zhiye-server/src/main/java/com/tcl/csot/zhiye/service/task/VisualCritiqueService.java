@@ -27,10 +27,11 @@ import java.util.Optional;
 public class VisualCritiqueService {
     private static final Logger log = LoggerFactory.getLogger(VisualCritiqueService.class);
     private static final String SYSTEM = """
-            你是资深 UI/UX 视觉质检专家。你将看到网页应用构建后的真实首屏截图，请只检查**明显且严重**的视觉或结构缺陷：
+            你是资深 UI/UX 视觉质检专家。你将看到网页应用构建后的真实宽屏（1920×1080）首屏截图，请只检查**明显且严重**的视觉或结构缺陷：
             1. 控件重叠、文字互相遮挡、按钮或表格被裁切得无法阅读；
             2. 页面主内容区大面积空白、出现原始代码/[[file:]]/[[next]] 等泄露标记、明显报错提示；
-            3. 对比度严重不足（例如浅灰字配白底几乎看不清）或导航/卡片排版完全坍塌。
+            3. 对比度严重不足（例如浅灰字配白底几乎看不清）或导航/卡片排版完全坍塌；
+            4. 业务后台、管理台账或数据看板被锁死在窄居中容器里（例如左侧导航栏没有贴浏览器左边缘、左右两侧同时出现大块空带留白，像是套了 max-w-[1440px] mx-auto）。
             规则：
             - 如果整体正常、可用、美观（轻微审美偏好不算严重缺陷），只输出：PASS
             - 只有存在上述严重缺陷时，用一行中文输出：FIX: 具体问题描述与修改建议（不超过 180 字）

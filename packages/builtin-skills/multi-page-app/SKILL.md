@@ -32,6 +32,9 @@ export default function App() {
 - 共享状态（如设备列表）放一个 `src/store.ts`：用 React context 或简单的模块级 store + `useSyncExternalStore`，同步到 localStorage 时**必须封装在 `try / catch` 中降级为内存状态**（工作台沙箱预览禁用同源存储，直接访问会抛 `SecurityError` 白屏）。
 
 ## 布局
-- 全分辨率适配：宽屏（`lg:` ≥ 1024px）采用左侧 `200px~220px` 固定导航（图标用 lucide-react，当前项高亮）+ 右侧 `flex-1 min-w-0` 流式内容区（使用 `w-full`，不要把整个管理后台锁死在 `max-w-5xl` 导致 2K/4K 大屏两侧大片空白）；`< 1024px`（含工作台窄预览窗、平板与手机）自动收起为顶部标题栏 + 抽屉菜单。
+- **全宽流式布局（严禁外层居中窄盒）**：
+  - ✅ 正确：`<div className="flex min-h-screen w-full">` + 左侧 `<aside className="w-56 shrink-0 ...">` 紧贴浏览器左边缘 + 右侧 `<main className="flex-1 min-w-0 w-full px-6 py-6">` 流式铺满至浏览器右边缘（适配 1280px 笔记本、1440px、1920px 办公屏和 2K/4K 大屏，绝无两侧大片空白）。
+  - ❌ 严禁：`<div className="mx-auto max-w-[1440px] flex">` 或 `<main className="mx-auto max-w-6xl">` / `max-w-7xl`（在 1920/2K/4K 全屏或大屏显示器上会导致左右两边出现大块空白！）。
+  - `< 1024px`（`lg:` 以下）侧边栏自动收起为顶部标题栏 + 抽屉菜单。
 - 每个页面顶部：标题 + 一句说明 + 右侧主操作按钮（如「新增设备」），支持 `flex-wrap gap-3` 避免窄屏按钮挤压。
 - 列表页：搜索框 + 筛选下拉（`flex-wrap gap-2`）+ 带 `overflow-x-auto` 的表格；表头、状态胶囊、单号、日期与操作列按钮均加 `whitespace-nowrap` 防止被挤成竖排；行操作（查看、编辑、删除）放在最后一列，不要调用浏览器原生 `window.confirm()` / `alert()` / `prompt()`（沙箱预览会静默拦截）。
