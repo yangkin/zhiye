@@ -395,10 +395,16 @@ export function ChatPage() {
                       }}
                     />
                   ) : null}
-                  {message.pending && !message.content && !message.thinking ? (
-                    <p className="conversation-status" role="status">
-                      <Icon name="refresh" className="spinning" /> {message.content ? '正在回答…' : '正在思考…'}
-                    </p>
+                  {message.pending && !(message.thinking && !message.content) ? (
+                    <div className="tl-live-bar" role="status" aria-live="polite" style={{ marginTop: 10 }}>
+                      <span className="tl-live-orb" aria-hidden="true" />
+                      <span className="tl-live-label">{message.content ? '正在输出中' : '正在思考中'}</span>
+                      <span className="tl-live-dots" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
+                    </div>
                   ) : null}
                   {message.stopped ? <p className="conversation-status">已停止回答{message.content ? '，上面是停止前收到的内容' : ''}。</p> : null}
                   {message.error ? (

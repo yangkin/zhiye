@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, errorMessage } from '../api/client';
 import type { TaskStreamState, TimelineItem, ToolItem } from '../api/sse';
 import type { StepDetail, Task } from '../api/types';
@@ -136,6 +136,62 @@ function GroupRow({ ids, tools, taskId }: { ids: string[]; tools: Map<string, To
   );
 }
 
+/** 实时秒表：用于思考中 / 等待模型下一步时显示已耗时，让用户一眼确认仍在运行 */
+function useElapsedSeconds(active: boolean, resetKey: string | number): number {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!active) {
+      setSec(0);
+      return;
+    }
+    const started = Date.now();
+    setSec(0);
+    const id = window.setInterval(() => {
+      setSec(Math.max(1, Math.floor((Date.now() - started) / 1000)));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [active, resetKey]);
+  return sec;
+}
+
+/** 进行中的底部实时脉搏条：只要任务未结束，即使处于思考静默期或等待模型下一轮，也能明确看到正在运行 */
+function LiveActivityBar({ stream, items }: { stream: TaskStreamState; items: TimelineItem[] }) {
+  const activeThinking = items.some((x) => x.kind === 'thinking' && !x.done);
+  const runningTool = [...stream.tools].reverse().find((t) => t.state === 'start' && t.name !== 'todo_write');
+  const last = items[items.length - 1];
+  const resetKey = `${items.length}:${stream.lastSeq}:${runningTool?.id ?? ''}`;
+  const elapsed = useElapsedSeconds(!activeThinking, resetKey);
+
+  // 如果底部已经有一个正在脉动的「思考中…」气泡，避免重复叠加
+  if (activeThinking) return null;
+
+  let label = '正在思考下一步';
+  if (stream.status === 'CANCELLING') {
+    label = '正在停止当前任务';
+  } else if (runningTool) {
+    label = `正在执行：${runningTool.summary || runningTool.name}`;
+  } else if (last?.kind === 'stage' && last.label) {
+    label = last.label;
+  } else if (last?.kind === 'text') {
+    label = '正在持续输出';
+  } else if (stream.phaseLabel) {
+    label = stream.phaseLabel;
+  }
+
+  return (
+    <div className="tl-live-bar" role="status" aria-live="polite">
+      <span className="tl-live-orb" aria-hidden="true" />
+      <span className="tl-live-label">{label}</span>
+      <span className="tl-live-dots" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </span>
+      {elapsed >= 2 ? <span className="tl-live-sec">{elapsed}s</span> : null}
+    </div>
+  );
+}
+
 /** 生成视图：文字、思考、步骤、阶段、检查按事件顺序交错。 */
 export function Timeline({ stream, finished, summaryOnly = false }: Props) {
   const tools = useMemo(() => new Map(stream.tools.map((t) => [t.id, t])), [stream.tools]);
@@ -203,6 +259,7 @@ export function Timeline({ stream, finished, summaryOnly = false }: Props) {
           <TimelineRow key={x.key} item={x} tools={tools} taskId={stream.taskId} />
         ),
       )}
+      <LiveActivityBar stream={stream} items={items} />
     </div>
   );
 }
@@ -259,6 +316,7 @@ function ThinkingRow({ item, taskId }: { item: Extract<TimelineItem, { kind: 'th
   // 思考过程默认收起，点开才看
   const expanded = open ?? false;
   const text = loaded ?? item.text;
+  const liveSecs = useElapsedSeconds(!item.done, item.key);
   const secs = item.durationMs ? Math.max(1, Math.round(item.durationMs / 1000)) : null;
   const toggle = async () => {
     const next = !expanded;
@@ -275,7 +333,17 @@ function ThinkingRow({ item, taskId }: { item: Extract<TimelineItem, { kind: 'th
   return (
     <div className={`tl-thinking ${item.done ? 'done' : 'live'}`}>
       <button type="button" aria-expanded={expanded} onClick={() => void toggle()}>
-        {item.done ? `已思考 ${secs ?? '?'}s` : '思考中…'}
+        {!item.done ? <span className="tl-live-orb" aria-hidden="true" /> : null}
+        <span>
+          {item.done ? `已思考 ${secs ?? '?'}s` : `思考中${liveSecs >= 1 ? ` ${liveSecs}s` : ''}`}
+        </span>
+        {!item.done ? (
+          <span className="tl-live-dots" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        ) : null}
         <i aria-hidden="true">{expanded ? '▾' : '▸'}</i>
       </button>
       {expanded && text ? <p>{text}</p> : null}
