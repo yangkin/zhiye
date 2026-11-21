@@ -10,21 +10,36 @@ export function elementLabel(s: Selection): string {
   return cls ? `${tag}.${cls}` : tag;
 }
 
-/** iframe 在 preview-stage 内的偏移（覆盖层都以 stage 为定位容器）。 */
+/** iframe 在 preview-stage 内的视觉盒子与缩放比（覆盖层都以 preview-stage 为定位容器）。 */
 function useFrameBox(frameRef: RefObject<HTMLIFrameElement | null>, deps: unknown[]) {
-  const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0 });
+  const [box, setBox] = useState({ left: 0, top: 0, width: 0, height: 0, scaleX: 1, scaleY: 1 });
   useLayoutEffect(() => {
+    const f = frameRef.current;
+    const stage = (f?.closest('.preview-stage') as HTMLElement | null) ?? f?.parentElement ?? null;
+    if (!f || !stage) return;
     const measure = () => {
-      const f = frameRef.current;
-      const stage = f?.parentElement;
-      if (!f || !stage) return;
       const fr = f.getBoundingClientRect();
       const sr = stage.getBoundingClientRect();
-      setBox({ left: fr.left - sr.left + f.clientLeft, top: fr.top - sr.top + f.clientTop, width: f.clientWidth, height: f.clientHeight });
+      const scaleX = f.clientWidth > 0 ? fr.width / f.clientWidth : 1;
+      const scaleY = f.clientHeight > 0 ? fr.height / f.clientHeight : 1;
+      setBox({
+        left: fr.left - sr.left + f.clientLeft * scaleX,
+        top: fr.top - sr.top + f.clientTop * scaleY,
+        width: fr.width,
+        height: fr.height,
+        scaleX,
+        scaleY,
+      });
     };
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(stage);
+    ro?.observe(f);
+    return () => {
+      window.removeEventListener('resize', measure);
+      ro?.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   return box;
@@ -33,9 +48,12 @@ function useFrameBox(frameRef: RefObject<HTMLIFrameElement | null>, deps: unknow
 export function ElementTagPill({ selection, frameRef }: { selection: Selection; frameRef: RefObject<HTMLIFrameElement | null> }) {
   const box = useFrameBox(frameRef, [selection.loc]);
   const r = selection.rect;
-  if (r.top + r.height < 0 || r.top > box.height) return null;
-  const top = Math.max(box.top + 2, box.top + r.top - 22);
-  const left = Math.min(Math.max(box.left + 2, box.left + r.left), box.left + box.width - 120);
+  const rTop = r.top * box.scaleY;
+  const rLeft = r.left * box.scaleX;
+  const rHeight = r.height * box.scaleY;
+  if (rTop + rHeight < 0 || rTop > box.height) return null;
+  const top = Math.max(box.top + 2, box.top + rTop - 22);
+  const left = Math.min(Math.max(box.left + 2, box.left + rLeft), box.left + box.width - 120);
   return (
     <span className="ze-element-tag" style={{ top, left }} aria-hidden="true">
       {elementLabel(selection)}
@@ -79,11 +97,14 @@ export function ChatEditBar({ selection, frameRef, onSend, onParent, onViewSourc
   }, [error, blocked.busy]);
 
   const r = selection.rect;
+  const rTop = r.top * box.scaleY;
+  const rLeft = r.left * box.scaleX;
+  const rHeight = r.height * box.scaleY;
   const maxLeft = Math.max(box.left + 8, box.left + box.width - size.w - 8);
   const maxTop = Math.max(box.top + 8, box.top + box.height - size.h - 8);
-  let top = box.top + r.top + r.height + 8;
-  if (top > maxTop) top = Math.max(box.top + 8, box.top + r.top - size.h - 30);
-  let left = box.left + r.left;
+  let top = box.top + rTop + rHeight + 8;
+  if (top > maxTop) top = Math.max(box.top + 8, box.top + rTop - size.h - 30);
+  let left = box.left + rLeft;
   if (drag) {
     left = drag.x;
     top = drag.y;

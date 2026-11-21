@@ -1,6 +1,6 @@
 /* ==========================================================================
-   全分辨率自适应宽屏布局（兼容 1280px 笔记本 / 1920x1080 / 2K / 4K 3840px 大屏）
-   统一覆盖固定 1280px / 1100px 窄容器限制，避免大屏左右大片留白，同时保持表单与阅读区比例协调
+   全分辨率自适应宽屏布局（兼容 1280px 笔记本 / 1440px / 1920x1080 / 2K / 4K 3840px 大屏）
+   统一覆盖固定窄容器与无上限分栏，避免大屏留白/对话栏过肥，以及小屏预览表格截断
    ========================================================================== */
 
 /* 1. 通用内容页容器（社区 / 应用 / 历史 / 看板 / 管理 / 日志）：流式铺展 + 动态安全边距 */
@@ -44,6 +44,10 @@
   gap: 18px;
 }
 
+.scene-thumb-title {
+  text-wrap: balance;
+}
+
 /* 3. 卡片画廊网格（应用页 / 灵感社区 / 首页社区预告）：按屏幕宽度自动增列，防止大屏卡片被拉伸变形 */
 .apps-page .app-grid,
 .app-grid {
@@ -77,7 +81,265 @@
   max-width: 560px;
 }
 
-/* 5. FHD 1920px+ 宽屏增强 */
+/* 5. 工作台（/apps/:id）：锁定对话栏黄金宽度区间，防止 4K 屏对话栏过肥，同时给 1280px 笔记本更多预览空间 */
+@media (min-width: 971px) {
+  .studio-body.workspace-body {
+    grid-template-columns: clamp(300px, 26%, 460px) minmax(0, 1fr);
+  }
+
+  .studio-body.workspace-body.chat-collapsed {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+
+  .studio-body.workspace-body.preview-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-header .studio-identity {
+    width: calc(clamp(300px, 26%, 460px) - 14px);
+    min-width: 0;
+  }
+
+  .studio-app-name {
+    max-width: none;
+    min-width: 48px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .studio-header .studio-identity {
+    width: calc(clamp(300px, 26%, 460px) - 17px);
+  }
+}
+
+@media (max-width: 1190px) and (min-width: 971px) {
+  .studio-header .studio-identity {
+    width: calc(clamp(300px, 26%, 460px) - 11px);
+  }
+}
+
+/* 工作台预览视口自适应引擎（自适应 1280 等比缩放 / 原生 1:1 / 平板 / 手机） */
+.studio-device-tools {
+  gap: 8px;
+}
+
+.studio-device-group {
+  background: var(--st-bg);
+  border: 1px solid var(--st-line);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.studio-device-group > button {
+  height: 28px;
+  width: 28px;
+  border-radius: 6px;
+}
+
+.studio-device-group > button > .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.studio-device-group > button.active {
+  background: var(--st-accent-soft);
+  color: var(--st-accent-ink);
+  box-shadow: none;
+}
+
+.studio-scale-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--st-line);
+  background: var(--st-bg);
+  color: var(--st-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.studio-scale-pill:hover {
+  border-color: var(--st-accent-line);
+  color: var(--st-accent-ink);
+  background: var(--st-accent-softer);
+}
+
+.studio-main .preview-stage {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.preview-viewport-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 3px #2a1d4a14, 0 8px 28px #2a1d4a1a;
+  flex: none;
+}
+
+.preview-viewport-shell > iframe {
+  display: block;
+  border: 0;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+}
+
+.studio-panel.preview-maximized .preview-viewport-shell {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.studio-main .preview-stage.is-device-frame,
+.work-browser-stage.is-device-frame {
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 35%, #f5f4f9, #e7e5ee 75%);
+}
+
+.studio-main .preview-stage.device-mobile .preview-viewport-shell,
+.work-browser-stage.device-mobile .preview-viewport-shell {
+  border: 6px solid #2b2638;
+  border-radius: 26px;
+  box-shadow: 0 18px 48px rgba(32, 23, 56, 0.22);
+}
+
+.studio-main .preview-stage.device-tablet .preview-viewport-shell,
+.work-browser-stage.device-tablet .preview-viewport-shell {
+  border: 5px solid #352f44;
+  border-radius: 18px;
+  box-shadow: 0 16px 44px rgba(32, 23, 56, 0.18);
+}
+
+@media (max-width: 1180px) {
+  .studio-scale-pill {
+    display: none;
+  }
+}
+
+/* 工作台云服务 / 代码面板宽屏展开 */
+.studio-cloud {
+  max-width: min(1080px, 100%);
+}
+
+.cc-section {
+  max-width: min(1080px, 100%);
+}
+
+.cc-grid td {
+  max-width: 320px;
+}
+
+/* 6. 社区作品详情页（/community/:id）：自适应右侧栏 + 预览等比适配与设备切换 */
+@media (min-width: 901px) {
+  .work-page {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 23vw, 440px);
+    gap: clamp(18px, 1.8vw, 28px);
+    padding: clamp(16px, 1.5vw, 24px);
+  }
+}
+
+.work-browser-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  overflow: hidden;
+  background: #fff;
+}
+
+.work-browser-stage .preview-viewport-shell {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.work-device-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  margin-right: 4px;
+}
+
+.work-scale-pill {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid #e6e0f2;
+  background: #fff;
+  color: #6f6482;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.work-scale-pill:hover {
+  border-color: #cbbcf0;
+  color: #5b3fc0;
+  background: #f7f4fe;
+}
+
+.work-device-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid #e8e3f2;
+  background: #f3f1f8;
+}
+
+.work-device-group > button {
+  width: 26px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #776c8c;
+  padding: 0;
+}
+
+.work-device-group > button .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.work-device-group > button.active {
+  background: #fff;
+  color: #5b3fc0;
+  box-shadow: 0 1px 3px rgba(58, 36, 110, 0.12);
+}
+
+/* 7. 独立会话页（/chat/:id）双栏文件模式比例优化 + 历史版本宽弹窗放大 */
+@media (min-width: 961px) {
+  .chat-page.with-files .chat-column {
+    flex: 0 0 clamp(340px, 28vw, 520px);
+  }
+}
+
+.modal-wide {
+  width: min(1240px, calc(100vw - 64px));
+  height: 86dvh;
+}
+
+/* 8. FHD 1920px+ 宽屏增强 */
 @media (min-width: 1800px) {
   .logs-split {
     grid-template-columns: 400px minmax(0, 1fr);
@@ -92,34 +354,56 @@
     max-width: 1040px;
   }
 
+  .chat-files-body {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+
+  .file-doc {
+    max-width: 1020px;
+  }
+
+  .cc-nav {
+    width: 168px;
+  }
+
+  .studio-main .code-files {
+    width: 224px;
+  }
+
   .gov-sample-apps {
     max-width: 480px;
   }
 }
 
-/* 6. 2K / 4K（2560px ~ 3840px）超宽大屏增强 */
+/* 9. 2K / 4K（2560px ~ 3840px）超宽大屏增强 */
 @media (min-width: 2400px) {
   .logs-split {
     grid-template-columns: 460px minmax(0, 1fr);
   }
 
   .cp-card {
-    max-width: 1120px;
+    max-width: 1220px;
   }
 
+  .cp-ask,
+  .cp-thread {
+    max-width: 1100px;
+  }
+
+  /* 4K 下用更饱满的卡片宽度，避免 10 张模板挤成一排细条 */
   .create-page .inspiration-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    gap: 22px;
   }
 
   .apps-page .app-grid,
   .app-grid {
-    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
     gap: 22px;
   }
 
   .work-grid {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
     gap: 22px;
   }
 
@@ -129,11 +413,27 @@
 
   .conversation-stream,
   .conversation-composer-inner {
+    max-width: 1240px;
+  }
+
+  .chat-files-body {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .file-doc {
     max-width: 1160px;
+  }
+
+  .cc-nav {
+    width: 184px;
+  }
+
+  .studio-main .code-files {
+    width: 256px;
   }
 }
 
-/* 7. 中小屏与移动端回退保障 */
+/* 10. 中小屏与移动端回退保障 */
 @media (max-width: 960px) {
   .content-page {
     padding: 24px 20px 36px;

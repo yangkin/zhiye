@@ -8,6 +8,8 @@ import { toast } from '../lib/store';
 import { authorOf, countLabel, useLikeWork, useUseWork, WorkCover } from '../components/Community';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { usePreviewViewport, type PreviewViewportMode } from '../hooks/usePreviewViewport';
 
 /** 作品详情：左边大预览（页面快照），右边作者、点赞、使用模板、去访问、相关推荐 */
 export function WorkPage() {
@@ -22,6 +24,8 @@ export function WorkPage() {
   const like = useLikeWork();
   const use = useUseWork();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const narrow = useMediaQuery('(max-width: 900px)');
+  const vp = usePreviewViewport('auto', narrow);
 
   if (isLoading) return <LoadingState label="正在打开作品…" />;
   if (error || !t) return <ErrorState message={error ? errorMessage(error) : '作品不存在'} onRetry={() => refetch()} />;
@@ -51,6 +55,41 @@ export function WorkPage() {
             <i />
             <i />
             <span>{t.siteUrl ? t.siteUrl.replace(/^https?:\/\//, '') : '页面快照 · 不含真实数据'}</span>
+            {t.previewUrl && !narrow ? (
+              <div className="work-device-bar">
+                {vp.isScaled ? (
+                  <button
+                    type="button"
+                    className="work-scale-pill"
+                    title={vp.mode === 'auto' ? '当前已按 1280px 等比适配，点击切回 1:1 原生宽度' : `当前按 ${Math.round(vp.scale * 100)}% 缩放`}
+                    onClick={() => vp.setMode(vp.mode === 'auto' ? 'native' : 'auto')}
+                  >
+                    {vp.logicalWidth} · {Math.round(vp.scale * 100)}%
+                  </button>
+                ) : null}
+                <div className="work-device-group" role="group" aria-label="切换预览视口">
+                  {(
+                    [
+                      ['auto', 'web', '自适应桌面'],
+                      ['tablet', 'tablet', '平板 768px'],
+                      ['mobile', 'phone', '手机 390px'],
+                    ] as [PreviewViewportMode, 'web' | 'tablet' | 'phone', string][]
+                  ).map(([k, icon, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={vp.mode === k ? 'active' : ''}
+                      aria-label={label}
+                      aria-pressed={vp.mode === k}
+                      title={label}
+                      onClick={() => vp.setMode(k)}
+                    >
+                      <Icon name={icon} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {t.previewUrl ? (
               <a className="icon-button" href={t.previewUrl} target="_blank" rel="noreferrer" aria-label="新窗口打开预览" title="新窗口打开">
                 <Icon name="expand" />
@@ -58,7 +97,14 @@ export function WorkPage() {
             ) : null}
           </header>
           {t.previewUrl ? (
-            <iframe src={t.previewUrl} title={`${t.name} 预览`} sandbox="allow-scripts allow-forms allow-popups" />
+            <div
+              ref={vp.stageRef}
+              className={`work-browser-stage ${vp.isDeviceFrame ? `is-device-frame device-${vp.mode}` : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
+            >
+              <div className="preview-viewport-shell" style={vp.shellStyle}>
+                <iframe src={t.previewUrl} style={vp.frameStyle} title={`${t.name} 预览`} sandbox="allow-scripts allow-forms allow-popups" />
+              </div>
+            </div>
           ) : (
             <div className="work-stage-empty">
               <WorkCover t={t} live={false} />

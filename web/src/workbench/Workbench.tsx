@@ -27,6 +27,7 @@ import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
 import { ErrorBoundary, retryableLazy } from '../components/ErrorBoundary';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { usePreviewViewport, type PreviewViewportMode } from '../hooks/usePreviewViewport';
 
 const CodePane = retryableLazy(() => import('./CodePane').then((m) => ({ default: m.CodePane })));
 
@@ -153,6 +154,7 @@ function Workbench({ id }: { id: string }) {
   // 手机上对话和工作区上下叠放时，点页签要直接切过去，不能让内容藏在长对话下面
   const narrow = useMediaQuery('(max-width: 760px)');
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat');
+  const vp = usePreviewViewport('auto', narrow);
   const openTab = (value: Tab) => {
     setTab(value);
     if (narrow) {
@@ -590,6 +592,40 @@ function Workbench({ id }: { id: string }) {
                   >
                     <Icon name={maximized ? 'contract' : 'expand'} />
                   </button>
+                  {!narrow ? (
+                    <div className="studio-device-group" role="group" aria-label="预览视口适配">
+                      {(
+                        [
+                          ['auto', 'web', '自适应桌面', '自适应桌面（窄窗按 1280px 等比缩放，宽屏 1:1 铺满）'],
+                          ['native', 'preview', '原生 1:1', '按当前窗格实际宽度 1:1 渲染'],
+                          ['tablet', 'tablet', '平板 768px', '平板视口预览（768px）'],
+                          ['mobile', 'phone', '手机 390px', '手机视口预览（390px）'],
+                        ] as [PreviewViewportMode, 'web' | 'preview' | 'tablet' | 'phone', string, string][]
+                      ).map(([modeKey, iconName, label, tip]) => (
+                        <button
+                          key={modeKey}
+                          type="button"
+                          className={vp.mode === modeKey ? 'active' : ''}
+                          aria-label={label}
+                          aria-pressed={vp.mode === modeKey}
+                          title={tip}
+                          onClick={() => vp.setMode(modeKey)}
+                        >
+                          <Icon name={iconName} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {!narrow && vp.isScaled ? (
+                    <button
+                      type="button"
+                      className="studio-scale-pill"
+                      title={vp.mode === 'auto' ? '当前已按 1280px 等比适配，点击切回 1:1 原生宽度' : `当前以 ${Math.round(vp.scale * 100)}% 缩放以完整展示`}
+                      onClick={() => vp.setMode(vp.mode === 'auto' ? 'native' : 'auto')}
+                    >
+                      {vp.logicalWidth} · {Math.round(vp.scale * 100)}%
+                    </button>
+                  ) : null}
                 </div>
                 <div className="studio-route-bar">
                   <button
@@ -662,7 +698,10 @@ function Workbench({ id }: { id: string }) {
                   <button onClick={() => setPreviewVersion(null)}>返回当前版本</button>
                 </div>
               ) : null}
-              <div className={`preview-stage ${editMode ? 'is-selecting' : ''}`}>
+              <div
+                ref={vp.stageRef}
+                className={`preview-stage ${editMode ? 'is-selecting' : ''} ${vp.isDeviceFrame ? `is-device-frame device-${vp.mode}` : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
+              >
                 {frameSrc ? (
                   <>
                     {frameLoading ? (
@@ -670,15 +709,18 @@ function Workbench({ id }: { id: string }) {
                         正在加载最新预览…
                       </div>
                     ) : null}
-                    <iframe
-                      key={frameKey!}
-                      ref={frameRef}
-                      src={frameSrc}
-                      data-preview
-                      onLoad={() => setFrameLoading(false)}
-                      sandbox="allow-scripts allow-forms"
-                      title={`${app.name}应用预览`}
-                    />
+                    <div className="preview-viewport-shell" style={vp.shellStyle}>
+                      <iframe
+                        key={frameKey!}
+                        ref={frameRef}
+                        src={frameSrc}
+                        data-preview
+                        style={vp.frameStyle}
+                        onLoad={() => setFrameLoading(false)}
+                        sandbox="allow-scripts allow-forms"
+                        title={`${app.name}应用预览`}
+                      />
+                    </div>
                   </>
                 ) : null}
                 {frameSrc && editMode && editor.selection ? <ElementTagPill selection={editor.selection} frameRef={frameRef} /> : null}
