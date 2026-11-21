@@ -1,6 +1,84 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { fmtCompact, fmtNum } from './DashboardCharts';
 import { niceTicks } from './TrendChart';
+
+function fmtMedianSec(sec?: number | null): string {
+  if (sec === undefined || sec === null || Number.isNaN(sec) || sec <= 0) return '—';
+  if (sec < 60) return `${Math.round(sec)}秒`;
+  if (sec < 3600) {
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
+  }
+  const h = Math.floor(sec / 3600);
+  const m = Math.round((sec % 3600) / 60);
+  return m > 0 ? `${h}时${m}分` : `${h}小时`;
+}
+
+/** 吸顶章节锚点导览条：IntersectionObserver 滚动联动高亮当前章节 + 窗口摘要 + 回到顶部 */
+export function StickyAnchorBar({
+  items,
+  meta,
+}: {
+  items: readonly [string, string, string][];
+  meta?: ReactNode;
+}) {
+  const [activeId, setActiveId] = useState(items[0]?.[0] ?? '');
+
+  useEffect(() => {
+    const els = items
+      .map(([id]) => document.getElementById(id))
+      .filter((el): el is HTMLElement => Boolean(el));
+    if (els.length === 0 || typeof IntersectionObserver === 'undefined') return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]?.target.id) {
+          setActiveId(visible[0].target.id);
+        }
+      },
+      { rootMargin: '-80px 0px -65% 0px', threshold: 0.01 },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [items]);
+
+  return (
+    <div className="xa-anchor-bar sticky" aria-label="章节快速导航">
+      <div className="xa-anchor-links">
+        {items.map(([id, n, lbl]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            className={`xa-anchor-pill ${activeId === id ? 'active' : ''}`}
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveId(id);
+              document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+          >
+            <i>{n}</i>
+            <span>{lbl}</span>
+          </a>
+        ))}
+      </div>
+      <div className="xa-anchor-right">
+        {meta ? <span className="xa-anchor-meta">{meta}</span> : null}
+        <button
+          type="button"
+          className="xa-top-btn"
+          title="回到顶部"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        >
+          ↑ 顶部
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /* ==========================================================================
    X-APM 标杆级企业数据可视化组件库（100% 真实数据驱动，纯 SVG 高清自适应）
@@ -126,9 +204,10 @@ export interface TrapezoidStep {
   rateLabel?: string | null;
   rateText?: string | null;
   subNote?: string | null;
+  medianSec?: number | null;
 }
 
-const FUNNEL_SHADES = ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#7c3aed', '#8b5cf6'];
+const FUNNEL_SHADES = ['#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#6366f1', '#8b5cf6'];
 const FUNNEL_CHAIN_PARENT: Record<string, string> = {
   ready: 'apps',
   published: 'ready',
@@ -141,6 +220,7 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
   const computed = useMemo(() => {
     const byKey = new Map(steps.map((s) => [s.key, s.count]));
     const maxCount = Math.max(1, ...steps.map((s) => s.count));
+    const appsBase = byKey.get('apps') ?? 0;
     let worstDropIdx = -1;
     let worstDropCount = 0;
 
@@ -152,13 +232,19 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
         : s.key === 'apps'
           ? 100
           : null;
+      const overallRate =
+        s.key === 'conversations'
+          ? null
+          : appsBase > 0
+            ? Math.min(100, (s.count / appsBase) * 100)
+            : null;
       const drop = resolvedBaseKey && baseCount > 0 ? Math.max(0, baseCount - s.count) : 0;
       if (resolvedBaseKey && drop > worstDropCount && s.key !== 'cloud') {
         worstDropCount = drop;
         worstDropIdx = idx;
       }
       const note = s.subNote ?? s.rateText ?? s.rateLabel ?? null;
-      return { ...s, resolvedBaseKey, baseCount, stepRate, drop, note };
+      return { ...s, resolvedBaseKey, baseCount, stepRate, overallRate, drop, note };
     });
 
     const widthRatio = (count: number, idx: number) => {
@@ -243,8 +329,10 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
               <tr>
                 <th scope="col">环节</th>
                 <th scope="col" className="num">数量</th>
+                <th scope="col" className="num">整体转化</th>
                 <th scope="col" className="num">步间转化</th>
                 <th scope="col" className="num">流失</th>
+                <th scope="col" className="num">中位耗时</th>
               </tr>
             </thead>
             <tbody>
@@ -265,6 +353,13 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
                     </td>
                     <td className="num"><b>{fmtNum(r.count)}</b></td>
                     <td className="num">
+                      {r.overallRate !== null ? (
+                        <span>{r.overallRate.toFixed(1)}%</span>
+                      ) : (
+                        <span className="dash-muted">—</span>
+                      )}
+                    </td>
+                    <td className="num">
                       {r.stepRate !== null ? (
                         <b>{r.stepRate.toFixed(1)}%</b>
                       ) : r.note ? (
@@ -276,6 +371,7 @@ export function TrapezoidFunnel({ steps }: { steps: TrapezoidStep[] }) {
                     <td className={`num ${isWorst ? 'xa-drop-alert' : 'dash-muted'}`}>
                       {r.drop > 0 ? `-${fmtNum(r.drop)}` : '—'}
                     </td>
+                    <td className="num dash-muted">{fmtMedianSec(r.medianSec)}</td>
                   </tr>
                 );
               })}
@@ -457,7 +553,15 @@ export function CalendarHeatmap({
   days: { date: string; tasks: number; apps: number; pv: number; total: number }[];
   metric?: 'total' | 'tasks' | 'pv' | 'apps';
 }) {
-  const [hover, setHover] = useState<{ date: string; tasks: number; apps: number; pv: number; val: number } | null>(null);
+  const [hover, setHover] = useState<{
+    date: string;
+    tasks: number;
+    apps: number;
+    pv: number;
+    val: number;
+    xPct: number;
+    yPct: number;
+  } | null>(null);
 
   const { weeks, monthLabels, maxVal, activeDaysCount, peakDay } = useMemo(() => {
     if (!days.length) {
@@ -547,13 +651,35 @@ export function CalendarHeatmap({
                   fill={levelColor(v)}
                   stroke={isHover ? '#0f172a' : 'transparent'}
                   strokeWidth={1.2}
-                  onMouseEnter={() => setHover({ date: d.date, tasks: d.tasks, apps: d.apps, pv: d.pv, val: v })}
+                  onMouseEnter={() =>
+                    setHover({
+                      date: d.date,
+                      tasks: d.tasks,
+                      apps: d.apps,
+                      pv: d.pv,
+                      val: v,
+                      xPct: ((leftPad + c * (cell + gap) + cell / 2) / svgW) * 100,
+                      yPct: ((topPad + r * (cell + gap)) / svgH) * 100,
+                    })
+                  }
                   onMouseLeave={() => setHover(null)}
                 />
               );
             }),
           )}
         </svg>
+        {hover ? (
+          <div
+            className="xa-float-tip"
+            style={{
+              left: `${Math.min(84, Math.max(16, hover.xPct))}%`,
+              top: `${Math.max(4, hover.yPct - 8)}%`,
+            }}
+          >
+            <small>{hover.date}</small>
+            <div>AI 任务 <b>{fmtNum(hover.tasks)}</b> · 新建 <b>{fmtNum(hover.apps)}</b> · PV <b>{fmtNum(hover.pv)}</b></div>
+          </div>
+        ) : null}
       </div>
       <div className="xa-cal-foot">
         <div className="xa-cal-hover-info">
@@ -768,6 +894,7 @@ export function CohortRetentionMatrix({
 /** 06. 三段式桑基流向图（创作入口 → 应用形态 → 最终执行结果） */
 export function SankeyFlowChart({
   flow,
+  onSelectOutcome,
 }: {
   flow?: {
     total: number;
@@ -775,6 +902,7 @@ export function SankeyFlowChart({
     links: { source: string; target: string; value: number }[];
     topPaths: { path: string[]; count: number }[];
   };
+  onSelectOutcome?: (label: string) => void;
 }) {
   const [hoverLink, setHoverLink] = useState<string | null>(null);
   const [hoverNode, setHoverNode] = useState<string | null>(null);
@@ -890,51 +1018,68 @@ export function SankeyFlowChart({
   const failSum = failNodes.reduce((a, b) => a + b.value, 0);
   const topFail = failNodes.sort((a, b) => b.value - a.value)[0];
 
+  const activeRibbon = hoverLink ? layout.ribbons.find((r) => r.key === hoverLink) ?? null : null;
+  const activeNodeObj = hoverNode ? layout.nodes.find((n) => n.id === hoverNode) ?? null : null;
+
   return (
     <div className="xa-sankey-grid">
       <div className="xa-sankey-chart">
         <div className="xa-sankey-col-heads">
           <span>① 创作入口 / 任务类型</span>
           <span>② 应用形态</span>
-          <span>③ 最终执行结果</span>
+          <span>③ 最终执行结果（点击异常项可下钻排查）</span>
         </div>
-        <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="xa-sankey-svg" role="img" aria-label="任务流向桑基图">
-          {layout.ribbons.map((rb) => {
-            const focused =
-              hoverLink === rb.key || (hoverNode !== null && (rb.source === hoverNode || rb.target === hoverNode));
-            const dimmed = (hoverLink !== null || hoverNode !== null) && !focused;
-            return (
-              <path
-                key={rb.key}
-                d={rb.path}
-                fill={rb.color}
-                fillOpacity={focused ? 0.52 : dimmed ? 0.08 : 0.26}
-                onMouseEnter={() => setHoverLink(rb.key)}
-                onMouseLeave={() => setHoverLink(null)}
-              >
-                <title>
-                  {rb.srcLabel} → {rb.tgtLabel}：{fmtNum(rb.value)} 次
-                </title>
-              </path>
-            );
-          })}
-          {layout.nodes.map((nd) => {
-            const labelX = nd.col === 2 ? nd.x + layout.nodeW + 8 : nd.x + layout.nodeW + 7;
-            return (
-              <g
-                key={nd.id}
-                onMouseEnter={() => setHoverNode(nd.id)}
-                onMouseLeave={() => setHoverNode(null)}
-                style={{ cursor: 'pointer' }}
-              >
-                <rect x={nd.x} y={nd.y} width={layout.nodeW} height={nd.h} rx={3} fill={nd.color} />
-                <text x={labelX} y={nd.y + nd.h / 2} dy="0.35em" fontSize={11.5} fill="#1e293b" fontWeight={500}>
-                  {nd.label} <tspan fill="#64748b" fontWeight={400}>{fmtNum(nd.value)}</tspan>
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+        <div className="xa-sankey-canvas">
+          <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="xa-sankey-svg" role="img" aria-label="任务流向桑基图">
+            {layout.ribbons.map((rb) => {
+              const focused =
+                hoverLink === rb.key || (hoverNode !== null && (rb.source === hoverNode || rb.target === hoverNode));
+              const dimmed = (hoverLink !== null || hoverNode !== null) && !focused;
+              return (
+                <path
+                  key={rb.key}
+                  d={rb.path}
+                  fill={rb.color}
+                  fillOpacity={focused ? 0.56 : dimmed ? 0.08 : 0.28}
+                  onMouseEnter={() => setHoverLink(rb.key)}
+                  onMouseLeave={() => setHoverLink(null)}
+                />
+              );
+            })}
+            {layout.nodes.map((nd) => {
+              const labelX = nd.x + layout.nodeW + 7;
+              const clickable = nd.col === 2 && Boolean(onSelectOutcome);
+              return (
+                <g
+                  key={nd.id}
+                  onMouseEnter={() => setHoverNode(nd.id)}
+                  onMouseLeave={() => setHoverNode(null)}
+                  onClick={() => {
+                    if (clickable) onSelectOutcome?.(nd.label);
+                  }}
+                  style={{ cursor: clickable ? 'pointer' : 'default' }}
+                >
+                  <rect x={nd.x} y={nd.y} width={layout.nodeW} height={nd.h} rx={3} fill={nd.color} />
+                  <text x={labelX} y={nd.y + nd.h / 2} dy="0.35em" fontSize={11.5} fill="#0f172a" fontWeight={500}>
+                    {nd.label} <tspan fill="#64748b" fontWeight={400}>{fmtNum(nd.value)}</tspan>
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+          {activeRibbon ? (
+            <div className="xa-sankey-tip">
+              <b>{activeRibbon.srcLabel}</b> → <b>{activeRibbon.tgtLabel}</b>：<b>{fmtNum(activeRibbon.value)}</b> 次（占总任务{' '}
+              {((activeRibbon.value / Math.max(1, flow.total)) * 100).toFixed(1)}%）
+            </div>
+          ) : activeNodeObj ? (
+            <div className="xa-sankey-tip">
+              <b>{activeNodeObj.label}</b>：共 <b>{fmtNum(activeNodeObj.value)}</b> 次（占总任务{' '}
+              {((activeNodeObj.value / Math.max(1, flow.total)) * 100).toFixed(1)}%）
+              {activeNodeObj.col === 2 && onSelectOutcome ? ' · 点击前往日志中心定位明细 →' : ''}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="xa-sankey-side">

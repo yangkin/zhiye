@@ -597,6 +597,33 @@ public class DashboardService {
         String wsPred = ctx.wsPred("workspace_id");
         String aPred = ctx.wsPred("a.workspace_id");
         String cPred = ctx.wsPred("c.workspace_id");
+        Double readyMedianSec = jdbc.sql("""
+                select percentile_cont(0.5) within group (order by diff_sec) from (
+                  select extract(epoch from (min(v.created_at) - a.created_at)) as diff_sec
+                  from app a
+                  join version v on v.app_id = a.id
+                  where %s and a.deleted_at is null and a.created_at >= ? and a.created_at < ?
+                  group by a.id, a.created_at
+                  having min(v.created_at) >= a.created_at
+                ) s
+                """.formatted(aPred))
+                .params(concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs}))
+                .query(Double.class).optional().orElse(null);
+
+        Double pubMedianSec = jdbc.sql("""
+                select percentile_cont(0.5) within group (order by diff_sec) from (
+                  select extract(epoch from (min(d.created_at) - min(v.created_at))) as diff_sec
+                  from app a
+                  join version v on v.app_id = a.id
+                  join deployment d on d.app_id = a.id
+                  where %s and a.deleted_at is null and a.created_at >= ? and a.created_at < ?
+                  group by a.id
+                  having min(d.created_at) >= min(v.created_at)
+                ) s
+                """.formatted(aPred))
+                .params(concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs}))
+                .query(Double.class).optional().orElse(null);
+
         return jdbc.sql("""
                 select
                   (select count(*) from conversation c where %s and c.deleted_at is null and c.created_at >= ? and c.created_at < ?) as convs,
@@ -640,26 +667,27 @@ public class DashboardService {
                     long cloud = rs.getLong("cloud");
                     return List.<Map<String, Object>>of(
                             funnelStep("conversations", "发起创造会话", convs,
-                                    convs > 0 ? "转应用 " + pct1(convsToApps, convs) + "%（" + convsToApps + "）" : null),
-                            funnelStep("apps", "窗口新建应用（含导入/直建）", apps, null),
+                                    convs > 0 ? "转应用 " + pct1(convsToApps, convs) + "%（" + convsToApps + "）" : null, null),
+                            funnelStep("apps", "窗口新建应用（含导入/直建）", apps, null, null),
                             funnelStep("ready", "首版生成就绪", ready,
-                                    apps > 0 ? "就绪率 " + pct1(ready, apps) + "%" : null),
+                                    apps > 0 ? "就绪率 " + pct1(ready, apps) + "%" : null, readyMedianSec),
                             funnelStep("published", "发布上线部署", published,
-                                    ready > 0 ? "较就绪 " + pct1(published, ready) + "%" : null),
+                                    ready > 0 ? "较就绪 " + pct1(published, ready) + "%" : null, pubMedianSec),
                             funnelStep("visited", "已发布且有访问", visited,
-                                    published > 0 ? "较发布 " + pct1(visited, published) + "%" : null),
+                                    published > 0 ? "较发布 " + pct1(visited, published) + "%" : null, null),
                             funnelStep("cloud", "启用共享云服务", cloud,
-                                    apps > 0 ? "占新建应用 " + pct1(cloud, apps) + "%" : null)
+                                    apps > 0 ? "占新建应用 " + pct1(cloud, apps) + "%" : null, null)
                     );
                 }).single();
     }
 
-    private static Map<String, Object> funnelStep(String key, String label, long count, String rateLabel) {
+    private static Map<String, Object> funnelStep(String key, String label, long count, String rateLabel, Double medianSec) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("key", key);
         m.put("label", label);
         m.put("count", count);
         if (rateLabel != null) m.put("rateLabel", rateLabel);
+        if (medianSec != null && !medianSec.isNaN() && medianSec >= 0) m.put("medianSec", round1(medianSec));
         return m;
     }
 

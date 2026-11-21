@@ -746,7 +746,16 @@ export interface DashboardData {
     templatesPublished: number;
     skillhubInstalled: number;
   };
-  funnel: { key: string; label: string; count: number; baseKey?: string | null; rateLabel?: string | null; rateText?: string | null; subNote?: string | null }[];
+  funnel: {
+    key: string;
+    label: string;
+    count: number;
+    baseKey?: string | null;
+    rateLabel?: string | null;
+    rateText?: string | null;
+    subNote?: string | null;
+    medianSec?: number | null;
+  }[];
   trends: {
     daily: DashboardDailyRow[];
   };

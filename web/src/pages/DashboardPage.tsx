@@ -19,9 +19,11 @@ import {
   SankeyFlowChart,
   SectionHeading,
   StackedAreaChart,
+  StickyAnchorBar,
   TrapezoidFunnel,
 } from '../components/AnalyticsCharts';
 import { formatOwnerIdentity } from '../components/OwnerPicker';
+import { WorkspaceProfileDrawer } from '../components/WorkspaceProfileDrawer';
 import { ClusterSandboxPanel } from '../components/ClusterSandboxPanel';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import {
@@ -254,6 +256,7 @@ export function DashboardPage() {
   const [wsQuery, setWsQuery] = useState('');
   const [wsSort, setWsSort] = useState<'apps' | 'tasks' | 'pv'>('apps');
   const [quotaTarget, setQuotaTarget] = useState<QuotaModalTarget | null>(null);
+  const [profileWsId, setProfileWsId] = useState<string | null>(null);
   const [inlineBusy, setInlineBusy] = useState<string | null>(null);
 
   const qc = useQueryClient();
@@ -670,27 +673,18 @@ export function DashboardPage() {
             </div>
           ) : null}
 
-          {/* X-APM 风格顶部章节锚点导览条（仅在总览模式下展示，大屏一键直达 5 大分析板块） */}
+          {/* X-APM 风格吸顶滚动联动章节锚点条（仅在总览模式下展示，大屏一键直达 5 大分析板块） */}
           {section === 'all' ? (
-            <div className="xa-anchor-bar" aria-label="章节快速导航">
-              <div className="xa-anchor-links">
-                {[
-                  ['sec-kpi', '01', '核心指标'],
-                  ['sec-funnel', '02', '转化漏斗与趋势'],
-                  ['sec-calendar', '03', '活跃日历与24h时段'],
-                  ['sec-sankey', '04', '任务流向桑基图'],
-                  ['sec-health', '05', '留存矩阵与资产健康'],
-                ].map(([id, n, lbl]) => (
-                  <a key={id} href={`#${id}`} className="xa-anchor-pill">
-                    <i>{n}</i>
-                    <span>{lbl}</span>
-                  </a>
-                ))}
-              </div>
-              <span className="xa-anchor-meta">
-                共 {fmtNum(data.overview.workspacesProductive)} 有产出空间 · {fmtNum(data.overview.appsTotal)} 应用 · {fmtNum(data.overview.tasksTotal)} 任务
-              </span>
-            </div>
+            <StickyAnchorBar
+              items={[
+                ['sec-kpi', '01', '核心指标'],
+                ['sec-funnel', '02', '转化漏斗与趋势'],
+                ['sec-calendar', '03', '活跃日历与24h时段'],
+                ['sec-sankey', '04', '任务流向桑基图'],
+                ['sec-health', '05', '留存矩阵与资产健康'],
+              ]}
+              meta={`${data.meta.startDate.slice(5)} ~ ${data.meta.endDate.slice(5)} · ${fmtNum(data.overview.workspacesProductive)} 空间 · ${fmtNum(data.overview.appsTotal)} 应用 · ${fmtNum(data.overview.tasksTotal)} 任务`}
+            />
           ) : null}
 
           {/* 01. 核心北极星 KPI（6 卡片等高对齐 + Sparkline + 环比，仅在「全部维度」展示） */}
@@ -965,7 +959,17 @@ export function DashboardPage() {
                 sub="从创作入口 → 应用形态 → 最终执行结果（成功 / 构建失败 / 模型异常 / 取消）透明追踪流量去向"
               />
               <div className="dash-panel">
-                <SankeyFlowChart flow={data.sankeyFlow} />
+                <SankeyFlowChart
+                  flow={data.sankeyFlow}
+                  onSelectOutcome={(label) => {
+                    const status = label.includes('成功')
+                      ? 'SUCCEEDED'
+                      : label.includes('取消')
+                        ? 'CANCELLED'
+                        : 'FAILED';
+                    navigate(`/logs?status=${status}`);
+                  }}
+                />
               </div>
             </section>
           ) : null}
@@ -1084,13 +1088,22 @@ export function DashboardPage() {
                                   </td>
                                   {isAdmin ? (
                                     <td className="dash-nowrap">
-                                      <button
-                                        type="button"
-                                        className="dash-link"
-                                        onClick={() => navigate('/admin?tab=sites')}
-                                      >
-                                        去风控
-                                      </button>
+                                      <div className="dash-action-row">
+                                        <button
+                                          type="button"
+                                          className="dash-link"
+                                          onClick={() => setProfileWsId(z.workspaceId)}
+                                        >
+                                          细查
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="dash-link"
+                                          onClick={() => navigate('/admin?tab=sites')}
+                                        >
+                                          去风控
+                                        </button>
+                                      </div>
                                     </td>
                                   ) : null}
                                 </tr>
@@ -1160,65 +1173,30 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 总览专享：4 大业务域深度分析直达卡片（替代 8000px 纵向大长页） */}
+          {/* 总览专享：紧凑专题快捷直达条（避免底部臃肿堆叠） */}
           {section === 'all' ? (
-            <section className="dash-section" aria-label="分域深度分析入口">
-              <div className="dash-exec-grid">
-                <button type="button" className="dash-exec-card" onClick={() => setSection('growth')}>
-                  <div className="dash-exec-head">
-                    <span className="dash-head-icon violet sm"><Icon name="chart" /></span>
-                    <b>增长与空间排行</b>
-                    <span className="dash-exec-arrow">深入分析 →</span>
-                  </div>
-                  <div className="dash-exec-metrics">
-                    <div><span>有产出空间</span><strong>{fmtNum(data.overview.workspacesProductive)}</strong></div>
-                    <div><span>活跃空间</span><strong>{fmtNum(data.overview.workspacesActiveRange)}</strong></div>
-                    <div><span>对话转应用</span><strong>{fmtNum(data.overview.conversationsConverted)}</strong></div>
-                  </div>
-                  <p>查看 Top 工作空间生产力榜单、24h 活跃分布与配额快捷调整</p>
-                </button>
-
-                <button type="button" className="dash-exec-card" onClick={() => setSection('apps')}>
-                  <div className="dash-exec-head">
-                    <span className="dash-head-icon teal sm"><Icon name="grid" /></span>
-                    <b>应用资产与流量</b>
-                    <span className="dash-exec-arrow">深入分析 →</span>
-                  </div>
-                  <div className="dash-exec-metrics">
-                    <div><span>应用总量</span><strong>{fmtNum(data.overview.appsTotal)}</strong></div>
-                    <div><span>已发布站点</span><strong>{fmtNum(data.overview.appsPublished)}</strong></div>
-                    <div><span>累计 PV</span><strong>{fmtCompact(data.overview.pvTotal)}</strong></div>
-                  </div>
-                  <p>查看应用类型 / 技术栈分布、状态健康度与热门应用分页榜</p>
-                </button>
-
-                <button type="button" className="dash-exec-card" onClick={() => setSection('agent')}>
-                  <div className="dash-exec-head">
-                    <span className="dash-head-icon indigo sm"><Icon name="agent" /></span>
-                    <b>Agent 编排与质检</b>
-                    <span className="dash-exec-arrow">深入分析 →</span>
-                  </div>
-                  <div className="dash-exec-metrics">
-                    <div><span>任务总数</span><strong>{fmtNum(data.overview.tasksTotal)}</strong></div>
-                    <div><span>成功率</span><strong>{data.overview.taskSuccessRate}%</strong></div>
-                    <div><span>门禁通过率</span><strong>{overallVerifyRate}%</strong></div>
-                  </div>
-                  <p>查看任务耗时分位、工具调用遥测、模型路由与失败根因排行</p>
-                </button>
-
-                <button type="button" className="dash-exec-card" onClick={() => setSection('infra')}>
-                  <div className="dash-exec-head">
-                    <span className="dash-head-icon amber sm"><Icon name="cloud" /></span>
-                    <b>云服务、反馈与监控</b>
-                    <span className="dash-exec-arrow">深入分析 →</span>
-                  </div>
-                  <div className="dash-exec-metrics">
-                    <div><span>云服务应用</span><strong>{fmtNum(data.overview.cloudEnabledApps)}</strong></div>
-                    <div><span>云数据表</span><strong>{fmtNum(data.overview.cloudTablesTotal)}</strong></div>
-                    <div><span>用户反馈</span><strong>{fmtNum(data.overview.helpFeedbackTotal)}</strong></div>
-                  </div>
-                  <p>查看云函数与数据源调用、对话协作、素材导入与社区互动明细</p>
-                </button>
+            <section className="dash-section" aria-label="专题深度分析快捷入口">
+              <div className="xa-footer-dock">
+                <span className="xa-footer-dock-label">深入专题分析</span>
+                <div className="xa-footer-dock-btns">
+                  <button type="button" className="xa-dock-btn" onClick={() => setSection('growth')}>
+                    增长与空间排行 <b>{fmtNum(data.overview.workspacesProductive)}</b> →
+                  </button>
+                  <button type="button" className="xa-dock-btn" onClick={() => setSection('apps')}>
+                    应用资产与流量 <b>{fmtNum(data.overview.appsTotal)}</b> →
+                  </button>
+                  <button type="button" className="xa-dock-btn" onClick={() => setSection('agent')}>
+                    Agent 编排与质检 <b>{overallVerifyRate}%</b> →
+                  </button>
+                  <button type="button" className="xa-dock-btn" onClick={() => setSection('infra')}>
+                    云服务与监控 <b>{fmtNum(data.overview.cloudEnabledApps)}</b> →
+                  </button>
+                  {isAdmin ? (
+                    <button type="button" className="xa-dock-btn primary" onClick={() => navigate('/admin')}>
+                      进入管理工作台 →
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </section>
           ) : null}
@@ -1320,6 +1298,13 @@ export function DashboardPage() {
                                     </button>
                                     {isAdmin ? (
                                       <>
+                                        <button
+                                          type="button"
+                                          className="dash-link"
+                                          onClick={() => setProfileWsId(w.workspaceId)}
+                                        >
+                                          细查
+                                        </button>
                                         <button
                                           type="button"
                                           className="dash-link"
@@ -2485,47 +2470,6 @@ export function DashboardPage() {
             </section>
           ) : null}
 
-          {/* 治理与运维：在「全部维度」展示高密度治理摘要入口，在「治理与运维」专页展开完整控制台 */}
-          {isAdmin && section === 'all' && adminQ.data ? (
-            <section className="dash-section" aria-label="平台治理快捷入口">
-              <div className="dash-panel">
-                <DashPanelHead
-                  icon="lock"
-                  tone="violet"
-                  title="平台治理、配额运维与操作审计"
-                  sub={`当前操作人 ${adminQ.data.currentActor} · 默认配额 ${adminQ.data.defaultQuota.maxApps} 应用 / ${adminQ.data.defaultQuota.dailyTaskLimit} 次日任务 / ${adminQ.data.defaultQuota.maxConcurrentTasks} 并发`}
-                  right={
-                    <button type="button" className="primary-button dash-compact-btn" onClick={() => navigate('/admin')}>
-                      进入管理工作台 →
-                    </button>
-                  }
-                />
-                <div className="dash-mini-stats compact-4">
-                  <div>
-                    <span className="dash-mini-label-icon"><Icon name="settings" /><span>自定义配额空间</span></span>
-                    <b>{fmtNum(adminQ.data.customQuotas.length)}</b>
-                    <small>覆盖全局默认上限</small>
-                  </div>
-                  <div>
-                    <span className="dash-mini-label-icon"><Icon name="help" /><span>待跟进用户反馈</span></span>
-                    <b className={adminQ.data.feedbackOpenCount > 0 ? 'dash-warn-num' : ''}>{fmtNum(adminQ.data.feedbackOpenCount)}</b>
-                    <small>累计 {fmtNum(adminQ.data.feedbacks.length)} 条员工上报</small>
-                  </div>
-                  <div>
-                    <span className="dash-mini-label-icon"><Icon name="globe" /><span>线上站点 / 回收站</span></span>
-                    <b>{fmtNum(adminQ.data.publishedApps?.length ?? 0)} / {fmtNum(adminQ.data.deletedApps.length)}</b>
-                    <small>支持风控权限调整与一键恢复</small>
-                  </div>
-                  <div>
-                    <span className="dash-mini-label-icon"><Icon name="history" /><span>审计留痕记录</span></span>
-                    <b>{fmtNum(adminQ.data.auditLogs.length)}</b>
-                    <small>支持按动作筛选与 CSV 导出</small>
-                  </div>
-                </div>
-              </div>
-            </section>
-          ) : null}
-
           {isAdmin && section === 'admin' ? (
             <AdminGovernancePanel
               overview={adminQ.data}
@@ -2536,6 +2480,12 @@ export function DashboardPage() {
               onOpenQuotaModal={(target) => setQuotaTarget(target)}
             />
           ) : null}
+
+          <WorkspaceProfileDrawer
+            workspaceId={profileWsId}
+            onClose={() => setProfileWsId(null)}
+            onStartHandover={(wsId) => navigate('/admin?tab=handover&fromWs=' + encodeURIComponent(wsId))}
+          />
 
           {quotaTarget && adminQ.data ? (
             <AdminQuotaModal
