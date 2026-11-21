@@ -94,11 +94,18 @@ export function AppsPage() {
           创造新应用
         </button>
       </div>
-      <section className="apps-summary" aria-label="应用概览">
-        <UsageTile used={summary.data?.appsUsed ?? summary.data?.total} limit={summary.data?.appLimit} loading={summary.isLoading} />
-        <SummaryTile label="已发布应用" value={summary.data?.published} loading={summary.isLoading} />
-        <SummaryTile label="总访问量（PV）" value={summary.data?.totalPv} loading={summary.isLoading} />
-      </section>
+      <AppsKpiGrid
+        used={summary.data?.appsUsed ?? summary.data?.total}
+        limit={summary.data?.appLimit}
+        published={summary.data?.published}
+        totalPv={summary.data?.totalPv}
+        loading={summary.isLoading}
+        allApps={all ?? []}
+        activeStatus={status}
+        activeFilter={filter}
+        onTogglePublished={() => setStatus((cur) => (cur === '已发布' ? '全部' : '已发布'))}
+        onToggleFavorite={() => setFilter((cur) => (cur === '已收藏' ? '全部' : '已收藏'))}
+      />
       <div className="collection-toolbar">
         <div className="filter-tabs">
           {(['全部', ...APP_TYPES, '已收藏'] as Filter[]).map((x) => (
@@ -242,33 +249,165 @@ export function AppsPage() {
   );
 }
 
-function UsageTile({ used, limit, loading }: { used: number | undefined; limit: number | undefined; loading: boolean }) {
-  const u = used ?? 0;
+function AppsKpiGrid({
+  used,
+  limit,
+  published,
+  totalPv,
+  loading,
+  allApps,
+  activeStatus,
+  activeFilter,
+  onTogglePublished,
+  onToggleFavorite,
+}: {
+  used: number | undefined;
+  limit: number | undefined;
+  published: number | undefined;
+  totalPv: number | undefined;
+  loading: boolean;
+  allApps: AppSummary[];
+  activeStatus: Status;
+  activeFilter: Filter;
+  onTogglePublished: () => void;
+  onToggleFavorite: () => void;
+}) {
+  const u = used ?? allApps.length;
+  const pub = published ?? allApps.filter((a) => !!a.publishedVersionId).length;
+  const pv = totalPv ?? 0;
   const full = !!limit && u >= limit;
-  const pct = limit ? Math.min(100, Math.round((u / limit) * 100)) : 0;
-  return (
-    <div className={`summary-tile usage-tile ${full ? 'is-full' : ''}`}>
-      <span>应用总数</span>
-      <b>
-        {loading ? '—' : u.toLocaleString('zh-CN')}
-        {limit && !loading ? <small> / {limit}</small> : null}
-      </b>
-      {limit ? (
-        <div className="usage-bar" role="progressbar" aria-label="应用数量用量" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={u}>
-          <i style={{ width: `${pct}%` }} />
-        </div>
-      ) : null}
-      {full ? <p className="usage-hint">已达上限，删除不用的应用后可以继续创建</p> : null}
-    </div>
-  );
-}
+  const quotaPct = limit ? Math.min(100, Math.round((u / limit) * 100)) : 0;
+  const pubPct = u > 0 ? Math.min(100, Math.round((pub / u) * 100)) : 0;
+  const drafts = Math.max(0, u - pub);
+  const cloudCount = allApps.filter((a) => a.cloudEnabled).length;
+  const favCount = allApps.filter((a) => a.favorite).length;
+  const latestApp = allApps[0];
 
-function SummaryTile({ label, value, loading }: { label: string; value: number | undefined; loading: boolean }) {
+  const typeBreakdown = APP_TYPES.map((t) => ({ type: t, count: allApps.filter((a) => a.type === t).length }))
+    .filter((x) => x.count > 0)
+    .slice(0, 3)
+    .map((x) => `${x.type} ${x.count}`)
+    .join(' · ');
+
   return (
-    <div className="summary-tile">
-      <span>{label}</span>
-      <b>{loading ? '—' : (value ?? 0).toLocaleString('zh-CN')}</b>
-    </div>
+    <section className="apps-kpi-grid" aria-label="应用概览">
+      {/* 1. 应用总数与配额 */}
+      <article className={`apps-kpi-card tone-purple ${full ? 'is-full' : ''}`}>
+        <div className="apps-kpi-head">
+          <span className="apps-kpi-icon">
+            <Icon name="grid" />
+          </span>
+          <span className="apps-kpi-label">应用总数</span>
+          {limit && !loading ? (
+            <span className={`apps-kpi-badge ${full ? 'danger' : ''}`}>{full ? '已达上限' : `配额 ${quotaPct}%`}</span>
+          ) : null}
+        </div>
+        <div className="apps-kpi-val">
+          <b>{loading ? '—' : u.toLocaleString('zh-CN')}</b>
+          {limit && !loading ? <small>/ {limit}</small> : null}
+        </div>
+        {limit ? (
+          <div className="apps-kpi-bar" role="progressbar" aria-label="应用数量用量" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={u}>
+            <i style={{ width: `${quotaPct}%` }} />
+          </div>
+        ) : null}
+        <p className="apps-kpi-foot">
+          {full ? '删除闲置应用后可继续创建新应用' : typeBreakdown || '从一句话开始创建你的第一个应用'}
+        </p>
+      </article>
+
+      {/* 2. 已发布上线 */}
+      <article
+        className={`apps-kpi-card tone-emerald is-clickable ${activeStatus === '已发布' ? 'is-selected' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={onTogglePublished}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onTogglePublished();
+          }
+        }}
+        title="点击快速筛选已发布应用"
+      >
+        <div className="apps-kpi-head">
+          <span className="apps-kpi-icon">
+            <Icon name="globe" />
+          </span>
+          <span className="apps-kpi-label">已发布上线</span>
+          {!loading && u > 0 ? <span className="apps-kpi-badge">上线率 {pubPct}%</span> : null}
+        </div>
+        <div className="apps-kpi-val">
+          <b>{loading ? '—' : pub.toLocaleString('zh-CN')}</b>
+          <small>个站点</small>
+        </div>
+        <div className="apps-kpi-bar">
+          <i style={{ width: `${pubPct}%` }} />
+        </div>
+        <p className="apps-kpi-foot">
+          {drafts > 0 ? `未发布草稿 ${drafts} 个 · 点击切换筛选` : '所有应用均已发布上线'}
+        </p>
+      </article>
+
+      {/* 3. 累计访问量 */}
+      <article className="apps-kpi-card tone-blue">
+        <div className="apps-kpi-head">
+          <span className="apps-kpi-icon">
+            <Icon name="eye" />
+          </span>
+          <span className="apps-kpi-label">总访问量（PV）</span>
+          <span className="apps-kpi-badge">{pub > 0 ? `${pub} 站点在线` : '待上线'}</span>
+        </div>
+        <div className="apps-kpi-val">
+          <b>{loading ? '—' : pv.toLocaleString('zh-CN')}</b>
+          <small>次浏览</small>
+        </div>
+        <div className="apps-kpi-spark" aria-hidden="true">
+          <span style={{ height: '32%' }} />
+          <span style={{ height: '54%' }} />
+          <span style={{ height: '42%' }} />
+          <span style={{ height: '76%' }} />
+          <span style={{ height: '60%' }} />
+          <span style={{ height: pv > 0 ? '92%' : '36%' }} />
+        </div>
+        <p className="apps-kpi-foot">
+          {pub > 0 ? '点击应用卡片 ⋯ 可查看单站点明细统计' : '发布应用后自动统计真实访问流量'}
+        </p>
+      </article>
+
+      {/* 4. 云服务与收藏 */}
+      <article
+        className={`apps-kpi-card tone-amber is-clickable ${activeFilter === '已收藏' ? 'is-selected' : ''}`}
+        role="button"
+        tabIndex={0}
+        onClick={onToggleFavorite}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleFavorite();
+          }
+        }}
+        title="点击快速筛选已收藏应用"
+      >
+        <div className="apps-kpi-head">
+          <span className="apps-kpi-icon">
+            <Icon name="cloud" />
+          </span>
+          <span className="apps-kpi-label">云服务与收藏</span>
+          <span className="apps-kpi-badge">★ 收藏 {favCount}</span>
+        </div>
+        <div className="apps-kpi-val">
+          <b>{loading ? '—' : cloudCount.toLocaleString('zh-CN')}</b>
+          <small>个云应用</small>
+        </div>
+        <div className="apps-kpi-meta-pills">
+          <span>数据库 · 权限 · 云函数</span>
+        </div>
+        <p className="apps-kpi-foot" title={latestApp ? `最近更新：${latestApp.name}` : undefined}>
+          {latestApp ? `最近更新：${latestApp.name}` : '启用云服务即可持久化业务数据'}
+        </p>
+      </article>
+    </section>
   );
 }
 

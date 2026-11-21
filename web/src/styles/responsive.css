@@ -3,13 +3,270 @@
    统一覆盖固定窄容器与无上限分栏，避免大屏留白/对话栏过肥，以及小屏预览表格截断
    ========================================================================== */
 
+/* 0. 桌面端统一隐藏冗余空白顶栏（左侧图标栏 + 页面主标题已完整传达定位，移动端保留汉堡菜单） */
+@media (min-width: 761px) {
+  .shell > .main > .topbar {
+    display: none;
+  }
+}
+
 /* 1. 通用内容页容器（社区 / 应用 / 历史 / 看板 / 管理 / 日志）：流式铺展 + 动态安全边距 */
 .content-page {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 32px clamp(24px, 3vw, 64px) 48px;
+  padding: 24px clamp(24px, 3vw, 64px) 48px;
   box-sizing: border-box;
+}
+
+/* 我的应用页 4 联精致指标卡（替代原先单调空旷的 3 格大白块） */
+.apps-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0 0 22px;
+}
+
+.apps-kpi-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 15px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #e7e3f1;
+  box-shadow: 0 2px 10px rgba(45, 31, 84, 0.035);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.apps-kpi-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+  opacity: 0.9;
+}
+
+.apps-kpi-card.tone-purple::before {
+  background: linear-gradient(90deg, #7c5ce0, #a78bfa);
+}
+
+.apps-kpi-card.tone-emerald::before {
+  background: linear-gradient(90deg, #059669, #34d399);
+}
+
+.apps-kpi-card.tone-blue::before {
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.apps-kpi-card.tone-amber::before {
+  background: linear-gradient(90deg, #d97706, #fbbf24);
+}
+
+.apps-kpi-card.is-clickable {
+  cursor: pointer;
+}
+
+.apps-kpi-card:hover {
+  border-color: #d6ccef;
+  box-shadow: 0 8px 22px rgba(45, 31, 84, 0.07);
+  transform: translateY(-1px);
+}
+
+.apps-kpi-card.is-selected {
+  border-color: #7c5ce0;
+  box-shadow: 0 0 0 2px rgba(124, 92, 224, 0.14), 0 8px 22px rgba(45, 31, 84, 0.08);
+}
+
+.apps-kpi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apps-kpi-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+}
+
+.apps-kpi-icon .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.tone-purple .apps-kpi-icon {
+  background: #f3efff;
+  color: #6b4cd4;
+}
+
+.tone-emerald .apps-kpi-icon {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.tone-blue .apps-kpi-icon {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.tone-amber .apps-kpi-icon {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.apps-kpi-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #4b435c;
+  white-space: nowrap;
+}
+
+.apps-kpi-badge {
+  margin-left: auto;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tone-purple .apps-kpi-badge {
+  background: #f4f0ff;
+  color: #5b3fc0;
+}
+
+.tone-emerald .apps-kpi-badge {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.tone-blue .apps-kpi-badge {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.tone-amber .apps-kpi-badge {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.apps-kpi-badge.danger {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.apps-kpi-val {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.1;
+}
+
+.apps-kpi-val b {
+  font-size: 30px;
+  font-weight: 700;
+  color: #1c172b;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.apps-kpi-val small {
+  font-size: 13px;
+  font-weight: 500;
+  color: #847b96;
+}
+
+.apps-kpi-bar {
+  height: 5px;
+  width: 100%;
+  border-radius: 999px;
+  background: #f1eef7;
+  overflow: hidden;
+}
+
+.apps-kpi-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.tone-purple .apps-kpi-bar > i {
+  background: linear-gradient(90deg, #7c5ce0, #a78bfa);
+}
+
+.tone-purple.is-full .apps-kpi-bar > i {
+  background: #dc2626;
+}
+
+.tone-emerald .apps-kpi-bar > i {
+  background: linear-gradient(90deg, #059669, #34d399);
+}
+
+.apps-kpi-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 18px;
+}
+
+.apps-kpi-spark span {
+  flex: 1;
+  max-width: 18px;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(180deg, #60a5fa, #dbeafe);
+}
+
+.apps-kpi-spark span:last-child {
+  background: linear-gradient(180deg, #2563eb, #93c5fd);
+}
+
+.apps-kpi-meta-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.apps-kpi-meta-pills span {
+  font-size: 11px;
+  color: #8a7f9e;
+  background: #f7f5fc;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.apps-kpi-foot {
+  margin: auto 0 0;
+  font-size: 12px;
+  color: #7b728e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1120px) {
+  .apps-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .apps-kpi-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .content-page.dash-page {
