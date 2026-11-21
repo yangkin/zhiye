@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import type { SelectOption } from '../components/Select';
 
-export type PreviewViewportMode = 'auto' | 'native' | 'tablet' | 'mobile';
+export type PreviewViewportMode = 'auto' | '1280' | '1440' | '1920' | '2560' | 'native';
 
 const DESKTOP_MIN_WIDTH = 1280;
-const TABLET_WIDTH = 768;
-const MOBILE_WIDTH = 390;
-const MOBILE_MAX_HEIGHT = 844;
-const DEVICE_PADDING = 28;
+
+const PRESET_WIDTHS: Partial<Record<PreviewViewportMode, number>> = {
+  '1280': 1280,
+  '1440': 1440,
+  '1920': 1920,
+  '2560': 2560,
+};
+
+export const PREVIEW_RESOLUTION_OPTIONS: SelectOption<PreviewViewportMode>[] = [
+  { value: 'auto', label: '自适应', hint: '窄窗按 1280px 等比适配，宽屏 1:1 铺满' },
+  { value: '1280', label: '1280px', hint: '小屏笔记本（1280 宽）' },
+  { value: '1440', label: '1440px', hint: '主流笔记本（1440 宽）' },
+  { value: '1920', label: '1920px', hint: '标准办公屏（1920×1080）' },
+  { value: '2560', label: '2560px', hint: '2K 宽屏显示器（检查大屏留白）' },
+  { value: 'native', label: '1:1 原生', hint: '不缩放，按当前预览窗实际宽度显示' },
+];
 
 export interface PreviewViewportState {
   /** 回调 ref：无论组件在 loading 后挂载还是切页签重新挂载，都能准确监听尺寸 */
@@ -19,8 +32,8 @@ export interface PreviewViewportState {
   logicalWidth: number;
   /** 是否处于等比缩放状态 */
   isScaled: boolean;
-  /** 是否处于居中设备画框模式（平板 / 手机） */
-  isDeviceFrame: boolean;
+  /** 是否在大屏上以 1:1 居中模拟更小的桌面分辨率 */
+  isConstrained: boolean;
   /** 外层视口容器样式（用于占据缩放后的视觉尺寸） */
   shellStyle?: CSSProperties;
   /** iframe 自身样式 */
@@ -28,13 +41,13 @@ export interface PreviewViewportState {
 }
 
 /**
- * 预览视口自适应引擎：
- * - auto（默认）：当舞台宽度 < 1280px（如 1280/1440 笔记本分栏预览）时，
- *   以 1280px 标准桌面宽度渲染并等比缩放贴合舞台，彻底消除表格右截断与状态胶囊换行；
- *   当舞台宽度 >= 1280px（1920 / 2K / 4K / 全屏预览）时，1:1 铺满舞台原生渲染。
- * - native：始终按当前舞台物理尺寸 1:1 渲染，方便实测响应式断点。
- * - tablet：768px 居中平板画框（舞台偏窄时自动等比缩小防溢出）。
- * - mobile：390px 居中手机画框（舞台偏窄/偏矮时自动等比缩小防溢出）。
+ * 电脑多分辨率预览视口引擎：
+ * - auto（默认）：当预览舞台 < 1280px（如 1280/1440 笔记本分栏预览）时，
+ *   以 1280px 标准桌面宽度渲染并等比缩放贴合舞台，避免表格右截断与状态胶囊换行；
+ *   当舞台 >= 1280px（1920 / 2K / 4K / 全屏预览）时，1:1 铺满舞台原生高清渲染。
+ * - 1280 / 1440 / 1920 / 2560：模拟对应电脑显示器宽度；
+ *   若当前舞台比目标更窄则等比缩放完整呈现，若更宽则 1:1 居中模拟该电脑宽度。
+ * - native：始终按当前舞台真实宽度 1:1 不缩放渲染。
  */
 export function usePreviewViewport(initial: PreviewViewportMode = 'auto', bypassOnNarrow = false): PreviewViewportState {
   const [stageEl, setStageEl] = useState<HTMLDivElement | null>(null);
@@ -77,7 +90,7 @@ export function usePreviewViewport(initial: PreviewViewportMode = 'auto', bypass
         scale: 1,
         logicalWidth: stageW || DESKTOP_MIN_WIDTH,
         isScaled: false,
-        isDeviceFrame: false,
+        isConstrained: false,
       };
     }
 
@@ -91,7 +104,7 @@ export function usePreviewViewport(initial: PreviewViewportMode = 'auto', bypass
           scale: 1,
           logicalWidth: stageW,
           isScaled: false,
-          isDeviceFrame: false,
+          isConstrained: false,
         };
       }
       const scale = stageW / DESKTOP_MIN_WIDTH;
@@ -103,7 +116,7 @@ export function usePreviewViewport(initial: PreviewViewportMode = 'auto', bypass
         scale,
         logicalWidth: DESKTOP_MIN_WIDTH,
         isScaled: true,
-        isDeviceFrame: false,
+        isConstrained: false,
         shellStyle: {
           width: `${stageW}px`,
           height: `${stageH}px`,
@@ -117,44 +130,49 @@ export function usePreviewViewport(initial: PreviewViewportMode = 'auto', bypass
       };
     }
 
-    // 平板 / 手机居中设备画框
-    const availW = Math.max(240, stageW - DEVICE_PADDING * 2);
-    const availH = Math.max(320, stageH - DEVICE_PADDING * 2);
-    const targetW = effectiveMode === 'tablet' ? TABLET_WIDTH : MOBILE_WIDTH;
-    const scaleW = Math.min(1, availW / targetW);
-    const targetH =
-      effectiveMode === 'mobile'
-        ? Math.min(MOBILE_MAX_HEIGHT, Math.max(667, Math.floor(availH / scaleW)))
-        : Math.max(640, Math.floor(availH / scaleW));
-    const scaleH = Math.min(1, availH / targetH);
-    const scale = Math.min(scaleW, scaleH);
-    const visualW = Math.round(targetW * scale);
-    const visualH = Math.round(targetH * scale);
-    const isScaled = scale < 0.995;
+    // 指定电脑分辨率模拟（1280 / 1440 / 1920 / 2560）
+    const targetW = PRESET_WIDTHS[effectiveMode] ?? DESKTOP_MIN_WIDTH;
+    if (stageW < targetW) {
+      const scale = stageW / targetW;
+      const logicalHeight = Math.max(480, Math.ceil(stageH / scale));
+      return {
+        stageRef,
+        mode,
+        setMode,
+        scale,
+        logicalWidth: targetW,
+        isScaled: true,
+        isConstrained: false,
+        shellStyle: {
+          width: `${stageW}px`,
+          height: `${stageH}px`,
+        },
+        frameStyle: {
+          width: `${targetW}px`,
+          height: `${logicalHeight}px`,
+          transform: `scale(${scale})`,
+          transformOrigin: '0 0',
+        },
+      };
+    }
 
+    // 舞台比目标电脑分辨率更宽（例如在 4K 屏上模拟 1280 / 1440 / 1920 笔记本）：1:1 居中展示
     return {
       stageRef,
       mode,
       setMode,
-      scale,
+      scale: 1,
       logicalWidth: targetW,
-      isScaled,
-      isDeviceFrame: true,
+      isScaled: false,
+      isConstrained: true,
       shellStyle: {
-        width: `${visualW}px`,
-        height: `${visualH}px`,
+        width: `${targetW}px`,
+        height: `${stageH}px`,
       },
-      frameStyle: isScaled
-        ? {
-            width: `${targetW}px`,
-            height: `${targetH}px`,
-            transform: `scale(${scale})`,
-            transformOrigin: '0 0',
-          }
-        : {
-            width: `${targetW}px`,
-            height: `${targetH}px`,
-          },
+      frameStyle: {
+        width: `${targetW}px`,
+        height: `${stageH}px`,
+      },
     };
   }, [stageRef, stageSize, mode, bypassOnNarrow]);
 }

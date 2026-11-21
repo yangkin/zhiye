@@ -27,7 +27,7 @@ import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
 import { ErrorBoundary, retryableLazy } from '../components/ErrorBoundary';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { usePreviewViewport, type PreviewViewportMode } from '../hooks/usePreviewViewport';
+import { PREVIEW_RESOLUTION_OPTIONS, usePreviewViewport } from '../hooks/usePreviewViewport';
 
 const CodePane = retryableLazy(() => import('./CodePane').then((m) => ({ default: m.CodePane })));
 
@@ -593,37 +593,22 @@ function Workbench({ id }: { id: string }) {
                     <Icon name={maximized ? 'contract' : 'expand'} />
                   </button>
                   {!narrow ? (
-                    <div className="studio-device-group" role="group" aria-label="预览视口适配">
-                      {(
-                        [
-                          ['auto', 'web', '自适应桌面', '自适应桌面（窄窗按 1280px 等比缩放，宽屏 1:1 铺满）'],
-                          ['native', 'preview', '原生 1:1', '按当前窗格实际宽度 1:1 渲染'],
-                          ['tablet', 'tablet', '平板 768px', '平板视口预览（768px）'],
-                          ['mobile', 'phone', '手机 390px', '手机视口预览（390px）'],
-                        ] as [PreviewViewportMode, 'web' | 'preview' | 'tablet' | 'phone', string, string][]
-                      ).map(([modeKey, iconName, label, tip]) => (
-                        <button
-                          key={modeKey}
-                          type="button"
-                          className={vp.mode === modeKey ? 'active' : ''}
-                          aria-label={label}
-                          aria-pressed={vp.mode === modeKey}
-                          title={tip}
-                          onClick={() => vp.setMode(modeKey)}
-                        >
-                          <Icon name={iconName} />
-                        </button>
-                      ))}
-                    </div>
+                    <Select
+                      className="studio-res-picker"
+                      ariaLabel="预览电脑分辨率"
+                      value={vp.mode}
+                      options={PREVIEW_RESOLUTION_OPTIONS}
+                      onChange={vp.setMode}
+                    />
                   ) : null}
                   {!narrow && vp.isScaled ? (
                     <button
                       type="button"
                       className="studio-scale-pill"
-                      title={vp.mode === 'auto' ? '当前已按 1280px 等比适配，点击切回 1:1 原生宽度' : `当前以 ${Math.round(vp.scale * 100)}% 缩放以完整展示`}
-                      onClick={() => vp.setMode(vp.mode === 'auto' ? 'native' : 'auto')}
+                      title={`当前按 ${vp.logicalWidth}px 等比缩放（${Math.round(vp.scale * 100)}%），点击切换回 1:1 原生宽度`}
+                      onClick={() => vp.setMode('native')}
                     >
-                      {vp.logicalWidth} · {Math.round(vp.scale * 100)}%
+                      {Math.round(vp.scale * 100)}%
                     </button>
                   ) : null}
                 </div>
@@ -700,7 +685,7 @@ function Workbench({ id }: { id: string }) {
               ) : null}
               <div
                 ref={vp.stageRef}
-                className={`preview-stage ${editMode ? 'is-selecting' : ''} ${vp.isDeviceFrame ? `is-device-frame device-${vp.mode}` : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
+                className={`preview-stage ${editMode ? 'is-selecting' : ''} ${vp.isConstrained ? 'is-constrained-desktop' : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
               >
                 {frameSrc ? (
                   <>
