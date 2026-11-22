@@ -11,7 +11,6 @@ export const SHOT_DIR = '.zhiye/dist-shot'
 export const DEVICES = {
   desktop: { viewport: { width: 1280, height: 800 }, label: '桌面 1280×800' },
   wide: { viewport: { width: 1920, height: 1080 }, label: '宽屏 1920×1080' },
-  mobile: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, label: '手机 390×844' },
 }
 
 async function startViteDevServer(cwd) {

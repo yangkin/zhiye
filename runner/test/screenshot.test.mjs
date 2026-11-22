@@ -24,8 +24,8 @@ test('截图自查：发现横向溢出和文字截断，返回截图和摘要',
   assert.match(r.text, /横向溢出/)
   assert.match(r.text, /wide-table/)
   assert.match(r.text, /文字被截断.*cell/)
-  const m = await takeScreenshot(dir, { projectKind: 'static', device: 'mobile' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
-  assert.match(m.text, /手机 390×844/)
+  const w = await takeScreenshot(dir, { projectKind: 'static', device: 'wide' }, { ...process.env, ZHIYE_CHROME_PATH: CHROME })
+  assert.match(w.text, /宽屏 1920×1080/)
 })
 
 test('截图自查：宽屏 1920×1080 检出 max-w-[1440px] mx-auto 两侧留白，满宽流式布局放行', { skip: !existsSync(CHROME) && '没有 Chrome' }, async () => {
@@ -77,11 +77,11 @@ test('screenshot 工具：能看图的模型拿到图片，不能看图的只拿
   assert.equal(tool.name, 'screenshot')
   const v = await tool.execute('1', {}, undefined, undefined, { model: { input: ['text', 'image'] } })
   assert.deepEqual(v.content.map((c) => c.type), ['text', 'image'])
-  const t = await tool.execute('2', { device: 'mobile' }, undefined, undefined, { model: { input: ['text'] } })
+  const t = await tool.execute('2', { device: 'wide' }, undefined, undefined, { model: { input: ['text'] } })
   assert.deepEqual(t.content.map((c) => c.type), ['text'])
   assert.match(t.content[0].text, /不能看图/)
   assert.equal(checkToolCall('screenshot', {}, { cwd: '/tmp' }), null)
-  assert.equal(toolSummary('/tmp', 'screenshot', { device: 'mobile', route: '#/orders' }), '截图自查 · 手机 #/orders')
+  assert.equal(toolSummary('/tmp', 'screenshot', { device: 'wide', route: '#/orders' }), '截图自查 · 宽屏 1920 #/orders')
 })
 
 test('截图自查：template 项目走内存 Vite Dev Server 免写构建产物', { skip: !existsSync(CHROME) && '没有 Chrome' }, async () => {

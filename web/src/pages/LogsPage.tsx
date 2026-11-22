@@ -800,7 +800,6 @@ function TaskLogsWorkbench({ onJumpSandboxes }: { onJumpSandboxes?: () => void }
               taskId={selectedTaskId}
               onOpenApp={(appId) => navigate('/apps/' + appId)}
               onJumpSandboxes={onJumpSandboxes}
-              onBackToList={() => listPaneRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
             />
           )}
         </section>
@@ -861,12 +860,10 @@ function TaskDiagnosticPane({
   taskId,
   onOpenApp,
   onJumpSandboxes,
-  onBackToList,
 }: {
   taskId: string;
   onOpenApp: (appId: string) => void;
   onJumpSandboxes?: () => void;
-  onBackToList?: () => void;
 }) {
   const [subTab, setSubTab] = useState<DetailTab>('events');
   const [liveFollow, setLiveFollow] = useState<boolean>(true);
@@ -1054,11 +1051,6 @@ function TaskDiagnosticPane({
       <div className="logs-detail-head">
         <div className="logs-detail-title-row">
           <h2>
-            {onBackToList ? (
-              <button type="button" className="logs-mobile-back" onClick={onBackToList}>
-                ↑ 列表
-              </button>
-            ) : null}
             <span>{task.appName}</span>
             <span className={`logs-status ${tone}`}>
               {task.active ? <i className="logs-live-dot" aria-hidden="true" /> : null}

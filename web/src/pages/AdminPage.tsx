@@ -50,7 +50,7 @@ export function AdminPage() {
       <div className="content-page dash-page">
         <EmptyState
           icon="lock"
-          title="仅平台管理员可访问管理工作台"
+          title="仅平台管理员可访问"
           desc="当前工作空间未配置管理员权限。如需开启管理权限，可将空间 ID 加入 ZHIYE_ADMIN_ALLOW_WORKSPACES 或通过 SSO 管理员账号登录。"
         />
       </div>

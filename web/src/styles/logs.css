@@ -1374,18 +1374,3 @@ mark.logs-hl {
 .logs-wf-track {
   height: 6px !important;
 }
-
-@media (max-width: 640px) {
-  .logs-filter-left {
-    width: 100%;
-  }
-  .logs-search-box {
-    min-width: 0;
-    flex: 1 1 100%;
-    max-width: none;
-  }
-  .logs-filter-right {
-    width: 100%;
-    justify-content: flex-end;
-  }
-}

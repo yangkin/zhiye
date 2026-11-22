@@ -26,7 +26,6 @@ import { PublishModal } from './PublishModal';
 import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
 import { ErrorBoundary, retryableLazy } from '../components/ErrorBoundary';
-import { useMediaQuery } from '../hooks/useMediaQuery';
 import { PREVIEW_RESOLUTION_OPTIONS, usePreviewViewport } from '../hooks/usePreviewViewport';
 
 const CodePane = retryableLazy(() => import('./CodePane').then((m) => ({ default: m.CodePane })));
@@ -151,16 +150,9 @@ function Workbench({ id }: { id: string }) {
   const frameSrc = baseFrameSrc && cloudOn && previewAs !== 'admin' ? `${baseFrameSrc}?__as=${previewAs}` : baseFrameSrc;
   const otherActiveEarly = activeQ.data && app && activeQ.data.appId !== app.id ? activeQ.data : null;
   const lockedEarly = (!!app?.activeTask && !isTerminal(app.activeTask.status)) || !!otherActiveEarly;
-  // 手机上对话和工作区上下叠放时，点页签要直接切过去，不能让内容藏在长对话下面
-  const narrow = useMediaQuery('(max-width: 760px)');
-  const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat');
-  const vp = usePreviewViewport('auto', narrow);
+  const vp = usePreviewViewport('auto');
   const openTab = (value: Tab) => {
     setTab(value);
-    if (narrow) {
-      setMobileView('panel');
-      window.scrollTo({ top: 0 });
-    }
   };
   // 页签的键盘操作：左右方向键切到相邻页签，Home / End 到首尾（焦点和选中一起走）
   const onTabKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -471,12 +463,6 @@ function Workbench({ id }: { id: string }) {
           </span>
         </div>
         <div className={`studio-tabs ${previewCollapsed ? 'is-hidden' : ''}`} role="tablist" aria-label="工作台功能" onKeyDown={onTabKey}>
-          {narrow ? (
-            <button className={mobileView === 'chat' ? 'active' : ''} role="tab" aria-selected={mobileView === 'chat'} tabIndex={mobileView === 'chat' ? 0 : -1} onClick={() => setMobileView('chat')}>
-              <Icon name="agent" />
-              <span>对话</span>
-            </button>
-          ) : null}
           {(
             [
               ['code', '代码', 'code'],
@@ -487,12 +473,12 @@ function Workbench({ id }: { id: string }) {
           ).filter(([value]) => !((skill || script) && (value === 'cloud' || value === 'preview'))).map(([value, label, symbol]) => (
             <button
               key={value}
-              className={tab === value && !(narrow && mobileView === 'chat') ? 'active' : ''}
+              className={tab === value ? 'active' : ''}
               role="tab"
               aria-label={label}
               title={label}
-              aria-selected={tab === value && !(narrow && mobileView === 'chat')}
-              tabIndex={tab === value && !(narrow && mobileView === 'chat') ? 0 : -1}
+              aria-selected={tab === value}
+              tabIndex={tab === value ? 0 : -1}
               onClick={() => openTab(value)}
             >
               <Icon name={symbol} />
@@ -538,7 +524,7 @@ function Workbench({ id }: { id: string }) {
           </button>
         </div>
       </header>
-      <div className={`workspace-body studio-body ${previewCollapsed ? 'preview-collapsed' : ''} ${maximized ? 'is-maximized' : ''} ${narrow ? 'mobile-' + mobileView : ''}`}>
+      <div className={`workspace-body studio-body ${previewCollapsed ? 'preview-collapsed' : ''} ${maximized ? 'is-maximized' : ''}`}>
         {editMode === 'manual' && editor.selection && tab === 'preview' ? (
           <ManualPanel key={`${editor.selection.loc}#${editor.selection.instanceIndex ?? ''}`} editor={editor} selection={editor.selection} onClose={editor.clearSelection} />
         ) : (
@@ -560,7 +546,6 @@ function Workbench({ id }: { id: string }) {
           previewVisible={!previewCollapsed}
           onFocusPreview={() => {
             setPreviewCollapsed(false);
-            setMobileView('panel');
             setTab(mainTab);
             setPreviewVersion(null);
           }}
@@ -592,16 +577,14 @@ function Workbench({ id }: { id: string }) {
                   >
                     <Icon name={maximized ? 'contract' : 'expand'} />
                   </button>
-                  {!narrow ? (
-                    <Select
-                      className="studio-res-picker"
-                      ariaLabel="预览电脑分辨率"
-                      value={vp.mode}
-                      options={PREVIEW_RESOLUTION_OPTIONS}
-                      onChange={vp.setMode}
-                    />
-                  ) : null}
-                  {!narrow && vp.isScaled ? (
+                  <Select
+                    className="studio-res-picker"
+                    ariaLabel="预览电脑分辨率"
+                    value={vp.mode}
+                    options={PREVIEW_RESOLUTION_OPTIONS}
+                    onChange={vp.setMode}
+                  />
+                  {vp.isScaled ? (
                     <button
                       type="button"
                       className="studio-scale-pill"

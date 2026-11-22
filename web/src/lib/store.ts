@@ -16,11 +16,9 @@ interface UiState {
   /** 数据源管理弹窗 */
   sourcesOpen: boolean;
   setSourcesOpen: (open: boolean) => void;
-  mobileNav: boolean;
   helpOpen: boolean;
   setHelpOpen: (open: boolean) => void;
   setImportOpen: (open: boolean) => void;
-  setMobileNav: (open: boolean) => void;
 }
 
 let toastSeq = 0;
@@ -30,11 +28,9 @@ export const useUi = create<UiState>((set) => ({
   importOpen: false,
   sourcesOpen: false,
   setSourcesOpen: (sourcesOpen) => set({ sourcesOpen }),
-  mobileNav: false,
   helpOpen: false,
   setHelpOpen: (helpOpen) => set({ helpOpen }),
   setImportOpen: (importOpen) => set({ importOpen }),
-  setMobileNav: (mobileNav) => set({ mobileNav }),
 }));
 
 export function toast(message: string, tone: 'ok' | 'error' = 'ok', action?: ToastItem['action']) {

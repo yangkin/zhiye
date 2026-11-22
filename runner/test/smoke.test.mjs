@@ -89,14 +89,14 @@ test('smokeTest 能检出子路由切换后 #root 白屏', { skip: !HAS_CHROME &
   }
 })
 
-test('smokeTest 能检出移动端 390px 视口下的横向溢出', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
+test('smokeTest 能检出桌面 1280px 视口下的横向溢出', { skip: !HAS_CHROME && '没有本地 Chrome' }, async () => {
   const dir = makeSite(`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0">
-<div id="root"><div style="width:900px;height:80px">宽表格撑爆移动端视口</div></div>
+<div id="root"><div style="width:1800px;height:80px">宽表格撑爆桌面视口</div></div>
 </body></html>`)
   try {
     const r = await smokeTest(dir, { requireRoot: true, chromePath: CHROME })
     assert.equal(r.ok, false)
-    assert.match(r.detail, /移动端.*横向溢出/)
+    assert.match(r.detail, /横向溢出/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

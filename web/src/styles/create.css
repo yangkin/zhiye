@@ -145,17 +145,6 @@
 .help-input { display: flex; gap: 8px; align-items: center; margin: 0 14px 14px; padding: 8px 8px 8px 14px; border: 1px solid #e8e2f2; border-radius: 16px; background: #fff; }
 .help-input input { flex: 1; border: 0; outline: none; font-size: 13px; background: transparent; color: #3a3048; }
 
-@media (max-width: 760px) {
-  .cp-tabs { padding-right: 4px; }
-  .cp-tabs button { padding: 8px 12px; font-size: 13px; }
-  .cp-pet { top: -80px; right: 8px; transform: scale(.78); transform-origin: bottom right; }
-  .cp-title { font-size: 28px; gap: 8px; }
-  .cp-composer .send-button { flex: none; width: 38px; height: 38px; border-radius: 12px; }
-}
-@media (max-width: 520px) {
-  .create-page .inspiration-card { grid-template-columns: 1fr; }
-  .create-page .inspiration-card .scene-thumb { aspect-ratio: 16 / 9; }
-}
 .sr-only{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* 小织睡觉（无预览） */

@@ -240,23 +240,6 @@ export async function smokeTest(dir, { requireRoot = false, captureShot = false,
       } catch {}
     }
 
-    // 移动端（390×844）视口冒烟：检测常见的小屏横向溢出或渲染报错
-    if (requireRoot && errors.length === 0) {
-      let mobileCtx
-      try {
-        mobileCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
-        const mp = await mobileCtx.newPage()
-        await attachPageWatchers(mp, { origin, blocked, errors, warnings, prefix: '移动端 ' })
-        await mp.goto(origin + '/index.html', { waitUntil: 'load', timeout: timeoutMs })
-        await mp.waitForTimeout(450)
-        checkRenderState(await readRenderState(mp), requireRoot, errors, '移动端 ', 390)
-      } catch (e) {
-        errors.push(`移动端检查失败：${String(e.message).split('\n')[0]}`)
-      } finally {
-        if (mobileCtx) await mobileCtx.close().catch(() => {})
-      }
-    }
-
     // 沙箱 iframe 冒烟：工作台预览使用 sandbox="allow-scripts allow-forms"（禁用 localStorage/sessionStorage）
     if (errors.length === 0) {
       const sboxPage = await ctx.newPage()

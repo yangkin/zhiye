@@ -1188,7 +1188,7 @@ export function DashboardPage() {
                   </button>
                   {isAdmin ? (
                     <button type="button" className="xa-dock-btn primary" onClick={() => navigate('/admin')}>
-                      进入管理工作台 →
+                      进入平台管理 →
                     </button>
                   ) : null}
                 </div>

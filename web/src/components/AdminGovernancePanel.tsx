@@ -630,7 +630,7 @@ export function AdminGovernancePanel({
     return (
       <section className="dash-section" aria-label="治理与运维">
         <div className="dash-panel">
-          <DashEmptyBox icon="settings" title="正在加载管理工作台与资产台账…" />
+          <DashEmptyBox icon="settings" title="正在加载平台管理数据…" />
         </div>
       </section>
     );

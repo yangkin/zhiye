@@ -9,53 +9,20 @@ import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
 import { HelpPanel } from './HelpPanel';
 
-const titles: Record<string, string> = {
-  create: '我的工作空间',
-  apps: '我的应用',
-  history: '历史记录',
-  community: '灵感社区',
-  dashboard: '数据看板',
-  admin: '平台管理',
-  logs: '运行日志',
-};
-
 export function LightLayout() {
   const location = useLocation();
   const page = location.pathname.split('/')[1] || 'create';
-  const mobileNav = useUi((s) => s.mobileNav);
-  const setMobileNav = useUi((s) => s.setMobileNav);
   const [modal, setModal] = useState<null | 'workspace'>(null);
   const setHelpOpen = useUi((s) => s.setHelpOpen);
 
   useEffect(() => {
-    setMobileNav(false);
     document.querySelector('.main')?.scrollTo(0, 0);
-  }, [location.pathname, setMobileNav]);
-
-  useEffect(() => {
-    if (!mobileNav) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileNav(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [mobileNav, setMobileNav]);
+  }, [location.pathname]);
 
   return (
     <div className="shell">
-      {mobileNav ? <button className="nav-backdrop" aria-label="关闭导航" onClick={() => setMobileNav(false)} /> : null}
       <Sidebar page={page} onHelp={() => setHelpOpen(true)} onWorkspace={() => setModal('workspace')} />
       <main className={`main ${page === 'create' ? 'main-create' : page === 'chat' ? 'main-chat' : page === 'community' && location.pathname.split('/')[2] ? 'main-work' : ''}`}>
-        <header className="topbar">
-          <div className="topbar-left">
-            <button className="icon-button mobile-menu" aria-label="打开导航" onClick={() => setMobileNav(!mobileNav)}>
-              <Icon name="menu" />
-            </button>
-            <span className="workspace-dot" />
-            <span>{titles[page] ?? '我的工作空间'}</span>
-          </div>
-          <div className="topbar-right" />
-        </header>
         <Outlet />
       </main>
       <HelpPanel />
@@ -83,7 +50,6 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
   const meta = useMeta().data;
   const user = meta?.auth?.user ?? null;
   const isAdmin = Boolean(meta?.auth?.admin);
-  const mobileNav = useUi((s) => s.mobileNav);
   const { data: apps } = useApps({ sort: 'updated' });
   const creatorItems = [
     ['create', 'plus', '创造'],
@@ -97,7 +63,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
     ['logs', 'terminal', '日志'],
   ] as const;
   return (
-    <aside className={`sidebar rail ${mobileNav ? 'visible' : ''}`}>
+    <aside className="sidebar rail">
       <Link className="rail-brand" to="/create" aria-label="织页 · 让想法成形" title="织页 · 让想法成形">
         <img className="brand-logo" src="/brand.svg" alt="" />
         <b>织页</b>

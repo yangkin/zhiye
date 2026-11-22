@@ -9,7 +9,6 @@ import { authorOf, countLabel, useLikeWork, useUseWork, WorkCover } from '../com
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
 import { Select } from '../components/Select';
-import { useMediaQuery } from '../hooks/useMediaQuery';
 import { PREVIEW_RESOLUTION_OPTIONS, usePreviewViewport } from '../hooks/usePreviewViewport';
 
 /** 作品详情：左边大预览（页面快照），右边作者、点赞、使用模板、去访问、相关推荐 */
@@ -25,8 +24,7 @@ export function WorkPage() {
   const like = useLikeWork();
   const use = useUseWork();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const narrow = useMediaQuery('(max-width: 900px)');
-  const vp = usePreviewViewport('auto', narrow);
+  const vp = usePreviewViewport('auto');
 
   if (isLoading) return <LoadingState label="正在打开作品…" />;
   if (error || !t) return <ErrorState message={error ? errorMessage(error) : '作品不存在'} onRetry={() => refetch()} />;
@@ -56,7 +54,7 @@ export function WorkPage() {
             <i />
             <i />
             <span>{t.siteUrl ? t.siteUrl.replace(/^https?:\/\//, '') : '页面快照 · 不含真实数据'}</span>
-            {t.previewUrl && !narrow ? (
+            {t.previewUrl ? (
               <div className="work-device-bar">
                 {vp.isScaled ? (
                   <button
