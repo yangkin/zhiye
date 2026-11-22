@@ -1099,13 +1099,15 @@
   padding: 4px 9px;
   border-radius: 7px;
   cursor: pointer;
+  white-space: nowrap;
+  flex: none;
   transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
 }
 
 .xa-top-btn:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border-color: #d4c8ef;
+  background: #f5f2fc;
+  color: #4f359e;
 }
 
 /* 3. 日历热力图 & 桑基图实时浮层 Tooltip */

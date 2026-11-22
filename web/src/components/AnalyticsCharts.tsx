@@ -1027,9 +1027,9 @@ export function SankeyFlowChart({
     <div className="xa-sankey-grid">
       <div className="xa-sankey-chart">
         <div className="xa-sankey-col-heads">
-          <span>① 创作入口 / 任务类型</span>
+          <span>① 任务类型</span>
           <span>② 应用形态</span>
-          <span>③ 最终执行结果（点击异常项可下钻排查）</span>
+          <span>③ 执行结果（点击查看日志）</span>
         </div>
         <div className="xa-sankey-canvas">
           <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="xa-sankey-svg" role="img" aria-label="任务流向桑基图">

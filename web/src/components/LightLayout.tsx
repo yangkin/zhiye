@@ -12,11 +12,11 @@ import { HelpPanel } from './HelpPanel';
 const titles: Record<string, string> = {
   create: '我的工作空间',
   apps: '我的应用',
-  history: '版本与记录',
+  history: '历史记录',
   community: '灵感社区',
-  dashboard: '统计看板',
-  admin: '管理工作台',
-  logs: '日志排查',
+  dashboard: '数据看板',
+  admin: '平台管理',
+  logs: '运行日志',
 };
 
 export function LightLayout() {
@@ -116,7 +116,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
           <>
             <div className="rail-divider" aria-hidden="true" />
             {adminItems.map(([p, i, t]) => (
-              <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={p === 'admin' ? '管理工作台' : t}>
+              <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={p === 'admin' ? '平台管理' : p === 'dashboard' ? '数据看板' : p === 'logs' ? '运行日志' : t}>
                 <span className="rail-icon">
                   <Icon name={i} />
                 </span>
