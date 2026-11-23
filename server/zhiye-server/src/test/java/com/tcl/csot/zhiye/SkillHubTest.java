@@ -47,11 +47,28 @@ class SkillHubTest extends IntegrationTest {
 
     @Test
     void parsesFrontmatter() {
-        com.tcl.csot.zhiye.service.skillhub.SkillMeta m = com.tcl.csot.zhiye.service.skillhub.SkillMeta.parse("---\nname: weekly-report\ndescription: \"生成周报\"  # 注释\n---\n正文");
+        com.tcl.csot.zhiye.service.skillhub.SkillMeta m = com.tcl.csot.zhiye.service.skillhub.SkillMeta.parse("---\nname: t11-stk-alarm-query\ndescription: \"生成周报\"  # 注释\ncompatibility: Python 3.10+ 标准库\n---\n正文");
         assertThat(m.validName()).isTrue();
+        assertThat(m.hasVersionInName()).isFalse();
         assertThat(m.description()).isEqualTo("生成周报");
+        assertThat(m.vagueCompatibility()).isFalse();
+
+        com.tcl.csot.zhiye.service.skillhub.SkillMeta versioned = com.tcl.csot.zhiye.service.skillhub.SkillMeta.parse("---\nname: t11-stk-alarm-v2\ndescription: 查告警\ncompatibility: 兼容飞书\n---\n正文");
+        assertThat(versioned.hasVersionInName()).isTrue();
+        assertThat(versioned.validName()).isFalse();
+        assertThat(versioned.vagueCompatibility()).isTrue();
+
         com.tcl.csot.zhiye.service.skillhub.SkillMeta block = com.tcl.csot.zhiye.service.skillhub.SkillMeta.parse("---\nname: 周报 Skill\ndescription: >\n  第一行\n  第二行\n---\n");
         assertThat(block.validName()).isFalse();
         assertThat(block.description()).isEqualTo("第一行 第二行");
+
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isGenericDisplayName("SPC")).isTrue();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isGenericDisplayName("产品助手")).isTrue();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isGenericDisplayName("t11 - 储位告警查询")).isFalse();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isJunkPath("debug.log")).isTrue();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isJunkPath("tmp/result.json")).isTrue();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.isJunkPath("references/guide.md")).isFalse();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.scanSecrets("联系人 ou_1234567890abcdef1234")).isNotEmpty();
+        assertThat(com.tcl.csot.zhiye.service.skillhub.SkillMeta.scanSecrets("token = \"<YOUR_TOKEN>\"")).isEmpty();
     }
 }

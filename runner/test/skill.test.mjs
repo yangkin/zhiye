@@ -57,7 +57,7 @@ test('合格的 skill 包通过，结果格式正确，不留 __pycache__', asyn
   const w = pkg(GOOD)
   const r = await verify(w, { projectKind: 'skill' })
   assert.equal(r.ok, true, JSON.stringify(r.checks))
-  assert.deepEqual(r.checks.map((c) => c.name), ['SKILL.md 格式', '引用文件', '脚本语法'])
+  assert.deepEqual(r.checks.map((c) => c.name), ['SKILL.md 格式', '引用文件', '脚本语法', '安全与文件清理'])
   assert.equal(r.previewDir, null)
   assert.equal(r.publishDir, null)
   assert.equal(r.editable, false)
@@ -79,19 +79,43 @@ test('缺少 name', async () => {
   assert.match(byName(r)['SKILL.md 格式'].detail, /缺少 name/)
 })
 
-test('name 格式不正确、description 为空或太长', async () => {
-  for (const bad of ['Weekly_Report', '-abc', 'a'.repeat(65), '周报']) {
+test('name 格式不正确（含版本号/非法字符）、description 超过 120 字、超过 500 行或笼统 compatibility', async () => {
+  for (const bad of ['Weekly_Report', '-abc', 'abc-', 'a--b', 'a'.repeat(65), '周报', 'weekly-report-v1', 'stk-alarm-v2-0', 'stk-alarm-1-0']) {
     const r = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace('weekly-report', bad) }), { projectKind: 'skill' })
     assert.equal(byName(r)['SKILL.md 格式'].ok, false, bad)
     assert.match(byName(r)['SKILL.md 格式'].detail, /name 格式不正确/)
   }
   const empty = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace(/description: .*\n/, 'description: ""\n') }), { projectKind: 'skill' })
   assert.match(byName(empty)['SKILL.md 格式'].detail, /缺少 description/)
-  const long = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace(/description: .*\n/, `description: ${'长'.repeat(1025)}\n`) }), { projectKind: 'skill' })
-  assert.match(byName(long)['SKILL.md 格式'].detail, /太长/)
+  const long = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace(/description: .*\n/, `description: ${'长'.repeat(121)}\n`) }), { projectKind: 'skill' })
+  assert.match(byName(long)['SKILL.md 格式'].detail, /太长.*120/)
+  const tooLongMd = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD + '\n'.repeat(500) + 'end' }), { projectKind: 'skill' })
+  assert.match(byName(tooLongMd)['SKILL.md 格式'].detail, /超过 500 行/)
+  const vagueCompat = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace('---\n\n# 周报生成', 'compatibility: 兼容飞书\n---\n\n# 周报生成') }), { projectKind: 'skill' })
+  assert.match(byName(vagueCompat)['SKILL.md 格式'].detail, /compatibility 描述过于笼统/)
+  const goodCompat = await verify(pkg({ ...GOOD, 'SKILL.md': GOOD_MD.replace('---\n\n# 周报生成', 'compatibility: Python 3.10+（仅标准库），无外部接口依赖\n---\n\n# 周报生成') }), { projectKind: 'skill' })
+  assert.equal(byName(goodCompat)['SKILL.md 格式'].ok, true)
   const none = await verify(pkg({ 'references/a.md': 'x' }), { projectKind: 'skill' })
   assert.equal(none.ok, false)
   assert.match(byName(none)['SKILL.md 格式'].detail, /没有 SKILL.md/)
+})
+
+test('安全与文件清理：拦截飞书用户 ID、密钥令牌、明文密码及临时日志文件', async () => {
+  const feishuUid = await verify(pkg({ ...GOOD, 'references/template.md': '联系人：ou_a1b2c3d4e5f678901234' }), { projectKind: 'skill' })
+  assert.equal(feishuUid.ok, false)
+  assert.match(byName(feishuUid)['安全与文件清理'].detail, /飞书用户 ID/)
+
+  const secretKey = await verify(pkg({ ...GOOD, 'scripts/count_words.py': 'api_key = "real_secret_key_987654321"\n' }), { projectKind: 'skill' })
+  assert.equal(secretKey.ok, false)
+  assert.match(byName(secretKey)['安全与文件清理'].detail, /明文凭证/)
+
+  const placeholderOk = await verify(pkg({ ...GOOD, 'scripts/count_words.py': 'api_key = "<YOUR_API_KEY>"\n' }), { projectKind: 'skill' })
+  assert.equal(byName(placeholderOk)['安全与文件清理'].ok, true)
+
+  const junkLog = await verify(pkg({ ...GOOD, 'debug.log': 'trace...', 'tmp/out.txt': '1' }), { projectKind: 'skill' })
+  assert.equal(junkLog.ok, false)
+  assert.match(byName(junkLog)['安全与文件清理'].detail, /debug\.log/)
+  assert.match(byName(junkLog)['安全与文件清理'].detail, /tmp\//)
 })
 
 test('引用的文件不存在', async () => {

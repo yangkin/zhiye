@@ -99,7 +99,8 @@ public final class Prompts {
 
                 ## 要求
                 - 只修改 SKILL.md、references/、scripts/；内容用中文
-                - 脚本只用标准库，不要联网、不要安装依赖
+                - 严格遵循 SkillHub 规范：SKILL.md 放根目录且 ≤500 行；配置头 name 仅小写字母/数字/`-`、≤64 字符、不含版本号（建议 2~4 词段）；description ≤120 字；有特定运行依赖时须填具体 compatibility（不得只写「兼容飞书」等笼统描述）；正文写清功能、适用场景、使用步骤与依赖的权限或其它技能
+                - 安全与清理：严禁写入凭证、密码、token、飞书用户 ID（ou_xxx）等敏感信息；脚本只用标准库，不联网、不装依赖，自测产生的缓存/日志/临时输出文件必须删除
                 - 最后用两三句话总结这个 skill 包含哪些文件、怎么使用
                 - 最后单独一行输出：[[next]] 建议一 | 建议二（2～3 个用户最可能的下一句话，每个不超过 14 个字）
                 """);
@@ -110,7 +111,7 @@ public final class Prompts {
 
     static String modify(String content, JsonNode ctx, boolean skill) {
         if (skill) return "请按用户的要求修改当前的 skill 包（只有文件，不是网页）。\n\n## 用户的要求\n" + content + "\n\n## 约定\n" + Catalog.SKILL_HINT
-                + "\n\n## 要求\n- 保持 SKILL.md 头部的 name、description 有效\n- 脚本只用标准库\n- 最后用一两句话总结你改了什么\n";
+                + "\n\n## 要求\n- 严格遵循 SkillHub 规范：SKILL.md ≤500 行；配置头 name 仅小写字母/数字/`-`且不含版本号、description ≤120 字、有特定依赖时写具体 compatibility\n- 严禁包含凭证/密码/token/飞书用户 ID（ou_xxx），不得遗留缓存/调试日志/临时文件\n- 脚本只用标准库\n- 最后用一两句话总结你改了什么\n";
         StringBuilder sb = new StringBuilder();
         sb.append("请按用户的要求修改当前项目。\n\n## 用户的要求\n").append(content).append("\n\n");
         if (ctx != null && !ctx.isNull()) {

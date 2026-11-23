@@ -553,8 +553,11 @@ export const api = {
   ) => request<Task>(`/api/apps/${enc(appId)}/code`, { method: 'POST', body: input, idempotencyKey }),
 
   // SkillHub
-  skillhubPublish: (appId: string, input: { versionId: string; visibility: SkillVisibility; changelog: string }, idempotencyKey?: string) =>
-    request<SkillhubPublication>(`/api/skillhub/apps/${enc(appId)}/publish`, { method: 'POST', body: input, idempotencyKey }),
+  skillhubPublish: (
+    appId: string,
+    input: { versionId: string; displayName?: string; visibility: SkillVisibility; changelog: string },
+    idempotencyKey?: string,
+  ) => request<SkillhubPublication>(`/api/skillhub/apps/${enc(appId)}/publish`, { method: 'POST', body: input, idempotencyKey }),
   skillhubPublications: (appId: string) => request<SkillhubPublication[]>(`/api/skillhub/apps/${enc(appId)}/publications`),
   skillhubCategories: () => request<SkillHubCategory[]>('/api/skillhub/categories'),
   skillhubMarket: (input: { q?: string; categoryId?: string; page?: number; limit?: number } = {}) =>

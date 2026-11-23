@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { run, emitLog, flushLogs, summarize, log, RunnerError } from './util.mjs'
 import { smokeTest } from './smoke.mjs'
-import { checkSkillMd, checkReferences, checkScripts } from './skill.mjs'
+import { checkSkillMd, checkReferences, checkScripts, checkSecurityAndCleanliness } from './skill.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const PREVIEW_DIR = '.zhiye/dist-preview'
@@ -357,6 +357,7 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
       await step('SKILL.md 格式', async () => checkSkillMd(cwd)),
       await step('引用文件', async () => checkReferences(cwd)),
       await step('脚本语法', () => checkScripts(cwd, env)),
+      await step('安全与文件清理', async () => checkSecurityAndCleanliness(cwd)),
     ], editable: false, noDist: true }
   }
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)

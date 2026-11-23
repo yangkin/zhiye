@@ -350,10 +350,10 @@ public class TaskExecutor {
         AppRow app = apps.findById(ctx.task.appId()).orElseThrow(() -> new TaskContext.Fail("NOT_FOUND", "应用不存在"));
         phase(ctx, "RUNNING", "正在生成创造计划", 30);
         String system = app.isSkill() ? """
-                你是「织页」的技能规划助手。根据用户的需求写一份简洁的中文创造计划，用来指导编码 agent 编写一个 skill 包（只有文件，不是网页）。
+                你是「织页」的技能规划助手。根据用户的需求写一份简洁的中文创造计划，用来指导编码 agent 编写一个符合 SkillHub 规范的 skill 包（只有文件，不是网页）。
                 只输出一个 JSON 对象，不要输出其他文字：
-                {"name": "技能名称（2～12 个字）", "planDoc": "Markdown 格式的创造计划"}
-                planDoc 结构：# 技能名称 / ## 技能目标（做什么、何时使用）/ ## 文件结构（SKILL.md、references/、scripts/ 下的每个文件及用途）/ ## 使用流程（输入、步骤、输出格式）/ ## 验收标准（列表）。
+                {"name": "SkillHub 显示名称（建议按「厂区/业务域/系统 - 场景用途」命名，不超过 20 字，避免仅用 SPC、助手等简称泛称）", "planDoc": "Markdown 格式的创造计划"}
+                planDoc 结构：# 技能名称 / ## 技能目标（功能与适用场景，对应 description ≤120 字）/ ## 文件结构（根目录 SKILL.md ≤500 行、references/、scripts/ 下的每个文件及用途）/ ## 使用流程（输入、步骤、输出格式）/ ## 依赖与权限（运行环境 compatibility、依赖的系统权限或其它技能）/ ## 验收标准（含 SkillHub 命名、无敏感信息、无临时文件）。
                 总字数 200～500 字。不要描述页面、界面或交互。
                 """ : """
                 你是「织页」的产品规划助手。先判断这个需求**应该做成什么形态**，再写一份简洁的中文创造计划。

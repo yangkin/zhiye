@@ -13,9 +13,11 @@ public final class Catalog {
     public static final Set<String> TYPES = Set.copyOf(TYPE_LIST);
     public static final String DEFAULT_TYPE = "开发网站";
     public static final String SKILL_TYPE = "开发skill";
-    public static final String SKILL_HINT = "开发skill：产出一个 skill 包（不是网页）。仓库根目录就是 skill 目录：`SKILL.md`（YAML 头部：name 用小写字母、数字和连字符，"
-            + "不超过 64 字符；description 写清做什么、何时使用，不超过 1024 字），正文写使用说明、输入要求、步骤和输出格式；规范、模板、示例放 `references/`；"
-            + "辅助脚本放 `scripts/`（Python 或 Node.js，只用标准库，带用法注释）；SKILL.md 里用相对路径引用这些文件。不要创建网页、src/ 或 package.json。";
+    public static final String SKILL_HINT = "开发skill：产出一个符合 SkillHub 规范的 skill 包（不是网页）。仓库根目录就是 skill 目录：`SKILL.md` 放根目录且总行数不超过 500 行"
+            + "（YAML 配置头：`name` 仅小写英文字母、数字和连字符 `-`，≤64 字符，不含版本号，建议 2~4 个词段如 `t11-stk-alarm-query`；"
+            + "`description` 说明做什么与何时使用，严格不超过 120 字；有特定运行环境、工具或接口依赖时须填写 `compatibility` 并写明具体依赖，不得只写「兼容飞书」等笼统描述），"
+            + "正文写清功能、适用场景、使用步骤及依赖的权限或其它技能；规范、模板、示例放 `references/`；辅助脚本放 `scripts/`（Python 或 Node.js，只用标准库，带用法注释）；"
+            + "SKILL.md 里用相对路径引用这些文件。严禁包含凭证、账号密码、token、飞书用户 ID（ou_xxx）等敏感信息，严禁残留缓存、调试日志、测试输出等临时文件，不要创建网页、src/ 或 package.json。";
 
     public static String projectKindFor(String type) { return SKILL_TYPE.equals(type) ? "skill" : "template"; }
 

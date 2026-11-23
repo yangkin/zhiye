@@ -68,6 +68,12 @@ public class SkillHubService {
 
     public boolean enabled() { return props.enabled(); }
 
+    private static boolean looksBinary(byte[] bytes) {
+        int limit = Math.min(bytes.length, 4096);
+        for (int i = 0; i < limit; i++) if (bytes[i] == 0) return true;
+        return false;
+    }
+
     /** 导出 skill 包的顶层目录名（与旧实现一致） */
     public static String folderName(AppRow app, String skillMd) {
         String f = SkillMeta.parse(skillMd).folderName();
@@ -208,13 +214,50 @@ public class SkillHubService {
         if (vid == null) throw ApiException.validation("技能还没有生成完成，暂时不能发布");
         VersionRow v = versions.find(vid).filter(x -> x.appId().equals(app.id())).orElseThrow(() -> ApiException.notFound("版本"));
         String md = git.readFile(app.id(), v.gitCommit(), "SKILL.md").map(b -> new String(b, StandardCharsets.UTF_8))
-                .orElseThrow(() -> ApiException.validation("这个版本没有 SKILL.md，不能发布"));
+                .orElseThrow(() -> ApiException.validation("这个版本根目录没有 SKILL.md，不能发布"));
+        int mdLines = SkillMeta.lineCount(md);
+        if (mdLines > SkillMeta.MAX_SKILL_MD_LINES)
+            throw ApiException.validation("SKILL.md 超过 " + SkillMeta.MAX_SKILL_MD_LINES + " 行上限（当前 " + mdLines + " 行），请将长规范或示例拆到 references/ 后再发布");
         SkillMeta meta = SkillMeta.parse(md);
+        if (meta.hasVersionInName())
+            throw ApiException.validation("SKILL.md 头部的 name 不能包含版本号（如 -v1、-1-0），建议由 2~4 个英文词段组成");
         if (!meta.validName())
-            throw ApiException.validation("SKILL.md 头部的 name 不合法：只能用小写字母、数字和连字符，不超过 64 个字符");
+            throw ApiException.validation("SKILL.md 头部的 name 不合法：仅允许小写英文字母、数字和连字符 \"-\"，不能以 \"-\" 开头/结尾或连续 \"--\"，不超过 64 个字符");
         if (meta.description() == null || meta.description().isBlank())
-            throw ApiException.validation("SKILL.md 头部缺少 description：写清这个 skill 做什么、什么时候使用");
-        if (meta.description().length() > 1024) throw ApiException.validation("SKILL.md 的 description 最多 1024 字");
+            throw ApiException.validation("SKILL.md 头部缺少 description：写清这个 skill 做什么、何时使用");
+        int descLen = SkillMeta.codePointLength(meta.description());
+        if (descLen > SkillMeta.MAX_DESCRIPTION_LEN)
+            throw ApiException.validation("SKILL.md 的 description 超过 " + SkillMeta.MAX_DESCRIPTION_LEN + " 字上限（当前 " + descLen + " 字）");
+        if (meta.vagueCompatibility())
+            throw ApiException.validation("SKILL.md 头部的 compatibility 描述过于笼统：请写明所需运行环境、工具或接口依赖，不得只写「兼容飞书」等泛称");
+
+        // 发布前强制安全与文件清理检测（不可绕过）
+        List<String> junkFiles = new ArrayList<>();
+        List<String> secretHits = new ArrayList<>();
+        for (var entry : git.listFiles(app.id(), v.gitCommit())) {
+            String rel = entry.path();
+            if (SkillMeta.isJunkPath(rel)) {
+                junkFiles.add(rel);
+                continue;
+            }
+            if (entry.size() > 512 * 1024) continue;
+            byte[] bytes = git.readFile(app.id(), v.gitCommit(), rel).orElse(null);
+            if (bytes == null || looksBinary(bytes)) continue;
+            List<String> found = SkillMeta.scanSecrets(new String(bytes, StandardCharsets.UTF_8));
+            if (!found.isEmpty()) secretHits.add(rel + "（" + String.join("、", found) + "）");
+        }
+        if (!secretHits.isEmpty())
+            throw ApiException.validation("发布前安全检测未通过，发现敏感信息：" + String.join("；", secretHits) + "。请清理凭证、密码、token 或飞书用户 ID 后重试");
+        if (!junkFiles.isEmpty())
+            throw ApiException.validation("发布前文件清理检测未通过，存在无关缓存/调试日志/临时文件：" + String.join("、", junkFiles) + "。请删除后重试");
+
+        // 显示名称校验（SkillHub 规范：≤20 字，不可仅用简称/泛称）
+        String displayName = req != null && req.displayName() != null && !req.displayName().isBlank() ? req.displayName().trim() : app.name().trim();
+        if (SkillMeta.isGenericDisplayName(displayName))
+            throw ApiException.validation("SkillHub 显示名称过于泛化，建议按「厂区/业务域/系统 - 场景用途」清晰命名（如：t11 - 储位告警查询）");
+        int displayLen = SkillMeta.codePointLength(displayName);
+        if (displayLen > SkillMeta.MAX_DISPLAY_NAME_LEN)
+            throw ApiException.validation("SkillHub 显示名称不能超过 " + SkillMeta.MAX_DISPLAY_NAME_LEN + " 字（当前 " + displayLen + " 字）");
 
         token = requireToken(token);
 
@@ -233,11 +276,10 @@ public class SkillHubService {
 
         // slug：同一个应用沿用上次的；新应用由名称 + 应用 id 生成，保证唯一且重试时不变
         String slug = lastSlug(app.id()).orElseGet(() -> slugOf(meta.rawName(), app.id()));
-        String displayName = req != null && req.displayName() != null && !req.displayName().isBlank() ? req.displayName().trim() : app.name();
-        if (displayName.length() > 64) displayName = displayName.substring(0, 64);
-        String summary = req != null && req.summary() != null && !req.summary().isBlank() ? req.summary().trim() : (app.description() == null ? "" : app.description());
-        if (summary.isBlank()) summary = meta.description();
-        if (summary.length() > 200) summary = summary.substring(0, 200);
+        String summary = req != null && req.summary() != null && !req.summary().isBlank() ? req.summary().trim() : meta.description();
+        if (SkillMeta.codePointLength(summary) > SkillMeta.MAX_DESCRIPTION_LEN) {
+            summary = summary.substring(0, summary.offsetByCodePoints(0, SkillMeta.MAX_DESCRIPTION_LEN));
+        }
         List<String> tags = req != null && req.tags() != null && !req.tags().isEmpty() ? req.tags().stream().limit(5).toList() : defaultTags(app.type());
         String version = req != null && req.version() != null && !req.version().isBlank() ? req.version().trim() : nextVersion(lastVersion(app.id()));
         boolean submit = req == null || req.submitReview() == null || req.submitReview();

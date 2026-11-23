@@ -86,17 +86,28 @@ ${TODO_RULES}
 - 如果消息里附带了校验报错，先修复报错。
 - 最后按任务指令要求的结构收尾总结（不要贴大段代码）；指令没有要求时用两三句中文总结你做了什么。
 
-## skill 包的结构（都在工作区根目录）
-- SKILL.md（必需）：开头是 YAML frontmatter：
+## skill 包的结构与 SkillHub 规范（都在工作区根目录，必须严格遵守）
+- SKILL.md（必需，位于根目录，总行数不超过 500 行；详细规范、长模板、示例拆到 references/）：开头是 YAML frontmatter：
   ---
-  name: 只用小写字母、数字和连字符，不超过 64 个字符，例如 weekly-report
-  description: 说明这个 skill 做什么、什么时候应该使用它，不超过 1024 个字符
+  name: t11-stk-alarm-query
+  description: 查询 t11 STK 储位告警明细及汇总，适用于储位告警查询、库位异常排查和告警趋势分析。
+  compatibility: （有特定运行依赖时必填）具体写明运行环境、工具或接口依赖，如 Python 3.10+（标准库），需调用 STK 告警查询接口
   ---
-  正文写清楚：用途、需要的输入、执行步骤、输出格式；用相对路径引用 references/ 和 scripts/ 里的文件（例如 [模板](references/template.md)、\`python3 scripts/count.py\`），引用的文件必须真实存在。
+  配置头硬性规范：
+  - \`name\`（技能标识，与导出目录名一致）：仅允许小写英文字母、数字和连字符 \`-\`，不超过 64 个字符，**禁止包含版本号**（如 \`-v1\`、\`-v2\`、\`-1-0\`），不能以 \`-\` 开头/结尾或连续 \`--\`；建议由 2～4 个英文词段组成（例：\`t11-stk-alarm-query\`）。
+  - \`description\`（简介）：说明技能做什么、何时使用，帮助 Agent 判断加载时机；**严格不超过 120 字**。
+  - \`compatibility\`（运行依赖）：若技能依赖特定运行环境（如 Python 3 / Node.js）、CLI 工具或外部接口，必须填写并具体说明，**严禁只写「兼容飞书」「通用」等笼统描述**；纯文本指令型技能可省略。
+  正文内容必须写清：
+  1. 功能与适用场景（做什么、何时触发、适用边界）；
+  2. 使用步骤（输入要求、具体执行步骤、输出格式，并用相对路径引用 \`references/\` 和 \`scripts/\` 里的文件，如 \`[模板](references/template.md)\`、\`python3 scripts/count.py\`，引用的文件必须真实存在）；
+  3. 依赖的权限或其它技能（所需系统/数据权限、关联技能，无则写明「无」）。
 - references/：规范、模板、示例等参考资料（Markdown 等文本文件）。
 - scripts/：辅助脚本，用 Python 3 或 Node.js 编写，只用标准库，文件开头用注释写明用途和用法。
+- 安全与文件清理（红线，违反会导致校验失败）：
+  - **严禁包含敏感信息**：禁止出现任何真实凭证、账号密码、令牌（token）、密钥、私钥、飞书用户 ID（\`ou_xxx\`）等，示例一律使用脱敏占位符（如 \`<API_TOKEN>\`、\`<USER_ID>\`）。
+  - **严禁遗留无关文件**：不得保留缓存、调试日志、测试输出、临时结果（如 \`.log\`、\`.tmp\`、\`.bak\`、\`.env*\`、\`__pycache__/\`、\`tmp/\`、\`logs/\`、\`test_output*\` 等）。
 - 不要创建网页、src/、index.html 或 package.json；不要保留模板里已经没用的占位内容（如「织页正在根据你的需求编写这个 skill」）。
-- 可以用 \`python3 scripts/xxx.py\` 或 \`node scripts/xxx.js\` 运行脚本自测（不能联网），自测产生的临时文件请删除。
+- 可以用 \`python3 scripts/xxx.py\` 或 \`node scripts/xxx.js\` 运行脚本自测（不能联网），自测产生的临时文件必须删除。
 - 内容用中文编写（name 用英文小写）。`
 
 export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（预览和发布后都能用），**不要自己起服务端、不要连别的数据库、不要自己做登录**。

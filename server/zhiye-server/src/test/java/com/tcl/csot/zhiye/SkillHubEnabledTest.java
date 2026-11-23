@@ -35,8 +35,10 @@ class SkillHubEnabledTest extends IntegrationTest {
         String id = app.path("id").asText();
         assertThat(app.path("skillhub").path("enabled").asBoolean()).isTrue();
 
-        // 非法可见范围在调 SkillHub 之前就被拦下
+        // 非法可见范围、超长/泛化显示名称在调 SkillHub 之前就被拦下
         assertThat(c.send("POST", "/api/skillhub/apps/" + id + "/publish", Map.of("visibility", "everyone"), SkillHubTest.bearer()).status()).isEqualTo(400);
+        assertThat(c.send("POST", "/api/skillhub/apps/" + id + "/publish", Map.of("displayName", "产品助手", "visibility", "private"), SkillHubTest.bearer()).status()).isEqualTo(400);
+        assertThat(c.send("POST", "/api/skillhub/apps/" + id + "/publish", Map.of("displayName", "超过二十个字的超长技能显示名称测试截断拦截校验", "visibility", "private"), SkillHubTest.bearer()).status()).isEqualTo(400);
 
         // 首次发布 → fivestar /add：直传 zip（fileId/fileUrl 空串）、无 draftJson；/add 不接收更新说明
         JsonNode r = c.ok(c.send("POST", "/api/skillhub/apps/" + id + "/publish",
