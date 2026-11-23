@@ -97,6 +97,13 @@ final class SandboxPodFactory {
                     .withValue("Exists".equals(t.operator()) ? null : t.value()).withEffect(t.effect()).build());
         }
 
+        Map<String, String> nodeSelector = new LinkedHashMap<>();
+        for (var e : p.nodeSelector().entrySet()) {
+            if (e.getKey() != null && !e.getKey().isBlank() && e.getValue() != null && !e.getValue().isBlank()) {
+                nodeSelector.put(e.getKey(), e.getValue());
+            }
+        }
+
         PodSpecBuilder spec = new PodSpecBuilder()
                 .withRestartPolicy("Never")
                 .withActiveDeadlineSeconds(in.deadlineSeconds())
@@ -105,7 +112,7 @@ final class SandboxPodFactory {
                 .withTerminationGracePeriodSeconds(0L)
                 .withHostNetwork(false).withHostPID(false).withHostIPC(false)
                 .withDnsPolicy("ClusterFirst")
-                .withNodeSelector(p.nodeSelector().isEmpty() ? null : new LinkedHashMap<>(p.nodeSelector()))
+                .withNodeSelector(nodeSelector.isEmpty() ? null : nodeSelector)
                 .withTolerations(tolerations.isEmpty() ? null : tolerations)
                 .withNewSecurityContext()
                     .withRunAsNonRoot(true)

@@ -1,0 +1,47 @@
+# 自建 K8s 沙箱模式配置（ZHIYE_SANDBOX_PROVIDER=k8s，不依赖 OpenSandbox Server）
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zhiye-config
+  namespace: zhiye
+data:
+  # ---- 数据库与域名（部署前替换 <...>） ----
+  ZHIYE_DB_URL: jdbc:postgresql://<postgres 内网地址>:5432/zhiye
+  ZHIYE_DB_USER: zhiye
+  ZHIYE_PUBLIC_BASE_URL: https://zhiye.example.com
+  ZHIYE_PREVIEW_BASE: https://preview.zhiye.example.com
+  ZHIYE_SITE_SCHEME: https
+  ZHIYE_SITE_HOST_SUFFIX: sites.zhiye.example.com
+
+  # ---- 对象存储：前期可直接用 local（落在共享 NAS 卷的 objects/），接 OSS/MinIO 时改为 s3 ----
+  ZHIYE_STORAGE_TYPE: local
+
+  # ---- 自建 K8s Pod 沙箱核心配置（无需 ZHIYE_OPENSANDBOX_API_KEY） ----
+  ZHIYE_SANDBOX_PROVIDER: k8s
+  ZHIYE_SANDBOX_NAMESPACE: zhiye-sandbox
+  ZHIYE_SANDBOX_PVC: zhiye-runtime
+  ZHIYE_RUNNER_IMAGE: <registry>/zhiye/zhiye-runner:<版本>
+  ZHIYE_RUNNER_PULL_POLICY: IfNotPresent
+  ZHIYE_GATEWAY_URL: http://zhiye-api.zhiye.svc:8080/llm/v1
+  ZHIYE_SANDBOX_CPU_REQUEST: "2"
+  ZHIYE_SANDBOX_CPU_LIMIT: "2"
+  ZHIYE_SANDBOX_MEMORY_REQUEST: 4Gi
+  ZHIYE_SANDBOX_MEMORY_LIMIT: 4Gi
+  # 普通容器运行时留空；集群有 gVisor/Kata 时填对应 RuntimeClass 名称
+  ZHIYE_SANDBOX_RUNTIME_CLASS: ""
+  # 前期通用集群默认不限制沙箱节点池（置空）；拆独立沙箱节点池时给节点打 zhiye/pool=sandbox 标签并设为 sandbox
+  ZHIYE_SANDBOX_NODE_POOL: ""
+  # 如果集群 CNI 不支持 NetworkPolicy（如 flannel 默认模式），可临时设为 false；生产建议启用 Calico/Cilium/Terway 并保持 true
+  ZHIYE_SANDBOX_ISOLATION_CHECK: "true"
+  ZHIYE_NPM_REGISTRY: https://registry.npmmirror.com
+
+  # ---- 任务并发与上限（总并发 = api 副本数 × ZHIYE_TASK_CONCURRENCY） ----
+  ZHIYE_TASK_CONCURRENCY: "4"
+  ZHIYE_TASK_MAX_MINUTES: "60"
+  ZHIYE_TASK_CONTINUE_WAIT_MINUTES: "30"
+  ZHIYE_SANDBOX_MAX_HOURS: "8"
+
+  # ---- 认证与治理（按需开启 sso / 五星AI岛） ----
+  ZHIYE_AUTH_MODE: anonymous
+  ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin"
+  ZHIYE_SOURCES_ALLOWED_HOSTS: "*.csot.tcl.com"

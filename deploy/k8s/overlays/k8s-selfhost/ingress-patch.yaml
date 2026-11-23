@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zhiye
+  namespace: zhiye
+spec:
+  tls:
+    - hosts:
+        - zhiye.example.com
+        - preview.zhiye.example.com
+        - "*.sites.zhiye.example.com"
+      secretName: zhiye-tls
+  rules:
+    - host: zhiye.example.com
+      http:
+        paths:
+          - path: /llm
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zhiye-api, port: { number: 8080 } } }
+    - host: preview.zhiye.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
+    - host: "*.sites.zhiye.example.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }

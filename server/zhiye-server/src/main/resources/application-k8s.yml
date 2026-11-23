@@ -100,14 +100,15 @@ zhiye:
       gateway-url: ${ZHIYE_GATEWAY_URL:http://zhiye-api.zhiye.svc:8080/llm/v1}
       npm-registry: ${ZHIYE_NPM_REGISTRY:https://registry.npmmirror.com}
       startup-timeout-seconds: ${ZHIYE_SANDBOX_STARTUP_TIMEOUT:120}
+      isolation-check: ${ZHIYE_SANDBOX_ISOLATION_CHECK:true}
       resources:
         cpu-request: ${ZHIYE_SANDBOX_CPU_REQUEST:2}
         cpu-limit: ${ZHIYE_SANDBOX_CPU_LIMIT:2}
         memory-request: ${ZHIYE_SANDBOX_MEMORY_REQUEST:4Gi}
         memory-limit: ${ZHIYE_SANDBOX_MEMORY_LIMIT:4Gi}
-      # 沙箱节点池（键里有 / 时要用 "[...]" 括起来）
+      # 沙箱节点池（键里有 / 时要用 "[...]" 括起来）；留空（ZHIYE_SANDBOX_NODE_POOL=""）时不限节点池
       node-selector:
-        "[zhiye/pool]": sandbox
+        "[zhiye/pool]": ${ZHIYE_SANDBOX_NODE_POOL:sandbox}
       tolerations:
         - key: zhiye/sandbox
           operator: Equal

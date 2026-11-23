@@ -1,0 +1,8 @@
+# 共享 RWX NFS / NAS 卷配置：两个 PV（zhiye 与 zhiye-sandbox 命名空间）共同指向同一目录。
+# 如果使用阿里云 NAS CSI，可参考 overlays/prod/pv-nas.yaml 改为 CSI 驱动写法。
+- op: replace
+  path: /spec/nfs/server
+  value: "<nfs-or-nas-server>"
+- op: replace
+  path: /spec/nfs/path
+  value: "/zhiye-runtime"

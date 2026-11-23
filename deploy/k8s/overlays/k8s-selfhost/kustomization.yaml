@@ -1,0 +1,21 @@
+# 自建 K8s 沙箱多副本部署 overlay（不依赖 OpenSandbox Server）。
+# 适用场景：前期使用自有 K8s 集群，由 zhiye-api 直接在 zhiye-sandbox 命名空间内按任务拉起独立 Pod 沙箱。
+# 部署前把 config.yaml / pv-nfs.yaml / ingress-patch.yaml / images 里的 <...> 替换成真实环境值。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: zhiye-server
+    newName: <registry>/zhiye/zhiye-server
+    newTag: "<版本>"
+patches:
+  - path: pv-nfs.yaml
+    target: { kind: PersistentVolume }
+  - path: config.yaml
+  - path: ingress-patch.yaml
+  # 前期通用 K8s 集群默认不强制拆节点池，移除 base 里的 nodeSelector（后续拆专用节点池时删掉下面两条 patch 即可）
+  - patch: '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]'
+    target: { kind: Deployment, name: zhiye-api, namespace: zhiye }
+  - patch: '[{"op":"remove","path":"/spec/template/spec/nodeSelector"}]'
+    target: { kind: Deployment, name: zhiye-site, namespace: zhiye }

@@ -30,6 +30,8 @@ public class AppController {
     private com.tcl.csot.zhiye.service.chat.AskAttachments askAttachments;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.common.RateLimitService rateLimit;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.jdbc.core.simple.JdbcClient jdbc;
 
     public AppController(AppService apps, CurrentPrincipal principal, StatsService stats,
                          com.tcl.csot.zhiye.service.workspace.QuotaService quota, com.tcl.csot.zhiye.config.ZhiyeProperties props) {
@@ -124,15 +126,29 @@ public class AppController {
         PlanChatRun prev = planChatRunning.put(app.id(), run);
         if (prev != null) prev.abort();
 
+        java.time.Instant startedAt = clearRemotePlanStop(app.id());
         String userMsgId = apps.recordPlanUserMessage(app.id(), c, assetIds);
         final java.util.List<JsonNode> hist = java.util.List.copyOf(history);
         final StringBuilder shown = new StringBuilder();
+        final long[] lastStopPollAt = { 0L };
         Runnable markStoppedOnce = () -> {
             if (run.stop().get() && !run.saved().get() && run.stopRecorded().compareAndSet(false, true)) {
                 try { apps.recordPlanChatStopped(app.id(), userMsgId, shown.toString()); } catch (Exception ignored) { }
             }
         };
         run.onStop().set(markStoppedOnce);
+        java.util.function.BooleanSupplier isStopped = () -> {
+            if (run.stop().get()) return true;
+            long now = System.currentTimeMillis();
+            if (now - lastStopPollAt[0] >= 250) {
+                lastStopPollAt[0] = now;
+                if (remotePlanStopped(app.id(), startedAt)) {
+                    run.abort();
+                    return true;
+                }
+            }
+            return false;
+        };
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L);
         emitter.onCompletion(() -> { if (!run.saved().get()) run.abort(); });
         emitter.onTimeout(run::abort);
@@ -141,18 +157,21 @@ public class AppController {
         com.tcl.csot.zhiye.util.Threads.start("plan-chat", () -> {
             try {
                 askService.planChat(workspaceId, app, c, hist, skillIds, attached,
-                        run.stop()::get,
+                        isStopped,
                         (in) -> {
                             run.stream().set(in);
-                            if (run.stop().get()) run.abort();
+                            if (isStopped.getAsBoolean()) run.abort();
                         },
                         (res) -> {
-                            if (run.stop().get()) return null;
+                            if (run.stop().get() || remotePlanStopped(app.id(), startedAt)) {
+                                run.stop().set(true);
+                                return null;
+                            }
                             run.saved().set(true);
                             return apps.applyPlanChatResult(workspaceId, app.id(), res);
                         },
                         (name, data) -> {
-                            if (run.stop().get()) throw new java.io.IOException("用户停止了回答");
+                            if (isStopped.getAsBoolean()) throw new java.io.IOException("用户停止了回答");
                             try {
                                 emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
                                         .name(name).data(Json.write(data), org.springframework.http.MediaType.APPLICATION_JSON));
@@ -178,14 +197,33 @@ public class AppController {
         return emitter;
     }
 
-    /** 立即停止当前应用的计划阶段流式回答 */
+    /** 立即停止当前应用的计划阶段流式回答（写入跨副本停止信号 + 立即中断本实例上游连接） */
     @PostMapping("/{id}/plan-chat/stop")
     public Map<String, Object> stopPlanChat(@PathVariable String id) {
         var app = apps.require(ws(), id);
+        if (jdbc != null) {
+            jdbc.sql("insert into conversation_stop (conversation_id, requested_at) values (?, clock_timestamp()) "
+                    + "on conflict (conversation_id) do update set requested_at = excluded.requested_at")
+                    .param("plan:" + app.id()).update();
+        }
         PlanChatRun run = planChatRunning.get(app.id());
-        if (run == null || run.saved().get()) return Map.of("stopped", false, "finished", true);
+        if (run == null) return Map.of("stopped", true, "finished", false, "remote", true);
+        if (run.saved().get()) return Map.of("stopped", false, "finished", true);
         run.abort();
         return Map.of("stopped", true, "finished", false);
+    }
+
+    private java.time.Instant clearRemotePlanStop(String appId) {
+        if (jdbc == null) return java.time.Instant.now();
+        jdbc.sql("delete from conversation_stop where conversation_id = ?").param("plan:" + appId).update();
+        return jdbc.sql("select clock_timestamp() as ts").query((rs, i) -> com.tcl.csot.zhiye.util.Db.ts(rs, "ts")).single();
+    }
+
+    private boolean remotePlanStopped(String appId, java.time.Instant startedAt) {
+        if (jdbc == null) return false;
+        return jdbc.sql("select requested_at from conversation_stop where conversation_id = ?")
+                .param("plan:" + appId).query((rs, i) -> com.tcl.csot.zhiye.util.Db.ts(rs, "requested_at"))
+                .optional().map(req -> !req.isBefore(startedAt)).orElse(false);
     }
 
     @GetMapping("/{id}")
