@@ -24,6 +24,12 @@ public class AppController {
     private final com.tcl.csot.zhiye.config.ZhiyeProperties props;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.chat.AskService askService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.chat.AskAttachments askAttachments;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.common.RateLimitService rateLimit;
 
     public AppController(AppService apps, CurrentPrincipal principal, StatsService stats,
                          com.tcl.csot.zhiye.service.workspace.QuotaService quota, com.tcl.csot.zhiye.config.ZhiyeProperties props) {
@@ -67,6 +73,45 @@ public class AppController {
     @PostMapping("/{id}/plan-feedback")
     public Map<String, Object> planFeedback(@PathVariable String id, @RequestBody JsonNode body) {
         return apps.planFeedback(ws(), id, body == null ? "" : body.path("content").asText(""));
+    }
+
+    /** 计划待确认阶段的流式 AI 对话与计划修订（SSE：thinking / delta / plan_updating / plan_updated / done / error） */
+    @PostMapping(value = "/{id}/plan-chat", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
+    public org.springframework.web.servlet.mvc.method.annotation.SseEmitter planChat(@PathVariable String id, @RequestBody JsonNode body) {
+        String workspaceId = ws();
+        var app = apps.requirePlanApp(workspaceId, id);
+        String content = body == null ? "" : body.path("content").asText("");
+        String c = askService.validate(content);
+        if (rateLimit != null) {
+            rateLimit.check("ws-ask:" + workspaceId, 60, 60, "RATE_LIMITED", "提问太频繁，请稍后再试");
+        }
+        java.util.List<JsonNode> history = new java.util.ArrayList<>();
+        if (body != null && body.has("history") && body.get("history").isArray()) {
+            for (JsonNode h : body.get("history")) {
+                if (history.size() >= 100) break;
+                if (h.hasNonNull("role") && h.hasNonNull("content")) history.add(h);
+            }
+        }
+        java.util.List<String> skillIds = com.tcl.csot.zhiye.service.chat.AskService.ids(body);
+        java.util.List<String> assetIds = com.tcl.csot.zhiye.service.chat.AskService.assetIds(body);
+        java.util.List<com.tcl.csot.zhiye.service.chat.AskAttachments.Attached> attached =
+                askAttachments == null ? java.util.List.of() : askAttachments.load(workspaceId, assetIds);
+        apps.recordPlanUserMessage(app.id(), c, assetIds);
+
+        final java.util.List<JsonNode> hist = java.util.List.copyOf(history);
+        var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L);
+        com.tcl.csot.zhiye.util.Threads.start("plan-chat", () -> {
+            try {
+                askService.planChat(workspaceId, app, c, hist, skillIds, attached,
+                        (res) -> apps.applyPlanChatResult(workspaceId, app.id(), res),
+                        (name, data) -> emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                .name(name).data(Json.write(data), org.springframework.http.MediaType.APPLICATION_JSON)));
+                emitter.complete();
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+        });
+        return emitter;
     }
 
     @GetMapping("/{id}")

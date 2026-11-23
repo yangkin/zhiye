@@ -23,6 +23,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 创造页里的「问一句」：不创建应用，直接用模型回答。
@@ -39,6 +40,10 @@ public class AskService {
     private static final int CONVERSATION_MAX_TOKENS = 16000;
     /** 回答里的文件块：[[file:名称.md]] … [[/file]]，界面显示成可预览、可下载的文件卡片 */
     public static final String FILE_OPEN = "[[file:", FILE_CLOSE = "[[/file]]";
+    /** 计划阶段对话修订块：[[plan]] … [[/plan]]，服务端提取并自动更新 app.plan_doc */
+    public static final String PLAN_OPEN = "[[plan]]", PLAN_CLOSE = "[[/plan]]";
+    /** 计划阶段一次对话的结果：回复正文、修订后的完整计划（未修订则为 null）、思考过程 */
+    public record PlanChatResult(String reply, String planDoc, String thinking) {}
     /** 带文件的历史消息保留的长度（后续修改要看到整份文档） */
     public static final int MAX_FILE_CHARS = 40000;
     public static final int MAX_HISTORY = 12;
@@ -837,6 +842,235 @@ public class AskService {
             if (platformLogs != null) {
                 platformLogs.error("llm_gateway", "ASK_RUN_FAILED", null, null, null, null, null, null,
                         "会话问答请求异常：" + e.getMessage(), com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e), java.util.Map.of());
+            }
+            try { emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR)); } catch (Exception ignored) { }
+        }
+    }
+
+    private static final String PLAN_CHAT_SYSTEM = """
+            你是「织页」的产品与方案规划助手，正在「创造计划待确认」阶段和用户一起打磨当前应用的创造计划。
+            核心规则：
+            1. 思考过程（reasoning）必须全程使用简体中文，简短清晰。
+            2. 当前仍在规划讨论阶段，**绝不开始写代码、绝不假装已经开始执行**；真正执行需要用户确认后点击页面上的「立即执行」按钮。
+            3. **区分「纯讨论/提问」与「要求修改/优化计划」**：
+               - 如果用户只是提问、询问可行性、打问号（如「？」）、质疑某个设计、或聊思路还没明确让改计划：
+                 直接用自然简洁的中文回答并给出建议，**不要输出 [[plan]] 块**，保持当前计划不变。
+               - 如果用户要求优化、修改、完善、补充、精简或重写计划（例如「不行，继续优化」「加上审批流」「去掉某某功能」「把数据结构说细一点」「重新整理」）：
+                 a) 先用 2～5 句简明中文说明你优化或调整了哪些关键点；
+                 b) 紧接着输出修订后的**完整新版创造计划（Markdown）**，严格用 [[plan]] 和 [[/plan]] 包裹：
+                    [[plan]]
+                    # 名称
+                    ...
+                    [[/plan]]
+            4. **新版计划质量要求**：
+               - 必须输出**完整可直接交付执行的整份计划**，把用户的新要求融进对应正式章节（如 # 名称 / ## 目标 / ## 内容与功能 / ## 业务规则 / ## 异常与边界情况 / ## 验收标准 / ## 本期不实现；技能包保持 # 技能名称 / ## 技能目标 / ## 文件结构 / ## 使用流程 / ## 验收标准）。
+               - **严禁在末尾机械堆砌 `## 补充反馈`**；如果原计划里残留了旧的 `## 补充反馈`，请把其中有价值的需求吸收到正式章节里，并清掉无意义条目（如单独的问号）。
+               - 非技能网页应用遵循桌面宽屏全宽流式布局与自定义下拉组件规范，不要在计划里写代码或 diff；总字数 400～1000 字（技能类 200～550 字），能用表格的用表格。
+            5. 回答最后（[[/plan]] 之后）可按需附一行 `[[next]] 建议一 | 建议二`（2～3 个用户最可能接着讨论或补充计划的简短追问，每个不超过 14 字；不要输出「立即执行」「开始生成」这类执行按钮文案），没有合适的就不要输出。
+            """;
+
+    /** 解析计划阶段对话回复：分离对话正文与 [[plan]]...[[/plan]] 中的完整新版计划 */
+    public static PlanChatResult parsePlanReply(String raw, String thinking) {
+        String s = raw == null ? "" : raw;
+        int open = s.indexOf(PLAN_OPEN);
+        if (open < 0) {
+            return new PlanChatResult(s.trim(), null, thinking == null ? "" : thinking);
+        }
+        String before = s.substring(0, open).trim();
+        int bodyStart = open + PLAN_OPEN.length();
+        int close = s.indexOf(PLAN_CLOSE, bodyStart);
+        String planRaw;
+        String after = "";
+        if (close >= 0) {
+            planRaw = s.substring(bodyStart, close).trim();
+            after = s.substring(close + PLAN_CLOSE.length()).trim();
+        } else {
+            planRaw = s.substring(bodyStart).trim();
+        }
+        // 去掉模型偶尔多包的 ```markdown ... ``` 外壳
+        planRaw = stripCodeFence(planRaw).trim();
+        if (planRaw.length() > 20000) planRaw = cap(planRaw, 20000);
+        String planDoc = planRaw.isEmpty() ? null : planRaw;
+
+        StringBuilder reply = new StringBuilder();
+        if (!before.isEmpty()) reply.append(before);
+        if (!after.isEmpty()) {
+            if (!reply.isEmpty()) reply.append("\n\n");
+            reply.append(after);
+        }
+        String replyText = reply.toString().trim();
+        if (planDoc != null) {
+            // 若正文（不含 [[next]] 行）为空，补一句清晰说明
+            String bodyWithoutNext = replyText.replaceAll("(?m)^\\[\\[next\\]\\].*$", "").trim();
+            if (bodyWithoutNext.isEmpty()) {
+                replyText = replyText.isEmpty()
+                        ? "已按你的意见优化了上方「创造计划」，可以查看确认或继续补充。"
+                        : "已按你的意见优化了上方「创造计划」，可以查看确认或继续补充。\n\n" + replyText;
+            }
+        }
+        return new PlanChatResult(replyText, planDoc, thinking == null ? "" : thinking);
+    }
+
+    private static String stripCodeFence(String s) {
+        String t = s == null ? "" : s.trim();
+        if (t.startsWith("```")) {
+            int nl = t.indexOf('\n');
+            if (nl > 0) {
+                t = t.substring(nl + 1);
+                if (t.endsWith("```")) t = t.substring(0, t.length() - 3);
+            }
+        }
+        return t;
+    }
+
+    /**
+     * 计划待确认阶段的流式对话：既可自由聊天答疑，也可让 AI 直接重写并更新 app.plan_doc（绝不自动触发执行）。
+     * 流式过程中在检测到 [[plan]] 标记后切到 plan_updating 状态，避免把整份原始计划标记刷进聊天气泡。
+     */
+    public void planChat(String ws, com.tcl.csot.zhiye.entity.AppRow app, String content,
+                         List<JsonNode> history, List<String> skillAppIds, List<AskAttachments.Attached> assets,
+                         java.util.function.Function<PlanChatResult, Map<String, Object>> onComplete, Sink sink) {
+        String c = validate(content);
+        String requestedModel = app.model() == null || app.model().isBlank()
+                ? com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO : app.model();
+        com.tcl.csot.zhiye.service.llm.LlmRoute route;
+        try {
+            route = router.forWorkspace(ws, requestedModel);
+        } catch (ApiException e) {
+            try { emit(sink, "error", Json.obj().put("message", e.getMessage())); } catch (Exception ignored) { }
+            return;
+        }
+        StringBuilder ctx = new StringBuilder();
+        ctx.append("\n\n【当前待确认应用】\n");
+        ctx.append("- 名称：").append(app.name()).append('\n');
+        ctx.append("- 类型：").append(app.type()).append("（形态：").append(app.projectKind()).append("，生成模式：").append(app.mode()).append("）\n");
+        if (app.prompt() != null && !app.prompt().isBlank()) {
+            ctx.append("- 原始需求：\n").append(cap(app.prompt(), 3000)).append('\n');
+        }
+        if (dataSources != null) {
+            String ds = dataSources.summary(app.id());
+            if (ds != null && !ds.isBlank()) ctx.append(ds).append('\n');
+        }
+        String sk = skillContext(ws, skillAppIds);
+        if (!sk.isBlank()) ctx.append(sk).append('\n');
+        ctx.append("\n【当前创造计划全文】\n");
+        ctx.append(app.planDoc() == null || app.planDoc().isBlank() ? "（当前计划为空）" : cap(app.planDoc(), 12000));
+
+        ArrayNode msgs = Json.M.createArrayNode();
+        String sys = PLAN_CHAT_SYSTEM + (app.isSkill() ? "" : "\n" + com.tcl.csot.zhiye.constants.Capabilities.PLAN) + ctx;
+        msgs.addObject().put("role", "system").put("content", sys);
+        List<JsonNode> norm = normalizeHistory(history);
+        String mergedUser = c;
+        if (!norm.isEmpty() && "user".equals(norm.get(norm.size() - 1).path("role").asText())) {
+            String prev = norm.get(norm.size() - 1).path("content").asText("").trim();
+            if (!prev.isEmpty()) mergedUser = prev + "\n\n" + c;
+            norm = norm.subList(0, norm.size() - 1);
+        }
+        for (JsonNode h : norm) msgs.add(h);
+        msgs.add(userMessage(mergedUser, assets));
+
+        ObjectNode body = Json.obj();
+        body.put("model", route.model());
+        body.put("stream", true);
+        body.put("max_tokens", 8192);
+        body.put("reasoning_effort", "medium");
+        body.putObject("stream_options").put("include_usage", true);
+        body.set("messages", msgs);
+
+        try {
+            if (faults.llmError()) throw new java.io.IOException("注入的模型故障");
+            HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes(StandardCharsets.UTF_8));
+            try (InputStream in = res.body()) {
+                if (res.statusCode() >= 400) {
+                    emit(sink, "error", Json.obj().put("message", upstreamError(res.statusCode(), in.readAllBytes())));
+                    return;
+                }
+                BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                String line;
+                StringBuilder raw = new StringBuilder();
+                StringBuilder thinking = new StringBuilder();
+                StringBuilder pending = new StringBuilder();
+                boolean inPlan = false;
+                boolean planClosed = false;
+                final int guard = PLAN_OPEN.length();
+
+                while ((line = r.readLine()) != null) {
+                    line = line.trim();
+                    if (!line.startsWith("data:")) continue;
+                    String data = line.substring(5).trim();
+                    if (data.equals("[DONE]")) break;
+                    if (data.isEmpty()) continue;
+                    JsonNode n;
+                    try { n = Json.M.readTree(data); } catch (Exception e) { continue; }
+                    JsonNode delta = n.path("choices").path(0).path("delta");
+                    streamThinking(delta, thinking, sink);
+                    JsonNode cont = delta.get("content");
+                    if (cont == null || !cont.isTextual() || cont.asText().isEmpty()) continue;
+                    String piece = cont.asText();
+                    raw.append(piece);
+                    if (!inPlan) {
+                        pending.append(piece);
+                        int idx = pending.indexOf(PLAN_OPEN);
+                        if (idx >= 0) {
+                            String before = pending.substring(0, idx);
+                            if (!before.isEmpty()) emit(sink, "delta", Json.obj().put("text", before));
+                            String tail = pending.substring(idx + PLAN_OPEN.length());
+                            pending.setLength(0);
+                            pending.append(tail);
+                            inPlan = true;
+                            emit(sink, "plan_updating", Json.obj());
+                            int closeIdx = pending.indexOf(PLAN_CLOSE);
+                            if (closeIdx >= 0) {
+                                planClosed = true;
+                                String after = pending.substring(closeIdx + PLAN_CLOSE.length());
+                                pending.setLength(0);
+                                if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                            }
+                        } else if (pending.length() > guard) {
+                            String flush = pending.substring(0, pending.length() - guard);
+                            pending.delete(0, pending.length() - guard);
+                            emit(sink, "delta", Json.obj().put("text", flush));
+                        }
+                    } else if (!planClosed) {
+                        pending.append(piece);
+                        int closeIdx = pending.indexOf(PLAN_CLOSE);
+                        if (closeIdx >= 0) {
+                            planClosed = true;
+                            String after = pending.substring(closeIdx + PLAN_CLOSE.length());
+                            pending.setLength(0);
+                            if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                        } else if (pending.length() > PLAN_CLOSE.length() + 16) {
+                            pending.delete(0, pending.length() - PLAN_CLOSE.length());
+                        }
+                    } else {
+                        emit(sink, "delta", Json.obj().put("text", piece));
+                    }
+                }
+                if (!inPlan && !pending.isEmpty()) {
+                    emit(sink, "delta", Json.obj().put("text", pending.toString()));
+                    pending.setLength(0);
+                }
+                if (raw.isEmpty()) {
+                    emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR));
+                    return;
+                }
+                PlanChatResult parsed = parsePlanReply(raw.toString(), thinking.toString());
+                Map<String, Object> updatedApp = null;
+                try {
+                    updatedApp = onComplete.apply(parsed);
+                } catch (Exception e) {
+                    log.warn("保存计划对话结果失败：{}", e.toString());
+                }
+                if (updatedApp != null) {
+                    emit(sink, "plan_updated", updatedApp);
+                }
+                emit(sink, "done", Json.obj().put("planUpdated", updatedApp != null));
+            }
+        } catch (Exception e) {
+            log.warn("计划对话失败：{}", e.toString());
+            if (platformLogs != null) {
+                platformLogs.error("llm_gateway", "PLAN_CHAT_FAILED", ws, null, app.id(), null, null, null,
+                        "计划对话请求异常：" + e.getMessage(), com.tcl.csot.zhiye.service.ops.PlatformLogService.stackTrace(e), java.util.Map.of());
             }
             try { emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR)); } catch (Exception ignored) { }
         }

@@ -123,7 +123,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const keyRef = useRef<string | null>(null);
   const [queueOpen, setQueueOpen] = useState(true);
   const [removingQueued, setRemovingQueued] = useState<string | null>(null);
-  const [planFeedbackSent, setPlanFeedbackSent] = useState(false);
+  const [planUpdatedTick, setPlanUpdatedTick] = useState(0);
+  const planCardRef = useRef<HTMLDivElement | null>(null);
+  const askAbortRef = useRef<AbortController | null>(null);
+  const scrollToPlan = () => {
+    planCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const elementContext = ctx && ctx.appId === app.id ? ctx : null;
   const queuedQuery = useQuery({
     queryKey: ['queued', app.id],
@@ -141,7 +146,9 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const cloudQueued = !cloudEnabled && queued.some((q) => q.enableCloud);
 
   useEffect(() => {
-    setPlanFeedbackSent(false);
+    askAbortRef.current?.abort();
+    askAbortRef.current = null;
+    setPlanUpdatedTick(0);
     setError('');
   }, [app.id]);
 
@@ -169,8 +176,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const chatAssets = useChat((s) => s.assets);
   const chatHint = useChat((s) => s.hint);
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
-  // 直接回答的问题（不创建任务）：流式显示的那一条
-  const [asking, setAsking] = useState<null | { q: string; a: string }>(null);
+  // 直接回答的问题 / 计划阶段讨论（不创建任务）：流式显示的那一条
+  const [asking, setAsking] = useState<null | { q: string; a: string; thinking: string; planUpdating: boolean }>(null);
+  useEffect(() => {
+    if (!asking) return;
+    const el = scroll.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [asking?.q, asking?.a, asking?.planUpdating]);
   const skillBtn = useRef<HTMLButtonElement>(null);
   const draftNotes = useChat((s) => s.draftNotes);
   const mySkills = useMySkills((messages ?? []).some((m) => m.skillAppIds?.length));
@@ -303,15 +315,49 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     if (app.phase === 'plan') {
       setSending(true);
       setError('');
+      setDraft('');
+      setAsking({ q: content, a: '', thinking: '', planUpdating: false });
+      const history = (messages ?? [])
+        .filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim()))
+        .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed')
+        .slice(-24)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
+      const ctrl = new AbortController();
+      askAbortRef.current = ctrl;
       try {
-        const next = await api.planFeedback(app.id, content);
-        qc.setQueryData(qk.app(app.id), next);
-        setDraft('');
-        setPlanFeedbackSent(true);
-        toast('反馈已加入计划');
+        await api.planChat(
+          app.id,
+          {
+            content,
+            ...(history.length ? { history } : {}),
+            ...(chatSkills.length ? { skillAppIds: chatSkills.map((k) => k.id) } : {}),
+            ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),
+          },
+          {
+            onThinking: (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
+            onDelta: (t) => setAsking((r) => (r ? { ...r, a: r.a + t } : r)),
+            onPlanUpdating: () => setAsking((r) => (r ? { ...r, planUpdating: true } : r)),
+            onPlanUpdated: (nextApp) => {
+              qc.setQueryData(qk.app(app.id), nextApp);
+              setPlanUpdatedTick((v) => v + 1);
+              toast('已同步更新上方「创造计划」', 'ok', { label: '查看计划', run: scrollToPlan });
+            },
+          },
+          ctrl.signal,
+        );
+        useChat.getState().setSkills([]);
+        useChat.getState().setAssets([]);
+        await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
       } catch (err) {
-        setError(errorMessage(err));
+        if ((err as { name?: string })?.name === 'AbortError') {
+          await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+        } else {
+          setDraft(content);
+          setError(errorMessage(err));
+        }
       } finally {
+        if (askAbortRef.current === ctrl) askAbortRef.current = null;
+        setAsking(null);
         setSending(false);
       }
       return;
@@ -338,7 +384,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       setSending(true);
       setError('');
       setDraft('');
-      setAsking({ q: content, a: '' });
+      setAsking({ q: content, a: '', thinking: '', planUpdating: false });
       // 带上本应用已有的对话，追问才有上下文：只留 user/assistant、非空、非失败，最近 24 条交服务端合并归一化为 12 轮
       // 首条用户消息是应用最初需求（界面上已单独展示），不再重复喂给模型
       const history = (messages ?? [])
@@ -356,6 +402,8 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),
           },
           (t) => setAsking((r) => (r ? { ...r, a: r.a + t } : r)),
+          undefined,
+          (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
         );
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
@@ -540,7 +588,9 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             ) : phase === 'plan' && skill ? (
               <SkillStart app={app} onStarted={onTaskStarted} />
             ) : phase === 'plan' ? (
-              <PlanCard app={app} onStarted={onTaskStarted} />
+              <div ref={planCardRef}>
+                <PlanCard app={app} onStarted={onTaskStarted} updatedTick={planUpdatedTick} />
+              </div>
             ) : (
               <>
                 {/* 刚结束的任务保留一行文件改动汇总（可展开回看每一步） */}
@@ -575,28 +625,42 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               versionNumber={versionNumber}
               currentVersionId={currentVersion?.id ?? app.currentVersion?.id ?? null}
               busy={!!runningTaskId || !!otherBusy}
-              cloudEnabled={cloudEnabled}
-              onEnableCloud={onEnableCloud}
+              cloudEnabled={phase === 'ready' ? cloudEnabled : null}
+              onEnableCloud={phase === 'ready' ? onEnableCloud : undefined}
               onRestoreVersion={onRestoreVersion}
               modelLabel={modelLabel}
               steps={mergedTaskId && m.role === 'assistant' && m.taskId === mergedTaskId && (stream.timeline.length > 0 || stream.tools.length > 0) ? <Timeline stream={stream} finished summaryOnly /> : null}
-              next={idx === lastAssistant && !asking && !runningTaskId && phase === 'ready' ? (s) => void send(s) : undefined}
+              next={idx === lastAssistant && !asking && !runningTaskId && (phase === 'ready' || phase === 'plan') ? (s) => void send(s) : undefined}
             />
           );
         })}
         {asking ? (
-          <div className="assistant-message msg-row" aria-live="polite">
-            <span className="assistant-avatar">
-              <img src="/brand.svg" alt="" />
-            </span>
-            <div className="assistant-content">
-              <b className="assistant-head">
-                织页 <span className="assistant-model">· {modelLabel}</span>
-              </b>
-              <p className="asking-q">{asking.q}</p>
-              <Markdown className="asking-a" text={splitNext(asking.a || '…').body} />
+          <>
+            <UserBubble content={asking.q} createdAt={new Date().toISOString()} canEdit={false} />
+            <div className="assistant-message msg-row" aria-live="polite">
+              <span className="assistant-avatar">
+                <img src="/brand.svg" alt="" />
+              </span>
+              <div className="assistant-content">
+                <b className="assistant-head">
+                  织页 <span className="assistant-model">· {modelLabel}</span>
+                </b>
+                {!asking.a && !asking.planUpdating ? (
+                  <p className="asking-thinking" role="status">
+                    <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+                    <span>{asking.thinking ? '正在整理思路…' : '正在思考…'}</span>
+                  </p>
+                ) : null}
+                {asking.a ? <Markdown className="asking-a" text={splitNext(asking.a).body} /> : null}
+                {asking.planUpdating ? (
+                  <p className="plan-updating-pill" role="status">
+                    <Icon name="refresh" className="spinning" />
+                    正在根据你的意见修订上方「创造计划」…
+                  </p>
+                ) : null}
+              </div>
             </div>
-          </div>
+          </>
         ) : null}
         {showWriteTask ? (
           <div className="assistant-message">
@@ -863,13 +927,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               ref={input}
               id="plan-feedback"
               rows={2}
-              placeholder="确认计划，或在这里输入你的反馈…"
-              aria-label="计划反馈"
+              placeholder="继续和织页讨论，或告诉织页怎么优化这份计划…"
+              aria-label="讨论或优化计划"
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
                 if (error) setError('');
-                if (planFeedbackSent) setPlanFeedbackSent(false);
               }}
               onKeyDown={(e) => {
                 // 与创造页、会话页一致：回车发送，Shift+Enter 换行；输入法组合中、@ 技能弹层打开时不触发
@@ -880,16 +943,31 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               }}
             />
             {error ? <p className="composer-error" role="alert">{error}</p> : null}
-            {planFeedbackSent ? (
-              <p className="plan-feedback-status" role="status">
-                <Icon name="check" /> 反馈已加入计划，可继续补充；提交反馈不会自动执行。
-              </p>
-            ) : null}
             <div className="plan-feedback-toolbar">
-              <span><Icon name="spark" /> {skill ? '也可以直接点上方「开始生成」' : '反馈只更新计划，不会自动执行'}</span>
-              <button className="send-button" aria-label="提交计划反馈" title="加入计划，不自动执行" disabled={!draft.trim() || sending} onClick={() => void send()}>
-                <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
-              </button>
+              <span>
+                <Icon name="spark" />{' '}
+                {skill ? '可继续讨论，或直接点上方「开始生成」' : '可自由提问讨论或让 AI 修订计划，不会自动执行'}
+                {!skill && (planUpdatedTick > 0 || list.length > 0) ? (
+                  <button type="button" className="plan-jump-btn" onClick={scrollToPlan}>
+                    查看上方计划 ↑
+                  </button>
+                ) : null}
+              </span>
+              {sending ? (
+                <button
+                  type="button"
+                  className="send-button stop-button"
+                  aria-label="停止回复"
+                  title="停止当前回复"
+                  onClick={() => askAbortRef.current?.abort()}
+                >
+                  <i className="stop-glyph" aria-hidden="true" />
+                </button>
+              ) : (
+                <button className="send-button" aria-label="发送消息" title="发送（不会自动执行）" disabled={!draft.trim()} onClick={() => void send()}>
+                  <Icon name="send" />
+                </button>
+              )}
             </div>
           </>
         ) : phase === 'failed' ? (

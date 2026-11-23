@@ -35,7 +35,15 @@ const UNSUPPORTED = /^##\s*做不到的部分/m;
 const shapeLabel = (kind?: string) =>
   kind === 'script' ? '命令行脚本' : kind === 'static' ? '静态页面' : kind === 'skill' ? '技能包' : kind === 'vue' ? '网页应用 · Vue' : '网页应用';
 
-export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Task) => void }) {
+export function PlanCard({
+  app,
+  onStarted,
+  updatedTick = 0,
+}: {
+  app: AppDetail;
+  onStarted: (t: Task) => void;
+  updatedTick?: number;
+}) {
   const qc = useQueryClient();
   const { data: meta } = useMeta();
   const styles = meta?.styles?.length ? meta.styles : STYLE_FALLBACK;
@@ -46,6 +54,15 @@ export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Ta
   const [count, setCount] = useState(COUNTDOWN);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
+  const [justUpdated, setJustUpdated] = useState(false);
+
+  useEffect(() => {
+    if (!updatedTick) return;
+    setTab('plan');
+    setJustUpdated(true);
+    const id = setTimeout(() => setJustUpdated(false), 3200);
+    return () => clearTimeout(id);
+  }, [updatedTick]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyDoc = useRef(false);
   const revRef = useRef(0);
@@ -159,15 +176,16 @@ export function PlanCard({ app, onStarted }: { app: AppDetail; onStarted: (t: Ta
   );
 
   return (
-    <div className="plan-card">
+    <div className={`plan-card${justUpdated ? ' plan-just-updated' : ''}`}>
       <div className="plan-card-heading">
         <span>
           <Icon name="file" />
           创造计划
         </span>
-        <span className="plan-shape" title="由模型按需求判断的产出形态，需要的话可以在左侧对话里改">
+        <span className="plan-shape" title="由模型按需求判断的产出形态，需要的话可以在下方对话里讨论调整">
           {shapeLabel(app.projectKind)}
         </span>
+        {justUpdated ? <span className="tiny-badge plan-updated-badge">已更新</span> : null}
         <span className="tiny-badge current">待确认</span>
       </div>
       <div className="plan-tabs" role="tablist">

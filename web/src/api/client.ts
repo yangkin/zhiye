@@ -212,9 +212,14 @@ export const ASK_INTERRUPTED = '回答中断了，没有收到完整内容，请
 
 async function askStream(
   url: string,
-  input: { content: string; skillAppIds?: string[]; appId?: string; history?: { role: string; content: string }[] },
+  input: { content: string; skillAppIds?: string[]; assetIds?: string[]; appId?: string; history?: { role: string; content: string }[] },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  handlers?: {
+    onThinking?: (text: string) => void;
+    onPlanUpdating?: () => void;
+    onPlanUpdated?: (app: AppDetail) => void;
+  },
 ): Promise<void> {
   const res = await fetch(url, {
     method: 'POST',
@@ -248,9 +253,12 @@ async function askStream(
       else if (line.startsWith('data:')) {
         const raw = line.slice(5).trim();
         if (!raw) continue;
-        let data: { text?: string; message?: string } = {};
+        let data: { text?: string; message?: string } & Partial<AppDetail> = {};
         try { data = JSON.parse(raw); } catch { continue; }
         if (event === 'delta' && data.text) onDelta(data.text);
+        else if (event === 'thinking' && data.text) handlers?.onThinking?.(data.text);
+        else if (event === 'plan_updating') handlers?.onPlanUpdating?.();
+        else if (event === 'plan_updated' && data.id) handlers?.onPlanUpdated?.(data as AppDetail);
         else if (event === 'done') finished = true;
         else if (event === 'error' && data.message) throw new ApiError(data.message, 'ASK_FAILED', 502);
       }
@@ -305,7 +313,8 @@ export const api = {
     input: { content: string; skillAppIds?: string[]; assetIds?: string[]; appId?: string; history?: { role: string; content: string }[] },
     onDelta: (text: string) => void,
     signal?: AbortSignal,
-  ) => askStream('/api/chat/ask', input, onDelta, signal),
+    onThinking?: (text: string) => void,
+  ) => askStream('/api/chat/ask', input, onDelta, signal, onThinking ? { onThinking } : undefined),
   askConversation: (
     id: string,
     input: { content: string; skillAppIds?: string[]; assetIds?: string[]; history?: { role: string; content: string }[] },
@@ -466,6 +475,22 @@ export const api = {
   cancelQueued: (id: string) => request<void>(`/api/queued/${enc(id)}`, { method: 'DELETE' }),
   planFeedback: (appId: string, content: string) =>
     request<AppDetail>(`/api/apps/${enc(appId)}/plan-feedback`, { method: 'POST', body: { content } }),
+  planChat: (
+    appId: string,
+    input: { content: string; skillAppIds?: string[]; assetIds?: string[]; history?: { role: string; content: string }[] },
+    handlers: {
+      onDelta: (text: string) => void;
+      onThinking?: (text: string) => void;
+      onPlanUpdating?: () => void;
+      onPlanUpdated?: (app: AppDetail) => void;
+    },
+    signal?: AbortSignal,
+  ) =>
+    askStream(`/api/apps/${enc(appId)}/plan-chat`, input, handlers.onDelta, signal, {
+      onThinking: handlers.onThinking,
+      onPlanUpdating: handlers.onPlanUpdating,
+      onPlanUpdated: handlers.onPlanUpdated,
+    }),
 
   // 任务
   /** text：「继续」确认时用户顺便说的话（可选） */

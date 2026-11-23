@@ -846,3 +846,17 @@ a.skill-chip{text-decoration:none}
 .code-head-right small{font-size:11px}
 .model-button,.model-button *{white-space:nowrap}.model-button{flex:none}
 .confirm-input{width:100%;margin-top:12px;padding:10px 12px;border:1px solid #e2dcea;border-radius:9px;font:inherit;font-size:13px;color:#1f1c29;background:#fff;outline:none}.confirm-input:focus{border-color:#8b62be;box-shadow:0 0 0 3px #8b62be22}
+
+/* 计划阶段 AI 对话与计划修订状态 */
+.asking-thinking{display:inline-flex;align-items:center;gap:8px;margin:4px 0 0;font-size:12.5px;color:#6f58b8}
+.thinking-dots{display:inline-flex;align-items:center;gap:3px}
+.thinking-dots i{width:5px;height:5px;border-radius:50%;background:#7953dc;opacity:.3;animation:think-pulse 1.2s ease-in-out infinite}
+.thinking-dots i:nth-child(2){animation-delay:.2s}
+.thinking-dots i:nth-child(3){animation-delay:.4s}
+@keyframes think-pulse{0%,80%,100%{opacity:.25;transform:scale(.85)}40%{opacity:1;transform:scale(1.15)}}
+.plan-updating-pill{display:inline-flex;align-items:center;gap:7px;margin-top:8px;padding:6px 11px;border-radius:8px;background:#f3eefc;border:1px solid #dfd3f6;color:#5b3db5;font-size:12px;font-weight:500}
+.plan-updating-pill .icon{width:13px;height:13px}
+.plan-card.plan-just-updated{border-color:#8f6be6;box-shadow:0 0 0 3px #7953dc1f,0 10px 28px #4a2e9812;transition:border-color .25s,box-shadow .25s}
+.plan-updated-badge{background:#e7f7ef!important;color:#177a4d!important;border:1px solid #bfe8d4}
+.plan-jump-btn{margin-left:8px;padding:2px 8px;border-radius:6px;background:#f2edfc;color:#5b3db5;font-size:11.5px;font-weight:500;vertical-align:middle}
+.plan-jump-btn:hover{background:#e7ddfa}

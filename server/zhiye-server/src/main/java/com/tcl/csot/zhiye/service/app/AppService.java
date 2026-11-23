@@ -184,17 +184,60 @@ public class AppService {
         return out;
     }
 
-    /** 计划阶段用对话补充计划：追加到「补充反馈」，不重新生成整份计划 */
+    /** 计划阶段用对话补充计划：追加到「补充反馈」，不重新生成整份计划（保留兼容旧调用） */
     public Map<String, Object> planFeedback(String ws, String id, String content) {
         String text = content == null ? "" : content.trim();
         if (text.isEmpty()) throw ApiException.validation("请输入对计划的补充");
         if (text.length() > 2000) throw ApiException.validation("补充最多 2000 字");
-        AppRow app = apps.find(ws, id).orElseThrow(() -> ApiException.notFound("应用"));
-        if (!"plan".equals(app.phase())) throw ApiException.conflict("NOT_IN_PLAN", "当前不在计划阶段，直接发送修改需求即可");
+        AppRow app = requirePlanApp(ws, id);
         String doc = app.planDoc() == null ? "" : app.planDoc();
         String next = doc + "\n\n## 补充反馈\n- " + text.replace("\n", "\n- ") + "\n";
         apps.setPlan(app.id(), null, next, "plan");
         return detail(ws, id);
+    }
+
+    /** 校验应用存在且处于「待确认计划」阶段 */
+    public AppRow requirePlanApp(String ws, String id) {
+        AppRow app = apps.find(ws, id).orElseThrow(() -> ApiException.notFound("应用"));
+        if (!"plan".equals(app.phase())) throw ApiException.conflict("NOT_IN_PLAN", "当前不在计划阶段，直接发送修改需求即可");
+        return app;
+    }
+
+    /** 计划阶段对话：先落库用户消息 */
+    public void recordPlanUserMessage(String appId, String content, List<String> assetIds) {
+        messages.insert(appId, "user", content, null, null, "ok", assetIds == null || assetIds.isEmpty() ? null : assetIds);
+    }
+
+    /** 计划阶段对话完成：按需更新 planDoc 并落库助手回复；若更新了计划则返回最新应用详情 */
+    public Map<String, Object> applyPlanChatResult(String ws, String appId, com.tcl.csot.zhiye.service.chat.AskService.PlanChatResult res) {
+        boolean updated = res.planDoc() != null && !res.planDoc().isBlank();
+        if (updated) {
+            // 仅在仍处于 plan 阶段时更新，避免用户中途点「立即执行」后覆盖状态
+            AppRow cur = apps.find(ws, appId).orElse(null);
+            if (cur != null && "plan".equals(cur.phase())) {
+                apps.setPlan(appId, null, res.planDoc(), "plan");
+            } else {
+                updated = false;
+            }
+        }
+        String reply = res.reply() == null ? "" : res.reply().trim();
+        if (updated) {
+            String badge = "> ✓ 已同步更新上方「创造计划」，可继续讨论或点击「立即执行」。";
+            int nextIdx = reply.indexOf("\n[[next]]");
+            if (nextIdx >= 0) {
+                reply = reply.substring(0, nextIdx).trim() + "\n\n" + badge + "\n" + reply.substring(nextIdx + 1);
+            } else if (reply.startsWith("[[next]]")) {
+                reply = badge + "\n" + reply;
+            } else if (reply.isEmpty()) {
+                reply = badge;
+            } else {
+                reply = reply + "\n\n" + badge;
+            }
+        }
+        if (!reply.isEmpty()) {
+            messages.insert(appId, "assistant", reply, null, null, "ok");
+        }
+        return updated ? detail(ws, appId) : null;
     }
 
     public Map<String, Object> patch(String ws, String id, JsonNode body) {
