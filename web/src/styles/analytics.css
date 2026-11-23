@@ -305,14 +305,17 @@
   padding: 4px 0;
 }
 
+.xa-cal-stage {
+  position: relative;
+  margin: 0 auto;
+}
+
 .xa-cal-scroll svg {
   display: block;
 }
 
 .xa-cal-svg {
-  width: 100%;
-  max-width: 720px;
-  height: auto;
+  display: block;
 }
 
 .xa-cal-foot {

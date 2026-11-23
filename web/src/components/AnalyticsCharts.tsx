@@ -555,6 +555,8 @@ export function CalendarHeatmap({
   days: { date: string; tasks: number; apps: number; pv: number; total: number }[];
   metric?: 'total' | 'tasks' | 'pv' | 'apps';
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [containerW, setContainerW] = useState(660);
   const [hover, setHover] = useState<{
     date: string;
     tasks: number;
@@ -564,6 +566,16 @@ export function CalendarHeatmap({
     xPct: number;
     yPct: number;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setContainerW(Math.max(480, Math.floor(el.clientWidth)));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const { weeks, monthLabels, maxVal, activeDaysCount, peakDay } = useMemo(() => {
     if (!days.length) {
@@ -613,75 +625,87 @@ export function CalendarHeatmap({
     return '#1d4ed8';
   };
 
-  const cell = 18;
-  const gap = 5;
+  const numWeeks = Math.max(1, weeks.length);
   const leftPad = 24;
   const topPad = 22;
-  const svgW = leftPad + weeks.length * (cell + gap) + 6;
-  const svgH = topPad + 7 * (cell + gap) + 4;
+  const gap = containerW >= 1100 ? 6 : 5;
+  const availW = Math.max(460, containerW - leftPad - 8);
+  const cellW = Math.min(48, Math.max(15, Math.floor(availW / numWeeks) - gap));
+  const cellH = cellW <= 24 ? cellW : Math.min(24, Math.max(18, Math.round(cellW * 0.6)));
+  const svgW = leftPad + numWeeks * (cellW + gap) + 4;
+  const svgH = topPad + 7 * (cellH + gap) + 4;
   const weekLabels = ['一', '', '三', '', '五', '', '日'];
 
   return (
     <div className="xa-cal-wrap">
-      <div className="xa-cal-scroll">
-        <svg className="xa-cal-svg" viewBox={`0 0 ${svgW} ${svgH}`} role="img" aria-label="近 182 天每日活跃日历热力图">
-          {monthLabels.map((m) => (
-            <text key={m.col + m.text} x={leftPad + m.col * (cell + gap)} y={12} fontSize={10.5} fill="#64748b">
-              {m.text}
-            </text>
-          ))}
-          {weekLabels.map((w, r) =>
-            w ? (
-              <text key={r} x={0} y={topPad + r * (cell + gap) + 10} fontSize={10} fill="#94a3b8">
-                {w}
-              </text>
-            ) : null,
-          )}
-          {weeks.map((wk, c) =>
-            wk.map((d, r) => {
-              if (!d) return null;
-              const v = d[metric];
-              const isHover = hover?.date === d.date;
-              return (
-                <rect
-                  key={d.date}
-                  x={leftPad + c * (cell + gap)}
-                  y={topPad + r * (cell + gap)}
-                  width={cell}
-                  height={cell}
-                  rx={3}
-                  fill={levelColor(v)}
-                  stroke={isHover ? '#0f172a' : 'transparent'}
-                  strokeWidth={1.2}
-                  onMouseEnter={() =>
-                    setHover({
-                      date: d.date,
-                      tasks: d.tasks,
-                      apps: d.apps,
-                      pv: d.pv,
-                      val: v,
-                      xPct: ((leftPad + c * (cell + gap) + cell / 2) / svgW) * 100,
-                      yPct: ((topPad + r * (cell + gap)) / svgH) * 100,
-                    })
-                  }
-                  onMouseLeave={() => setHover(null)}
-                />
-              );
-            }),
-          )}
-        </svg>
-        {hover ? (
-          <div
-            className="xa-float-tip"
-            style={{
-              left: `${Math.min(84, Math.max(16, hover.xPct))}%`,
-              top: `${Math.max(4, hover.yPct - 8)}%`,
-            }}
+      <div className="xa-cal-scroll" ref={scrollRef}>
+        <div className="xa-cal-stage" style={{ width: svgW }}>
+          <svg
+            className="xa-cal-svg"
+            width={svgW}
+            height={svgH}
+            viewBox={`0 0 ${svgW} ${svgH}`}
+            role="img"
+            aria-label="近 182 天每日活跃日历热力图"
           >
-            <small>{hover.date}</small>
-            <div>AI 任务 <b>{fmtNum(hover.tasks)}</b> · 新建 <b>{fmtNum(hover.apps)}</b> · PV <b>{fmtNum(hover.pv)}</b></div>
-          </div>
-        ) : null}
+            {monthLabels.map((m) => (
+              <text key={m.col + m.text} x={leftPad + m.col * (cellW + gap)} y={13} fontSize={11} fill="#64748b">
+                {m.text}
+              </text>
+            ))}
+            {weekLabels.map((w, r) =>
+              w ? (
+                <text key={r} x={0} y={topPad + r * (cellH + gap) + cellH / 2 + 4} fontSize={10.5} fill="#94a3b8">
+                  {w}
+                </text>
+              ) : null,
+            )}
+            {weeks.map((wk, c) =>
+              wk.map((d, r) => {
+                if (!d) return null;
+                const v = d[metric];
+                const isHover = hover?.date === d.date;
+                return (
+                  <rect
+                    key={d.date}
+                    x={leftPad + c * (cellW + gap)}
+                    y={topPad + r * (cellH + gap)}
+                    width={cellW}
+                    height={cellH}
+                    rx={4}
+                    fill={levelColor(v)}
+                    stroke={isHover ? '#0f172a' : 'transparent'}
+                    strokeWidth={1.2}
+                    onMouseEnter={() =>
+                      setHover({
+                        date: d.date,
+                        tasks: d.tasks,
+                        apps: d.apps,
+                        pv: d.pv,
+                        val: v,
+                        xPct: ((leftPad + c * (cellW + gap) + cellW / 2) / svgW) * 100,
+                        yPct: ((topPad + r * (cellH + gap)) / svgH) * 100,
+                      })
+                    }
+                    onMouseLeave={() => setHover(null)}
+                  />
+                );
+              }),
+            )}
+          </svg>
+          {hover ? (
+            <div
+              className="xa-float-tip"
+              style={{
+                left: `${Math.min(84, Math.max(16, hover.xPct))}%`,
+                top: `${Math.max(4, hover.yPct - 8)}%`,
+              }}
+            >
+              <small>{hover.date}</small>
+              <div>AI 任务 <b>{fmtNum(hover.tasks)}</b> · 新建 <b>{fmtNum(hover.apps)}</b> · PV <b>{fmtNum(hover.pv)}</b></div>
+            </div>
+          ) : null}
+        </div>
       </div>
       <div className="xa-cal-foot">
         <div className="xa-cal-hover-info">

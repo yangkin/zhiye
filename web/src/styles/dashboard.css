@@ -1082,7 +1082,7 @@
 .dash-donut-wrap {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 24px;
   flex-wrap: wrap;
 }
 
@@ -1098,9 +1098,10 @@
   padding: 0;
   flex: 1;
   min-width: 180px;
+  max-width: 560px;
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 4px;
 }
 
 .dash-legend li {
@@ -1109,9 +1110,14 @@
   gap: 8px;
   font-size: 12px;
   color: #1f1c29;
-  padding: 3px 6px;
+  padding: 5px 8px;
   border-radius: 6px;
+  border-bottom: 1px dashed #f1edf8;
   cursor: default;
+}
+
+.dash-legend li:last-child {
+  border-bottom: none;
 }
 
 .dash-legend li.is-active {
