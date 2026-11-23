@@ -125,8 +125,16 @@ export function MultiTrendChart({
   };
 
   const tip = active !== null ? data[active] : null;
-  const tipLeft = active !== null ? Math.min(Math.max(x(active), 74), width - 74) : 0;
-  const tipTop = active !== null ? Math.max(4, y(Math.max(data[active].primary, data[active].secondary ?? 0)) - 58) : 0;
+  const tipTop =
+    active !== null
+      ? Math.min(H - 84, Math.max(6, y(Math.max(data[active].primary, data[active].secondary ?? 0)) - 22))
+      : 0;
+  const tipStyle =
+    active !== null
+      ? x(active) > width * 0.56
+        ? { right: Math.max(8, width - x(active) + 12), top: tipTop, transform: 'none' }
+        : { left: Math.max(8, x(active) + 12), top: tipTop, transform: 'none' }
+      : undefined;
 
   return (
     <div className="dash-trend">
@@ -204,7 +212,7 @@ export function MultiTrendChart({
           })}
         </svg>
         {tip ? (
-          <div className="trend-tooltip" style={{ left: tipLeft, top: tipTop }} role="status">
+          <div className="trend-tooltip" style={tipStyle} role="status">
             <small>{tip.date}</small>
             <div>
               {primaryLabel}: <b>{fmtNum(tip.primary)}</b>{unit}

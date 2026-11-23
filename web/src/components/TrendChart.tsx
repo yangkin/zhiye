@@ -74,8 +74,13 @@ export function TrendChart({ data, kind, label }: { data: DailyPoint[]; kind: 'l
   };
 
   const tip = active !== null ? data[active] : null;
-  const tipLeft = active !== null ? Math.min(Math.max(x(active), 60), width - 60) : 0;
-  const tipTop = active !== null ? Math.max(4, y(data[active].pv) - 52) : 0;
+  const tipTop = active !== null ? Math.min(H - 64, Math.max(6, y(data[active].pv) - 20)) : 0;
+  const tipStyle =
+    active !== null
+      ? x(active) > width * 0.56
+        ? { right: Math.max(8, width - x(active) + 12), top: tipTop, transform: 'none' }
+        : { left: Math.max(8, x(active) + 12), top: tipTop, transform: 'none' }
+      : undefined;
 
   return (
     <div className="trend-chart">
@@ -147,7 +152,7 @@ export function TrendChart({ data, kind, label }: { data: DailyPoint[]; kind: 'l
           })}
         </svg>
         {tip ? (
-          <div className="trend-tooltip" style={{ left: tipLeft, top: tipTop }} role="status">
+          <div className="trend-tooltip" style={tipStyle} role="status">
             <small>{tip.date}</small>
             <b>{fmt(tip.pv)}</b> 次浏览
           </div>

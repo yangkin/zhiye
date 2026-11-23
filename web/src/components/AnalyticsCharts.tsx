@@ -455,7 +455,13 @@ export function StackedAreaChart({
   const every = Math.max(1, Math.ceil((n * 48) / plotW));
 
   const tip = hover !== null ? data[hover] : null;
-  const tipLeft = hover !== null ? Math.min(Math.max(x(hover), 86), width - 86) : 0;
+  const tipFlipLeft = hover !== null && x(hover) > width * 0.56;
+  const tipStyle =
+    hover !== null
+      ? tipFlipLeft
+        ? { right: Math.max(8, width - x(hover) + 12), top: 8, transform: 'none' }
+        : { left: Math.max(8, x(hover) + 12), top: 8, transform: 'none' }
+      : undefined;
 
   return (
     <div className="xa-stacked-wrap">
@@ -533,7 +539,7 @@ export function StackedAreaChart({
           })}
         </svg>
         {tip ? (
-          <div className="trend-tooltip" style={{ left: tipLeft, top: 8 }}>
+          <div className="trend-tooltip" style={tipStyle}>
             <small>{tip.date}</small>
             {series.map((s) => (
               <div key={s.key}>
@@ -563,9 +569,17 @@ export function CalendarHeatmap({
     apps: number;
     pv: number;
     val: number;
-    xPct: number;
-    yPct: number;
+    clientX: number;
+    clientY: number;
+    placeBelow: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    if (!hover) return;
+    const clear = () => setHover(null);
+    window.addEventListener('scroll', clear, { passive: true, capture: true });
+    return () => window.removeEventListener('scroll', clear, { capture: true });
+  }, [hover]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -647,6 +661,7 @@ export function CalendarHeatmap({
             viewBox={`0 0 ${svgW} ${svgH}`}
             role="img"
             aria-label="近 182 天每日活跃日历热力图"
+            onMouseLeave={() => setHover(null)}
           >
             {monthLabels.map((m) => (
               <text key={m.col + m.text} x={leftPad + m.col * (cellW + gap)} y={13} fontSize={11} fill="#64748b">
@@ -676,17 +691,22 @@ export function CalendarHeatmap({
                     fill={levelColor(v)}
                     stroke={isHover ? '#0f172a' : 'transparent'}
                     strokeWidth={1.2}
-                    onMouseEnter={() =>
+                    onMouseEnter={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const cx = rect.left + rect.width / 2;
+                      const placeBelow = rect.top < 88;
+                      const clampedX = Math.min(window.innerWidth - 132, Math.max(132, cx));
                       setHover({
                         date: d.date,
                         tasks: d.tasks,
                         apps: d.apps,
                         pv: d.pv,
                         val: v,
-                        xPct: ((leftPad + c * (cellW + gap) + cellW / 2) / svgW) * 100,
-                        yPct: ((topPad + r * (cellH + gap)) / svgH) * 100,
-                      })
-                    }
+                        clientX: clampedX,
+                        clientY: placeBelow ? rect.bottom + 8 : rect.top - 8,
+                        placeBelow,
+                      });
+                    }}
                     onMouseLeave={() => setHover(null)}
                   />
                 );
@@ -695,10 +715,10 @@ export function CalendarHeatmap({
           </svg>
           {hover ? (
             <div
-              className="xa-float-tip"
+              className={`xa-float-tip ${hover.placeBelow ? 'is-below' : ''}`}
               style={{
-                left: `${Math.min(84, Math.max(16, hover.xPct))}%`,
-                top: `${Math.max(4, hover.yPct - 8)}%`,
+                left: hover.clientX,
+                top: hover.clientY,
               }}
             >
               <small>{hover.date}</small>
@@ -784,9 +804,15 @@ export function PolarRoseChart({
   return (
     <div className="xa-polar-wrap">
       <div className="xa-polar-meta">
-        <span>
-          峰值 <b>{String(peak.hour).padStart(2, '0')}:00</b>（{fmtNum(peak.total)} 次）
-        </span>
+        {active ? (
+          <span>
+            <b>{String(active.hour).padStart(2, '0')}:00</b> · 总计 <b>{fmtNum(active.total)}</b>（成 {active.succeeded} / 败 {active.failed}）
+          </span>
+        ) : (
+          <span>
+            峰值 <b>{String(peak.hour).padStart(2, '0')}:00</b>（{fmtNum(peak.total)} 次）
+          </span>
+        )}
         <span>夜班 00–08 占比 <b>{nightPct}%</b></span>
       </div>
       <div className="xa-polar-body">
@@ -830,7 +856,7 @@ export function PolarRoseChart({
             {active ? fmtNum(active.total) : fmtCompact(totalAll)}
           </text>
           <text x={cx} y={cy + 13} textAnchor="middle" fontSize={10.5} fill="#64748b">
-            {active ? `${String(active.hour).padStart(2, '0')}:00 · 成${active.succeeded}/败${active.failed}` : '窗口总任务'}
+            {active ? `${String(active.hour).padStart(2, '0')}:00 时段` : '窗口总任务'}
           </text>
         </svg>
       </div>
@@ -1143,7 +1169,11 @@ export function SankeyFlowChart({
               {((activeNodeObj.value / Math.max(1, flow.total)) * 100).toFixed(1)}%）
               {activeNodeObj.col === 2 && onSelectOutcome ? ' · 点击前往日志中心定位明细 →' : ''}
             </div>
-          ) : null}
+          ) : (
+            <div className="xa-sankey-tip is-idle">
+              悬停连线或节点查看流转占比，点击右侧结果可前往日志中心定位明细
+            </div>
+          )}
         </div>
       </div>
 
