@@ -124,11 +124,27 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const [queueOpen, setQueueOpen] = useState(true);
   const [removingQueued, setRemovingQueued] = useState<string | null>(null);
   const [planUpdatedTick, setPlanUpdatedTick] = useState(0);
+  const [planInView, setPlanInView] = useState(true);
   const planCardRef = useRef<HTMLDivElement | null>(null);
   const askAbortRef = useRef<AbortController | null>(null);
   const scrollToPlan = () => {
     planCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  useEffect(() => {
+    if (app.phase !== 'plan' || skill) {
+      setPlanInView(true);
+      return;
+    }
+    const target = planCardRef.current;
+    const root = scroll.current;
+    if (!target || !root || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => setPlanInView(entries[0]?.isIntersecting ?? true),
+      { root, threshold: 0.15 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [app.id, app.phase, skill]);
   const elementContext = ctx && ctx.appId === app.id ? ctx : null;
   const queuedQuery = useQuery({
     queryKey: ['queued', app.id],
@@ -319,7 +335,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       setAsking({ q: content, a: '', thinking: '', planUpdating: false });
       const history = (messages ?? [])
         .filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim()))
-        .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed')
+        .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed' && m.status !== 'cancelled')
         .slice(-24)
         .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }));
       const ctrl = new AbortController();
@@ -618,7 +634,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             <MessageItem
               key={m.id}
               m={m}
-              canEdit={phase === 'ready'}
+              canEdit={phase === 'ready' || phase === 'plan'}
               draftNote={draftNotes[m.id]}
               skillNames={skillNames}
               version={version}
@@ -927,7 +943,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               ref={input}
               id="plan-feedback"
               rows={2}
-              placeholder="继续和织页讨论，或告诉织页怎么优化这份计划…"
+              placeholder="继续聊聊，或告诉织页怎么调整计划…"
               aria-label="讨论或优化计划"
               value={draft}
               onChange={(e) => {
@@ -943,28 +959,39 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               }}
             />
             {error ? <p className="composer-error" role="alert">{error}</p> : null}
-            <div className="plan-feedback-toolbar">
-              <span>
-                <Icon name="spark" />{' '}
-                {skill ? '可继续讨论，或直接点上方「开始生成」' : '可自由提问讨论或让 AI 修订计划，不会自动执行'}
-                {!skill && (planUpdatedTick > 0 || list.length > 0) ? (
+            <div className="composer-bottom">
+              <div className="composer-tools">
+                <ModelModeButton
+                  models={meta?.models ?? []}
+                  modes={meta?.modes ?? []}
+                  model={app.model ?? 'auto'}
+                  mode={app.mode}
+                  className="model-button model-button-inline"
+                  onModel={(m) => void patchModel({ model: m })}
+                  onMode={(m) => void patchModel({ mode: m })}
+                />
+                {!skill && !planInView ? (
                   <button type="button" className="plan-jump-btn" onClick={scrollToPlan}>
-                    查看上方计划 ↑
+                    查看计划 ↑
                   </button>
                 ) : null}
-              </span>
+              </div>
               {sending ? (
                 <button
                   type="button"
                   className="send-button stop-button"
                   aria-label="停止回复"
                   title="停止当前回复"
-                  onClick={() => askAbortRef.current?.abort()}
+                  onClick={async () => {
+                    askAbortRef.current?.abort();
+                    await api.stopPlanChat(app.id).catch(() => undefined);
+                    await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+                  }}
                 >
                   <i className="stop-glyph" aria-hidden="true" />
                 </button>
               ) : (
-                <button className="send-button" aria-label="发送消息" title="发送（不会自动执行）" disabled={!draft.trim()} onClick={() => void send()}>
+                <button className="send-button" aria-label="发送消息" title="发送" disabled={!draft.trim()} onClick={() => void send()}>
                   <Icon name="send" />
                 </button>
               )}

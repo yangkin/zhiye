@@ -17,17 +17,28 @@ export function renderMarkdown(src: string): string {
     .replace(/<\/table>/g, '</table></div>');
 }
 
-const NEXT = /^\s*\[\[next\]\]\s*(.*)$/;
+const NEXT_INLINE = /\[\[next\]\]\s*(.*)$/;
 
-/** 模型在回答末尾用一行 `[[next]] A | B | C` 给出可点击的下一步；这里把它从正文里拆出来 */
+/** 模型在回答末尾用 `[[next]] A | B | C`（独占一行或行尾）给出可点击的下一步；这里把它从正文里拆出来 */
 export function splitNext(text: string): { body: string; next: string[] } {
   const lines = text.split('\n');
   const next: string[] = [];
   const keep: string[] = [];
+  let inFence = false;
   for (const l of lines) {
-    const m = NEXT.exec(l);
-    if (m) next.push(...m[1].split(/[|｜]/).map((s) => s.trim().replace(/^[「"]|[」"]$/g, '')).filter(Boolean));
-    else keep.push(l);
+    if (/^\s*```/.test(l)) {
+      inFence = !inFence;
+      keep.push(l);
+      continue;
+    }
+    const m = inFence ? null : NEXT_INLINE.exec(l);
+    if (m) {
+      const before = l.slice(0, m.index).trimEnd();
+      if (before) keep.push(before);
+      next.push(...m[1].split(/[|｜]/).map((s) => s.trim().replace(/^[「"]|[」"]$/g, '')).filter(Boolean));
+    } else {
+      keep.push(l);
+    }
   }
   return { body: keep.join('\n').replace(/\s*\[\[build(?::[^\]]*)?\]\]\s*/g, '').trimEnd(), next: [...new Set(next)].filter((s) => s.length <= 40).slice(0, 3) };
 }

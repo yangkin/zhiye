@@ -75,6 +75,24 @@ public class AppController {
         return apps.planFeedback(ws(), id, body == null ? "" : body.path("content").asText(""));
     }
 
+    /** 进行中的计划阶段对话（每个应用同一时间最多一条）：用户点停止或发起新消息时立即终止旧流 */
+    private record PlanChatRun(java.util.concurrent.atomic.AtomicBoolean stop,
+                               java.util.concurrent.atomic.AtomicBoolean saved,
+                               java.util.concurrent.atomic.AtomicBoolean stopRecorded,
+                               java.util.concurrent.atomic.AtomicReference<java.io.Closeable> stream,
+                               java.util.concurrent.atomic.AtomicReference<Runnable> onStop) {
+        void abort() {
+            stop.set(true);
+            java.io.Closeable c = stream.getAndSet(null);
+            if (c != null) {
+                try { c.close(); } catch (Exception ignored) { }
+            }
+            Runnable r = onStop.get();
+            if (r != null) r.run();
+        }
+    }
+    private final java.util.concurrent.ConcurrentHashMap<String, PlanChatRun> planChatRunning = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** 计划待确认阶段的流式 AI 对话与计划修订（SSE：thinking / delta / plan_updating / plan_updated / done / error） */
     @PostMapping(value = "/{id}/plan-chat", produces = org.springframework.http.MediaType.TEXT_EVENT_STREAM_VALUE)
     public org.springframework.web.servlet.mvc.method.annotation.SseEmitter planChat(@PathVariable String id, @RequestBody JsonNode body) {
@@ -96,22 +114,78 @@ public class AppController {
         java.util.List<String> assetIds = com.tcl.csot.zhiye.service.chat.AskService.assetIds(body);
         java.util.List<com.tcl.csot.zhiye.service.chat.AskAttachments.Attached> attached =
                 askAttachments == null ? java.util.List.of() : askAttachments.load(workspaceId, assetIds);
-        apps.recordPlanUserMessage(app.id(), c, assetIds);
 
+        PlanChatRun run = new PlanChatRun(
+                new java.util.concurrent.atomic.AtomicBoolean(false),
+                new java.util.concurrent.atomic.AtomicBoolean(false),
+                new java.util.concurrent.atomic.AtomicBoolean(false),
+                new java.util.concurrent.atomic.AtomicReference<>(),
+                new java.util.concurrent.atomic.AtomicReference<>());
+        PlanChatRun prev = planChatRunning.put(app.id(), run);
+        if (prev != null) prev.abort();
+
+        String userMsgId = apps.recordPlanUserMessage(app.id(), c, assetIds);
         final java.util.List<JsonNode> hist = java.util.List.copyOf(history);
+        final StringBuilder shown = new StringBuilder();
+        Runnable markStoppedOnce = () -> {
+            if (run.stop().get() && !run.saved().get() && run.stopRecorded().compareAndSet(false, true)) {
+                try { apps.recordPlanChatStopped(app.id(), userMsgId, shown.toString()); } catch (Exception ignored) { }
+            }
+        };
+        run.onStop().set(markStoppedOnce);
         var emitter = new org.springframework.web.servlet.mvc.method.annotation.SseEmitter(0L);
+        emitter.onCompletion(() -> { if (!run.saved().get()) run.abort(); });
+        emitter.onTimeout(run::abort);
+        emitter.onError((ex) -> run.abort());
+
         com.tcl.csot.zhiye.util.Threads.start("plan-chat", () -> {
             try {
                 askService.planChat(workspaceId, app, c, hist, skillIds, attached,
-                        (res) -> apps.applyPlanChatResult(workspaceId, app.id(), res),
-                        (name, data) -> emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
-                                .name(name).data(Json.write(data), org.springframework.http.MediaType.APPLICATION_JSON)));
+                        run.stop()::get,
+                        (in) -> {
+                            run.stream().set(in);
+                            if (run.stop().get()) run.abort();
+                        },
+                        (res) -> {
+                            if (run.stop().get()) return null;
+                            run.saved().set(true);
+                            return apps.applyPlanChatResult(workspaceId, app.id(), res);
+                        },
+                        (name, data) -> {
+                            if (run.stop().get()) throw new java.io.IOException("用户停止了回答");
+                            try {
+                                emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                        .name(name).data(Json.write(data), org.springframework.http.MediaType.APPLICATION_JSON));
+                            } catch (java.io.IOException | IllegalStateException gone) {
+                                run.abort();
+                                throw gone;
+                            }
+                            if ("delta".equals(name)) {
+                                String t = Json.M.valueToTree(data).path("text").asText("");
+                                if (!t.isEmpty()) shown.append(t);
+                            }
+                        });
+                markStoppedOnce.run();
                 emitter.complete();
             } catch (Exception e) {
+                markStoppedOnce.run();
                 emitter.completeWithError(e);
+            } finally {
+                run.stream().set(null);
+                planChatRunning.remove(app.id(), run);
             }
         });
         return emitter;
+    }
+
+    /** 立即停止当前应用的计划阶段流式回答 */
+    @PostMapping("/{id}/plan-chat/stop")
+    public Map<String, Object> stopPlanChat(@PathVariable String id) {
+        var app = apps.require(ws(), id);
+        PlanChatRun run = planChatRunning.get(app.id());
+        if (run == null || run.saved().get()) return Map.of("stopped", false, "finished", true);
+        run.abort();
+        return Map.of("stopped", true, "finished", false);
     }
 
     @GetMapping("/{id}")

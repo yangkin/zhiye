@@ -926,11 +926,15 @@ public class AskService {
     /**
      * 计划待确认阶段的流式对话：既可自由聊天答疑，也可让 AI 直接重写并更新 app.plan_doc（绝不自动触发执行）。
      * 流式过程中在检测到 [[plan]] 标记后切到 plan_updating 状态，避免把整份原始计划标记刷进聊天气泡。
+     * 用户停止或连接断开时通过 stopped 立即中断上游流，不落完整回复、不改计划。
      */
     public void planChat(String ws, com.tcl.csot.zhiye.entity.AppRow app, String content,
                          List<JsonNode> history, List<String> skillAppIds, List<AskAttachments.Attached> assets,
+                         java.util.function.BooleanSupplier stopped,
+                         java.util.function.Consumer<java.io.Closeable> onStreamOpen,
                          java.util.function.Function<PlanChatResult, Map<String, Object>> onComplete, Sink sink) {
         String c = validate(content);
+        if (stopped.getAsBoolean()) return;
         String requestedModel = app.model() == null || app.model().isBlank()
                 ? com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO : app.model();
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
@@ -979,8 +983,11 @@ public class AskService {
 
         try {
             if (faults.llmError()) throw new java.io.IOException("注入的模型故障");
+            if (stopped.getAsBoolean()) return;
             HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes(StandardCharsets.UTF_8));
             try (InputStream in = res.body()) {
+                if (onStreamOpen != null) onStreamOpen.accept(in);
+                if (stopped.getAsBoolean()) return;
                 if (res.statusCode() >= 400) {
                     emit(sink, "error", Json.obj().put("message", upstreamError(res.statusCode(), in.readAllBytes())));
                     return;
@@ -995,6 +1002,7 @@ public class AskService {
                 final int guard = PLAN_OPEN.length();
 
                 while ((line = r.readLine()) != null) {
+                    if (stopped.getAsBoolean()) return;
                     line = line.trim();
                     if (!line.startsWith("data:")) continue;
                     String data = line.substring(5).trim();
@@ -1004,6 +1012,7 @@ public class AskService {
                     try { n = Json.M.readTree(data); } catch (Exception e) { continue; }
                     JsonNode delta = n.path("choices").path(0).path("delta");
                     streamThinking(delta, thinking, sink);
+                    if (stopped.getAsBoolean()) return;
                     JsonNode cont = delta.get("content");
                     if (cont == null || !cont.isTextual() || cont.asText().isEmpty()) continue;
                     String piece = cont.asText();
@@ -1045,28 +1054,34 @@ public class AskService {
                     } else {
                         emit(sink, "delta", Json.obj().put("text", piece));
                     }
+                    if (stopped.getAsBoolean()) return;
                 }
+                if (stopped.getAsBoolean()) return;
                 if (!inPlan && !pending.isEmpty()) {
                     emit(sink, "delta", Json.obj().put("text", pending.toString()));
                     pending.setLength(0);
                 }
+                if (stopped.getAsBoolean()) return;
                 if (raw.isEmpty()) {
                     emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR));
                     return;
                 }
                 PlanChatResult parsed = parsePlanReply(raw.toString(), thinking.toString());
+                if (stopped.getAsBoolean()) return;
                 Map<String, Object> updatedApp = null;
                 try {
                     updatedApp = onComplete.apply(parsed);
                 } catch (Exception e) {
                     log.warn("保存计划对话结果失败：{}", e.toString());
                 }
+                if (stopped.getAsBoolean()) return;
                 if (updatedApp != null) {
                     emit(sink, "plan_updated", updatedApp);
                 }
                 emit(sink, "done", Json.obj().put("planUpdated", updatedApp != null));
             }
         } catch (Exception e) {
+            if (stopped.getAsBoolean()) return;
             log.warn("计划对话失败：{}", e.toString());
             if (platformLogs != null) {
                 platformLogs.error("llm_gateway", "PLAN_CHAT_FAILED", ws, null, app.id(), null, null, null,

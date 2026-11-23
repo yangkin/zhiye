@@ -220,7 +220,7 @@ export interface Message {
   content: string;
   elementContext: ElementContext | null;
   taskId: string | null;
-  status: 'ok' | 'pending' | 'failed';
+  status: 'ok' | 'pending' | 'failed' | 'cancelled';
   createdAt: string;
   /** 本条消息使用的技能（开发skill 应用 id） */
   skillAppIds?: string[];

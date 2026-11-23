@@ -858,5 +858,5 @@ a.skill-chip{text-decoration:none}
 .plan-updating-pill .icon{width:13px;height:13px}
 .plan-card.plan-just-updated{border-color:#8f6be6;box-shadow:0 0 0 3px #7953dc1f,0 10px 28px #4a2e9812;transition:border-color .25s,box-shadow .25s}
 .plan-updated-badge{background:#e7f7ef!important;color:#177a4d!important;border:1px solid #bfe8d4}
-.plan-jump-btn{margin-left:8px;padding:2px 8px;border-radius:6px;background:#f2edfc;color:#5b3db5;font-size:11.5px;font-weight:500;vertical-align:middle}
+.plan-jump-btn{height:28px;padding:0 10px;border-radius:8px;background:#f2edfc;color:#5b3db5;font-size:12px;font-weight:500;white-space:nowrap}
 .plan-jump-btn:hover{background:#e7ddfa}

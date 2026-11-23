@@ -71,6 +71,10 @@ public class MessageRepository {
         jdbc.sql("update message set status = ? where task_id = ? and role = 'user' and not steer").params(status, taskId).update();
     }
 
+    public void setStatus(String id, String status) {
+        jdbc.sql("update message set status = ? where id = ?").params(status, id).update();
+    }
+
     public void retarget(String oldTaskId, String newTaskId) {
         jdbc.sql("update message set task_id = ?, status = 'pending' where task_id = ? and role = 'user' and not steer").params(newTaskId, oldTaskId).update();
     }

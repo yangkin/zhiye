@@ -491,6 +491,8 @@ export const api = {
       onPlanUpdating: handlers.onPlanUpdating,
       onPlanUpdated: handlers.onPlanUpdated,
     }),
+  stopPlanChat: (appId: string) =>
+    request<{ stopped: boolean; finished: boolean }>(`/api/apps/${enc(appId)}/plan-chat/stop`, { method: 'POST' }),
 
   // 任务
   /** text：「继续」确认时用户顺便说的话（可选） */

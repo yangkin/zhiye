@@ -203,9 +203,22 @@ public class AppService {
         return app;
     }
 
-    /** 计划阶段对话：先落库用户消息 */
-    public void recordPlanUserMessage(String appId, String content, List<String> assetIds) {
-        messages.insert(appId, "user", content, null, null, "ok", assetIds == null || assetIds.isEmpty() ? null : assetIds);
+    /** 计划阶段对话：先落库用户消息并返回消息 ID */
+    public String recordPlanUserMessage(String appId, String content, List<String> assetIds) {
+        return messages.insert(appId, "user", content, null, null, "ok", assetIds == null || assetIds.isEmpty() ? null : assetIds).id();
+    }
+
+    /** 计划阶段对话被用户手动停止：标记用户消息为已取消并写入轻量停止记录（不污染后续历史、不覆盖计划） */
+    public void recordPlanChatStopped(String appId, String userMsgId, String partialShown) {
+        if (userMsgId != null && !userMsgId.isBlank()) {
+            messages.setStatus(userMsgId, "cancelled");
+        }
+        String shown = partialShown == null ? "" : partialShown.trim();
+        if (!shown.isEmpty()) {
+            messages.insert(appId, "assistant", shown + "\n\n（已停止回答）", null, null, "cancelled");
+        } else {
+            messages.insert(appId, "system", "织页的回复被用户取消", null, null, "ok");
+        }
     }
 
     /** 计划阶段对话完成：按需更新 planDoc 并落库助手回复；若更新了计划则返回最新应用详情 */
