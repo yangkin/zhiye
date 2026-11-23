@@ -10,24 +10,35 @@ const palettes: Record<SceneTemplate['style'], [string, string, string]> = {
   cyber: ['#edeaff', '#dcd5ff', '#5b43d6'],
 };
 
-/** 场景模板卡片的封面：按模板类型画一个示意界面，标题即模板名。 */
+/** 场景模板卡片的封面：按模板形态画对应示意界面，标题即模板名。 */
 export function SceneThumb({ t }: { t: SceneTemplate }) {
   const [bg, soft, ink] = palettes[t.style];
+  const variant =
+    t.thumb === 'dashboard'
+      ? 'dashboard'
+      : t.type === '开发skill'
+        ? 'skill'
+        : t.type === '技术文档'
+          ? 'doc'
+          : t.type === '开发网站'
+            ? 'system'
+            : 'tool';
+
   return (
     <div className="thumbnail scene-thumb" style={{ background: `linear-gradient(150deg, ${bg}, ${soft})`, color: ink }} aria-hidden="true">
       <span className="scene-thumb-watermark">
-        <TemplateIcon id={t.id} size={120} />
+        <TemplateIcon id={t.id} size={116} />
       </span>
       <div className="scene-thumb-bar">
         <i /> <i /> <i />
-        <span>TCL CSOT · {t.scene}</span>
+        <span>{t.type}</span>
       </div>
       <div className="scene-thumb-body">
         <span className="scene-thumb-icon" style={{ background: `linear-gradient(140deg, ${ink}, ${ink}cc)` }}>
-          <TemplateIcon id={t.id} size={20} />
+          <TemplateIcon id={t.id} size={19} />
         </span>
         <b>{t.title}</b>
-        {t.thumb === 'dashboard' ? (
+        {variant === 'dashboard' ? (
           <div className="scene-thumb-dash">
             <span>
               <i />
@@ -40,6 +51,45 @@ export function SceneThumb({ t }: { t: SceneTemplate }) {
               ))}
               <polyline points="6,22 23,16 40,19 57,9 74,14 91,5 108,10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity=".7" />
             </svg>
+          </div>
+        ) : variant === 'system' ? (
+          <div className="scene-thumb-system">
+            <div className="scene-thumb-sys-row">
+              <i />
+              <em style={{ width: '58%' }} />
+              <span />
+            </div>
+            <div className="scene-thumb-sys-row">
+              <i />
+              <em style={{ width: '74%' }} />
+              <span />
+            </div>
+            <div className="scene-thumb-sys-row">
+              <i />
+              <em style={{ width: '46%' }} />
+              <span />
+            </div>
+          </div>
+        ) : variant === 'skill' ? (
+          <div className="scene-thumb-skill">
+            <span>SKILL.md</span>
+            <div className="scene-thumb-lines">
+              <em style={{ width: '86%' }} />
+              <em style={{ width: '62%' }} />
+            </div>
+          </div>
+        ) : variant === 'doc' ? (
+          <div className="scene-thumb-doc">
+            <div className="scene-thumb-doc-toc">
+              <em />
+              <em />
+              <em />
+            </div>
+            <div className="scene-thumb-lines">
+              <em style={{ width: '88%' }} />
+              <em style={{ width: '72%' }} />
+              <em style={{ width: '54%' }} />
+            </div>
           </div>
         ) : (
           <div className="scene-thumb-lines">

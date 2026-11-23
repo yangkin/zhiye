@@ -9,7 +9,7 @@ import { api, errorMessage } from '../api/client';
 import { TaskLimitLink, errorCode } from '../components/LimitNotice';
 import { useActiveTask, useMeta } from '../api/queries';
 import { APP_TYPES, type AppType, type Asset, type Mode } from '../api/types';
-import { domainOf, templatesOf } from '../lib/templates';
+import { TEMPLATES, domainOf, featuredTemplates, templatesOf, type SceneTemplate } from '../lib/templates';
 import { SceneThumb } from '../components/SceneThumb';
 import { Pet } from '../components/Pet';
 import { TemplateIcon } from '../lib/templateIcons';
@@ -217,17 +217,56 @@ export function CreatePage() {
   // 帮助抽屉里已经有一只小织，页面上这只先藏起来
   const helpOpen = useUi((st) => st.helpOpen);
   const [domain, setDomain] = useState('全部');
-  useEffect(() => setDomain('全部'), [f.type]);
-  const domains = useMemo(() => [...new Set(templatesOf(f.type).map(domainOf))], [f.type]);
-  const shownTemplates = templatesOf(f.type).filter((t) => domain === '全部' || domainOf(t) === domain);
+  const [templateQuery, setTemplateQuery] = useState('');
+  useEffect(() => setDomain('全部'), [f.type, typeChosen]);
+
+  const activeTemplates = useMemo(
+    () => (typeChosen ? templatesOf(f.type) : TEMPLATES),
+    [typeChosen, f.type],
+  );
+  const domainCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of activeTemplates) {
+      const d = domainOf(t);
+      map.set(d, (map.get(d) ?? 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [activeTemplates]);
+  const shownTemplates = useMemo(() => {
+    const q = templateQuery.trim().toLowerCase();
+    return activeTemplates.filter((t) => {
+      if (domain !== '全部' && domainOf(t) !== domain) return false;
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.desc.toLowerCase().includes(q) ||
+        t.scene.toLowerCase().includes(q) ||
+        t.type.toLowerCase().includes(q)
+      );
+    });
+  }, [activeTemplates, domain, templateQuery]);
+  const quickChips = useMemo(
+    () => (typeChosen ? templatesOf(f.type).slice(0, 4) : featuredTemplates()),
+    [typeChosen, f.type],
+  );
 
   const works = useQuery({ queryKey: ['templates', { sort: 'likes' }], queryFn: () => api.templates({ sort: 'likes' }) });
 
-  // 已经写了内容再点推荐：照样填进去，但给一次「撤销」找回原来的草稿
-  const fill = (text: string) => {
-    const prev = f.prompt.trim();
-    f.set({ prompt: text });
-    if (prev && prev !== text.trim()) toast('已换成推荐的需求', 'ok', { label: '撤销', run: () => useCreateForm.getState().set({ prompt: prev }) });
+  // 已经写了内容再点推荐：照样填进去，但给一次「撤销」找回原来的草稿和类型
+  const fill = (tpl: SceneTemplate) => {
+    const prevPrompt = f.prompt;
+    const prevType = f.type;
+    const prevChosen = f.typeChosen;
+    f.set({ prompt: tpl.prompt, type: tpl.type, typeChosen: true });
+    if (prevPrompt.trim() && prevPrompt.trim() !== tpl.prompt.trim()) {
+      toast(`已填入「${tpl.title}」`, 'ok', {
+        label: '撤销',
+        run: () => useCreateForm.getState().set({ prompt: prevPrompt, type: prevType, typeChosen: prevChosen }),
+      });
+    } else {
+      toast(`已填入「${tpl.title}」（${tpl.type}）`, 'ok');
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     setTimeout(() => {
       const el = textarea.current;
       if (!el) return;
@@ -429,8 +468,8 @@ export function CreatePage() {
         </p>
       ) : null}
       <div className="prompt-chips">
-        {templatesOf(f.type).slice(0, 4).map((t) => (
-          <button key={t.id} className="prompt-chip" title={t.title} onClick={() => fill(t.prompt)}>
+        {quickChips.map((t) => (
+          <button key={t.id} className="prompt-chip" title={`${t.title}（${t.type}）`} onClick={() => fill(t)}>
             <TemplateIcon id={t.id} size={14} />
             {t.title}
           </button>
@@ -439,42 +478,98 @@ export function CreatePage() {
       <div className="inspiration-section">
         <div className="section-title">
           <div>
-            <h2>
-              {typeChosen ? f.type : '灵感'} · 华星场景模板<span>✦</span>
-            </h2>
-            <p>来自 TCL华星 日常工作的场景，点一下就能填好需求，再按你的情况改一改。</p>
+            <h2>{typeChosen ? `${f.type} · 场景模板` : '华星场景模板'}</h2>
+            <p>覆盖数据看板、日常工具、内部业务系统、Skill 与技术文档，点击即可填入完整需求继续微调。</p>
           </div>
-          <span className="quiet-label">TCL华星 精选 · {templatesOf(f.type).length} 个</span>
+          <div className="template-section-meta">
+            {typeChosen ? (
+              <button type="button" className="template-show-all" onClick={() => setTypeChosen(false)}>
+                查看全部 {TEMPLATES.length} 个
+              </button>
+            ) : null}
+            <span className="quiet-label">
+              {shownTemplates.length === activeTemplates.length
+                ? `共 ${activeTemplates.length} 个`
+                : `已筛出 ${shownTemplates.length} / ${activeTemplates.length} 个`}
+            </span>
+          </div>
         </div>
-        <div className="template-domains" role="tablist" aria-label="模板领域">
-          {['全部', ...domains].map((d) => (
-            <button key={d} role="tab" aria-selected={domain === d} className={domain === d ? 'active' : ''} onClick={() => setDomain(d)}>
-              {d}
+        <div className="template-filter-bar">
+          <div className="template-domains" role="tablist" aria-label="模板领域">
+            <button
+              role="tab"
+              aria-selected={domain === '全部'}
+              className={domain === '全部' ? 'active' : ''}
+              onClick={() => setDomain('全部')}
+            >
+              全部 <em>{activeTemplates.length}</em>
             </button>
-          ))}
+            {domainCounts.map(([d, count]) => (
+              <button
+                key={d}
+                role="tab"
+                aria-selected={domain === d}
+                className={domain === d ? 'active' : ''}
+                onClick={() => setDomain(d)}
+              >
+                {d} <em>{count}</em>
+              </button>
+            ))}
+          </div>
+          <label className="template-search" aria-label="搜索模板">
+            <Icon name="search" />
+            <input
+              type="text"
+              value={templateQuery}
+              onChange={(e) => setTemplateQuery(e.target.value)}
+              placeholder="搜索模板名称或场景…"
+            />
+            {templateQuery ? (
+              <button type="button" className="template-search-clear" aria-label="清空搜索" onClick={() => setTemplateQuery('')}>
+                <Icon name="close" />
+              </button>
+            ) : null}
+          </label>
         </div>
-        <div className="inspiration-grid">
-          {shownTemplates.map((x) => (
-            <button key={x.id} className="inspiration-card" onClick={() => fill(x.prompt)}>
-              <SceneThumb t={x} />
-              <div className="inspiration-info">
-                <span className="scene-tag">{x.scene}</span>
-                <b className="sr-only">{x.title}</b>
-                <Icon name="arrow" />
-                <p>{x.desc}</p>
-              </div>
+        {shownTemplates.length > 0 ? (
+          <div className="inspiration-grid">
+            {shownTemplates.map((x) => (
+              <button key={x.id} className="inspiration-card" onClick={() => fill(x)}>
+                <SceneThumb t={x} />
+                <div className="inspiration-info">
+                  <div className="inspiration-tags">
+                    <span className="scene-tag">{x.scene}</span>
+                    {!typeChosen ? <span className="type-tag">{x.type}</span> : null}
+                  </div>
+                  <b className="sr-only">{x.title}</b>
+                  <Icon name="arrow" />
+                  <p>{x.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="template-empty">
+            <span>没有匹配「{templateQuery}」的模板</span>
+            <button
+              type="button"
+              onClick={() => {
+                setTemplateQuery('');
+                setDomain('全部');
+                if (typeChosen) setTypeChosen(false);
+              }}
+            >
+              重置筛选
             </button>
-          ))}
-        </div>
+          </div>
+        )}
       </div>
       {works.data && works.data.length > 0 ? (
         <div className="inspiration-section community-teaser">
           <div className="section-title">
             <div>
-              <h2>
-                灵感社区 · 同事都在用<span>✦</span>
-              </h2>
-              <p>华星同事亲手织好的应用，看看效果，喜欢就「使用模板」复刻一份。</p>
+              <h2>灵感社区 · 同事都在用</h2>
+              <p>华星同事亲手做好的应用，预览效果满意即可「使用模板」复刻一份。</p>
             </div>
             <button className="community-more" onClick={() => navigate("/community")}>
               去灵感社区看看 →
