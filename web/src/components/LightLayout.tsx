@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
@@ -6,8 +6,22 @@ import { qk, useApps, useMeta } from '../api/queries';
 import { Icon } from '../lib/icons';
 import { copyText } from '../lib/format';
 import { toast, useUi } from '../lib/store';
+import { preloadRoute } from '../lib/routes';
+import { ErrorBoundary } from './ErrorBoundary';
 import { Modal } from './Modal';
 import { HelpPanel } from './HelpPanel';
+
+/** 延迟 150ms 再显字，本地/快网切换时绝不闪出「正在加载」文字 */
+export function RouteFallback() {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const id = setTimeout(() => setShow(true), 150);
+    return () => clearTimeout(id);
+  }, []);
+  return show ? (
+    <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted, #888)', fontSize: 13 }}>正在加载页面…</div>
+  ) : null;
+}
 
 export function LightLayout() {
   const location = useLocation();
@@ -23,7 +37,11 @@ export function LightLayout() {
     <div className="shell">
       <Sidebar page={page} onHelp={() => setHelpOpen(true)} onWorkspace={() => setModal('workspace')} />
       <main className={`main ${page === 'create' ? 'main-create' : page === 'chat' ? 'main-chat' : page === 'community' && location.pathname.split('/')[2] ? 'main-work' : ''}`}>
-        <Outlet />
+        <ErrorBoundary area="这个页面" page key={location.pathname}>
+          <Suspense fallback={<RouteFallback />}>
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
       </main>
       <HelpPanel />
       {modal === 'workspace' ? <WorkspaceModal onClose={() => setModal(null)} /> : null}
@@ -70,7 +88,14 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
       </Link>
       <nav className="main-nav rail-nav" aria-label="主导航">
         {creatorItems.map(([p, i, t]) => (
-          <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={t}>
+          <NavLink
+            key={p}
+            to={'/' + p}
+            className={page === p ? 'active' : ''}
+            title={t}
+            onMouseEnter={() => preloadRoute(p)}
+            onFocus={() => preloadRoute(p)}
+          >
             <span className="rail-icon">
               <Icon name={i} />
               {p === 'apps' && apps?.length ? <small>{apps.length > 99 ? '99+' : apps.length}</small> : null}
@@ -82,7 +107,14 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
           <>
             <div className="rail-divider" aria-hidden="true" />
             {adminItems.map(([p, i, t]) => (
-              <NavLink key={p} to={'/' + p} className={page === p ? 'active' : ''} title={p === 'admin' ? '平台管理' : p === 'dashboard' ? '数据看板' : p === 'logs' ? '运行日志' : t}>
+              <NavLink
+                key={p}
+                to={'/' + p}
+                className={page === p ? 'active' : ''}
+                title={p === 'admin' ? '平台管理' : p === 'dashboard' ? '数据看板' : p === 'logs' ? '运行日志' : t}
+                onMouseEnter={() => preloadRoute(p)}
+                onFocus={() => preloadRoute(p)}
+              >
                 <span className="rail-icon">
                   <Icon name={i} />
                 </span>
