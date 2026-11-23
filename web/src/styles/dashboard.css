@@ -522,6 +522,12 @@
   gap: 14px;
 }
 
+@media (min-width: 2200px) {
+  .dash-kpi-grid-6 {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 .dash-kpi {
   background: #fff;
   border: 1px solid #eae6f2;
@@ -1043,8 +1049,9 @@
 
 .dash-hr-bar {
   position: relative;
-  width: 100%;
-  max-width: 16px;
+  width: 68%;
+  max-width: 28px;
+  min-width: 8px;
   border-radius: 4px 4px 2px 2px;
   background: #7953dc;
   overflow: hidden;

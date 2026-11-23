@@ -311,7 +311,7 @@
 
 .xa-cal-svg {
   width: 100%;
-  max-width: 920px;
+  max-width: 720px;
   height: auto;
 }
 
@@ -412,36 +412,17 @@
 /* 04. 三段桑基流向图 */
 .xa-sankey-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 28%, 440px);
   gap: 20px;
   align-items: start;
 }
 
 .xa-sankey-chart {
   min-width: 0;
-}
-
-.xa-sankey-col-heads {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  padding: 0 12px 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.xa-sankey-col-heads span:nth-child(2) {
-  text-align: center;
-}
-
-.xa-sankey-col-heads span:nth-child(3) {
-  text-align: right;
-  padding-right: 40px;
+  overflow-x: auto;
 }
 
 .xa-sankey-svg {
-  width: 100%;
-  height: auto;
   display: block;
 }
 

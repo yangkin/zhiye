@@ -906,18 +906,41 @@ export function SankeyFlowChart({
   };
   onSelectOutcome?: (label: string) => void;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [canvasW, setCanvasW] = useState(720);
   const [hoverLink, setHoverLink] = useState<string | null>(null);
   const [hoverNode, setHoverNode] = useState<string | null>(null);
 
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = Math.floor(el.clientWidth);
+      if (w > 0) setCanvasW((prev) => (prev === w ? prev : w));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const layout = useMemo(() => {
     if (!flow || flow.total === 0 || flow.nodes.length === 0) return null;
-    const W = 720;
-    const H = 264;
+    const W = Math.max(560, canvasW);
     const nodeW = 14;
-    const colX = [16, 336, 560];
-    const padY = 24;
-    const usableH = H - padY * 2;
-    const nodeGap = 8;
+    const rightReserve = 176;
+    const col0X = 8;
+    const col2X = Math.max(360, W - rightReserve);
+    const col1X = Math.round(col0X + (col2X - col0X) * 0.48);
+    const colX = [col0X, col1X, col2X];
+    const padTop = 34;
+    const padBottom = 14;
+    const baseUsableH = 264;
+    const nodeGap = 9;
 
     const byCol: Record<number, typeof flow.nodes> = { 0: [], 1: [], 2: [] };
     for (const n of flow.nodes) {
@@ -942,13 +965,14 @@ export function SankeyFlowChart({
       { id: string; col: number; label: string; value: number; x: number; y: number; h: number; color: string; outOff: number; inOff: number }
     >();
 
+    let maxBottom = padTop + baseUsableH;
     for (const col of [0, 1, 2]) {
       const list = byCol[col].slice(0, 6);
       const colTotal = Math.max(1, list.reduce((a, b) => a + b.value, 0));
-      const avail = Math.max(60, usableH - nodeGap * Math.max(0, list.length - 1));
-      let curY = padY;
+      const avail = Math.max(60, baseUsableH - nodeGap * Math.max(0, list.length - 1));
+      let curY = padTop;
       list.forEach((n, idx) => {
-        const h = Math.max(14, (n.value / colTotal) * avail);
+        const h = Math.max(16, (n.value / colTotal) * avail);
         rectMap.set(n.id, {
           ...n,
           x: colX[col],
@@ -960,7 +984,11 @@ export function SankeyFlowChart({
         });
         curY += h + nodeGap;
       });
+      if (list.length > 0) {
+        maxBottom = Math.max(maxBottom, curY - nodeGap);
+      }
     }
+    const H = Math.ceil(maxBottom + padBottom);
 
     const ribbons: {
       key: string;
@@ -1008,8 +1036,8 @@ export function SankeyFlowChart({
       });
     }
 
-    return { W, H, nodeW, nodes: Array.from(rectMap.values()), ribbons };
-  }, [flow]);
+    return { W, H, nodeW, colX, nodes: Array.from(rectMap.values()), ribbons };
+  }, [flow, canvasW]);
 
   if (!flow || !layout) {
     return <div className="xa-empty-inline">当前时间窗口内暂无任务流转记录</div>;
@@ -1026,13 +1054,24 @@ export function SankeyFlowChart({
   return (
     <div className="xa-sankey-grid">
       <div className="xa-sankey-chart">
-        <div className="xa-sankey-col-heads">
-          <span>① 任务类型</span>
-          <span>② 应用形态</span>
-          <span>③ 执行结果（点击查看日志）</span>
-        </div>
-        <div className="xa-sankey-canvas">
-          <svg viewBox={`0 0 ${layout.W} ${layout.H}`} className="xa-sankey-svg" role="img" aria-label="任务流向桑基图">
+        <div className="xa-sankey-canvas" ref={wrapRef}>
+          <svg
+            width={layout.W}
+            height={layout.H}
+            viewBox={`0 0 ${layout.W} ${layout.H}`}
+            className="xa-sankey-svg"
+            role="img"
+            aria-label="任务流向桑基图"
+          >
+            <text x={layout.colX[0]} y={16} fontSize={12} fontWeight={600} fill="#64748b">
+              ① 任务类型
+            </text>
+            <text x={layout.colX[1]} y={16} fontSize={12} fontWeight={600} fill="#64748b">
+              ② 应用形态
+            </text>
+            <text x={layout.colX[2]} y={16} fontSize={12} fontWeight={600} fill="#64748b">
+              ③ 执行结果（点击查看日志）
+            </text>
             {layout.ribbons.map((rb) => {
               const focused =
                 hoverLink === rb.key || (hoverNode !== null && (rb.source === hoverNode || rb.target === hoverNode));
@@ -1049,7 +1088,7 @@ export function SankeyFlowChart({
               );
             })}
             {layout.nodes.map((nd) => {
-              const labelX = nd.x + layout.nodeW + 7;
+              const labelX = nd.x + layout.nodeW + 8;
               const clickable = nd.col === 2 && Boolean(onSelectOutcome);
               return (
                 <g
@@ -1062,7 +1101,7 @@ export function SankeyFlowChart({
                   style={{ cursor: clickable ? 'pointer' : 'default' }}
                 >
                   <rect x={nd.x} y={nd.y} width={layout.nodeW} height={nd.h} rx={3} fill={nd.color} />
-                  <text x={labelX} y={nd.y + nd.h / 2} dy="0.35em" fontSize={11.5} fill="#0f172a" fontWeight={500}>
+                  <text x={labelX} y={nd.y + nd.h / 2} dy="0.35em" fontSize={12.5} fill="#0f172a" fontWeight={500}>
                     {nd.label} <tspan fill="#64748b" fontWeight={400}>{fmtNum(nd.value)}</tspan>
                   </text>
                 </g>
