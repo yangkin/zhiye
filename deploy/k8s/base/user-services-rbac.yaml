@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zhiye-apps
+  labels:
+    app.kubernetes.io/part-of: zhiye
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zhiye-user-service-manager
+  namespace: zhiye-apps
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "deployments/scale"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets", "persistentvolumeclaims", "pods", "pods/log"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zhiye-user-service-manager
+  namespace: zhiye-apps
+subjects:
+  - kind: ServiceAccount
+    name: zhiye-api
+    namespace: zhiye
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zhiye-user-service-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zhiye-user-service-waker
+  namespace: zhiye-apps
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zhiye-site-user-service-waker
+  namespace: zhiye-apps
+subjects:
+  - kind: ServiceAccount
+    name: zhiye-site
+    namespace: zhiye
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zhiye-user-service-waker
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: zhiye-app-container-limits
+  namespace: zhiye-apps
+spec:
+  limits:
+    - type: Container
+      max:
+        cpu: "1"
+        memory: "1Gi"
+      min:
+        cpu: "100m"
+        memory: "128Mi"
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: zhiye-apps-namespace-quota
+  namespace: zhiye-apps
+spec:
+  hard:
+    limits.cpu: "64"
+    limits.memory: "128Gi"
+    requests.cpu: "32"
+    requests.memory: "64Gi"
+    pods: "160"
+    persistentvolumeclaims: "160"
+    requests.storage: "500Gi"

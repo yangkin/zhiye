@@ -115,3 +115,38 @@ zhiye:
           value: "true"
           effect: NoSchedule
       reaper-interval-seconds: 60
+  # 单体后端应用托管（Python / Node.js / Java / Go / Dockerfile）
+  service-runtime:
+    provider: ${ZHIYE_SERVICE_PROVIDER:k8s}
+    namespace: ${ZHIYE_SERVICE_NAMESPACE:zhiye-apps}
+    harbor-registry: ${ZHIYE_SERVICE_HARBOR_REGISTRY:}
+    harbor-secret-name: ${ZHIYE_SERVICE_HARBOR_SECRET:harbor-registry-secret}
+    kaniko-image: ${ZHIYE_SERVICE_KANIKO_IMAGE:gcr.io/kaniko-project/executor:v1.23.2}
+    base-image-python: ${ZHIYE_SERVICE_IMAGE_PYTHON:python:3.11-slim}
+    base-image-node: ${ZHIYE_SERVICE_IMAGE_NODE:node:22-alpine}
+    base-image-java-build: ${ZHIYE_SERVICE_IMAGE_JAVA_BUILD:maven:3.9-eclipse-temurin-21-alpine}
+    base-image-java-runtime: ${ZHIYE_SERVICE_IMAGE_JAVA_RUNTIME:eclipse-temurin:21-jre-alpine}
+    base-image-go-build: ${ZHIYE_SERVICE_IMAGE_GO_BUILD:golang:1.23-alpine}
+    base-image-go-runtime: ${ZHIYE_SERVICE_IMAGE_GO_RUNTIME:alpine:3.20}
+    npm-registry: ${ZHIYE_NPM_REGISTRY:}
+    pip-index-url: ${ZHIYE_PIP_INDEX_URL:}
+    maven-mirror-url: ${ZHIYE_MAVEN_MIRROR_URL:}
+    go-proxy: ${ZHIYE_GO_PROXY:}
+    storage-class: ${ZHIYE_SERVICE_STORAGE_CLASS:}
+    network-policy-enabled: ${ZHIYE_SERVICE_NETWORK_POLICY:true}
+    gateway-pod-namespace: ${ZHIYE_GATEWAY_NAMESPACE:zhiye}
+    default-idle-sleep-minutes: ${ZHIYE_SERVICE_IDLE_SLEEP_MIN:2880}
+    idle-sweep-seconds: ${ZHIYE_SERVICE_IDLE_SWEEP_SEC:60}
+    wake-timeout-seconds: ${ZHIYE_SERVICE_WAKE_TIMEOUT_SEC:30}
+    build-timeout-seconds: ${ZHIYE_SERVICE_BUILD_TIMEOUT_SEC:600}
+    # 资源配额门禁（单应用硬上限 1C 1G；全平台池适配 100C 200G 集群 + 30 并发开发沙箱）
+    max-memory-mb: ${ZHIYE_SERVICE_MAX_MEMORY_MB:1024}
+    max-cpu-millicores: ${ZHIYE_SERVICE_MAX_CPU_MILLICORES:1000}
+    max-pvc-size-gi: ${ZHIYE_SERVICE_MAX_PVC_SIZE_GI:5}
+    min-idle-sleep-minutes: ${ZHIYE_SERVICE_MIN_IDLE_SLEEP_MIN:5}
+    allow-never-sleep: ${ZHIYE_SERVICE_ALLOW_NEVER_SLEEP:false}
+    max-services-per-workspace: ${ZHIYE_SERVICE_MAX_PER_WORKSPACE:5}
+    max-workspace-running-memory-mb: ${ZHIYE_SERVICE_MAX_WS_MEMORY_MB:2048}
+    max-workspace-running-cpu-millicores: ${ZHIYE_SERVICE_MAX_WS_CPU_MILLICORES:2000}
+    max-platform-running-memory-mb: ${ZHIYE_SERVICE_MAX_PLATFORM_MEMORY_MB:131072}
+    max-platform-running-cpu-millicores: ${ZHIYE_SERVICE_MAX_PLATFORM_CPU_MILLICORES:64000}

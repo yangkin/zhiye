@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, errorMessage, type AppListQuery } from '../api/client';
 import { qk } from '../api/queries';
-import { APP_TYPES, hasNoPreview, isScriptApp, isSkillApp, type AppSummary, type AppType } from '../api/types';
+import { APP_TYPES, hasNoPreview, isScriptApp, isServiceApp, isSkillApp, type AppSummary, type AppType } from '../api/types';
 import { Icon, kindIcon } from '../lib/icons';
 import { fmtTime, shortDay } from '../lib/format';
 import { toast } from '../lib/store';
@@ -192,6 +192,21 @@ export function AppsPage() {
                       <span className="status-badge skill">技能包</span>
                     ) : (
                       <span className={`status-badge ${a.publishedVersionId ? 'published' : ''}`}>{statusLabel(a)}</span>
+                    )}
+                    {isServiceApp(a) && (
+                      <span
+                        className="status-badge cloud"
+                        title={`单体服务托管 · ${(a.service?.runtime || 'service').toUpperCase()} · ${a.service?.status === 'running' ? '运行中' : a.service?.status === 'sleeping' ? '休眠中（访问自动唤醒）' : a.service?.status === 'failed' ? '部署异常' : '已停止'}`}
+                      >
+                        <Icon name="cloud" />
+                        {a.service?.status === 'running'
+                          ? '服务运行中'
+                          : a.service?.status === 'sleeping'
+                            ? '服务休眠中'
+                            : a.service?.status === 'failed'
+                              ? '服务异常'
+                              : '单体服务'}
+                      </span>
                     )}
                     {a.cloudEnabled && (
                       <span className="status-badge cloud" title="已启用云服务：数据表、员工登录、云函数">

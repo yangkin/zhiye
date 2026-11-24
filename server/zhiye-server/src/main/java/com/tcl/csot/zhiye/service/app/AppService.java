@@ -42,6 +42,8 @@ public class AppService {
     private com.tcl.csot.zhiye.service.skillhub.SkillRefs skillRefs;
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.service.source.DataSourceService dataSources;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
     public AppService(AppRepository apps, TaskService taskService, TaskRepository tasks, MessageRepository messages,
                       DraftRepository drafts, VersionRepository versions, VersionService versionService, GitService git,
@@ -302,7 +304,8 @@ public class AppService {
         AppRow app = require(ws, id);
         if (tasks.activeForApp(app.id()).isPresent())
             throw ApiException.conflict("APP_BUSY", "应用有正在进行的任务，请先停止任务再删除");
-        // 删除即下线：站点地址立刻返回 404
+        // 删除即下线：站点地址立刻返回 404，单体应用同时销毁容器/进程与独立 Schema
+        if (app.isService() && monolithService != null) monolithService.destroyForApp(app, true);
         jdbc.sql("update app set published_version_id = null where id = ?").param(app.id()).update();
         jdbc.sql("update deployment set status = 'inactive' where app_id = ? and status = 'active'").param(app.id()).update();
         drafts.delete(app.id());
@@ -525,6 +528,16 @@ public class AppService {
         String vid = versionId == null || versionId.isBlank() ? app.currentVersionId() : versionId;
         if (vid == null) throw ApiException.conflict("INVALID_PHASE", "请先完成生成再发布");
         VersionRow v = versions.find(vid).filter(x -> x.appId().equals(app.id())).orElseThrow(() -> ApiException.notFound("版本"));
+        if (app.isService()) {
+            if (monolithService == null) throw ApiException.conflict("SERVICE_DISABLED", "当前环境未启用单体后端托管服务");
+            try {
+                monolithService.initializeAndDeploy(app, v);
+            } catch (Exception e) {
+                throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "DEPLOY_FAILED", "单体服务部署失败：" + e.getMessage());
+            }
+            versionService.publishInternal(app.id(), v.id());
+            return Map.of("siteUrl", views.siteUrl(app.slug()), "versionId", v.id());
+        }
         if (versions.build(v.buildId()).isEmpty()) throw ApiException.conflict("BUILD_MISSING", "这个版本没有可用的构建产物");
         // 20.4.3：表的权限需要知道「是谁」，但应用是内网公开（谁都能打开、没人登录）——发布出去就会全部报错，先拦下
         var acc = accessService.get(app.id());
@@ -551,6 +564,9 @@ public class AppService {
 
     public void unpublish(String ws, String id) {
         AppRow app = require(ws, id);
+        if (app.isService() && monolithService != null) {
+            try { monolithService.stop(ws, id); } catch (Exception ignored) {}
+        }
         jdbc.sql("update app set published_version_id = null, updated_at = now() where id = ?").param(app.id()).update();
         jdbc.sql("update deployment set status = 'inactive' where app_id = ? and status = 'active'").param(app.id()).update();
     }

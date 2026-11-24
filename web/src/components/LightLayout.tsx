@@ -27,7 +27,7 @@ export function LightLayout() {
   const location = useLocation();
   const page = location.pathname.split('/')[1] || 'create';
   const [modal, setModal] = useState<null | 'workspace'>(null);
-  const setHelpOpen = useUi((s) => s.setHelpOpen);
+  const openHelp = useUi((s) => s.openHelp);
 
   useEffect(() => {
     document.querySelector('.main')?.scrollTo(0, 0);
@@ -35,7 +35,7 @@ export function LightLayout() {
 
   return (
     <div className="shell">
-      <Sidebar page={page} onHelp={() => setHelpOpen(true)} onWorkspace={() => setModal('workspace')} />
+      <Sidebar page={page} onHelp={() => openHelp('docs')} onWorkspace={() => setModal('workspace')} />
       <main className={`main ${page === 'create' ? 'main-create' : page === 'chat' ? 'main-chat' : page === 'community' && location.pathname.split('/')[2] ? 'main-work' : ''}`}>
         <ErrorBoundary area="这个页面" page key={location.pathname}>
           <Suspense fallback={<RouteFallback />}>
@@ -55,10 +55,10 @@ export function LightLayout() {
  */
 export function AppRail({ page = '' }: { page?: string }) {
   const [ws, setWs] = useState(false);
-  const setHelpOpen = useUi((s) => s.setHelpOpen);
+  const openHelp = useUi((s) => s.openHelp);
   return (
     <>
-      <Sidebar page={page} onHelp={() => setHelpOpen(true)} onWorkspace={() => setWs(true)} />
+      <Sidebar page={page} onHelp={() => openHelp('docs')} onWorkspace={() => setWs(true)} />
       {ws ? <WorkspaceModal onClose={() => setWs(false)} /> : null}
     </>
   );

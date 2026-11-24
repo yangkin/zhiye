@@ -213,7 +213,7 @@ export function CreatePage() {
 
   const [headline, setHeadline] = useState(0);
   const nextHeadline = () => setHeadline((h) => (h + 1) % HEADLINES.length);
-  const setHelpOpen = useUi((st) => st.setHelpOpen);
+  const openHelp = useUi((st) => st.openHelp);
   // 帮助抽屉里已经有一只小织，页面上这只先藏起来
   const helpOpen = useUi((st) => st.helpOpen);
   const [domain, setDomain] = useState('全部');
@@ -362,7 +362,7 @@ export function CreatePage() {
           ))}
         </div>
         <div className={`cp-pet ${helpOpen ? 'is-hidden' : ''}`}>
-          <Pet size={120} onClick={() => setHelpOpen(true)} />
+          <Pet size={120} onClick={() => openHelp('chat')} />
         </div>
         <div className="composer cp-composer">
         <textarea

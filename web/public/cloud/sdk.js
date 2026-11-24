@@ -11,7 +11,7 @@
     var h = cfg.token ? { Authorization: 'Bearer ' + cfg.token } : {};
     if (site) h['X-Zhiye-Request'] = '1';
     var opt = { method: method, headers: Object.assign(h, headers || {}), credentials: site ? 'same-origin' : 'omit' };
-    if (body !== undefined && body !== null && !(body instanceof Blob) && !(body instanceof ArrayBuffer)) {
+    if (body !== undefined && body !== null && !(body instanceof Blob) && !(body instanceof ArrayBuffer) && !ArrayBuffer.isView(body)) {
       opt.headers['Content-Type'] = 'application/json';
       opt.body = JSON.stringify(body);
     } else if (body !== undefined && body !== null) {
@@ -97,7 +97,11 @@
       },
     },
     storage: {
-      upload: function (path, blob) { return call('POST', '/storage?path=' + encodeURIComponent(path), blob); },
+      upload: function (path, data) {
+        var payload = typeof data === 'string' ? new Blob([data], { type: 'text/plain;charset=utf-8' })
+          : (ArrayBuffer.isView(data) ? new Blob([data]) : data);
+        return call('POST', '/storage?path=' + encodeURIComponent(path), payload);
+      },
       /** 返回可直接给 img/a 用的 blob URL */
       download: async function (path) {
         var res = await fetch(cfg.api + '/storage?path=' + encodeURIComponent(path), {
@@ -108,6 +112,7 @@
         return URL.createObjectURL(await res.blob());
       },
       list: function () { return call('GET', '/storage'); },
+      remove: function (path) { return call('DELETE', '/storage?path=' + encodeURIComponent(path)); },
     },
   };
 })();

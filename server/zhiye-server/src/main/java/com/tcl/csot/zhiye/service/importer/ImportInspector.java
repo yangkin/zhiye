@@ -32,7 +32,17 @@ public final class ImportInspector {
 
     private record Entry(String name, int method, long csize, long usize, long localOffset, boolean dir, boolean symlink) {}
 
-    private static final Set<String> SKIP_DIRS = Set.of("node_modules", ".git", "__MACOSX");
+    private static final Set<String> SKIP_DIRS = Set.of(
+            "node_modules", ".git", "__MACOSX", ".venv", "venv", "__pycache__",
+            ".pytest_cache", ".mypy_cache", ".idea", ".vscode", ".turbo"
+    );
+
+    /** 不应被当作「外层冗余壳目录」剥离的标准项目内部目录名 */
+    private static final Set<String> KEEP_TOP_DIRS = Set.of(
+            "src", "app", "public", "static", "templates", "frontend", "backend", "server",
+            "client", "web", "api", "dist", "build", "scripts", "docs", "references",
+            "cmd", "internal", "pkg", "assets", "components", "pages"
+    );
 
     private ImportInspector() {}
 
@@ -89,6 +99,39 @@ public final class ImportInspector {
                 rep.rootDir(), rep.candidates(), rep.warnings());
     }
 
+    /** 安全解压 ZIP 到目标目录（去掉统一顶层目录、支持 rootDir 子目录、跳过 .git / node_modules / __MACOSX / .DS_Store）。 */
+    public static int extractZipToDir(Path zip, Path targetDir, String rootDir, Limits limits) throws Exception {
+        Result checked = inspectZip(zip, limits);
+        List<Entry> entries = readCentralDirectory(zip);
+        List<Entry> files = new ArrayList<>();
+        for (Entry e : entries) {
+            String n = e.name().replace('\\', '/');
+            if (e.dir() || n.endsWith("/") || skipped(n)) continue;
+            files.add(e);
+        }
+        String prefix = commonTopDir(files);
+        String subPrefix = (rootDir == null || rootDir.isBlank()) ? "" : rootDir.replace('\\', '/').replaceAll("^/+|/+$", "") + "/";
+        byte[] all = Files.readAllBytes(zip);
+        Path root = targetDir.toAbsolutePath().normalize();
+        Files.createDirectories(root);
+        int written = 0;
+        for (Entry e : files) {
+            String rel = e.name().replace('\\', '/').substring(prefix.length());
+            if (!subPrefix.isEmpty()) {
+                if (!rel.startsWith(subPrefix)) continue;
+                rel = rel.substring(subPrefix.length());
+            }
+            if (rel.isEmpty() || rel.contains("..")) continue;
+            Path dst = root.resolve(rel).normalize();
+            if (!dst.startsWith(root)) throw invalid("压缩包包含不安全的路径：" + rel);
+            Files.createDirectories(dst.getParent());
+            Files.write(dst, readEntry(all, e, (int) Math.min(Integer.MAX_VALUE, limits.maxFile())));
+            written++;
+        }
+        if (written == 0 && checked.fileCount() > 0) throw invalid("压缩包里找不到指定目录的文件：" + rootDir);
+        return written;
+    }
+
     private static Map<String, Long> sizes(Map<String, Entry> byPath) {
         Map<String, Long> out = new LinkedHashMap<>();
         byPath.forEach((k, v) -> out.put(k, v.usize()));
@@ -103,16 +146,24 @@ public final class ImportInspector {
     }
 
     private static String commonTopDir(List<Entry> files) {
-        String first = null;
-        for (Entry e : files) {
-            String n = e.name().replace('\\', '/');
-            int i = n.indexOf('/');
-            if (i < 0) return "";
-            String top = n.substring(0, i + 1);
-            if (first == null) first = top;
-            else if (!first.equals(top)) return "";
+        String prefix = "";
+        for (int depth = 0; depth < 3; depth++) {
+            String first = null;
+            boolean valid = true;
+            for (Entry e : files) {
+                String n = e.name().replace('\\', '/').substring(prefix.length());
+                int i = n.indexOf('/');
+                if (i < 0) { valid = false; break; }
+                String top = n.substring(0, i);
+                if (depth > 0 && KEEP_TOP_DIRS.contains(top.toLowerCase(Locale.ROOT))) { valid = false; break; }
+                String topSlash = top + "/";
+                if (first == null) first = topSlash;
+                else if (!first.equals(topSlash)) { valid = false; break; }
+            }
+            if (!valid || first == null) break;
+            prefix += first;
         }
-        return first == null ? "" : first;
+        return prefix;
     }
 
     // ---------- zip 中央目录解析 ----------

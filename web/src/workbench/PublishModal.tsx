@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { ApiError, api, errorMessage, type AccessLevel } from '../api/client';
 import { useInvalidateApp } from '../api/queries';
 import { waitForTask } from '../api/sse';
-import type { AppDetail, Task } from '../api/types';
+import { isServiceApp, isSkillApp, type AppDetail, type Task } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText } from '../lib/format';
 import { toast } from '../lib/store';
@@ -35,7 +35,11 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
   const [effectiveAccess, setEffectiveAccess] = useState<{ level: AccessLevel; membersCount: number }>({ level: 'public', membersCount: 0 });
   const v = app.currentVersion;
   const needsSave = hasLocalDraft || app.hasDraft;
-  const cloud = useQuery({ queryKey: ['cloud', app.id], queryFn: () => api.cloudStatus(app.id) });
+  const cloud = useQuery({
+    queryKey: ['cloud', app.id],
+    queryFn: () => api.cloudStatus(app.id),
+    enabled: !isServiceApp(app) && !isSkillApp(app),
+  });
   const cloudOn = cloud.data?.enabled ?? false;
   const [blocked, setBlocked] = useState<{ tables: string[]; sso: boolean }>({ tables: [], sso: false });
   const onBlocked = useCallback((tables: string[], sso: boolean) => setBlocked({ tables, sso }), []);

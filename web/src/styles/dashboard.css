@@ -1453,6 +1453,17 @@
   font-size: 11px;
   background: #f3effa;
   color: #5b3db5;
+  white-space: nowrap;
+}
+
+.dash-tag.ok {
+  background: #e8f6ef;
+  color: #20724d;
+}
+
+.dash-tag.err {
+  background: #fdecec;
+  color: #b42318;
 }
 
 .dash-pill {

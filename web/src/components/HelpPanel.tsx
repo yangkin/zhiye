@@ -6,7 +6,7 @@ import { api } from '../api/client';
 import { qk } from '../api/queries';
 import { HelpError, helpApi, streamHelp, type HelpAsset, type HelpConversation, type HelpMessage } from '../api/help';
 import { Icon } from '../lib/icons';
-import { HELP_CHIPS, offlineAnswer, type HelpChip } from '../lib/helpFaq';
+import { HELP, HELP_CHIPS, HELP_DOC_CHAPTERS, offlineAnswer, type HelpChip, type HelpDocChapter } from '../lib/helpFaq';
 import { fmtDate, fmtTime, isToday, isYesterday } from '../lib/format';
 import { useUi } from '../lib/store';
 import { Pet } from './Pet';
@@ -103,10 +103,15 @@ export function HelpPanel() {
   const panelRef = useRef<HTMLElement | null>(null);
   const open = useUi((s) => s.helpOpen);
   const setOpen = useUi((s) => s.setHelpOpen);
+  const helpTab = useUi((s) => s.helpTab);
+  const setHelpTab = useUi((s) => s.setHelpTab);
   const { data: workspace } = useQuery({ queryKey: qk.workspace, queryFn: api.workspace, enabled: open, staleTime: 5 * 60_000 });
   const wsId = workspace?.id ?? null;
 
   const [view, setView] = useState<'chat' | 'history'>('chat');
+  const [docChapterId, setDocChapterId] = useState<HelpDocChapter['id']>('limits');
+  const [docQuery, setDocQuery] = useState('');
+  const [openFaqId, setOpenFaqId] = useState<string | null>('limits');
   const [convId, setConvId] = useState<string | null>(null);
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
@@ -221,8 +226,8 @@ export function HelpPanel() {
   }, [msgs, view, open]);
 
   useEffect(() => {
-    if (open && view === 'chat') inputRef.current?.focus();
-  }, [open, view, mode]);
+    if (open && helpTab === 'chat' && view === 'chat') inputRef.current?.focus();
+  }, [open, helpTab, view, mode]);
 
   const onScroll = () => {
     const el = listRef.current;
@@ -477,28 +482,202 @@ export function HelpPanel() {
 
   const empty = msgs.length === 0 && !loadingConv;
   const placeholder = mode === 'report' ? '描述遇到的问题，可以附上截图' : '描述你的问题，或者跟我聊聊…';
+  const activeChapter = HELP_DOC_CHAPTERS.find((c) => c.id === docChapterId) ?? HELP_DOC_CHAPTERS[0];
+  const kw = docQuery.trim().toLowerCase();
+  const filteredFaq = kw
+    ? HELP.filter(
+        (it) =>
+          it.q.toLowerCase().includes(kw) ||
+          it.keywords.some((k) => k.toLowerCase().includes(kw)) ||
+          it.a.some((line) => line.toLowerCase().includes(kw)),
+      )
+    : HELP;
+
+  const askBotFromDoc = (promptText: string) => {
+    setHelpTab('chat');
+    setView('chat');
+    setMode('ask');
+    void send(promptText);
+  };
 
   return (
-    <aside ref={panelRef} className="xz-panel" role="dialog" aria-label="小织 · 使用帮助" onClick={(e) => e.stopPropagation()}>
+    <aside
+      ref={panelRef}
+      className={`xz-panel ${helpTab === 'docs' ? 'is-docs' : ''}`}
+      role="dialog"
+      aria-label={helpTab === 'docs' ? '织页帮助文档与资源限制' : '小织 · 使用帮助'}
+      onClick={(e) => e.stopPropagation()}
+    >
       <header className="xz-head">
-        <div className="xz-title">
-          {streaming ? <i className="xz-live" title="小织正在回答" /> : null}
-          <b title={view === 'history' ? '对话历史' : title}>{view === 'history' ? '对话历史' : title}</b>
+        <div className="xz-tabs" role="tablist" aria-label="帮助模式切换">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={helpTab === 'docs'}
+            className={`xz-tab ${helpTab === 'docs' ? 'on' : ''}`}
+            onClick={() => setHelpTab('docs')}
+          >
+            <Icon name="book" />
+            <span>帮助文档</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={helpTab === 'chat'}
+            className={`xz-tab ${helpTab === 'chat' ? 'on' : ''}`}
+            onClick={() => setHelpTab('chat')}
+          >
+            {streaming ? <i className="xz-live" title="小织正在回答" /> : <Icon name="spark" />}
+            <span>问小织</span>
+          </button>
         </div>
         <div className="xz-actions">
-          <button className="xz-icon" aria-label="新对话" title="新对话" onClick={startNew}>
-            <Icon name="plus" />
-          </button>
-          <button className={`xz-icon ${view === 'history' ? 'on' : ''}`} aria-label="对话历史" title="历史" aria-pressed={view === 'history'} onClick={toggleHistory}>
-            <Icon name="history" />
-          </button>
+          {helpTab === 'chat' ? (
+            <>
+              <button className="xz-icon" aria-label="新对话" title="新对话" onClick={startNew}>
+                <Icon name="plus" />
+              </button>
+              <button className={`xz-icon ${view === 'history' ? 'on' : ''}`} aria-label="对话历史" title="历史" aria-pressed={view === 'history'} onClick={toggleHistory}>
+                <Icon name="history" />
+              </button>
+            </>
+          ) : null}
           <button className="xz-icon" aria-label="关闭帮助" title="关闭" onClick={() => setOpen(false)}>
             <Icon name="close" />
           </button>
         </div>
       </header>
 
-      {view === 'history' ? (
+      {helpTab === 'docs' ? (
+        <div className="xz-docs">
+          <div className="xz-docs-top">
+            <div className="xz-docs-search">
+              <Icon name="search" />
+              <input
+                type="text"
+                value={docQuery}
+                onChange={(e) => setDocQuery(e.target.value)}
+                placeholder="搜索限制项、休眠、1C1G、云存储、预检 Skill…"
+                aria-label="搜索帮助文档"
+              />
+              {docQuery ? (
+                <button type="button" className="xz-icon small" aria-label="清空搜索" onClick={() => setDocQuery('')}>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </div>
+            <div className="xz-docs-pills" role="tablist" aria-label="文档章节">
+              {HELP_DOC_CHAPTERS.map((ch) => (
+                <button
+                  key={ch.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={!kw && docChapterId === ch.id}
+                  className={`xz-doc-pill ${!kw && docChapterId === ch.id ? 'on' : ''}`}
+                  onClick={() => {
+                    setDocQuery('');
+                    setDocChapterId(ch.id);
+                  }}
+                >
+                  <span>{ch.shortTitle}</span>
+                  {ch.badge ? <em>{ch.badge}</em> : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="xz-docs-body">
+            {kw ? (
+              <div className="xz-docs-section">
+                <div className="xz-docs-banner">
+                  <div>
+                    <h3>搜索结果（{filteredFaq.length} 条）</h3>
+                    <p>关键词「{docQuery.trim()}」匹配到的帮助条目与规范说明</p>
+                  </div>
+                  <button type="button" className="xz-ask-btn" onClick={() => askBotFromDoc(docQuery.trim())}>
+                    <Icon name="spark" /> 直接问小织
+                  </button>
+                </div>
+                {filteredFaq.length === 0 ? (
+                  <p className="xz-muted">文档里没找到完全匹配的条目，点右上角「直接问小织」让我帮你解答～</p>
+                ) : (
+                  <div className="xz-faq-list">
+                    {filteredFaq.map((it) => (
+                      <div key={it.id} className="xz-faq-card is-open">
+                        <div className="xz-faq-q">
+                          <Icon name={it.icon} />
+                          <b>{it.q}</b>
+                        </div>
+                        <div className="xz-faq-a">
+                          {it.a.map((line, idx) => (
+                            <p key={idx}>{line}</p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : activeChapter.id === 'faq' ? (
+              <div className="xz-docs-section">
+                <div className="xz-docs-banner">
+                  <div>
+                    <h3>{activeChapter.title}</h3>
+                    <p>{activeChapter.summary}</p>
+                  </div>
+                  <button type="button" className="xz-ask-btn" onClick={() => setHelpTab('chat')}>
+                    <Icon name="spark" /> 问小织
+                  </button>
+                </div>
+                <div className="xz-faq-list">
+                  {HELP.map((it) => {
+                    const isOpen = openFaqId === it.id;
+                    return (
+                      <div key={it.id} className={`xz-faq-card ${isOpen ? 'is-open' : ''}`}>
+                        <button
+                          type="button"
+                          className="xz-faq-toggle"
+                          aria-expanded={isOpen}
+                          onClick={() => setOpenFaqId(isOpen ? null : it.id)}
+                        >
+                          <span className="xz-faq-q">
+                            <Icon name={it.icon} />
+                            <b>{it.q}</b>
+                          </span>
+                          <span className="xz-faq-arrow">{isOpen ? '−' : '+'}</span>
+                        </button>
+                        {isOpen ? (
+                          <div className="xz-faq-a">
+                            {it.a.map((line, idx) => (
+                              <p key={idx}>{line}</p>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="xz-docs-section">
+                <div className="xz-docs-banner">
+                  <div>
+                    <h3>{activeChapter.title}</h3>
+                    <p>{activeChapter.summary}</p>
+                  </div>
+                  <button type="button" className="xz-ask-btn" onClick={() => askBotFromDoc(activeChapter.askPrompt)}>
+                    <Icon name="spark" /> 问小织细节
+                  </button>
+                </div>
+                <div
+                  className="xz-md xz-doc-md"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(activeChapter.markdown) }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : view === 'history' ? (
         <div className="xz-history">
           {history === null ? <p className="xz-muted">加载中…</p> : null}
           {historyError ? <p className="xz-muted">{historyError}</p> : null}
@@ -562,15 +741,16 @@ export function HelpPanel() {
         </div>
       )}
 
-      <form
-        className={`xz-input ${mode === 'report' ? 'report' : ''}`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (streaming) {
-            if (stopArmed) onStop();
-          } else if (canSend) void send();
-        }}
-      >
+      {helpTab === 'chat' ? (
+        <form
+          className={`xz-input ${mode === 'report' ? 'report' : ''}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (streaming) {
+              if (stopArmed) onStop();
+            } else if (canSend) void send();
+          }}
+        >
         {mode === 'report' ? (
           <div className="xz-mode">
             <Icon name="alert" /> 问题上报
@@ -630,6 +810,7 @@ export function HelpPanel() {
           )}
         </div>
       </form>
+      ) : null}
     </aside>
   );
 }

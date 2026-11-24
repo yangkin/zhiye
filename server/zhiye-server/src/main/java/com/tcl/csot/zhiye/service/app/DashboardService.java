@@ -174,6 +174,7 @@ public class DashboardService {
         out.put("llm", llmSection(ctx, platformToken));
         out.put("versions", versionsSection(ctx));
         out.put("cloud", cloudSection(ctx));
+        out.put("monolithServices", monolithServicesSection(ctx));
         out.put("dataSources", dataSourcesSection(ctx));
         out.put("interactions", interactionsSection(ctx));
         out.put("ecosystem", ecosystemSection(ctx));
@@ -1724,6 +1725,65 @@ public class DashboardService {
             return r;
         }).list());
         m.put("functions", fnMap);
+        return m;
+    }
+
+    private Map<String, Object> monolithServicesSection(FilterCtx ctx) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        String aPred = ctx.wsPred("a.workspace_id");
+        Object[] winWs = concat(ctx.wsParams(), new Object[]{ctx.startTs, ctx.endTs});
+
+        var agg = jdbc.sql("""
+                select
+                  count(*) as total,
+                  count(*) filter (where s.status = 'running') as running_cnt,
+                  count(*) filter (where s.status = 'sleeping') as sleeping_cnt,
+                  count(*) filter (where s.status = 'stopped') as stopped_cnt,
+                  count(*) filter (where s.status = 'failed') as failed_cnt,
+                  count(*) filter (where s.pg_enabled = true) as pg_cnt,
+                  count(*) filter (where s.pvc_enabled = true) as pvc_cnt,
+                  coalesce(sum(s.memory_mb) filter (where s.status = 'running'), 0) as running_mem_mb
+                from app_service s join app a on a.id = s.app_id
+                where %s and a.deleted_at is null
+                """.formatted(aPred)).params(ctx.wsParams()).query((rs, i) -> {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("total", rs.getLong("total"));
+            r.put("running", rs.getLong("running_cnt"));
+            r.put("sleeping", rs.getLong("sleeping_cnt"));
+            r.put("stopped", rs.getLong("stopped_cnt"));
+            r.put("failed", rs.getLong("failed_cnt"));
+            r.put("pgEnabled", rs.getLong("pg_cnt"));
+            r.put("pvcEnabled", rs.getLong("pvc_cnt"));
+            r.put("runningMemoryMb", rs.getLong("running_mem_mb"));
+            return r;
+        }).single();
+        m.putAll(agg);
+
+        m.put("byRuntime", groupCounts("""
+                select coalesce(nullif(s.runtime, ''), 'unknown') as k, count(*) as c
+                from app_service s join app a on a.id = s.app_id
+                where %s and a.deleted_at is null
+                group by 1 order by 2 desc
+                """.formatted(aPred), ctx.wsParams()));
+
+        var relAgg = jdbc.sql("""
+                select
+                  count(*) as total,
+                  count(*) filter (where r.status = 'succeeded') as ok_cnt,
+                  count(*) filter (where r.status = 'failed') as err_cnt
+                from app_service_release r join app a on a.id = r.app_id
+                where %s and a.deleted_at is null and r.started_at >= ? and r.started_at < ?
+                """.formatted(aPred)).params(winWs).query((rs, i) -> {
+            long tot = rs.getLong("total");
+            long ok = rs.getLong("ok_cnt");
+            Map<String, Object> rm = new LinkedHashMap<>();
+            rm.put("releasesTotal", tot);
+            rm.put("releasesSucceeded", ok);
+            rm.put("releasesFailed", rs.getLong("err_cnt"));
+            rm.put("releaseSuccessRate", tot == 0 ? 0.0 : round1((double) ok * 100.0 / tot));
+            return rm;
+        }).single();
+        m.putAll(relAgg);
         return m;
     }
 

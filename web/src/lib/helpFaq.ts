@@ -75,13 +75,37 @@ export const HELP: HelpItem[] = [
   },
   {
     id: 'import',
-    q: '怎么导入已有代码并部署？',
+    q: '怎么导入已有代码并部署？支持哪些语言？',
     icon: 'folder',
-    keywords: ['导入', '上传', '代码', '部署', 'zip', 'html', '文件夹', 'vite', '项目'],
+    keywords: ['导入', '上传', '代码', '部署', 'zip', 'html', '文件夹', 'vite', '项目', '后端', 'python', 'java', 'go', 'node', 'dockerfile'],
     a: [
       '点输入框左下角的「＋」→「导入代码并部署」，选择 HTML 文件、ZIP 压缩包或项目文件夹，也可以直接拖进去。',
-      '织页会识别项目类型和文件清单，确认名称后点「导入并部署」。目前支持 HTML、静态网站和 Vite（React/Vue）项目；Next.js、后端语言项目会提示暂不支持。',
-      '导入成功后会自动发布，并且可以继续用对话或编辑模式修改。',
+      '支持形态：纯静态 HTML、Vite/Vue/React 前端 SPA，以及 Python（FastAPI/Flask/Django）、Node.js（Express/Fastify/Koa/Nest/Next）、Java（Spring Boot + Maven/Gradle）、Go、自定义 Linux Dockerfile 单体后端与前后端一体项目。',
+      '导入自动跳过 node_modules、.venv、__pycache__、.git、.idea，自动剥离最多 3 层冗余外层目录，并自动扫描 .env 凭证文件、外部中间件、前端硬编码 localhost 和写死端口风险。',
+      '导入成功后自动部署并分配独立子域名，导入的后端服务也支持继续在工作台通过对话迭代代码并热重部署。',
+    ],
+  },
+  {
+    id: 'monolith',
+    q: '单体后端托管的 1C 1G 限制与 2 天自动休眠怎么工作？',
+    icon: 'cloud',
+    keywords: ['单体', '后端', '托管', '休眠', '唤醒', 'pod', '1c', '1g', 'pvc', 'data', 'postgres', '环境变量', '日志', 'dockerfile'],
+    a: [
+      '每个单体后端应用硬上限为 1C 1G（CPU 100～1000 mCPU、内存 128～1024 MB）、/data 持久化卷 1～5 Gi、密文环境变量最多 64 个（AES-256-GCM 加密）。',
+      '闲置自动休眠（Scale-to-Zero）：默认连续 2 天（2880 分钟）无访问自动将 Pod 缩容为 0 并销毁（释放 100% CPU 与内存，不占运行配额）；再次打开链接时自动透明唤醒（1～10 秒）。可调范围 5～10080 分钟（7 天），普通用户不支持设为 0 常驻。',
+      '数据持久化：在工作台「服务托管」开启「托管 PostgreSQL 独立 Schema」（注入 DATABASE_URL / JDBC_DATABASE_URL）或「挂载 /data 持久化卷」（注入 DATA_DIR=/data），休眠唤醒或重部署后数据不丢失。',
+      '平台自动剥离客户端伪造头并透传可信华星 SSO 身份头（X-Zhiye-User-Id / Name / Email）。',
+    ],
+  },
+  {
+    id: 'preflight',
+    q: '用 CodeBuddy / Cursor 写的项目导入前怎么校验？',
+    icon: 'book',
+    keywords: ['codebuddy', 'cursor', 'claude', 'agent', '预检', 'skill', 'preflight', '校验', '审核', '报错', 'localhost', 'redis', '微服务'],
+    a: [
+      '用外部编码 Agent 开发准备导入织页的项目时，请先使用平台内置预检 Skill「zhiye-deploy-preflight」，运行 python3 scripts/check_zhiye_ready.py <目录或ZIP> 执行预检。',
+      '脚本会输出 PASS（通过）/ WARN（风险提示）/ BLOCK（阻断，不可直接导入）及具体文件行号和整改理由。',
+      '常见阻断项：监听 127.0.0.1（需改为 0.0.0.0 + PORT）、前端硬编码 http://localhost:xxxx（需改为相对路径 /api）、包内含 .env 或明文密钥、依赖 Spring Cloud/Nacos/Dubbo 微服务、依赖本地 GPU/CUDA、或未附 Dockerfile 的 Rust/PHP/Ruby/.NET 项目。',
     ],
   },
   {
@@ -107,13 +131,14 @@ export const HELP: HelpItem[] = [
   },
   {
     id: 'limits',
-    q: '有什么使用限制？',
+    q: '平台有哪些资源与配额限制？',
     icon: 'lock',
-    keywords: ['限制', '上限', '最多', '数量', '10 个', '同时', '任务', '排队', '50', 'mb', '大小', '超过', '额度'],
+    keywords: ['限制', '上限', '最多', '数量', '10 个', '同时', '任务', '排队', '50', 'mb', '大小', '超过', '额度', '配额', '1c', '1g', '2c', '2g', '休眠'],
     a: [
-      '每人最多拥有 10 个应用（已删除的不算），在「应用」页顶部可以看到已用数量；达到上限后，删除不用的应用就可以继续创建。',
-      '同一时间只能进行 1 个任务（生成、修改、保存或导入）。有任务在进行时再提交会提示你，点「查看进行中的任务」可以回到那个应用。',
-      '导入代码最多 50 MB、5000 个文件，会自动跳过 node_modules 和 .git。',
+      '个人配额：每人总应用最多 10 个（已删除不计），其中单体后端最多 5 个；同一时刻运行中单体服务合计上限 2C 2G（超限时需先休眠其他服务）；同一时间只能跑 1 个 AI 任务、每日 50 次（管理员可在后台按人提额）。',
+      '单体后端硬上限：单应用最多 1C 1G（1000 mCPU / 1024 MB）、/data 持久化卷 1～5 Gi、强制开启闲置休眠（默认 2 天 / 2880 分钟，范围 5～10080 分钟）、环境变量最多 64 个；全平台运行池上限 64C 128G（160 Pod，适配 100C 200G / 30 并发集群）。',
+      '代码导入限制：ZIP ≤ 50 MB、解压 ≤ 200 MB、单文件 ≤ 20 MB、文件数 ≤ 5000；对话附件单文件 ≤ 10 MB（每条消息最多 5 个）。',
+      '云服务限制：最多 50 张表（每表 ≤ 40 列、单次查询 ≤ 200 行）；云文件存储单文件 ≤ 10 MB、单应用最多 200 个文件；Deno 云函数单次超时 10 秒。',
     ],
   },
   {
@@ -220,19 +245,149 @@ export const HELP: HelpItem[] = [
     id: 'scope',
     q: '织页能做多大的应用？哪些做不了？',
     icon: 'alert',
-    keywords: ['多大', '上限', '复杂', '能做', '做不了', '不能做', '支持', '范围', 'erp', 'mes', 'app', '小程序', '分期'],
+    keywords: ['多大', '上限', '复杂', '能做', '做不了', '不能做', '支持', '范围', 'erp', 'mes', 'app', '小程序', '分期', '边界'],
     a: [
-      '页面数量、角色数量、每条流程的状态数量和执行步数都不限；云数据表最多 50 张。内容多时，每做一段会弹出「要继续吗？」，点「继续」或在输入框里说「继续」就接着做。',
-      '做不了的：原生 App / 小程序、直连生产数据库或往 MES / ERP 写数据、自建后端和定时任务、支付和短信、实时多人协同、音视频和 3D。织页会说明原因，并改用网页应用、数据源只读接口、云函数、命令行脚本等替代做法。',
+      '对话新建应用：页面数、角色数、流程状态数和执行步数均不限，云数据库表最多 50 张、云文件存储最多 200 个文件（单文件 ≤ 10 MB）、支持 Deno 云函数（10 秒内）与应用内 AI。',
+      '代码导入托管：支持 Python / Node.js / Java / Go / 自定义 Linux Dockerfile 单体后端与前后端一体应用（单应用 1C 1G，带托管 PG Schema 与 /data 持久化卷），导入后可继续对话迭代。',
+      '明确超出平台能力上限（不支持）：微服务集群（Spring Cloud / Nacos / Dubbo）、自带 Redis / MySQL / MongoDB / Kafka / RabbitMQ / ES 中间件（需改用托管 PG 或外连内网实例）、GPU/CUDA 本地大模型推理、Docker-in-Docker、原生 App/小程序、Windows 专用组件、以及直写 MES/ERP 生产库。',
     ],
   },
 ];
 
-export const QUICK = ['start', 'types', 'modify', 'versions', 'cloud', 'community'];
+export interface HelpDocChapter {
+  id: 'limits' | 'monolith' | 'preflight' | 'cloud' | 'faq';
+  title: string;
+  shortTitle: string;
+  badge?: string;
+  summary: string;
+  markdown: string;
+  askPrompt: string;
+}
+
+export const HELP_DOC_CHAPTERS: HelpDocChapter[] = [
+  {
+    id: 'limits',
+    title: '平台资源与配额限制总览',
+    shortTitle: '资源限制',
+    badge: '必读',
+    summary: '所有单应用、个人工作空间、导入与云服务的硬上限一览表，超出上限系统将直接拦截提示。',
+    askPrompt: '帮我解读一下织页平台的资源配额限制，如果超限了怎么办？',
+    markdown: `### 1. 单体后端容器硬配额（超出不予部署）
+| 限制项 | 生效标准 | 说明 |
+| :--- | :--- | :--- |
+| 单应用 CPU 上限 | **100～1000 mCPU（1C）** | 默认 Py/Node/Go \`500m\`，Java \`1000m\` |
+| 单应用内存上限 | **128～1024 MB（1G）** | 默认 Py/Node/Go \`512 MB\`，Java \`1024 MB\` |
+| \`/data\` 持久化卷 | **1～5 Gi** | 开启开关后注入 \`DATA_DIR=/data\`，重启/休眠不丢 |
+| 闲置自动休眠 | **默认 2 天（2880 分钟）** | 可调 \`5～10080 分钟（7天）\`，强制开启不可设 \`0\` 常驻 |
+| 环境变量 | **最多 64 个 / 单值 ≤ 8 KB** | AES-256-GCM 密文托管 |
+| 单人单体服务数 | **最多 5 个** | 计入个人 10 个总应用名额内 |
+| 单人同时运行上限 | **2C 2G（2000m / 2048 MB）** | 超限时需先休眠或停止其他闲置服务 |
+| 全平台运行池上限 | **64C 128G / 160 Pod** | 适配 100C 200G / 30 并发开发集群（K8s 硬兜底） |
+
+### 2. 个人工作空间与 AI 构建配额
+| 限制项 | 生效标准 | 说明 |
+| :--- | :--- | :--- |
+| 每人总应用数 | **最多 10 个** | 不含已删除应用；管理员可在后台按人提额 |
+| 每人 AI 任务并发 / 日限 | **同时 1 个 / 每日 50 次** | AI 开发沙箱单实例 \`2C 4G\`，支持 60 步暂停确认继续 |
+| 小织帮助助手 | **每日 60 条对话** | 随时可查看本帮助文档（无次数限制） |
+
+### 3. 代码导入与云服务（BaaS）限制
+| 限制项 | 生效标准 | 说明 |
+| :--- | :--- | :--- |
+| 代码导入包体 | **ZIP ≤ 50 MB / 解压 ≤ 200 MB** | 单文件 ≤ **20 MB**，文件总数 ≤ **5000** |
+| 对话附件上传 | **单文件 ≤ 10 MB / 每条 ≤ 5 个** | 支持图片、PDF、Word/Excel/PPT（新版） |
+| 云数据库 | **最多 50 张表 / 每表 ≤ 40 列** | 单次查询最多 200 行，独立 PG Schema 隔离 |
+| 云文件存储 | **单文件 ≤ 10 MB / 最多 200 文件** | 支持 \`upload / download / list / remove\`，防 XSS 下载 |
+| Deno 云函数 | **单次超时 10 秒** | 无外网与本地文件读写，安全沙箱执行 |`,
+  },
+  {
+    id: 'monolith',
+    title: '单体后端托管与 2 天自动休眠',
+    shortTitle: '单体托管',
+    summary: '支持 Python / Node.js / Java / Go / 自定义 Dockerfile 一键导入、同源子域名反代与对话迭代。',
+    askPrompt: '单体后端应用休眠时 Pod 会停掉吗？如何保证数据不丢？',
+    markdown: `### 支持的技术栈
+- **Python**：FastAPI / Flask / Django / 标准库，自动创建隔离 \`.venv\` 安装依赖。
+- **Node.js**：Express / Fastify / Koa / NestJS / Next.js 及前后端一体项目。
+- **Java**：Spring Boot（Maven / Gradle），自动编译 JAR 并注入 \`--server.port=\${PORT:-8080}\`。
+- **Go**：自动执行 \`go build\` 编译原生二进制运行。
+- **自定义 Dockerfile**：若需其他 Linux 运行时，可在根目录提供标准 \`Dockerfile\`。
+
+### 闲置自动休眠（Scale-to-Zero）机制
+1. **默认 2 天（2880 分钟）无访问自动休眠**：减少工作日期间频繁冷启动，同时在周末或项目闲置时自动回收算力。
+2. **休眠时 Pod 完全销毁（\`replicas = 0\`）**：0 CPU、0 内存占用，不消耗个人 2C 2G 运行配额。
+3. **再次访问透明唤醒**：打开线上或预览地址时，网关自动拉起容器（Go/Node/Python 约 1～3 秒，Java 约 5～10 秒）。
+
+### 数据持久化与企业身份透传
+- **托管 PostgreSQL Schema**：在「服务托管」一键开启，自动注入 \`DATABASE_URL\` 与 \`JDBC_DATABASE_URL\`。
+- **持久化卷 \`/data\`**：SQLite 数据库、上传文件、生成报表请统一写入 \`DATA_DIR\`（默认 \`/data\`），切勿写入临时目录。
+- **华星 SSO 身份头**：网关自动剥离伪造头并注入 \`X-Zhiye-User-Id\`、\`X-Zhiye-User-Name\`、\`X-Zhiye-User-Email\`。`,
+  },
+  {
+    id: 'preflight',
+    title: '代码导入与外部 Agent 预检规范',
+    shortTitle: '预检规范',
+    badge: '推荐',
+    summary: '用 CodeBuddy / Cursor / Claude Code 编码后导入织页，先跑预检 Skill 避免踩坑。',
+    askPrompt: '我用 CodeBuddy 写的项目准备导入织页，有哪些必须遵守的规范？',
+    markdown: `### 外部编码 Agent 强制预检 Skill（\`zhiye-deploy-preflight\`）
+织页内置了标准 SkillHub 规范的预检技能 **\`zhiye-deploy-preflight\`**，建议发给使用 **CodeBuddy / Cursor / Claude Code** 的开发者，在交付打包前执行：
+\`\`\`bash
+python3 scripts/check_zhiye_ready.py <项目目录或ZIP路径>
+\`\`\`
+- **PASS（退出码 0）**：完全符合规范，可直接导入。
+- **WARN（退出码 0）**：可导入，但需按提示在「服务托管」补齐环境变量或持久化开关。
+- **BLOCK（退出码 2）**：触发平台能力上限或硬性红线，**禁止直接导入**，必须先按报告整改或改用独立部署。
+
+### 平台自动容错与静态体检
+导入 ZIP 时平台会自动：
+- 跳过 \`node_modules\`、\`.venv\`、\`__pycache__\`、\`.git\`、\`.idea\`、\`__MACOSX\`；
+- 自动剥离最多 **3 层**多余外层套壳目录；
+- 扫描 **4 类高频隐患**：\`.env\`/私钥泄露、Redis/MySQL/微服务依赖、前端硬编码 \`http://localhost:xxxx\`、后端写死监听端口未读 \`PORT\`。
+
+### 编码 4 条铁律
+1. 后端必须监听 **\`0.0.0.0\`** 并读取环境变量 **\`PORT\`**（禁止写死 \`127.0.0.1\`）。
+2. 前端请求 API 一律使用**同域相对路径**（如 \`/api/...\`)，禁止写死 \`http://localhost:8000\`。
+3. **禁止打包 \`.env\` 与明文密钥**，敏感配置统一在工作台「环境变量」加密录入。
+4. 持久化文件统一写入 **\`DATA_DIR\`（\`/data\`）** 或托管 PostgreSQL（\`DATABASE_URL\`）。`,
+  },
+  {
+    id: 'cloud',
+    title: '对话创造、云服务与能力边界',
+    shortTitle: '云服务与边界',
+    summary: '轻量化对话全栈（云数据库 + 云文件存储 + 云函数 + 应用内 AI）与平台能力红线。',
+    askPrompt: '什么需求适合用织页云服务，什么需求适合导入单体后端，哪些是平台做不了的？',
+    markdown: `### 对话新建 vs 导入托管怎么选？
+- **业务看板 / 表单审批 / 台账管理 / AI 工具**：直接用**对话新建 + 开启「共享云服务」**，零运维、无冷启动、秒级构建。
+  - **云数据库**：独立 PostgreSQL，最多 50 张表，工作台可视化增删改查、Excel/CSV 批量导入导出、6 种权限预设。
+  - **云文件存储**：通过 \`window.zhiye.cloud.storage\` 支持 \`upload / download / list / remove\`（单文件 ≤ 10 MB、最多 200 文件），工作台可统一管理。
+  - **Deno 云函数 & 应用内 AI**：后端校验/聚合逻辑写进云函数（10 秒内），摘要/OCR/根因分析直接调用 \`window.zhiye.ai\`。
+- **已有复杂后端逻辑 / 外部 Agent 工程**：走**「导入代码并部署」**进入单体容器托管，导入后仍可在工作台用对话微调后端代码并热重部署。
+
+### 明确不支持的能力红线（替代方案）
+| 超出边界的场景 | 原因与替代建议 |
+| :--- | :--- |
+| 微服务架构（Spring Cloud / Nacos / Dubbo / 多容器 Compose） | 平台为单实例托管，请拆为单体服务或改用独立 K8s 集群 |
+| 内置 Redis / MySQL / MongoDB / Kafka / RabbitMQ / ES | 平台内置托管 PostgreSQL 与 \`/data\`；确需中间件请改外连内网实例并在环境变量配置地址 |
+| GPU / CUDA / 本地大模型推理（PyTorch / vLLM） | 容器纯 CPU 且上限 1C 1G，请改用平台应用内 AI 或 HTTP 模型接口 |
+| 原生 App / 小程序 / Windows 专用组件（pywin32） | 改为内网响应式网页或跨平台 Linux 库 |
+| 直写 MES / ERP / SAP 生产数据库 | 通过「数据源」配置只读查询接口，或导出 Excel/CSV 流转 |`,
+  },
+  {
+    id: 'faq',
+    title: '常见操作速查（FAQ）',
+    shortTitle: '常见问题',
+    summary: '涵盖创造入门、修改微调、版本回滚、权限控制、数据源接入与故障排查。',
+    askPrompt: '帮我查一个织页使用问题',
+    markdown: '',
+  },
+];
+
+export const QUICK = ['start', 'limits', 'monolith', 'preflight', 'cloud', 'versions'];
 
 /** 欢迎页的快捷入口 */
 export interface HelpChip {
-  id: 'start' | 'modify' | 'idea' | 'report';
+  id: 'start' | 'limits' | 'modify' | 'idea' | 'report';
   label: string;
   icon: HelpItem['icon'];
   /** 点击后发送的问题；report 切换到问题上报模式 */
@@ -241,7 +396,8 @@ export interface HelpChip {
 
 export const HELP_CHIPS: HelpChip[] = [
   { id: 'start', label: '怎么开始创造应用', icon: 'spark', prompt: '怎么开始创造一个应用？' },
-  { id: 'modify', label: '生成后怎么修改', icon: 'edit', prompt: '应用生成后怎么修改？' },
+  { id: 'limits', label: '平台有哪些资源限制', icon: 'lock', prompt: '织页平台有哪些资源限制、配额和能力边界？' },
+  { id: 'modify', label: '单体后端与休眠说明', icon: 'cloud', prompt: '单体后端托管的 1C 1G 限制和 2 天自动休眠是怎么工作的？' },
   { id: 'idea', label: '帮我出谋划策', icon: 'book', prompt: '我想做一个应用，但还没想清楚需求，帮我出谋划策吧。' },
   { id: 'report', label: '问题上报', icon: 'alert' },
 ];

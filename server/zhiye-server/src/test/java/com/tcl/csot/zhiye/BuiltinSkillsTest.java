@@ -23,7 +23,7 @@ class BuiltinSkillsTest extends IntegrationTest {
     @Test
     void catalogPlaceAndRead(@TempDir Path agentDir) throws Exception {
         var names = refs.builtinCatalog().stream().map(SkillMeta::rawName).toList();
-        assertThat(names).contains("charts-dashboard", "excel-import-export", "forms-and-tables", "multi-page-app");
+        assertThat(names).contains("charts-dashboard", "excel-import-export", "forms-and-tables", "multi-page-app", "zhiye-deploy-preflight");
 
         var placed = refs.placeBuiltin(agentDir, Set.of("forms-and-tables"));
         assertThat(placed).extracting(SkillRefs.Builtin::name).doesNotContain("forms-and-tables").contains("charts-dashboard");

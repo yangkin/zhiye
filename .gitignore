@@ -1,7 +1,7 @@
 node_modules/
 dist/
 target/
-runtime/
+/runtime/
 *.log
 *.tsbuildinfo
 .claude/

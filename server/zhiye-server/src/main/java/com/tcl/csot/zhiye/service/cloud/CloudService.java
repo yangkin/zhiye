@@ -97,7 +97,10 @@ public class CloudService {
 
     /** 启用：建 schema、按 cloud/schema.sql 建表，返回一次性的应用令牌 */
     public synchronized Map<String, Object> enable(String ws, String appId) {
-        require(ws, appId);
+        AppRow app = require(ws, appId);
+        if (app.isService()) {
+            throw ApiException.validation("单体后端应用请前往工作台「服务托管」开启独立 PostgreSQL Schema 或 /data 持久化卷，无需启用静态云服务");
+        }
         // 即使已启用也重新应用 cloud/schema.sql：agent 新增表/列后，用户重新启用一次即可生效
         String schema = "app_" + appId.replaceAll("[^a-zA-Z0-9]", "_");
         String prefix = "cloud/" + appId + "/";
@@ -1007,12 +1010,29 @@ public class CloudService {
 
     // ---------- 存储 ----------
 
+    public static final int MAX_STORAGE_FILE_BYTES = 10 * 1024 * 1024;
+    public static final int MAX_STORAGE_FILES_PER_APP = 200;
+
     public Map<String, Object> putFile(Cloud c, String path, byte[] data) throws java.io.IOException {
+        return putFile(c, path, data, "/cloud/" + c.appId());
+    }
+
+    public Map<String, Object> putFile(Cloud c, String path, byte[] data, String basePrefix) throws java.io.IOException {
         String p = safePath(path);
-        if (data.length > 10 * 1024 * 1024) throw ApiException.validation("单个文件最多 10 MB");
+        byte[] bytes = data == null ? new byte[0] : data;
+        if (bytes.length > MAX_STORAGE_FILE_BYTES) throw ApiException.validation("单个文件最多 10 MB");
         String key = c.storagePrefix() + p;
-        store.put(key, data);
-        return Map.of("path", p, "size", data.length, "url", "/cloud/" + c.appId() + "/storage/" + p);
+        if (!store.exists(key)) {
+            List<String> existing = store.list(c.storagePrefix());
+            if (existing.size() >= MAX_STORAGE_FILES_PER_APP) {
+                throw new ApiException(HttpStatus.CONFLICT, "STORAGE_QUOTA_EXCEEDED",
+                        "单应用云存储最多保存 " + MAX_STORAGE_FILES_PER_APP + " 个文件，请先清理无用文件后再上传");
+            }
+        }
+        store.put(key, bytes);
+        String encoded = java.net.URLEncoder.encode(p, StandardCharsets.UTF_8).replace("+", "%20");
+        String url = (basePrefix == null ? "/cloud/" + c.appId() : basePrefix) + "/storage?path=" + encoded;
+        return Map.of("path", p, "size", bytes.length, "url", url, "contentType", guessContentType(p));
     }
 
     public Optional<byte[]> readFile(Cloud c, String path) throws java.io.IOException {
@@ -1027,10 +1047,37 @@ public class CloudService {
         store.delete(c.storagePrefix() + safePath(path));
     }
 
+    public static String guessContentType(String path) {
+        String lower = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".csv")) return "text/csv; charset=utf-8";
+        if (lower.endsWith(".json")) return "application/json; charset=utf-8";
+        if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".log")) return "text/plain; charset=utf-8";
+        if (lower.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (lower.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (lower.endsWith(".zip")) return "application/zip";
+        return "application/octet-stream";
+    }
+
+    public static boolean requiresAttachmentDisposition(String path) {
+        String lower = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".html") || lower.endsWith(".htm") || lower.endsWith(".svg")
+                || lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".xml");
+    }
+
     private static String safePath(String path) {
         if (path == null || path.isBlank()) throw ApiException.validation("缺少文件路径");
-        String p = path.replace('\\', '/');
-        if (p.startsWith("/") || p.contains("..")) throw ApiException.validation("路径只能是相对路径，不能含 ..");
+        String p = path.replace('\\', '/').trim();
+        if (p.startsWith("/") || p.endsWith("/") || p.contains("..") || p.contains("//"))
+            throw ApiException.validation("路径只能是相对路径，不能含 .. 或空目录段");
+        for (int i = 0; i < p.length(); i++) {
+            char ch = p.charAt(i);
+            if (ch < 0x20 || ch == 0x7f) throw ApiException.validation("文件路径包含非法控制字符");
+        }
         if (p.length() > 200) throw ApiException.validation("路径过长");
         return p;
     }

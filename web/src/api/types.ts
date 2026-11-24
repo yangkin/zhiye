@@ -72,11 +72,24 @@ export interface AppSummary {
   visualEditable: boolean;
   /** 是否已启用云服务（数据表/登录/云函数） */
   cloudEnabled?: boolean;
-  /** 项目形态：template=生成的 Web 项目；static/vite=导入项目；skill=技能包（只有文件，不能预览和发布） */
-  projectKind?: 'template' | 'vue' | 'static' | 'vite' | 'script' | 'skill';
+  /** 项目形态：template=生成的 Web 项目；static/vite=导入项目；service=单体后端/全栈托管；skill=技能包（只有文件，不能预览和发布） */
+  projectKind?: 'template' | 'vue' | 'static' | 'vite' | 'service' | 'script' | 'skill';
   activeTask: TaskRef | null;
   /** SkillHub 发布状态（仅技能包） */
   skillhub?: { enabled: boolean; lastPublishedAt: string | null; url: string | null } | null;
+  /** 单体后端应用运行状态摘要（仅 projectKind === 'service'） */
+  service?: {
+    runtime: string;
+    framework: string;
+    status: string;
+    port: number;
+    provider: string;
+    pgEnabled: boolean;
+    pvcEnabled: boolean;
+    idleSleepMin: number;
+    lastStartedAt?: string | null;
+    lastAccessAt?: string | null;
+  } | null;
 }
 
 export interface Asset {
@@ -289,7 +302,7 @@ export interface ImportManifest {
 
 export interface ImportCandidate {
   dir: string;
-  kind: 'static' | 'vite';
+  kind: 'static' | 'vite' | 'service';
   framework: string;
   label: string;
   prebuilt: boolean;
@@ -412,7 +425,87 @@ export type BridgeOutbound =
 export const isSkillApp = (a: { projectKind?: string; type: string }) => a.projectKind === 'skill' || (a.projectKind === undefined && a.type === '开发skill');
 /** 纯脚本项目：没有页面预览，和技能包一样只交付代码 */
 export const isScriptApp = (a: { projectKind?: string }) => a.projectKind === 'script';
+/** 单体后端/前后端一体托管应用（Python / Node / Java / Go / Dockerfile） */
+export const isServiceApp = (a: { projectKind?: string }) => a.projectKind === 'service';
 export const hasNoPreview = (a: { projectKind?: string; type: string }) => isSkillApp(a) || isScriptApp(a);
+
+export interface MonolithEnvVar {
+  key: string;
+  value: string;
+  secret: boolean;
+  hasValue?: boolean;
+  keepExisting?: boolean;
+  updatedAt?: string;
+}
+
+export interface MonolithRelease {
+  id: string;
+  versionId: string | null;
+  status: 'building' | 'succeeded' | 'failed';
+  imageRef: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface MonolithServiceStatus {
+  appId: string;
+  slug: string;
+  provider: string;
+  k8sNamespace?: string | null;
+  configured: boolean;
+  runtime?: string;
+  framework?: string;
+  frontendDir?: string;
+  backendDir?: string;
+  buildCmd?: string;
+  startCmd?: string;
+  port?: number;
+  healthPath?: string;
+  memoryMb?: number;
+  cpuMillicores?: number;
+  idleSleepMin?: number;
+  pgEnabled?: boolean;
+  pgSchema?: string | null;
+  pvcEnabled?: boolean;
+  pvcSizeGi?: number;
+  status: 'building' | 'running' | 'sleeping' | 'stopped' | 'failed';
+  desiredVersionId?: string | null;
+  runningVersionId?: string | null;
+  imageRef?: string | null;
+  lastAccessAt?: string | null;
+  lastStartedAt?: string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+  envVars: MonolithEnvVar[];
+  releases: MonolithRelease[];
+  quota?: {
+    maxMemoryMb: number;
+    maxCpuMillicores: number;
+    maxPvcSizeGi: number;
+    minIdleSleepMinutes: number;
+    allowNeverSleep: boolean;
+    maxServicesPerWorkspace: number;
+    workspaceServiceCount: number;
+    maxWorkspaceRunningMemoryMb: number;
+    maxWorkspaceRunningCpuMillicores: number;
+    workspaceRunningMemoryMb: number;
+    workspaceRunningCpuMillicores: number;
+  };
+}
+
+export interface MonolithLogs {
+  status: string;
+  provider: string;
+  runtimeLogs: string;
+  buildLog: string;
+  lastError: string | null;
+}
+
+export interface MonolithDockerfile {
+  custom: boolean;
+  content: string;
+}
 
 // ---- 应用访问统计 ----
 export interface AppsSummary {
@@ -937,6 +1030,21 @@ export interface DashboardData {
       byName: { name: string; calls: number; errors: number; avgDurationMs: number }[];
       recentErrors: { appId: string; appName: string; name: string; error: string | null; durationMs: number; at: string }[];
     };
+  };
+  monolithServices?: {
+    total: number;
+    running: number;
+    sleeping: number;
+    stopped: number;
+    failed: number;
+    pgEnabled: number;
+    pvcEnabled: number;
+    runningMemoryMb: number;
+    byRuntime: DashboardCountItem[];
+    releasesTotal: number;
+    releasesSucceeded: number;
+    releasesFailed: number;
+    releaseSuccessRate: number;
   };
   dataSources: {
     workspaceCount: number;
@@ -1662,6 +1770,33 @@ export interface AdminWorkspaceItem {
   createdAt: string;
 }
 
+export interface AdminMonolithServiceItem {
+  appId: string;
+  name: string;
+  slug: string;
+  workspaceId: string;
+  published: boolean;
+  ownerLogin?: string | null;
+  ownerRealName?: string | null;
+  ownerName: string;
+  runtime: string;
+  framework: string;
+  provider: string;
+  status: string;
+  port: number;
+  memoryMb: number;
+  cpuMillicores: number;
+  idleSleepMin: number;
+  pgEnabled: boolean;
+  pgSchema?: string | null;
+  pvcEnabled: boolean;
+  pvcSizeGi: number;
+  lastAccessAt?: string | null;
+  lastStartedAt?: string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+}
+
 export interface AdminOverview {
   currentActor: string;
   ssoRestricted: boolean;
@@ -1675,6 +1810,7 @@ export interface AdminOverview {
   feedbacks: AdminFeedbackItem[];
   feedbackOpenCount: number;
   publishedApps?: AdminPublishedAppItem[];
+  monolithServices?: AdminMonolithServiceItem[];
   allApps?: AdminAppItem[];
   workspaces?: AdminWorkspaceItem[];
   deletedApps: AdminDeletedAppItem[];

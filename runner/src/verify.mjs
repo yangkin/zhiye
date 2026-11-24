@@ -360,6 +360,11 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
       await step('安全与文件清理', async () => checkSecurityAndCleanliness(cwd)),
     ], editable: false, noDist: true }
   }
+  else if (kind === 'service') {
+    r = { checks: [
+      await step('脚本语法', () => checkScripts(cwd, env)),
+    ], editable: false, noDist: true }
+  }
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)
   // 报错里的绝对路径换成相对工作区的路径，便于 agent 阅读
   const strip = (d) => [cwd, realCwd(cwd)].reduce((acc, p) => acc.split(p + '/').join(''), String(d || ''))

@@ -28,7 +28,7 @@ interface Props {
   currentVersion: Version | undefined;
   versions: Version[];
   onTaskStarted: (t: Task) => void;
-  onEnableCloud: () => void;
+  onEnableCloud?: () => void;
   onRestoreVersion: (version: Version) => void;
   /** 切到「云服务」页 */
   onOpenCloud?: () => void;
@@ -884,7 +884,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   setPicker(null);
                 }}
               />
-              {skill ? null : (
+              {skill || app.projectKind === 'service' ? null : (
                 <button
                   type="button"
                   className={`skill-button cloud-chip${cloudEnabled ? ' on' : cloudQueued ? ' queued' : ''}`}

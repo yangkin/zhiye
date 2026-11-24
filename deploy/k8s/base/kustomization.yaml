@@ -13,4 +13,5 @@ resources:
   - ingress.yaml
   - networkpolicy-sandbox.yaml
   - networkpolicy-zhiye.yaml
+  - user-services-rbac.yaml
 # Secret zhiye-secrets 不在这里，见 secret.example.yaml

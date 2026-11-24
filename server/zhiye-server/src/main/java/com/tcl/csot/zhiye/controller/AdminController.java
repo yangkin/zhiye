@@ -208,4 +208,12 @@ public class AdminController {
         if (clusterSandbox == null) return Map.of("ok", false, "reclaimedCount", 0);
         return clusterSandbox.reclaimExpiredLeases(actor);
     }
+
+    @PostMapping("/services/{appId}/{action}")
+    public Map<String, Object> controlService(@PathVariable String appId,
+                                              @PathVariable String action,
+                                              HttpServletRequest req) throws Exception {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.controlMonolithService(appId, action, actor);
+    }
 }

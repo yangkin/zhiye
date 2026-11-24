@@ -118,6 +118,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   SANDBOX_DESTROY: '销毁沙箱实例',
   SANDBOX_REAP: '幽灵沙箱对账清理',
   CLUSTER_NODE_PURGE: '清理离线集群节点',
+  SERVICE_SLEEP: '休眠单体服务',
+  SERVICE_STOP: '强停单体服务',
+  SERVICE_START: '启动单体服务',
   RUNTIME_LOG_VIEW: '查看服务运行日志',
   RUNNER_LOG_DOWNLOAD: '下载 Runner 日志',
 };
@@ -1393,6 +1396,7 @@ export function AdminGovernancePanel({
          模块 2：已发布站点巡检与访问风控（100% 全宽 + 直接支持转移归属）
          ==================================================================== */}
       {govTab === 'sites' ? (
+        <>
         <div className="dash-panel">
           <DashPanelHead
             icon="globe"
@@ -1541,6 +1545,130 @@ export function AdminGovernancePanel({
             </>
           )}
         </div>
+        <div className="dash-panel" style={{ marginTop: 16 }}>
+          <DashPanelHead
+            icon="cloud"
+            tone="violet"
+            title={`单体后端托管服务（${(overview?.monolithServices ?? []).length}）`}
+            sub="跨工作空间巡检运行中的 Python / Node / Java / Go 单体服务，支持强行休眠、停止与按需唤醒"
+          />
+          {(overview?.monolithServices ?? []).length === 0 ? (
+            <GovHealthyBanner
+              icon="cloud"
+              tone="muted"
+              title="当前暂无单体后端托管服务"
+              desc="用户导入或部署 Python / Node / Java / Go 单体及全栈项目后将实时同步至此处巡检"
+            />
+          ) : (
+            <div className="dash-table-wrap">
+              <table className="dash-table">
+                <thead>
+                  <tr>
+                    <th scope="col">服务名称 / 运行时</th>
+                    <th scope="col">归属人 / 空间</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">资源与存储</th>
+                    <th scope="col">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(overview?.monolithServices ?? []).map((svc) => (
+                    <tr key={svc.appId}>
+                      <td>
+                        <b>{svc.name}</b>
+                        <div>
+                          <code>{svc.slug}</code> <span className="dash-tag">{svc.runtime.toUpperCase()}</span>{' '}
+                          <span className="dash-tag">{svc.framework}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <OwnerBadge
+                          ownerName={svc.ownerName}
+                          ownerRealName={svc.ownerRealName}
+                          ownerLogin={svc.ownerLogin}
+                          workspaceId={svc.workspaceId}
+                        />
+                      </td>
+                      <td>
+                        <span className={`dash-tag ${svc.status === 'running' ? 'ok' : svc.status === 'failed' ? 'err' : ''}`}>
+                          {svc.status === 'running'
+                            ? '运行中'
+                            : svc.status === 'sleeping'
+                              ? '休眠中'
+                              : svc.status === 'building'
+                                ? '部署中'
+                                : svc.status === 'failed'
+                                  ? '异常'
+                                  : '已停止'}
+                        </span>
+                      </td>
+                      <td>
+                        <small>
+                          {svc.cpuMillicores}m / {svc.memoryMb}MB
+                          {svc.pgEnabled ? ` · PG(${svc.pgSchema || 'on'})` : ''}
+                          {svc.pvcEnabled ? ` · PVC(${svc.pvcSizeGi}Gi)` : ''}
+                          {svc.idleSleepMin > 0 ? ` · ${svc.idleSleepMin}m休眠` : ''}
+                        </small>
+                      </td>
+                      <td className="dash-nowrap">
+                        <div className="dash-action-row">
+                          <button type="button" className="dash-link" onClick={() => navigate('/apps/' + svc.appId)}>
+                            查看工作台
+                          </button>
+                          {svc.status === 'running' ? (
+                            <>
+                              <button
+                                type="button"
+                                className="dash-link"
+                                disabled={busyKey === `svc-sleep-${svc.appId}`}
+                                onClick={async () => {
+                                  await runAction(`svc-sleep-${svc.appId}`, async () => {
+                                    await api.adminControlService(svc.appId, 'sleep');
+                                    toast(`已将单体服务「${svc.name}」休眠（缩容到 0）`, 'ok');
+                                  });
+                                }}
+                              >
+                                休眠
+                              </button>
+                              <button
+                                type="button"
+                                className="dash-link danger"
+                                disabled={busyKey === `svc-stop-${svc.appId}`}
+                                onClick={async () => {
+                                  await runAction(`svc-stop-${svc.appId}`, async () => {
+                                    await api.adminControlService(svc.appId, 'stop');
+                                    toast(`已停止单体服务「${svc.name}」`, 'ok');
+                                  });
+                                }}
+                              >
+                                停止
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="dash-link"
+                              disabled={busyKey === `svc-start-${svc.appId}`}
+                              onClick={async () => {
+                                await runAction(`svc-start-${svc.appId}`, async () => {
+                                  await api.adminControlService(svc.appId, 'start');
+                                  toast(`已启动单体服务「${svc.name}」`, 'ok');
+                                });
+                              }}
+                            >
+                              启动
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        </>
       ) : null}
 
       {/* ====================================================================

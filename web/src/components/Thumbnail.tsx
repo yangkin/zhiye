@@ -1,5 +1,4 @@
 import type { AppSummary, AppType, StyleId } from '../api/types';
-import { Icon } from '../lib/icons';
 
 const STYLE_IDS: StyleId[] = ['lavender', 'mint', 'rose', 'sand', 'ink', 'cyber'];
 
@@ -29,25 +28,47 @@ export function Thumbnail({
   template,
   style,
 }: {
-  app: Pick<AppSummary, 'id' | 'name' | 'type' | 'source' | 'framework'>;
+  app: Pick<AppSummary, 'id' | 'name' | 'type' | 'source' | 'framework' | 'projectKind' | 'service'>;
   template?: Template;
   style?: StyleId;
 }) {
   const s = styleFor(app.id, style);
   if (app.source === 'import') {
+    const isSvc = app.projectKind === 'service';
+    const rt = (app.service?.runtime || (app.framework || '').split(/[\s+]/)[0] || 'code').toUpperCase();
+    const svcStatus = app.service?.status;
     return (
-      <div className={`thumbnail ${s} thumb-imported`}>
+      <div className={`thumbnail ${s} thumb-imported ${isSvc ? 'is-service' : ''}`}>
         <div className="mini-browser">
           <i />
           <i />
           <i />
-          <span>IMPORTED WITH ZHIYE</span>
+          <span>{isSvc ? 'ZHIYE SERVICE HOSTING' : 'IMPORTED WITH ZHIYE'}</span>
         </div>
         <div className="code-project-thumb">
-          <Icon name="code" />
-          <strong>{app.name}</strong>
-          <span>{app.framework ?? '导入代码'}</span>
-          <small>从已有代码，继续创造</small>
+          <div className="code-thumb-card">
+            <div className="code-thumb-top">
+              <span className="code-thumb-rt">{rt}</span>
+              {isSvc ? (
+                <span className={`code-thumb-dot ${svcStatus === 'running' ? 'is-on' : svcStatus === 'failed' ? 'is-err' : ''}`}>
+                  <i />
+                  {svcStatus === 'running' ? 'RUNNING' : svcStatus === 'sleeping' ? 'SLEEPING' : svcStatus === 'failed' ? 'ERROR' : 'READY'}
+                </span>
+              ) : (
+                <span className="code-thumb-dot is-on">
+                  <i />
+                  STATIC
+                </span>
+              )}
+            </div>
+            <strong title={app.name}>{app.name}</strong>
+            <span className="code-thumb-fw">{app.framework ?? '导入代码'}</span>
+            <div className="code-thumb-bars" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+          </div>
         </div>
       </div>
     );

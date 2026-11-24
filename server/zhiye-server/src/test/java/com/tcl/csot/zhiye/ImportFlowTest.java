@@ -100,8 +100,8 @@ class ImportFlowTest extends IntegrationTest {
                 "repo/web/index.html", GARDEN, "repo/web/app.js", "fetch('/api/list')"));
         JsonNode m = c.ok(c.upload("/api/imports/upload", "repo.zip", "application/zip", data, Map.of()));
         assertThat(m.path("deployable").asBoolean()).isTrue();
-        assertThat(m.path("rootDir").asText()).isEqualTo("web");
-        assertThat(m.path("warnings").findValuesAsText("code")).contains("backend", "api");
+        assertThat(m.path("rootDir").asText()).isEmpty();
+        assertThat(m.path("candidates").findValuesAsText("dir")).contains("", "web");
         var bad = c.post("/api/imports", Map.of("uploadId", m.path("uploadId").asText(), "name", "x", "rootDir", "src"));
         assertThat(bad.status()).isEqualTo(400);
         JsonNode r = c.ok(c.post("/api/imports", Map.of("uploadId", m.path("uploadId").asText(), "name", "前后端仓库", "rootDir", "web")));
@@ -120,12 +120,12 @@ class ImportFlowTest extends IntegrationTest {
         assertThat(c.upload("/api/imports/upload", "empty.html", "text/html", "   ".getBytes(), Map.of()).status()).isEqualTo(400);
         assertThat(c.upload("/api/imports/upload", "x.exe", "application/octet-stream", "MZ".getBytes(), Map.of()).status()).isEqualTo(400);
 
-        JsonNode n = c.ok(c.upload("/api/imports/upload", "next-app.zip", "application/zip",
-                zip(Map.of("next-app/package.json", "{\"dependencies\":{\"next\":\"15.0.0\",\"react\":\"19.0.0\"}}")), Map.of()));
-        assertThat(n.path("framework").asText()).isEqualTo("Next.js");
+        JsonNode n = c.ok(c.upload("/api/imports/upload", "php-app.zip", "application/zip",
+                zip(Map.of("php-app/composer.json", "{\"name\":\"demo/php\"}", "php-app/index.php", "<?php echo 1;")), Map.of()));
+        assertThat(n.path("framework").asText()).isEqualTo("PHP");
         assertThat(n.path("deployable").asBoolean()).isFalse();
         List<String> before = ids(c);
-        var rej = c.post("/api/imports", Map.of("uploadId", n.path("uploadId").asText(), "name", "next"));
+        var rej = c.post("/api/imports", Map.of("uploadId", n.path("uploadId").asText(), "name", "php-demo"));
         assertThat(rej.status()).isEqualTo(400);
         assertThat(rej.code()).isEqualTo("IMPORT_UNSUPPORTED");
         assertThat(ids(c)).isEqualTo(before);

@@ -1947,6 +1947,35 @@ export function DashboardPage() {
             <section className="dash-section" aria-label="版本、云服务与反馈">
               <SectionTitle title="版本、云服务与反馈" sub="统计版本构建、云数据库与权限、云函数、数据源调用及用户反馈。" />
 
+              {data.monolithServices ? (
+                <div className="dash-panel" style={{ marginBottom: 16 }}>
+                  <DashPanelHead
+                    icon="cloud"
+                    tone="violet"
+                    title="单体后端与应用托管（Python / Node / Java / Go）"
+                    sub={`共 ${fmtNum(data.monolithServices.total)} 个托管服务 · 运行中 ${fmtNum(data.monolithServices.running)} · 休眠中 ${fmtNum(data.monolithServices.sleeping)} · 异常 ${fmtNum(data.monolithServices.failed)} · 活跃内存配额 ${fmtNum(data.monolithServices.runningMemoryMb)} MB`}
+                  />
+                  <div className="dash-mini-stats compact-3" style={{ marginBottom: data.monolithServices.byRuntime.length > 0 ? 12 : 0 }}>
+                    <div><span>托管服务总数</span><b>{fmtNum(data.monolithServices.total)}</b></div>
+                    <div><span>运行中 / 休眠中</span><b>{fmtNum(data.monolithServices.running)} / {fmtNum(data.monolithServices.sleeping)}</b></div>
+                    <div><span>独立 PG Schema</span><b>{fmtNum(data.monolithServices.pgEnabled)}</b></div>
+                    <div><span>/data 持久化卷</span><b>{fmtNum(data.monolithServices.pvcEnabled)}</b></div>
+                    <div><span>周期发布次数</span><b>{fmtNum(data.monolithServices.releasesTotal)}</b></div>
+                    <div><span>发布成功率</span><b>{data.monolithServices.releaseSuccessRate}%</b></div>
+                  </div>
+                  {data.monolithServices.byRuntime.length > 0 ? (
+                    <BreakdownBars
+                      items={data.monolithServices.byRuntime.map((rt, i) => ({
+                        key: rt.key,
+                        label: rt.key.toUpperCase(),
+                        value: rt.count,
+                        color: CHART_PALETTE[i % CHART_PALETTE.length],
+                      }))}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="dash-grid-3">
                 <div className="dash-panel">
                   <DashPanelHead

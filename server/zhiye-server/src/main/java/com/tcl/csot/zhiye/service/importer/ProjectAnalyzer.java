@@ -62,6 +62,8 @@ public final class ProjectAnalyzer {
         Map<String, Node> nodes = new LinkedHashMap<>();
         String backend = null, backendDir = null;
         List<Candidate> candidates = new ArrayList<>();
+        // 优先检测根目录是否为单体后端 / 前后端一体 / 自定义 Dockerfile 服务
+        var serviceSpec = com.tcl.csot.zhiye.service.runtime.ServiceRuntimeDetector.detect(files.keySet(), reader);
         for (String d : dirs) {
             if (has(d, "package.json")) {
                 Node n = classifyNode(d);
@@ -79,11 +81,20 @@ public final class ProjectAnalyzer {
                 candidates.add(new Candidate(d, "static", fw, labelFor(d, fw), pre));
             }
         }
+        if (serviceSpec.isPresent()) {
+            var s = serviceSpec.get();
+            String lbl = "根目录 · " + s.framework() + "（单体服务托管）";
+            candidates.add(new Candidate("", "service", s.framework(), lbl, false));
+        }
         candidates.sort(Comparator.comparingInt(this::rank));
         if (candidates.isEmpty()) return unsupported(nodes, backend);
 
         Candidate primary = candidates.get(0);
         List<Warning> warnings = new ArrayList<>();
+        if ("service".equals(primary.kind())) {
+            serviceSpec.ifPresent(s -> serviceWarnings(s, warnings));
+            return new Report(primary.framework(), true, null, primary.kind(), primary.dir(), candidates, warnings);
+        }
         if (backend != null)
             warnings.add(risk("backend", "后端代码不会部署",
                     "检测到" + backend + "后端" + (backendDir == null || backendDir.isEmpty() ? "" : "（" + backendDir + "/）")
@@ -106,9 +117,9 @@ public final class ProjectAnalyzer {
     private Report unsupported(Map<String, Node> nodes, String backend) {
         Node rootNode = nodes.get("");
         if (rootNode != null && rootNode.reason != null) return fail(rootNode.framework, rootNode.reason);
-        if (backend != null) return fail(backend, "暂不支持部署 " + backend + " 项目：需要服务端运行环境。织页只能部署前端页面，如果项目里有前端目录，请单独打包前端后导入");
+        if (backend != null) return fail(backend, "暂不支持原生部署 " + backend + " 项目：织页当前支持静态 HTML、Vite / Vue / React 前端，以及 Python / Node.js / Java / Go 单体后端与前后端一体项目；如需部署其他语言，可在根目录提供标准 Linux Dockerfile");
         if (!nodes.isEmpty()) { Node n = nodes.values().iterator().next(); return fail(n.framework, n.reason); }
-        return fail("待识别", "没有找到可以部署的网页：需要根目录（或子目录）里有 index.html，或带 build 脚本的前端项目");
+        return fail("待识别", "没有找到可部署的项目入口：需要包含 index.html、带 build 脚本的前端项目，或 Python / Node.js / Java / Go / Dockerfile 单体后端代码");
     }
 
     private static Report fail(String fw, String reason) {
@@ -158,6 +169,11 @@ public final class ProjectAnalyzer {
         if (has(d, "requirements.txt") || has(d, "pyproject.toml") || has(d, "manage.py")) return "Python";
         if (has(d, "go.mod")) return "Go";
         if (has(d, "composer.json")) return "PHP";
+        if (has(d, "Cargo.toml")) return "Rust";
+        if (has(d, "Gemfile")) return "Ruby";
+        String prefix = d.isEmpty() ? "" : d + "/";
+        if (files.keySet().stream().anyMatch(p -> p.startsWith(prefix) && !p.substring(prefix.length()).contains("/") && p.endsWith(".csproj")))
+            return ".NET";
         return null;
     }
 
@@ -167,7 +183,7 @@ public final class ProjectAnalyzer {
             int i = p.lastIndexOf('/');
             String dir = i < 0 ? "" : p.substring(0, i), name = p.substring(i + 1);
             if (!dir.isEmpty() && dir.split("/").length > 3) continue;
-            if (Set.of("package.json", "index.html", "pom.xml", "build.gradle", "build.gradle.kts", "requirements.txt", "pyproject.toml", "go.mod", "manage.py", "composer.json").contains(name))
+            if (Set.of("package.json", "index.html", "pom.xml", "build.gradle", "build.gradle.kts", "requirements.txt", "pyproject.toml", "go.mod", "manage.py", "composer.json", "Cargo.toml", "Gemfile").contains(name) || name.endsWith(".csproj"))
                 out.add(dir);
         }
         return new ArrayList<>(out);
@@ -197,10 +213,108 @@ public final class ProjectAnalyzer {
 
     private int rank(Candidate c) {
         int depth = c.dir().isEmpty() ? 0 : c.dir().split("/").length;
-        int score = c.prebuilt() ? 300 : "vite".equals(c.kind()) ? 0 : 100;
+        int score = c.prebuilt() ? 300 : "service".equals(c.kind()) ? -10 : "vite".equals(c.kind()) ? 0 : 100;
         String first = c.dir().isEmpty() ? "" : c.dir().split("/")[0].toLowerCase();
         if (!c.dir().isEmpty() && FRONT_DIR_HINTS.stream().noneMatch(first::contains)) score += 20;
         return score + depth * 10;
+    }
+
+    private static final Pattern LOCALHOST_URL = Pattern.compile("https?://(?:localhost|127\\.0\\.0\\.1):\\d{2,5}");
+    private static final Pattern SECRET_FILE = Pattern.compile("(?i)(^|/)(\\.env(\\.(?!example|sample|template)[a-z0-9_-]+)?|id_rsa|.*\\.(pem|key|p12|pfx))$");
+    private static final Map<String, Pattern> MIDDLEWARE_PATTERNS = Map.ofEntries(
+            Map.entry("Redis", Pattern.compile("(?i)(?:^|[^a-z0-9_])(redis|ioredis|aioredis|spring-boot-starter-data-redis|go-redis)(?:[^a-z0-9_]|$)")),
+            Map.entry("MySQL", Pattern.compile("(?i)(?:^|[^a-z0-9_])(mysql|mysql2|pymysql|mysql-connector)(?:[^a-z0-9_]|$)")),
+            Map.entry("MongoDB", Pattern.compile("(?i)(?:^|[^a-z0-9_])(mongodb|mongoose|pymongo|mongo-driver)(?:[^a-z0-9_]|$)")),
+            Map.entry("Kafka", Pattern.compile("(?i)(?:^|[^a-z0-9_])(kafka|kafkajs|confluent-kafka|spring-kafka)(?:[^a-z0-9_]|$)")),
+            Map.entry("RabbitMQ", Pattern.compile("(?i)(?:^|[^a-z0-9_])(rabbitmq|amqplib|pika|spring-boot-starter-amqp)(?:[^a-z0-9_]|$)")),
+            Map.entry("Elasticsearch", Pattern.compile("(?i)(?:^|[^a-z0-9_])(elasticsearch|opensearch)(?:[^a-z0-9_]|$)")),
+            Map.entry("微服务框架 (Spring Cloud/Nacos/Dubbo)", Pattern.compile("(?i)(spring-cloud|nacos|dubbo|consul|eureka)"))
+    );
+
+    private void serviceWarnings(com.tcl.csot.zhiye.service.runtime.ServiceRuntimeDetector.Spec s, List<Warning> out) {
+        out.add(info("service-runtime", "单体应用容器托管（" + s.framework() + "）",
+                "平台将按 " + s.runtime().toUpperCase() + " 单体应用自动构建并托管运行，通过环境变量 PORT 注入监听端口（默认 " + s.port()
+                        + "），并自动透传华星 SSO 登录身份。部署后可在工作台「服务托管」调整启动命令、环境变量、独立 PostgreSQL Schema 与 /data 持久化卷。"));
+        if (!s.frontendDir().isEmpty()) {
+            out.add(info("fullstack", "识别到前后端一体仓库",
+                    "将同时构建前端目录 " + s.frontendDir() + "/ 与后端服务" + (s.backendDir().isEmpty() ? "" : "（" + s.backendDir() + "/）")
+                            + "，同域部署无跨域问题；如只想托管纯静态前端，可在上方改选对应前端目录。"));
+        }
+
+        // 预检 1：敏感凭证文件（.env / .pem / .key）
+        List<String> secrets = files.keySet().stream()
+                .filter(p -> SECRET_FILE.matcher(p).find())
+                .limit(3).toList();
+        if (!secrets.isEmpty()) {
+            out.add(risk("secret-file", "压缩包包含敏感配置文件",
+                    "检测到 " + String.join("、", secrets) + "。请勿把本地密钥或 .env 打包进代码，建议删除后改在工作台「服务托管 → 环境变量」加密托管。"));
+        }
+
+        // 预检 2：外部中间件 / 微服务依赖（明确告知平台能力边界）
+        StringBuilder manifestBlob = new StringBuilder();
+        for (String p : List.of("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
+                "requirements.txt", "pyproject.toml", "package.json", "pom.xml", "build.gradle", "go.mod")) {
+            String rootTxt = read("", p);
+            if (rootTxt != null) manifestBlob.append('\n').append(rootTxt);
+            if (!s.backendDir().isEmpty()) {
+                String bTxt = read(s.backendDir(), p);
+                if (bTxt != null) manifestBlob.append('\n').append(bTxt);
+            }
+        }
+        if (!manifestBlob.isEmpty()) {
+            String blob = manifestBlob.toString();
+            List<String> hitMw = new ArrayList<>();
+            for (var e : MIDDLEWARE_PATTERNS.entrySet()) {
+                if (e.getValue().matcher(blob).find()) hitMw.add(e.getKey());
+            }
+            if (!hitMw.isEmpty()) {
+                out.add(risk("middleware-deps", "检测到外部中间件或微服务依赖",
+                        "项目引用了 " + String.join("、", hitMw)
+                                + "。织页单体托管内置独立 PostgreSQL Schema 与 /data 持久化卷，不内置独立中间件或微服务注册中心；请改为 PostgreSQL / SQLite，或在「服务托管 → 环境变量」配置已有内网连接地址。"));
+            }
+        }
+
+        // 预检 3：前端源码硬编码 http://localhost:xxxx / 127.0.0.1:xxxx
+        String frontPrefix = s.frontendDir().isEmpty() ? "" : s.frontendDir() + "/";
+        long budget = SCAN_TOTAL_MAX;
+        String hardcodedFile = null;
+        String hardcodedUrl = null;
+        for (var e : files.entrySet()) {
+            String p = e.getKey();
+            if (!frontPrefix.isEmpty() && !p.startsWith(frontPrefix)) continue;
+            if (e.getValue() > SCAN_FILE_MAX || !SCAN_EXT.matcher(p).matches()) continue;
+            if (p.matches("(?i).*(?:^|/)(?:vite\\.config|webpack\\.config|vue\\.config|test|tests|__tests__|spec).*")) continue;
+            budget -= e.getValue();
+            if (budget < 0) break;
+            String content = reader.apply(p);
+            if (content == null) continue;
+            Matcher m = LOCALHOST_URL.matcher(content);
+            if (m.find()) {
+                hardcodedFile = p;
+                hardcodedUrl = m.group();
+                break;
+            }
+        }
+        if (hardcodedFile != null) {
+            out.add(risk("hardcoded-localhost", "前端硬编码了本机接口地址",
+                    "在 " + hardcodedFile + " 中检测到 " + hardcodedUrl
+                            + "，部署上线后浏览器会请求访问者本机导致接口报错。建议改为同域相对路径（如 /api），部署后将由同域名自动转发至后端。"));
+        }
+
+        // 预检 4：后端启动命令未自动注入 PORT 且入口疑似写死端口
+        boolean cmdInjectsPort = s.startCmd().contains("PORT");
+        if (!cmdInjectsPort && ("python".equals(s.runtime()) || "node".equals(s.runtime()) || "go".equals(s.runtime()))) {
+            String bdir = s.backendDir();
+            String entrySrc = firstText(bdir, "main.py", "app.py", "server.py", "server.js", "index.js", "src/index.js", "src/server.js", "main.go");
+            if (entrySrc != null && !entrySrc.contains("PORT") && !entrySrc.contains("SERVER_PORT")
+                    && Pattern.compile("(?i)(\\.listen\\(\\s*\\d{3,5}|port\\s*=\\s*\\d{3,5}|ListenAndServe\\(\\s*\"[^\"]*:\\d{3,5})").matcher(entrySrc).find()) {
+                out.add(risk("port-env", "后端疑似写死了监听端口",
+                        "入口代码未检测到读取 PORT / SERVER_PORT 环境变量，部署后可能无法通过端口健康检查。建议改为读取 PORT（默认 8080）并绑定 0.0.0.0。"));
+            }
+        }
+
+        out.add(info("scale-to-zero", "支持闲置自动休眠",
+                "单体服务默认开启 2 天（2880 分钟）无访问自动休眠（Pod 缩容到 0 释放算力），再次打开链接时自动唤醒，可在「服务托管」随时调整时长。"));
     }
 
     // ---------- 风险 ----------

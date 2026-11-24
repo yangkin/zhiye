@@ -207,6 +207,7 @@ export function detectFramework(files, readText) {
   const has = (f) => files.includes(f)
   const result = (framework, projectKind, unsupportedReason = null, extra = {}) => ({ framework, deployable: !unsupportedReason, unsupportedReason, projectKind: unsupportedReason ? null : projectKind, ...extra })
   const htmlLabel = () => (files.filter((f) => /\.html?$/i.test(f)).length === 1 ? 'HTML' : '静态站点')
+  if (has('Dockerfile')) return result('Docker 自定义服务', 'service', null, { runtime: 'dockerfile' })
   if (has('package.json')) {
     let pkg = null
     try { pkg = JSON.parse(readText('package.json')) } catch {}
@@ -214,17 +215,18 @@ export function detectFramework(files, readText) {
     const deps = { ...(pkg.peerDependencies || {}), ...(pkg.devDependencies || {}), ...(pkg.dependencies || {}) }
     const d = (n) => Object.prototype.hasOwnProperty.call(deps, n)
     const build = String(pkg.scripts?.build || '')
+    const start = String(pkg.scripts?.start || '')
     if (d('next')) {
       const cfg = ['next.config.js', 'next.config.mjs', 'next.config.ts', 'next.config.cjs'].filter(has).map(readText).join('\n')
       if (/output\s*:\s*['"]export['"]/.test(cfg) || /next export/.test(build)) return result('Next.js（静态导出）', 'vite', null, { buildTool: 'next' })
-      return result('Next.js', null, UNSUPPORTED('Next.js', "需要服务端运行环境。如果项目可以静态导出（next.config 里 output: 'export'），请开启后重新导入"))
+      return result('Next.js (SSR)', 'service', null, { runtime: 'node' })
     }
     if (d('nuxt') || d('nuxt3')) return result('Nuxt.js', null, UNSUPPORTED('Nuxt.js', '需要服务端运行环境。如果项目可以 nuxt generate 生成静态站点，请上传生成后的 .output/public 目录'))
     if (d('@tarojs/taro') || d('@dcloudio/uni-app')) return result(d('@tarojs/taro') ? 'Taro' : 'uni-app', null, '暂不支持部署小程序 / 跨端项目，请导入它构建出的 H5 产物（包含 index.html 的目录）')
     const ui = UI_LIBS.find(([n]) => d(n))?.[1] ?? null
     const tool = BUILD_TOOLS.find(([n]) => d(n))?.[1] ?? null
     if (!ui && !tool) {
-      if (SERVER_LIBS.some(d)) return result('Node.js 服务端', null, UNSUPPORTED('Node.js 服务端'))
+      if (SERVER_LIBS.some(d) || start.trim()) return result('Node.js 服务端', 'service', null, { runtime: 'node' })
       if (has('index.html')) return result(htmlLabel(), 'static')
       return result('未知', null, '无法识别项目类型：package.json 里没有前端框架或构建工具，目录里也没有 index.html')
     }
@@ -235,9 +237,9 @@ export function detectFramework(files, readText) {
     const framework = !tool ? ui : !ui || ['Angular CLI', 'Create React App', 'Umi'].includes(tool) ? tool : `${tool} + ${ui}`
     return result(framework, 'vite', null, { buildTool: tool || 'script' })
   }
-  if (has('requirements.txt') || has('pyproject.toml') || has('manage.py')) return result('Python', null, UNSUPPORTED('Python'))
-  if (has('go.mod')) return result('Go', null, UNSUPPORTED('Go'))
-  if (has('pom.xml') || has('build.gradle') || has('build.gradle.kts')) return result('Java', null, UNSUPPORTED('Java'))
+  if (has('requirements.txt') || has('pyproject.toml') || has('manage.py') || has('app.py') || has('main.py') || has('server.py')) return result('Python', 'service', null, { runtime: 'python' })
+  if (has('go.mod') || has('main.go')) return result('Go', 'service', null, { runtime: 'go' })
+  if (has('pom.xml') || has('build.gradle') || has('build.gradle.kts')) return result('Java', 'service', null, { runtime: 'java' })
   if (has('composer.json')) return result('PHP', null, UNSUPPORTED('PHP'))
   if (has('index.html')) return result(htmlLabel(), 'static')
   return result('未知', null, '无法识别项目类型：根目录没有 index.html')

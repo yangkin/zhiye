@@ -32,6 +32,8 @@ public class VersionService {
     private final Views views;
     private final JdbcClient jdbc;
     private final com.tcl.csot.zhiye.repository.MessageRepository messages;
+    @org.springframework.beans.factory.annotation.Autowired(required = false) @org.springframework.context.annotation.Lazy
+    private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
     public VersionService(VersionRepository versions, AppRepository apps, DraftRepository drafts, TaskRepository tasks,
                           GitService git, ObjectStore store, Views views, JdbcClient jdbc,
@@ -175,6 +177,9 @@ public class VersionService {
         VersionRow v = versions.insert(app.id(), title, "restore", c.commit(), c.tree(), app.currentVersionId(), target.id(), null,
                 target.buildId());
         jdbc.sql("update app set current_version_id = ?, phase = 'ready', updated_at = now() where id = ?").params(v.id(), app.id()).update();
+        if (app.isService() && monolithService != null) {
+            monolithService.initializeAndDeploy(apps.findById(app.id()).orElse(app), v);
+        }
         // 对话里留一行记录，方便回看「什么时候回到了哪个版本」
         messages.insert(app.id(), "system", "已回到 V" + target.number() + "，内容已保存为 V" + v.number(), null, null, "ok");
         return views.version(v, apps.findById(app.id()).orElseThrow());

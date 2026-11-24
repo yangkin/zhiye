@@ -159,8 +159,17 @@ export const APP_AI = `
 - 不要在代码里写模型地址或任何密钥，不要直连外部模型接口。调用较慢（几秒到几十秒），要有加载状态和失败提示（error.message 是中文，可以直接显示）。
 - 先用 \`window.zhiye?.ai\` 判断是否可用（本地直接打开 dist 时没有），不可用时给出提示而不是报错。需要时用 read 读取内置技能 app-ai 的说明。`
 
+const SERVICE = `
+## 项目形态（单体后端 / 全栈应用）
+- 这是一个运行在织页容器托管环境中的单体后端或前后端一体项目（Python / Node.js / Java / Go）。
+- 服务监听端口必须优先读取环境变量 \`PORT\`（默认 \`8080\`），绑定 \`0.0.0.0\`；不要把端口写死或改造成需要额外微服务中间件的架构。
+- 数据库与存储由工作台「服务托管」提供：PostgreSQL 连接串通过 \`DATABASE_URL\` / \`JDBC_DATABASE_URL\` 注入，持久化目录通过 \`DATA_DIR\`（默认 \`/data\`）注入；不要使用静态站点的 \`cloud/schema.sql\`、\`window.zhiye\` 或 \`request_confirm(cloud)\`。
+- 平台网关已透传华星 SSO 身份请求头（\`X-Zhiye-User-Id\` / \`X-Zhiye-User-Login\` / \`X-Zhiye-User-Name\` / \`X-Zhiye-User-Admin\`），可直接读取。
+- 尽量沿用项目原有目录结构、语言和框架风格，修改完后端或前端代码后保持语法正确与启动入口一致（无需调用静态页面的 screenshot 工具）。`
+
 export function systemPrompt(projectKind, cloudEnabled = false) {
   if (projectKind === 'skill') return SKILL
+  if (projectKind === 'service') return COMMON + '\n' + SERVICE
   const extra = projectKind === 'static' ? STATIC : projectKind === 'vite' ? VITE : projectKind === 'vue' ? VUE : projectKind === 'script' ? SCRIPT : TEMPLATE
   // 启用云服务的应用：把云能力与建表约定告诉 agent，否则它只会写死示例数据
   // 脚本项目没有页面：不带云服务、应用内 AI 和截图自查的说明

@@ -61,16 +61,26 @@ class ImportInspectorTest {
     @Test
     void detectsFrameworks() throws Exception {
         assertThat(ImportInspector.inspectZip(zip(m("a/package.json", "{\"dependencies\":{\"next\":\"15\",\"react\":\"19\"}}")), LIMITS))
-                .satisfies(r -> { assertThat(r.framework()).isEqualTo("Next.js"); assertThat(r.deployable()).isFalse(); assertThat(r.unsupportedReason()).contains("Next.js"); });
+                .satisfies(r -> { assertThat(r.framework()).contains("Next.js"); assertThat(r.deployable()).isTrue(); assertThat(r.projectKind()).isEqualTo("service"); });
         assertThat(ImportInspector.inspectZip(zip(m("package.json", "{\"dependencies\":{\"nuxt\":\"3\"}}")), LIMITS).framework()).isEqualTo("Nuxt.js");
         var vite = ImportInspector.inspectZip(zip(m("v/package.json", "{\"dependencies\":{\"react\":\"19\"},\"devDependencies\":{\"vite\":\"7\"}}", "v/index.html", "<div id=root>")), LIMITS);
         assertThat(vite.framework()).isEqualTo("Vite + React");
         assertThat(vite.projectKind()).isEqualTo("vite");
         assertThat(ImportInspector.inspectZip(zip(m("package.json", "{\"dependencies\":{\"vue\":\"3\",\"vite\":\"7\"}}")), LIMITS).framework()).isEqualTo("Vite + Vue");
         assertThat(ImportInspector.inspectZip(zip(m("package.json", "{\"dependencies\":{\"react\":\"19\"}}")), LIMITS).framework()).isEqualTo("React");
-        assertThat(ImportInspector.inspectZip(zip(m("app.py", "print(1)", "requirements.txt", "flask")), LIMITS).framework()).isEqualTo("Python");
-        assertThat(ImportInspector.inspectZip(zip(m("go.mod", "module x")), LIMITS).framework()).isEqualTo("Go");
-        assertThat(ImportInspector.inspectZip(zip(m("pom.xml", "<project/>")), LIMITS).framework()).isEqualTo("Java");
+        var py = ImportInspector.inspectZip(zip(m("app.py", "print(1)", "requirements.txt", "flask")), LIMITS);
+        assertThat(py.framework()).contains("Python");
+        assertThat(py.deployable()).isTrue();
+        assertThat(py.projectKind()).isEqualTo("service");
+        var go = ImportInspector.inspectZip(zip(m("go.mod", "module x")), LIMITS);
+        assertThat(go.framework()).isEqualTo("Go");
+        assertThat(go.deployable()).isTrue();
+        assertThat(go.projectKind()).isEqualTo("service");
+        var java = ImportInspector.inspectZip(zip(m("pom.xml", "<project/>")), LIMITS);
+        assertThat(java.framework()).contains("Java");
+        assertThat(java.deployable()).isTrue();
+        assertThat(java.projectKind()).isEqualTo("service");
+        assertThat(ImportInspector.inspectZip(zip(m("composer.json", "{}")), LIMITS).deployable()).isFalse();
         assertThat(ImportInspector.inspectZip(zip(m("readme.md", "hi")), LIMITS).deployable()).isFalse();
     }
 
@@ -100,7 +110,7 @@ class ImportInspectorTest {
     static java.util.List<String> codes(ImportInspector.Result r) { return r.warnings().stream().map(ProjectAnalyzer.Warning::code).toList(); }
 
     @Test
-    void fullStackRepoDeploysOnlyFrontendAndExplainsBackendAndApi() throws Exception {
+    void fullStackRepoOffersMonolithServiceAndFrontendCandidate() throws Exception {
         var r = ImportInspector.inspectZip(zip(m(
                 "repo/pom.xml", "<project/>",
                 "repo/src/main/java/App.java", "class App {}",
@@ -110,11 +120,12 @@ class ImportInspectorTest {
                 "repo/frontend/src/api.ts", "import axios from 'axios'\nexport const list = () => axios.get('/api/users')",
                 "repo/frontend/src/router.ts", "createRouter({ history: createWebHistory() })")), LIMITS);
         assertThat(r.deployable()).isTrue();
-        assertThat(r.rootDir()).isEqualTo("frontend");
-        assertThat(r.projectKind()).isEqualTo("vite");
-        assertThat(r.framework()).isEqualTo("Vite + Vue");
-        assertThat(codes(r)).contains("backend", "api", "typecheck", "history", "no-lock", "editable");
-        assertThat(r.warnings().stream().filter(w -> w.code().equals("api")).findFirst().orElseThrow().detail()).contains("/api/", "proxy");
+        assertThat(r.rootDir()).isEmpty();
+        assertThat(r.projectKind()).isEqualTo("service");
+        assertThat(r.framework()).contains("Java").contains("Vue");
+        assertThat(r.candidates()).extracting(ProjectAnalyzer.Candidate::dir).containsExactly("", "frontend");
+        assertThat(r.candidates().get(1).kind()).isEqualTo("vite");
+        assertThat(codes(r)).contains("service-runtime", "fullstack", "scale-to-zero");
     }
 
     @Test
@@ -153,13 +164,64 @@ class ImportInspectorTest {
         var s = ImportInspector.inspectZip(zip(m("index.html", "<h1>x</h1>", "about/index.html", "<p>a</p>", "app.js", "fetch('/api/list')")), LIMITS);
         assertThat(s.candidates()).hasSize(1);
         assertThat(codes(s)).contains("api");
-        assertThat(ImportInspector.inspectZip(zip(m("pom.xml", "<project/>", "src/App.java", "x")), LIMITS).unsupportedReason()).contains("Java", "前端");
-        assertThat(ImportInspector.inspectZip(zip(m("package.json", "{\"dependencies\":{\"express\":\"4\"}}")), LIMITS).framework()).isEqualTo("Node.js 服务端");
+        assertThat(ImportInspector.inspectZip(zip(m("pom.xml", "<project/>", "src/App.java", "x")), LIMITS).deployable()).isTrue();
+        var exp = ImportInspector.inspectZip(zip(m("package.json", "{\"dependencies\":{\"express\":\"4\"}}")), LIMITS);
+        assertThat(exp.framework()).contains("Express");
+        assertThat(exp.deployable()).isTrue();
+        assertThat(exp.projectKind()).isEqualTo("service");
     }
 
     @Test
     void htmlChecks() {
         assertThat(ImportInspector.inspectHtml("<!doctype html><h1>hi</h1>".getBytes(), LIMITS).framework()).isEqualTo("HTML");
         assertThatThrownBy(() -> ImportInspector.inspectHtml("   ".getBytes(), LIMITS)).isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void messyNestedZipAndJunkDirsAutoUnwrapped() throws Exception {
+        // 业务用户常见的三层套壳 + .venv / __pycache__ / .idea / __MACOSX 混乱压缩包
+        var r = ImportInspector.inspectZip(zip(m(
+                "外包交付-v2/proj-final/my-app/requirements.txt", "fastapi\nuvicorn\n",
+                "外包交付-v2/proj-final/my-app/main.py", "import os\nport = int(os.environ.get('PORT', 8000))\n",
+                "外包交付-v2/proj-final/my-app/.venv/lib/site.py", "pass",
+                "外包交付-v2/proj-final/my-app/__pycache__/main.cpython-312.pyc", "bin",
+                "外包交付-v2/proj-final/my-app/.idea/workspace.xml", "<xml/>",
+                "__MACOSX/._README", "mac"
+        )), LIMITS);
+        assertThat(r.deployable()).isTrue();
+        assertThat(r.projectKind()).isEqualTo("service");
+        assertThat(r.rootDir()).isEmpty();
+        assertThat(r.files()).extracting(ImportInspector.FileInfo::path)
+                .containsExactlyInAnyOrder("requirements.txt", "main.py");
+    }
+
+    @Test
+    void preflightRiskScannersCatchSecretsMiddlewareLocalhostAndPort() throws Exception {
+        // 混合多项高风险项的真实反面用例：.env 凭证 + Redis/MySQL + 前端硬编码 localhost + 写死端口
+        var r = ImportInspector.inspectZip(zip(m(
+                "bad-app/requirements.txt", "flask\nredis==5.0.0\npymysql==1.1.0\n",
+                "bad-app/.env", "SECRET_KEY=prod-secret-value\n",
+                "bad-app/app.py", "from flask import Flask\napp = Flask(__name__)\napp.run(host='127.0.0.1', port=5000)\n",
+                "bad-app/frontend/src/api.ts", "export const API = 'http://localhost:8000/api'\n"
+        )), LIMITS);
+        assertThat(r.deployable()).isTrue();
+        assertThat(r.projectKind()).isEqualTo("service");
+        assertThat(r.warnings()).extracting(ProjectAnalyzer.Warning::code)
+                .contains("secret-file", "middleware-deps", "hardcoded-localhost", "port-env");
+    }
+
+    @Test
+    void unsupportedLanguagesAndBrokenManifestsGiveClearBoundaryMessage() throws Exception {
+        var rust = ImportInspector.inspectZip(zip(m(
+                "Cargo.toml", "[package]\nname = \"api\"\n",
+                "src/main.rs", "fn main() {}"
+        )), LIMITS);
+        assertThat(rust.deployable()).isFalse();
+        assertThat(rust.unsupportedReason()).contains("Rust").contains("Dockerfile");
+
+        var brokenPkg = ImportInspector.inspectZip(zip(m(
+                "package.json", "{ broken json !!"
+        )), LIMITS);
+        assertThat(brokenPkg.deployable()).isFalse();
     }
 }

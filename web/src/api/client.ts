@@ -573,6 +573,26 @@ export const api = {
     }),
   unpublish: (appId: string) => request<void>(`/api/apps/${enc(appId)}/unpublish`, { method: 'POST' }),
 
+  // 单体后端应用托管
+  serviceStatus: (appId: string) => request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service`),
+  serviceUpdateConfig: (appId: string, input: Record<string, unknown>) =>
+    request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service`, { method: 'PATCH', body: input }),
+  serviceUpdateEnv: (appId: string, vars: { key: string; value: string; secret: boolean; keepExisting?: boolean }[]) =>
+    request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/env`, { method: 'PUT', body: { vars } }),
+  serviceDeploy: (appId: string, versionId?: string) =>
+    request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/deploy`, {
+      method: 'POST',
+      body: versionId ? { versionId } : {},
+    }),
+  serviceStart: (appId: string) => request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/start`, { method: 'POST' }),
+  serviceStop: (appId: string) => request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/stop`, { method: 'POST' }),
+  serviceSleep: (appId: string) => request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/sleep`, { method: 'POST' }),
+  serviceRestart: (appId: string) => request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/restart`, { method: 'POST' }),
+  serviceLogs: (appId: string, tail = 200) =>
+    request<import('./types').MonolithLogs>(`/api/apps/${enc(appId)}/service/logs?tail=${tail}`),
+  serviceDockerfile: (appId: string) =>
+    request<import('./types').MonolithDockerfile>(`/api/apps/${enc(appId)}/service/dockerfile`),
+
   // 导入
   uploadImport: (file: Blob, fileName: string, folderName?: string, signal?: AbortSignal) => {
     const form = new FormData();
@@ -611,6 +631,8 @@ export const api = {
       { method: 'PUT', body },
     ),
   adminUnpublishApp: (id: string) => request<{ id: string; name: string; published: boolean }>(`/api/admin/apps/${enc(id)}/unpublish`, { method: 'POST', body: {} }),
+  adminControlService: (appId: string, action: 'sleep' | 'stop' | 'start') =>
+    request<import('./types').MonolithServiceStatus>(`/api/admin/services/${enc(appId)}/${action}`, { method: 'POST', body: {} }),
   adminRestoreApp: (id: string) => request<{ id: string; name: string; restored: boolean }>(`/api/admin/apps/${enc(id)}/restore`, { method: 'POST', body: {} }),
   adminDeleteApp: (id: string) => request<{ id: string; name: string; deleted: boolean }>(`/api/admin/apps/${enc(id)}`, { method: 'DELETE' }),
   adminPurgeApp: (id: string) => request<{ id: string; name: string; purged: boolean }>(`/api/admin/apps/${enc(id)}/purge`, { method: 'DELETE' }),

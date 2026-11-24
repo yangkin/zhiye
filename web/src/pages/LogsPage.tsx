@@ -2896,6 +2896,7 @@ function SchemasView() {
 
 const CATEGORY_LABELS: Record<string, string> = {
   ALL: '全部链路事件',
+  service_runtime: '单体服务托管 (service_runtime)',
   llm_gateway: '模型网关与问答 (llm_gateway)',
   api_error: '接口异常与堆栈 (api_error)',
   cloud_schema: '云库 Schema (cloud_schema)',
@@ -3039,13 +3040,13 @@ function PlatformEventsView() {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th scope="col">时间</th>
-                  <th scope="col">类别 / 动作</th>
-                  <th scope="col">状态</th>
-                  <th scope="col">耗时</th>
+                  <th scope="col" className="dash-nowrap">时间</th>
+                  <th scope="col" className="dash-nowrap">类别 / 动作</th>
+                  <th scope="col" className="dash-nowrap">状态</th>
+                  <th scope="col" className="dash-nowrap">耗时</th>
                   <th scope="col">关联任务 / 应用</th>
-                  <th scope="col">摘要</th>
-                  <th scope="col">详情</th>
+                  <th scope="col" style={{ minWidth: 280 }}>摘要</th>
+                  <th scope="col" className="dash-nowrap">详情</th>
                 </tr>
               </thead>
               <tbody>

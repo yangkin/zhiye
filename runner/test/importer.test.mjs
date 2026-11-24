@@ -119,7 +119,7 @@ const detect = (files) => detectFramework(Object.keys(files), (f) => files[f])
 
 test('框架识别', () => {
   const cases = [
-    [{ 'package.json': pkg({ next: '15', react: '19' }) }, 'Next.js', false, /Next\.js/],
+    [{ 'package.json': pkg({ next: '15', react: '19' }) }, 'Next.js (SSR)', true],
     [{ 'package.json': pkg({ nuxt: '3', vue: '3' }) }, 'Nuxt.js', false, /Nuxt/],
     [{ 'package.json': pkg({ react: '19' }, { vite: '7' }), 'index.html': '' }, 'Vite + React', true],
     [{ 'package.json': pkg({ vue: '3' }, { vite: '7' }) }, 'Vite + Vue', true],
@@ -128,14 +128,16 @@ test('框架识别', () => {
     [{ 'package.json': JSON.stringify({ scripts: { build: 'vue-cli-service build' }, dependencies: { vue: '2' }, devDependencies: { '@vue/cli-service': '5' } }) }, 'Vue CLI + Vue', true],
     [{ 'package.json': JSON.stringify({ scripts: { build: 'react-scripts build' }, dependencies: { react: '18', 'react-scripts': '5' } }) }, 'Create React App', true],
     [{ 'package.json': JSON.stringify({ scripts: { build: 'next build' }, dependencies: { next: '15' } }), 'next.config.mjs': "export default { output: 'export' }" }, 'Next.js（静态导出）', true],
-    [{ 'package.json': pkg({ express: '4' }) }, 'Node.js 服务端', false, /服务端/],
+    [{ 'package.json': pkg({ express: '4' }) }, 'Node.js 服务端', true],
     [{ 'package.json': pkg({ '@tarojs/taro': '3', react: '18' }) }, 'Taro', false, /小程序/],
     [{ 'package.json': pkg({ vue: '2' }) }, 'Vue', false, /Vue/],
-    [{ 'app.py': '', 'requirements.txt': 'flask' }, 'Python', false, /Python/],
-    [{ 'pyproject.toml': '' }, 'Python', false],
-    [{ 'go.mod': '' }, 'Go', false, /Go/],
-    [{ 'pom.xml': '' }, 'Java', false, /Java/],
-    [{ 'build.gradle': '' }, 'Java', false],
+    [{ 'app.py': '', 'requirements.txt': 'flask' }, 'Python', true],
+    [{ 'pyproject.toml': '' }, 'Python', true],
+    [{ 'go.mod': '' }, 'Go', true],
+    [{ 'pom.xml': '' }, 'Java', true],
+    [{ 'build.gradle': '' }, 'Java', true],
+    [{ 'Dockerfile': 'FROM alpine' }, 'Docker 自定义服务', true],
+    [{ 'composer.json': '{}' }, 'PHP', false, /PHP/],
     [{ 'index.html': '' }, 'HTML', true],
     [{ 'index.html': '', 'about.html': '', 'a.css': '' }, '静态站点', true],
     [{ 'package.json': pkg({ lodash: '4' }), 'index.html': '' }, 'HTML', true],
@@ -151,7 +153,10 @@ test('框架识别', () => {
   }
   assert.equal(detect({ 'package.json': pkg({ react: '19' }, { vite: '7' }) }).projectKind, 'vite')
   assert.equal(detect({ 'index.html': '' }).projectKind, 'static')
-  assert.match(detect({ 'package.json': pkg({ next: '15' }) }).unsupportedReason, /^暂不支持部署 Next\.js 项目：需要服务端运行环境。.*output: 'export'/)
+  assert.equal(detect({ 'package.json': pkg({ express: '4' }) }).projectKind, 'service')
+  assert.equal(detect({ 'app.py': '', 'requirements.txt': 'fastapi' }).projectKind, 'service')
+  assert.equal(detect({ 'go.mod': '' }).projectKind, 'service')
+  assert.equal(detect({ 'pom.xml': '' }).projectKind, 'service')
 })
 
 test('rootDir：只导入选中的子目录（前后端同仓库时只部署前端）', () => {

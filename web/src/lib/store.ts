@@ -17,7 +17,10 @@ interface UiState {
   sourcesOpen: boolean;
   setSourcesOpen: (open: boolean) => void;
   helpOpen: boolean;
+  helpTab: 'docs' | 'chat';
   setHelpOpen: (open: boolean) => void;
+  setHelpTab: (tab: 'docs' | 'chat') => void;
+  openHelp: (tab?: 'docs' | 'chat') => void;
   setImportOpen: (open: boolean) => void;
 }
 
@@ -29,7 +32,10 @@ export const useUi = create<UiState>((set) => ({
   sourcesOpen: false,
   setSourcesOpen: (sourcesOpen) => set({ sourcesOpen }),
   helpOpen: false,
+  helpTab: 'docs',
   setHelpOpen: (helpOpen) => set({ helpOpen }),
+  setHelpTab: (helpTab) => set({ helpTab }),
+  openHelp: (tab) => set((s) => ({ helpOpen: true, helpTab: tab ?? s.helpTab })),
   setImportOpen: (importOpen) => set({ importOpen }),
 }));
 

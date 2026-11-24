@@ -14,7 +14,8 @@ spec:
       labels: { app: zhiye-site }
     spec:
       serviceAccountName: zhiye-site
-      automountServiceAccountToken: false
+      # 需要按需唤醒 zhiye-apps 命名空间里已休眠的单体服务（最小权限 Role: zhiye-user-service-waker）
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001

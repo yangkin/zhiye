@@ -149,6 +149,20 @@ async function prompt(text) {
       event({ type: 'tool', id: 't' + turn + 'b', name: 'write', summary: '修改 SKILL.md', state: 'end', ok: true })
       return { text: '已编写周报生成 skill：SKILL.md、references/format.md、scripts/weekly.py。', turns: turn, aborted: false, error: null }
     }
+    const serviceEntry = ['app.py', 'main.py'].find((f) => fs.existsSync(path.join(cwd, f)))
+    if (serviceEntry && text.includes('请按用户的要求修改')) {
+      const p = path.join(cwd, serviceEntry)
+      let src = fs.readFileSync(p, 'utf8')
+      const repl = text.match(/改成[“"]([^”"]+)[”"]/)
+      if (repl && src.includes('v1-greeting')) {
+        src = src.replaceAll('v1-greeting', repl[1])
+      } else {
+        src = src + '\n# modified-by-chat\n'
+      }
+      fs.writeFileSync(p, src)
+      event({ type: 'tool', id: 't' + turn + 'b', name: 'write', summary: '修改 ' + serviceEntry, state: 'end', ok: true })
+      return { text: '已按要求修改后端服务 ' + serviceEntry + '。', turns: turn, aborted: false, error: null }
+    }
     const isStatic = fs.existsSync(path.join(cwd, 'index.html')) && !fs.existsSync(path.join(cwd, 'src/App.tsx'))
     let summary
     if (text.includes('请按用户的要求修改')) summary = modify(text, isStatic)
@@ -290,6 +304,9 @@ function verify(kind) {
   if (kind === 'skill') {
     const ok = fs.existsSync(path.join(cwd, 'SKILL.md')) && /^---[\s\S]*name:[\s\S]*description:[\s\S]*---/.test(fs.readFileSync(path.join(cwd, 'SKILL.md'), 'utf8'))
     return { ok, checks: [{ name: 'SKILL.md 检查', ok, detail: ok ? '' : 'SKILL.md 缺少 name 或 description' }], previewDir: null, publishDir: null, editable: false }
+  }
+  if (kind === 'service') {
+    return { ok: true, checks: [{ name: '脚本语法', ok: true, detail: '' }], previewDir: null, publishDir: null, editable: false }
   }
   if (kind === 'template') {
     const app = path.join(cwd, 'src/App.tsx')

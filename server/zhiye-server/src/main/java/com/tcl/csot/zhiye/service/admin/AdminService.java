@@ -66,6 +66,9 @@ public class AdminService {
     @Autowired(required = false)
     private com.tcl.csot.zhiye.service.repo.GitService git;
 
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
+
     @Autowired
     public AdminService(JdbcClient jdbc,
                         QuotaService quota,
@@ -140,6 +143,7 @@ public class AdminService {
                 .filter(f -> "open".equals(f.get("status")) || "in_progress".equals(f.get("status")))
                 .count());
         out.put("publishedApps", queryPublishedApps());
+        out.put("monolithServices", queryMonolithServices());
         out.put("allApps", queryAllApps());
         out.put("workspaces", queryWorkspaces());
         out.put("deletedApps", queryDeletedApps());
@@ -726,14 +730,86 @@ public class AdminService {
         return out;
     }
 
-    /** 强行下线已发布站点（不删除应用本体） */
+    /** 强行下线已发布站点（不删除应用本体；若为单体服务则同时停止运行实例） */
     public Map<String, Object> unpublishApp(String id, String actor) {
         AppRow app = apps.findById(id).orElseThrow(() -> ApiException.notFound("应用"));
         if (app.deletedAt() != null) throw ApiException.conflict("APP_DELETED", "应用已被删除，无需下线");
         jdbc.sql("update app set published_version_id = null, updated_at = now() where id = ?").param(id).update();
         jdbc.sql("update deployment set status = 'inactive' where app_id = ? and status = 'active'").param(id).update();
+        if (app.isService() && monolithService != null) {
+            try { monolithService.adminStop(id); } catch (Exception ignored) {}
+        }
         audit(actor, "APP_UNPUBLISH", "app", id, Map.of("name", app.name(), "workspaceId", app.workspaceId()));
         return Map.of("id", id, "name", app.name(), "published", false);
+    }
+
+    /** 管理员治理操作：强行休眠 / 停止 / 唤醒指定单体服务 */
+    public Map<String, Object> controlMonolithService(String appId, String action, String actor) throws Exception {
+        if (monolithService == null) throw ApiException.validation("当前环境未启用单体服务托管");
+        AppRow app = apps.findById(appId).filter(AppRow::isService).orElseThrow(() -> ApiException.notFound("单体服务"));
+        Map<String, Object> res;
+        String auditAction;
+        switch (action) {
+            case "sleep" -> { res = monolithService.adminSleep(appId); auditAction = "SERVICE_SLEEP"; }
+            case "stop" -> { res = monolithService.adminStop(appId); auditAction = "SERVICE_STOP"; }
+            case "start" -> { res = monolithService.adminStart(appId); auditAction = "SERVICE_START"; }
+            default -> throw ApiException.validation("不支持的服务操作：" + action);
+        }
+        audit(actor, auditAction, "app", appId, Map.of("name", app.name(), "workspaceId", app.workspaceId(), "action", action));
+        return res;
+    }
+
+    private List<Map<String, Object>> queryMonolithServices() {
+        return jdbc.sql("""
+                select s.app_id, a.name, a.slug, a.workspace_id, a.published_version_id,
+                       s.runtime, s.framework, s.status, s.port, s.memory_mb, s.cpu_millicores,
+                       s.idle_sleep_min, s.pg_enabled, s.pg_schema, s.pvc_enabled, s.pvc_size_gi,
+                       s.last_access_at, s.last_started_at, s.last_error, s.updated_at,
+                       u.login_name, u.real_name
+                from app_service s
+                join app a on a.id = s.app_id
+                left join workspace w on w.id = a.workspace_id
+                left join app_user u on u.id = w.owner_user_id
+                where a.deleted_at is null
+                order by case s.status when 'running' then 0 when 'failed' then 1 when 'building' then 2 when 'sleeping' then 3 else 4 end,
+                         s.updated_at desc
+                limit 200
+                """).query((rs, i) -> {
+            String appId = rs.getString("app_id");
+            String slug = rs.getString("slug");
+            String status = rs.getString("status");
+            if ("running".equals(status) && monolithService != null && !monolithService.isRunningNow(appId, slug)) {
+                status = "sleeping";
+            }
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("appId", appId);
+            m.put("name", rs.getString("name"));
+            m.put("slug", slug);
+            m.put("workspaceId", rs.getString("workspace_id"));
+            m.put("published", rs.getString("published_version_id") != null);
+            String login = rs.getString("login_name");
+            String real = rs.getString("real_name");
+            m.put("ownerLogin", login);
+            m.put("ownerRealName", real);
+            m.put("ownerName", displayName(real, login, rs.getString("workspace_id")));
+            m.put("runtime", rs.getString("runtime"));
+            m.put("framework", rs.getString("framework"));
+            m.put("provider", monolithService == null ? "local" : monolithService.providerName());
+            m.put("status", status);
+            m.put("port", rs.getInt("port"));
+            m.put("memoryMb", rs.getInt("memory_mb"));
+            m.put("cpuMillicores", rs.getInt("cpu_millicores"));
+            m.put("idleSleepMin", rs.getInt("idle_sleep_min"));
+            m.put("pgEnabled", rs.getBoolean("pg_enabled"));
+            m.put("pgSchema", rs.getString("pg_schema"));
+            m.put("pvcEnabled", rs.getBoolean("pvc_enabled"));
+            m.put("pvcSizeGi", rs.getInt("pvc_size_gi"));
+            m.put("lastAccessAt", Db.iso(Db.ts(rs, "last_access_at")));
+            m.put("lastStartedAt", Db.iso(Db.ts(rs, "last_started_at")));
+            m.put("lastError", rs.getString("last_error"));
+            m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+            return m;
+        }).list();
     }
 
     /** 从回收站恢复被软删除的应用 */
@@ -1237,6 +1313,10 @@ public class AdminService {
                 select distinct build_id from version
                 where app_id = ? and build_id is not null
                 """).param(id).query(String.class).list();
+
+        if (app.isService() && monolithService != null) {
+            monolithService.destroyForApp(app, true);
+        }
 
         jdbc.sql("delete from task_message_queue where app_id = ?").param(id).update();
         jdbc.sql("delete from draft where app_id = ?").param(id).update();

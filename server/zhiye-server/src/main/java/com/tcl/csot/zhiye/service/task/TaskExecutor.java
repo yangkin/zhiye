@@ -81,6 +81,8 @@ public class TaskExecutor {
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.ClusterSandboxService clusterSandbox;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
@@ -585,7 +587,15 @@ public class TaskExecutor {
 
         String title = modify ? modifyTitle(input.path("content").asText()) : "页面与交互生成完成";
         VersionRow ver = commit(ctx, app, title, modify ? "modify" : "generate", false);
-        String cloudNote = applyCloudSchema(ctx, app);
+        if (app.isService() && monolithService != null) {
+            phase(ctx, "COMMITTING", "正在重新构建并部署单体服务", 92);
+            try {
+                monolithService.initializeAndDeploy(app, ver);
+            } catch (Exception e) {
+                throw new TaskContext.Fail("BUILD_FAILED", "单体服务重新部署失败：" + e.getMessage());
+            }
+        }
+        String cloudNote = app.isService() ? null : applyCloudSchema(ctx, app);
         String finalSummary = summary == null || summary.isBlank() ? (modify ? "已完成修改。" : "已完成生成。") : summary.trim();
         if (ctx.manualVersionNumber > 0)
             finalSummary = "已先把你的手动修改保存为 V" + ctx.manualVersionNumber + "，AI 修改保存为 V" + ver.number() + "。\n\n" + finalSummary;
@@ -652,6 +662,21 @@ public class TaskExecutor {
         startRunner(ctx, false);
         ctx.prepared = true;
         phase(ctx, "VERIFYING", "正在检查", 60);
+        if (app.isService()) {
+            VersionRow ver = commit(ctx, app, "代码编辑 · " + files.size() + " 个文件", "code", false);
+            if (monolithService != null) {
+                phase(ctx, "RUNNING", "正在重新构建并部署单体服务", 85);
+                try {
+                    monolithService.initializeAndDeploy(app, ver);
+                    versionService.publishInternal(app.id(), ver.id());
+                } catch (Exception e) {
+                    throw new TaskContext.Fail("BUILD_FAILED", "代码已保存，但单体服务重新部署失败：" + e.getMessage());
+                }
+            }
+            messages.insert(app.id(), "assistant", "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "），单体服务已重新部署生效。", null, t.id(), "ok");
+            succeed(ctx, ver.id(), Json.obj().put("files", files.size()));
+            return;
+        }
         JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app.projectKind())));
         if (!v.path("ok").asBoolean(false)) throw new TaskContext.Fail("VERIFY_FAILED", "检查没有通过，修改未保存：" + failedSummary(v));
         VersionRow ver = commit(ctx, app, "代码编辑 · " + files.size() + " 个文件", "code", false);
@@ -699,6 +724,23 @@ public class TaskExecutor {
         }
         if (count == 0) throw new TaskContext.Fail("VALIDATION", "模板里没有文件");
         events.emit(ctx.id(), "tool", Map.of("id", "clone-files", "name", "write", "summary", "复制模板文件 · " + count + " 个", "state", "end", "ok", true));
+        if (app.isService()) {
+            phase(ctx, "VERIFYING", "正在提交单体项目源码", 45);
+            VersionRow ver = commit(ctx, app, "从模板「" + t.input().path("templateName").asText("") + "」复刻", "import", false);
+            phase(ctx, "COMMITTING", "正在构建并部署单体服务", 75);
+            if (monolithService == null) {
+                throw new TaskContext.Fail("SERVICE_RUNTIME_DISABLED", "当前环境未启用单体应用托管服务");
+            }
+            try {
+                monolithService.initializeAndDeploy(app, ver);
+            } catch (Exception e) {
+                throw new TaskContext.Fail("BUILD_FAILED", "单体服务部署失败：" + e.getMessage());
+            }
+            versionService.publishInternal(app.id(), ver.id());
+            jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
+            succeed(ctx, ver.id(), Json.obj().put("files", count).put("projectKind", "service"));
+            return;
+        }
         startRunner(ctx, false);
         ctx.prepared = true;
         if ("vite".equals(app.projectKind())) {
@@ -746,7 +788,12 @@ public class TaskExecutor {
         try (InputStream in = store.get(input.path("objectKey").asText()).orElseThrow(() -> new TaskContext.Fail("IMPORT_INVALID", "上传的文件已过期，请重新选择"))) {
             Files.copy(in, archive, StandardCopyOption.REPLACE_EXISTING);
         }
-        boolean vite = "vite".equals(input.path("projectKind").asText());
+        String requestedKind = input.path("projectKind").asText("static");
+        if ("service".equals(requestedKind)) {
+            runServiceImport(ctx, app, input, archive);
+            return;
+        }
+        boolean vite = "vite".equals(requestedKind);
         startRunner(ctx, vite);
         ctx.prepared = true;
 
@@ -784,6 +831,59 @@ public class TaskExecutor {
         jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
         ObjectNode result = Json.obj().put("framework", framework).put("projectKind", kind);
         result.set("notes", notes);
+        succeed(ctx, ver.id(), result);
+    }
+
+    /** 单体后端 / 前后端一体应用导入流程：安全解包 → 提交 V1 → 自动编译构建并启动托管实例 → 发布上线。 */
+    private void runServiceImport(TaskContext ctx, AppRow app, JsonNode input, Path archive) throws Exception {
+        if (monolithService == null) throw new TaskContext.Fail("SERVICE_DISABLED", "当前环境未启用单体后端托管服务");
+        phase(ctx, "RUNNING", "正在解包并识别单体应用", 15);
+        var imp = props.importer();
+        var limits = new com.tcl.csot.zhiye.service.importer.ImportInspector.Limits(
+                imp.maxUploadBytes(), imp.maxFiles(), imp.maxUnpackedBytes(), imp.maxFileBytes());
+        String rootDir = input.path("rootDir").asText("");
+        int extracted = com.tcl.csot.zhiye.service.importer.ImportInspector.extractZipToDir(archive, ctx.workspace, rootDir, limits);
+        events.emit(ctx.id(), "tool", Map.of("id", "svc-unpack", "name", "import", "summary", "解包单体项目 · " + extracted + " 个文件", "state", "end", "ok", true));
+
+        jdbc.sql("update app set project_kind = 'service' where id = ?").param(app.id()).update();
+        app = apps.findById(app.id()).orElseThrow();
+        VersionRow ver = commit(ctx, app, "导入单体项目并部署", "import", false);
+
+        phase(ctx, "VERIFYING", "正在构建并启动单体服务", 55);
+        com.tcl.csot.zhiye.service.runtime.MonolithServiceManager.ServiceRow svc = null;
+        String deployError = null;
+        try {
+            svc = monolithService.initializeAndDeploy(app, ver);
+        } catch (Exception e) {
+            deployError = e.getMessage();
+            svc = monolithService.find(app.id()).orElse(null);
+            log.warn("单体应用首次启动未就绪（保留源码 V1 供用户在「服务托管」补全环境变量或命令）app={}: {}", app.id(), deployError);
+        }
+        String fw = svc != null && svc.framework() != null ? svc.framework() : app.framework();
+        String rt = svc != null && svc.runtime() != null ? svc.runtime() : "service";
+        if (deployError == null) {
+            events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
+                    "summary", "单体服务启动就绪（" + fw + "）", "state", "end", "ok", true));
+            phase(ctx, "COMMITTING", "正在上线网关路由", 95);
+            versionService.publishInternal(app.id(), ver.id());
+        } else {
+            events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
+                    "summary", "源码已导入为 V1，但首次启动未就绪，请前往「服务托管」配置环境变量/数据库或启动命令后重新部署",
+                    "detail", deployError, "state", "end", "ok", false));
+            String shortErr = deployError.length() > 600 ? deployError.substring(0, 600) + "…" : deployError;
+            messages.insert(app.id(), "assistant",
+                    "源码已导入保存为 **V1**，但首次启动未就绪：\n\n```\n" + shortErr
+                            + "\n```\n\n请切换到右上角 **「服务托管」** 面板，按需补充环境变量（如 `STORAGE=sqlite`、密钥等）、开启独立 PostgreSQL Schema 或调整构建/启动命令后，点击 **「重新部署」** 即可上线。",
+                    null, ctx.id(), "ok");
+        }
+        jdbc.sql("update app set visible = true, phase = 'ready', framework = ?, updated_at = now() where id = ?")
+                .params(fw, app.id()).update();
+        ObjectNode result = Json.obj()
+                .put("framework", fw)
+                .put("projectKind", "service")
+                .put("runtime", rt)
+                .put("status", deployError == null ? "running" : "failed")
+                .put("deployPending", deployError != null);
         succeed(ctx, ver.id(), result);
     }
 
@@ -1394,7 +1494,7 @@ public class TaskExecutor {
     private VersionRow commit(TaskContext ctx, AppRow app, String title, String source, boolean clearDraft, String stage) throws Exception {
         phase(ctx, "COMMITTING", "visual".equals(stage) ? "正在保存你的手动修改" : "正在保存版本", "visual".equals(stage) ? 18 : 90);
         GitService.CommitResult c = git.commitWorkspace(app.id(), ctx.workspace, title + "\n\n织页任务 " + ctx.id(), ctx.id());
-        if (app.noPreview()) // 技能包和脚本项目没有页面构建产物，版本不关联 build
+        if (app.noPreview() || app.isService()) // 技能包、脚本和单体后端项目没有静态前端构建产物，版本不关联 build
             return versionService.createForTask(app.id(), ctx.id(), stage, title, source, c.commit(), c.tree(), null, clearDraft);
         Path dist = ctx.workspace.resolve(".zhiye");
         VersionRepository.BuildRow build;

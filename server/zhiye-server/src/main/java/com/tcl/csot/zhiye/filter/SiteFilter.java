@@ -56,7 +56,19 @@ public class SiteFilter extends OncePerRequestFilter {
     private final com.tcl.csot.zhiye.service.source.DataSourceService sources;
     private final AccessService access;
     private final com.tcl.csot.zhiye.service.cloud.AppAiService ai;
+    private com.tcl.csot.zhiye.service.runtime.ServiceProxyHandler serviceProxy;
+    private com.tcl.csot.zhiye.service.runtime.ServiceCrypto serviceCrypto;
     private static final Pattern SOURCE = Pattern.compile("^/__zhiye/source/([a-z][a-z0-9_]{1,47})$");
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setServiceProxy(com.tcl.csot.zhiye.service.runtime.ServiceProxyHandler serviceProxy) {
+        this.serviceProxy = serviceProxy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setServiceCrypto(com.tcl.csot.zhiye.service.runtime.ServiceCrypto serviceCrypto) {
+        this.serviceCrypto = serviceCrypto;
+    }
 
     public SiteFilter(ObjectStore store, VersionRepository versions, AppRepository apps, ZhiyeProperties props, PageViewRecorder pageViews,
                       CloudService cloud, org.springframework.jdbc.core.simple.JdbcClient jdbc, com.tcl.csot.zhiye.service.source.DataSourceService sources,
@@ -81,10 +93,16 @@ public class SiteFilter extends OncePerRequestFilter {
         String uri = URLDecoder.decode(req.getRequestURI(), StandardCharsets.UTF_8);
         Matcher h = hostPattern.matcher(host);
         if (h.matches()) {
+            String slug = h.group(1).toLowerCase();
             // 发布站点同源的平台接口：数据源代理与 SDK（页面里不放令牌）
-            if (uri.startsWith("/__zhiye/")) { servePlatform(h.group(1).toLowerCase(), uri, req, res, chain); return; }
+            if (uri.startsWith("/__zhiye/")) { servePlatform(slug, uri, req, res, chain); return; }
+            var found = apps.findBySlug(slug);
+            if (found.isPresent() && found.get().isService()) {
+                servePublishedService(found.get(), uri, req, res);
+                return;
+            }
             if (!isRead(req)) { res.sendError(405); return; }
-            servePublished(h.group(1).toLowerCase(), uri, req, res);
+            servePublished(slug, uri, req, res);
             return;
         }
         Matcher p = PREVIEW.matcher(uri);
@@ -155,6 +173,71 @@ public class SiteFilter extends OncePerRequestFilter {
         // 只统计已发布站点的 HTML 文档（不含预览、静态资源、HEAD 和爬虫）
         if (served != null && !head && (served.endsWith(".html") || served.endsWith(".htm")) && !PageViewRecorder.isBot(userAgent))
             pageViews.record(app.get().id());
+    }
+
+    /** 发布态 / 工作台隔离域预览态单体后端应用代理：支持全部 HTTP 方法、华星 SSO 鉴权与身份头透传、闲置自动唤醒与 PV 统计。 */
+    private void servePublishedService(AppRow app, String path, HttpServletRequest req, HttpServletResponse res) throws IOException {
+        if (serviceProxy == null) { message(res, 503, "单体服务网关未启用", "当前环境未启用单体应用托管服务。"); return; }
+        String appId = app.id();
+        boolean previewAuthorized = isAuthorizedServicePreview(appId, req, res);
+        if (!previewAuthorized && app.publishedVersionId() == null) { notFound(res, "这个站点不存在或已下线"); return; }
+        SsoUser user = access.siteUser(appId, req).orElse(null);
+        if (!previewAuthorized) {
+            AccessService.Access acc = access.get(appId);
+            if (acc.needsLogin() && user == null) {
+                boolean apiLike = path.startsWith("/api/") || !"GET".equalsIgnoreCase(req.getMethod())
+                        || (ContentTypes.hasExtension(path) && !path.endsWith(".html"));
+                if (apiLike) { res.sendError(401); return; }
+                String q = req.getQueryString();
+                res.setHeader("Cache-Control", "no-store");
+                res.sendRedirect(loginStart(appId, path + (q == null ? "" : "?" + q)));
+                return;
+            }
+            if (!access.canVisit(appId, acc, user)) {
+                message(res, 403, "没有访问权限", "这个应用只对指定人员开放，你（" + user.loginName() + "）还不在名单里，请联系应用作者添加。");
+                return;
+            }
+        }
+        boolean isAdmin = previewAuthorized || (user != null && access.isAdmin(appId, user));
+        boolean inWorkbenchFrame = previewAuthorized || "iframe".equalsIgnoreCase(req.getHeader("Sec-Fetch-Dest"));
+        String ct = serviceProxy.proxy(app, path, req, res, user, isAdmin, inWorkbenchFrame);
+        if (!previewAuthorized && "GET".equalsIgnoreCase(req.getMethod()) && ct != null && ct.toLowerCase().contains("text/html")
+                && !PageViewRecorder.isBot(req.getHeader("User-Agent"))) {
+            pageViews.record(appId);
+        }
+    }
+
+    private boolean isAuthorizedServicePreview(String appId, HttpServletRequest req, HttpServletResponse res) {
+        if (serviceCrypto == null) return false;
+        // 严禁调用 req.getParameter()，否则 Tomcat 会消费 application/x-www-form-urlencoded 的 POST 请求体
+        String qToken = queryParam(req.getQueryString(), "_zhiye_preview");
+        if (qToken != null && serviceCrypto.verifyPreviewToken(appId, qToken)) {
+            String sameSite = req.isSecure() ? "SameSite=None; Secure" : "SameSite=Lax";
+            res.addHeader("Set-Cookie", "zhiye_svc_preview=" + qToken + "; Path=/; HttpOnly; " + sameSite);
+            return true;
+        }
+        jakarta.servlet.http.Cookie[] cookies = req.getCookies();
+        if (cookies != null) {
+            for (jakarta.servlet.http.Cookie c : cookies) {
+                if ("zhiye_svc_preview".equals(c.getName()) && serviceCrypto.verifyPreviewToken(appId, c.getValue())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String queryParam(String queryString, String key) {
+        if (queryString == null || queryString.isEmpty()) return null;
+        for (String pair : queryString.split("&")) {
+            int eq = pair.indexOf('=');
+            String k = eq < 0 ? pair : pair.substring(0, eq);
+            if (key.equals(k)) {
+                String rawVal = eq < 0 ? "" : pair.substring(eq + 1);
+                return URLDecoder.decode(rawVal, StandardCharsets.UTF_8);
+            }
+        }
+        return null;
     }
 
     private static Map<String, Object> siteConfig(String appId, boolean cloudOn, Map<String, Object> user) {

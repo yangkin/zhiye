@@ -84,6 +84,7 @@ public class ImportService {
             manifest.put("name", name);
             manifest.put("format", format);
             manifest.put("framework", r.framework());
+            manifest.put("projectKind", r.projectKind());
             manifest.put("deployable", r.deployable());
             manifest.put("unsupportedReason", r.unsupportedReason());
             manifest.put("fileCount", r.fileCount());

@@ -109,30 +109,64 @@ public class CloudDataController {
     }
 
     // ---------- 文件存储 ----------
+    private String storageBase(String appId, CloudService.Cloud c) {
+        return appId == null ? "/__zhiye" : "/cloud/" + c.appId();
+    }
+
     @PostMapping("/storage")
     public Map<String, Object> upload(@PathVariable(required = false) String appId, @RequestParam String path,
-                                      @RequestBody byte[] body, HttpServletRequest req) throws Exception {
-        return cloud.putFile(ctx(appId, req).cloud(), path, body);
+                                      @RequestBody(required = false) byte[] body, HttpServletRequest req) throws Exception {
+        Ctx c = ctx(appId, req);
+        return cloud.putFile(c.cloud(), path, body == null ? new byte[0] : body, storageBase(appId, c.cloud()));
     }
 
     @PostMapping(value = "/storage/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Map<String, Object> uploadMultipart(@PathVariable(required = false) String appId,
+                                               @RequestParam(required = false) String path,
                                                @RequestPart("file") MultipartFile file, HttpServletRequest req) throws Exception {
         Ctx c = ctx(appId, req);
-        String name = file.getOriginalFilename() == null ? "file" : file.getOriginalFilename();
-        return cloud.putFile(c.cloud(), name, file.getBytes());
+        String name = (path != null && !path.isBlank()) ? path
+                : (file.getOriginalFilename() == null || file.getOriginalFilename().isBlank() ? "file" : file.getOriginalFilename());
+        return cloud.putFile(c.cloud(), name, file.getBytes(), storageBase(appId, c.cloud()));
     }
 
     @GetMapping(value = "/storage", params = "path")
     public ResponseEntity<byte[]> download(@PathVariable(required = false) String appId, @RequestParam String path,
                                            HttpServletRequest req) throws Exception {
-        var bytes = cloud.readFile(ctx(appId, req).cloud(), path);
+        return serveStoredFile(ctx(appId, req).cloud(), path);
+    }
+
+    @GetMapping("/storage/{*subpath}")
+    public ResponseEntity<byte[]> downloadByPath(@PathVariable(required = false) String appId, @PathVariable String subpath,
+                                                 HttpServletRequest req) throws Exception {
+        String p = subpath != null && subpath.startsWith("/") ? subpath.substring(1) : subpath;
+        return serveStoredFile(ctx(appId, req).cloud(), p);
+    }
+
+    private ResponseEntity<byte[]> serveStoredFile(CloudService.Cloud c, String path) throws Exception {
+        var bytes = cloud.readFile(c, path);
         if (bytes.isEmpty()) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).body(bytes.get());
+        String ct = CloudService.guessContentType(path);
+        var b = ResponseEntity.ok()
+                .header("X-Content-Type-Options", "nosniff")
+                .contentType(MediaType.parseMediaType(ct));
+        if (CloudService.requiresAttachmentDisposition(path)) {
+            String name = path.contains("/") ? path.substring(path.lastIndexOf('/') + 1) : path;
+            b.header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                    org.springframework.http.ContentDisposition.attachment().filename(name, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+        }
+        return b.body(bytes.get());
     }
 
     @GetMapping("/storage")
     public List<String> files(@PathVariable(required = false) String appId, HttpServletRequest req) throws Exception {
         return cloud.listFiles(ctx(appId, req).cloud());
+    }
+
+    @DeleteMapping("/storage")
+    public ResponseEntity<Void> deleteFile(@PathVariable(required = false) String appId, @RequestParam String path,
+                                           HttpServletRequest req) throws Exception {
+        cloud.deleteFile(ctx(appId, req).cloud(), path);
+        return ResponseEntity.noContent().build();
     }
 }

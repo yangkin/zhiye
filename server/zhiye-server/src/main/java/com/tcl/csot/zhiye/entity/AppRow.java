@@ -32,6 +32,9 @@ public record AppRow(String id, String workspaceId, String name, boolean nameLoc
 
     public boolean isVue() { return "vue".equals(projectKind); }
 
+    /** 单体后端/前后端一体托管应用（Python / Node / Java / Go / Dockerfile） */
+    public boolean isService() { return "service".equals(projectKind); }
+
     /** 平台模板生成的前端项目（依赖固定、预装缓存）：React 模板或 Vue 模板 */
     public boolean isTemplateLike() { return "template".equals(projectKind) || isVue(); }
     public boolean noPreview() { return isSkill() || isScript(); }

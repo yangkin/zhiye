@@ -4,9 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import { qk, useActiveTask, useApp, useInvalidateApp, useVersions } from '../api/queries';
 import { useTaskStream, waitForTask } from '../api/sse';
-import { isScriptApp, isSkillApp, isTerminal, type Message, type Task, type Version } from '../api/types';
+import { isScriptApp, isServiceApp, isSkillApp, isTerminal, type Message, type Task, type Version } from '../api/types';
 import { Icon, kindIcon } from '../lib/icons';
-import { downloadUrl } from '../lib/format';
+import { copyText, downloadUrl } from '../lib/format';
 import { toast, useChat } from '../lib/store';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
@@ -22,6 +22,7 @@ import { submitCodeEdits, useCode } from '../lib/codeStore';
 import { useVisualEditor } from '../editor/useVisualEditor';
 import { ChatPanel } from './ChatPanel';
 import { CloudPane, FilesPane } from './Panes';
+import { ServiceRuntimePane } from './ServiceRuntimePane';
 import { PublishModal } from './PublishModal';
 import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
@@ -30,7 +31,7 @@ import { PREVIEW_RESOLUTION_OPTIONS, usePreviewViewport } from '../hooks/usePrev
 
 const CodePane = retryableLazy(() => import('./CodePane').then((m) => ({ default: m.CodePane })));
 
-type Tab = 'code' | 'preview' | 'files' | 'cloud';
+type Tab = 'code' | 'preview' | 'files' | 'cloud' | 'service';
 
 /** 预览地址能不能打开：同源时看状态码；跨域时只能确认网络可达 */
 async function probePreview(src: string): Promise<boolean> {
@@ -70,6 +71,7 @@ function Workbench({ id }: { id: string }) {
 
   const skill = app ? isSkillApp(app) : false;
   const script = app ? isScriptApp(app) : false;
+  const service = app ? isServiceApp(app) : false;
   const mainTab: Tab = skill || script ? 'code' : 'preview';
   const [tab, setTab] = useState<Tab>(mainTab);
   // 技能包与脚本默认打开「代码」；没有云服务
@@ -144,7 +146,7 @@ function Workbench({ id }: { id: string }) {
   }, [tasksQ.data, trackedId, activeId, app]);
   const taskId = activeId ?? trackedId;
 
-  const cloudQ = useQuery({ queryKey: ['cloud', id], queryFn: () => api.cloudStatus(id!), enabled: !!id && !!app && !isSkillApp(app) });
+  const cloudQ = useQuery({ queryKey: ['cloud', id], queryFn: () => api.cloudStatus(id!), enabled: !!id && !!app && !isSkillApp(app) && !isServiceApp(app) });
   const cloudOn = cloudQ.data?.enabled ?? false;
   const baseFrameSrc = previewVersion ? previewVersion.previewUrl : (app?.previewUrl ?? null);
   const frameSrc = baseFrameSrc && cloudOn && previewAs !== 'admin' ? `${baseFrameSrc}?__as=${previewAs}` : baseFrameSrc;
@@ -468,9 +470,9 @@ function Workbench({ id }: { id: string }) {
               ['code', '代码', 'code'],
               ['preview', '预览', 'preview'],
               ['files', '文件', 'clip'],
-              ['cloud', '云服务', 'cloud'],
+              ...(service ? ([['service', '服务托管', 'cloud']] as const) : ([['cloud', '云服务', 'cloud']] as const)),
             ] as const
-          ).filter(([value]) => !((skill || script) && (value === 'cloud' || value === 'preview'))).map(([value, label, symbol]) => (
+          ).filter(([value]) => !((skill || script) && (value === 'cloud' || value === 'preview' || value === 'service'))).map(([value, label, symbol]) => (
             <button
               key={value}
               className={tab === value ? 'active' : ''}
@@ -483,7 +485,9 @@ function Workbench({ id }: { id: string }) {
             >
               <Icon name={symbol} />
               <span>{label}</span>
-              {value === 'cloud' && cloudOn && <i className="studio-tab-on" title="已启用" aria-label="已启用" />}
+              {((value === 'cloud' && cloudOn) || (value === 'service' && app.service?.status === 'running')) && (
+                <i className="studio-tab-on" title={value === 'service' ? '运行中' : '已启用'} aria-label="已启用" />
+              )}
             </button>
           ))}
           <span className="studio-nav-divider" />
@@ -534,8 +538,8 @@ function Workbench({ id }: { id: string }) {
           currentVersion={currentVersion}
           versions={versions}
           onTaskStarted={onTaskStarted}
-          onEnableCloud={() => useChat.getState().setCloudAsk(true)}
-          onOpenCloud={() => setTab('cloud')}
+          onEnableCloud={service ? undefined : () => useChat.getState().setCloudAsk(true)}
+          onOpenCloud={() => setTab(service ? 'service' : 'cloud')}
           onRestoreVersion={(v) => setRestoreTarget(v)}
           onPublish={() => (script ? download('export') : setModal(skill ? 'skillhub' : 'publish'))}
           skill={skill}
@@ -604,10 +608,24 @@ function Workbench({ id }: { id: string }) {
                   >
                     <Icon name="refresh" className={refreshing ? 'spinning' : ''} />
                   </button>
-                  <button className="studio-route-picker" aria-label="选择预览页面" onClick={() => setModal('routes')}>
-                    Home
-                    <Icon name="down" />
-                  </button>
+                  {service ? (
+                    <button
+                      type="button"
+                      className="studio-route-picker"
+                      title="点击复制单体服务访问地址"
+                      onClick={async () => {
+                        const url = app.siteUrl || frameSrc;
+                        if (url) toast((await copyText(url.replace(/\?_zhiye_preview=.*$/, ''))) ? '服务地址已复制。' : '请手动复制地址。');
+                      }}
+                    >
+                      {(app.siteUrl || frameSrc || '单体服务').replace(/^https?:\/\//, '').replace(/\/?\?_zhiye_preview=.*$/, '').replace(/\/$/, '')}
+                    </button>
+                  ) : (
+                    <button className="studio-route-picker" aria-label="选择预览页面" onClick={() => setModal('routes')}>
+                      Home
+                      <Icon name="down" />
+                    </button>
+                  )}
                   {cloudOn ? (
                     <Select
                       className="studio-identity-picker"
@@ -625,32 +643,34 @@ function Workbench({ id }: { id: string }) {
                     <Icon name="external" />
                   </button>
                 </div>
-                <div className="studio-edit-tools">
-                  <button
-                    type="button"
-                    className={`studio-dialog-modify ${editMode === 'chat' ? 'active' : ''}`}
-                    aria-label="对话修改"
-                    aria-pressed={editMode === 'chat'}
-                    title="选中元素后，直接描述想怎么改"
-                    disabled={editor.saving}
-                    onClick={() => toggleMode('chat')}
-                  >
-                    <Icon name="cursor" />
-                    <span>对话修改</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`studio-edit-toggle ${editMode === 'manual' ? 'active' : ''}`}
-                    aria-label="手动微调"
-                    aria-pressed={editMode === 'manual'}
-                    title="选中元素后，在左侧调整文字与样式"
-                    disabled={editor.saving}
-                    onClick={() => toggleMode('manual')}
-                  >
-                    <Icon name="edit" />
-                    <span>手动微调</span>
-                  </button>
-                </div>
+                {app.visualEditable ? (
+                  <div className="studio-edit-tools">
+                    <button
+                      type="button"
+                      className={`studio-dialog-modify ${editMode === 'chat' ? 'active' : ''}`}
+                      aria-label="对话修改"
+                      aria-pressed={editMode === 'chat'}
+                      title="选中元素后，直接描述想怎么改"
+                      disabled={editor.saving}
+                      onClick={() => toggleMode('chat')}
+                    >
+                      <Icon name="cursor" />
+                      <span>对话修改</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`studio-edit-toggle ${editMode === 'manual' ? 'active' : ''}`}
+                      aria-label="手动微调"
+                      aria-pressed={editMode === 'manual'}
+                      title="选中元素后，在左侧调整文字与样式"
+                      disabled={editor.saving}
+                      onClick={() => toggleMode('manual')}
+                    >
+                      <Icon name="edit" />
+                      <span>手动微调</span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
               {editor.staleDraft && !previewVersion ? (
                 <div className="stale-draft-banner" role="alert">
@@ -685,7 +705,7 @@ function Workbench({ id }: { id: string }) {
                         data-preview
                         style={vp.frameStyle}
                         onLoad={() => setFrameLoading(false)}
-                        sandbox="allow-scripts allow-forms"
+                        sandbox={app.projectKind === 'service' ? 'allow-scripts allow-forms allow-same-origin allow-popups allow-downloads' : 'allow-scripts allow-forms'}
                         title={`${app.name}应用预览`}
                       />
                     </div>
@@ -830,6 +850,8 @@ function Workbench({ id }: { id: string }) {
               onDownloadPage={() => download('page')}
               onExport={() => download('export')}
             />
+          ) : tab === 'service' && service ? (
+            <ServiceRuntimePane app={app} />
           ) : (
             <CloudPane appId={app.id} />
           )}

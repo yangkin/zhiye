@@ -46,7 +46,8 @@ function footerText(m: ImportManifest, dir: string) {
   if (!m.deployable) return m.unsupportedReason || '这个项目暂时无法部署。';
   const c = chosen(m, dir);
   const risks = dir === (m.rootDir ?? '') ? (m.warnings ?? []).filter((w) => w.level === 'risk').length : 0;
-  const what = c?.kind === 'vite' ? '安装依赖、构建并部署' : '保存文件并部署';
+  const what =
+    c?.kind === 'service' ? '自动构建并启动单体服务托管' : c?.kind === 'vite' ? '安装依赖、构建并部署' : '保存文件并部署';
   return `确认后会${what}${c && c.dir ? ` ${dirLabel(c.dir)}` : ''}，完成后进入应用工作台。${risks ? `体检发现 ${risks} 项风险，部署后部分功能可能不可用。` : ''}`;
 }
 
@@ -66,7 +67,15 @@ function ImportReport({ manifest, rootDir, onRootDir }: { manifest: ImportManife
               <input type="radio" name="import-root" checked={x.dir === rootDir} onChange={() => onRootDir(x.dir)} />
               <span>
                 <b>{dirLabel(x.dir)}</b>
-                <small>{x.prebuilt ? '已构建产物，直接部署，不安装依赖' : x.kind === 'vite' ? `${x.framework} · 从源码构建` : x.framework}</small>
+                <small>
+                  {x.prebuilt
+                    ? '已构建产物，直接部署，不安装依赖'
+                    : x.kind === 'service'
+                      ? `${x.framework} · 单体后端/全栈托管`
+                      : x.kind === 'vite'
+                        ? `${x.framework} · 从源码构建`
+                        : x.framework}
+                </small>
               </span>
             </label>
           ))}
@@ -320,8 +329,8 @@ function Dialog() {
             >
               <FolderArt />
               <h2>代码导入</h2>
-              <p>支持纯前端项目：HTML 静态站点、带 build 脚本的 Vue / React 项目（Vite、Vue CLI、Create React App、Umi 等），以及已构建好的 dist 目录</p>
-              <p>前后端在同一个仓库时只部署前端，Java、Python、Go、Node 等后端代码不会运行</p>
+              <p>支持纯前端项目（HTML、Vite / Vue / React / Umi / dist 产物）以及 Python、Node.js、Java、Go 单体后端与前后端一体项目</p>
+              <p>自动识别运行环境并容器化托管（支持同域前后端免跨域、托管 PostgreSQL Schema、/data 卷与闲置自动休眠）</p>
               <p>
                 拖拽项目文件夹、.zip 或 .html 到这里，或{' '}
                 <button type="button" className="code-inline" disabled={busy} onClick={() => fileRef.current?.click()}>
