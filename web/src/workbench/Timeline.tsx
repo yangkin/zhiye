@@ -6,7 +6,11 @@ import { useCode } from '../lib/codeStore';
 import { Markdown, splitNext } from '../lib/markdown';
 
 
-const TOOL_ICON: Record<string, string> = { write: '✦', edit: '✎', read: '☰', bash: '>_', ls: '☰', grep: '⌕', find: '⌕', skill: '◆', read_skill: '◆', source: '⛁', request_confirm: '☁', screenshot: '▣' };
+const TOOL_ICON: Record<string, string> = {
+  write: '✦', edit: '✎', read: '☰', bash: '>_', ls: '☰', grep: '⌕', find: '⌕',
+  find_files: '⌕', grep_files: '⌕', verify_app: '✓', service_runtime_inspect: '◉',
+  skill: '◆', read_skill: '◆', source: '⛁', request_confirm: '☁', screenshot: '▣',
+};
 
 /** 打开代码页的某个文件（由 Workbench 监听 openFile 后切到「代码」） */
 export function openInCode(path: string, line?: number) {

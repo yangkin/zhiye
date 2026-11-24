@@ -1,5 +1,9 @@
-// verify：类型检查、两套构建、冒烟测试。
-import { realpathSync, existsSync, mkdirSync, rmSync, readdirSync, lstatSync, copyFileSync, readFileSync, writeFileSync, cpSync, promises as fsp } from 'node:fs'
+// verify：类型检查、两套构建、冒烟测试、全栈起服探活。
+import { realpathSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, lstatSync, copyFileSync, readFileSync, writeFileSync, cpSync, promises as fsp } from 'node:fs'
+import { spawn } from 'node:child_process'
+import http from 'node:http'
+import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { run, emitLog, flushLogs, summarize, log, RunnerError } from './util.mjs'
@@ -78,8 +82,10 @@ function copyTree(src, dst, { skip = () => false } = {}) {
 }
 
 const skipProject = (rel) => {
-  const first = rel.split(path.sep)[0]
-  return first === '.git' || first === '.zhiye' || first === 'node_modules' || rel.split(path.sep).includes('node_modules') || rel.split(path.sep).includes('.git')
+  const norm = rel.split(path.sep).join('/')
+  const first = norm.split('/')[0]
+  return first === '.git' || first === '.zhiye' || first === 'node_modules' || norm === 'docs/PROJECT_NOTES.md'
+    || norm.split('/').includes('node_modules') || norm.split('/').includes('.git')
 }
 
 function listHtml(dir, sub = '') {
@@ -338,6 +344,188 @@ async function checkReadme(cwd) {
 
 function realCwd(cwd) { try { return realpathSync(cwd) } catch { return cwd } }
 
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address()
+      const p = typeof addr === 'object' && addr ? addr.port : 0
+      srv.close((err) => (err ? reject(err) : resolve(p)))
+    })
+  })
+}
+
+function httpProbe(url, timeoutMs = 2000) {
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { if (body.length < 2048) body += c })
+      res.on('end', () => resolve({ ok: true, status: res.statusCode || 0, body }))
+    })
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }) })
+    req.on('error', (err) => resolve({ ok: false, error: err.message }))
+  })
+}
+
+function detectNodeServiceEntry(cwd) {
+  for (const rel of ['server/index.mjs', 'server/index.js']) {
+    if (existsSync(path.join(cwd, rel))) return rel
+  }
+  const pkgPath = path.join(cwd, 'package.json')
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+      const start = String(pkg?.scripts?.start || '').trim()
+      const m = /^node\s+(?:--[a-z0-9-]+\s+)*([^\s;|&'"]+)/i.exec(start)
+      if (m && existsSync(path.join(cwd, m[1]))) return m[1]
+    } catch {}
+  }
+  return null
+}
+
+/** 启动 Node/Express 全栈后端到临时端口，探活 /api/health，并在有 Chrome + dist 时检查首屏渲染。 */
+export async function serviceLiveSmoke(cwd, env = process.env) {
+  const entry = detectNodeServiceEntry(cwd)
+  if (!entry) return { ok: true, skipped: true, detail: '未检测到本地 Node 服务端入口，跳过沙箱起服探活' }
+  const pkgPath = path.join(cwd, 'package.json')
+  if (existsSync(pkgPath) && !existsSync(path.join(cwd, 'node_modules'))) {
+    return { ok: true, skipped: true, detail: '未安装本地 node_modules，跳过沙箱起服探活' }
+  }
+  const port = await findFreePort()
+  const tmpData = mkdtempSync(path.join(os.tmpdir(), 'zhiye-svc-verify-'))
+  let logs = ''
+  const appendLog = (chunk) => {
+    logs += String(chunk || '')
+    if (logs.length > 8000) logs = logs.slice(-8000)
+  }
+  const child = spawn(process.execPath, [path.join(cwd, entry)], {
+    cwd,
+    env: { ...buildEnv(env), PORT: String(port), HOST: '127.0.0.1', DATA_DIR: tmpData },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let exited = null
+  child.stdout?.on('data', appendLog)
+  child.stderr?.on('data', appendLog)
+  child.once('exit', (code, sig) => { exited = { code, sig } })
+
+  const killChild = async () => {
+    if (exited || child.killed) return
+    try { child.kill('SIGTERM') } catch {}
+    await new Promise((r) => setTimeout(r, 250))
+    if (!exited) { try { child.kill('SIGKILL') } catch {} }
+  }
+
+  try {
+    const deadline = Date.now() + 10_000
+    let healthy = false
+    let lastStatus = ''
+    while (Date.now() < deadline) {
+      if (exited) {
+        return { ok: false, detail: `后端服务（${entry}）启动后立即退出（code=${exited.code ?? exited.sig}）：\n${logs.trim() || '（无输出）'}` }
+      }
+      const r = await httpProbe(`http://127.0.0.1:${port}/api/health`, 1500)
+      if (r.ok) {
+        if (r.status >= 200 && r.status < 300) { healthy = true; break }
+        if (r.status === 404) {
+          const r2 = await httpProbe(`http://127.0.0.1:${port}/`, 1500)
+          if (r2.ok && r2.status >= 200 && r2.status < 400) { healthy = true; break }
+          lastStatus = `GET /api/health → 404，GET / → ${r2.ok ? r2.status : r2.error}`
+        } else {
+          lastStatus = `GET /api/health 返回 HTTP ${r.status}：${r.body.slice(0, 300)}`
+        }
+      } else {
+        lastStatus = r.error
+      }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    if (!healthy) {
+      return { ok: false, detail: `后端服务未在 10 秒内通过健康检查（${lastStatus}）。\n最近输出：\n${logs.trim() || '（无输出）'}` }
+    }
+
+    // 有构建产物和无头浏览器时，顺带打开真实全栈首页检查白屏 / 脚本异常 / 5xx 接口错误，并抓 1920 截图
+    const chromePath = env.ZHIYE_CHROME_PATH
+    if (existsSync(path.join(cwd, 'dist', 'index.html')) && chromePath && existsSync(chromePath)) {
+      const { chromium } = await import('playwright-core')
+      const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-svc-chrome-'))
+      let browser
+      try {
+        browser = await chromium.launch({
+          executablePath: chromePath,
+          headless: true,
+          timeout: 25_000,
+          args: ['--no-sandbox', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-background-networking', '--use-mock-keychain', '--password-store=basic'],
+          env: { ...process.env, HOME: process.env.HOME || userDataDir },
+        })
+        const origin = `http://127.0.0.1:${port}`
+        const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 }, locale: 'zh-CN' })
+        const page = await ctx.newPage()
+        const errors = []
+        await page.route('**/*', (route) => {
+          const u = route.request().url()
+          return u.startsWith(origin) || u.startsWith('data:') || u.startsWith('blob:') ? route.continue() : route.abort('blockedbyclient')
+        })
+        page.on('pageerror', (e) => errors.push(`页面脚本错误：${e.message}`))
+        page.on('console', (m) => { if (m.type() === 'error' && !/ERR_BLOCKED_BY_CLIENT|favicon/.test(m.text())) errors.push(`控制台错误：${m.text()}`) })
+        page.on('response', (res) => {
+          const u = res.url()
+          if (u.startsWith(origin) && res.status() >= 500) errors.push(`后端接口返回 HTTP ${res.status()}：${u.replace(origin, '')}`)
+        })
+        await page.goto(origin + '/', { waitUntil: 'load', timeout: 20_000 }).catch((e) => errors.push(`首页打开失败：${String(e.message).split('\n')[0]}`))
+        await page.waitForTimeout(900)
+        const state = await page.evaluate(() => {
+          const root = document.getElementById('root') || document.getElementById('app')
+          const text = (document.body?.innerText || '').trim()
+          return { hasRoot: !!root, rootChildren: root ? root.childElementCount : 0, textLen: text.length }
+        })
+        if (state.hasRoot && state.rootChildren === 0 && state.textLen === 0) {
+          errors.push('全栈首页是空白的：#root 未渲染出内容')
+        }
+        let screenshot
+        if (errors.length === 0) {
+          const buf = await page.screenshot({ type: 'jpeg', quality: 65 }).catch(() => null)
+          if (buf) screenshot = buf.toString('base64')
+        }
+        if (errors.length) {
+          return { ok: false, detail: `全栈首屏冒烟未通过：\n${errors.slice(0, 6).join('\n')}${logs.trim() ? `\n\n后端日志：\n${logs.trim().slice(-1500)}` : ''}` }
+        }
+        return { ok: true, detail: `后端 ${entry} 启动正常（/api/health 200），全栈首页渲染与接口均无报错`, ...(screenshot ? { screenshot } : {}) }
+      } finally {
+        if (browser) await browser.close().catch(() => {})
+        try { rmSync(userDataDir, { recursive: true, force: true }) } catch {}
+      }
+    }
+    return { ok: true, detail: `后端 ${entry} 启动正常（/api/health 200）` }
+  } finally {
+    await killChild()
+    try { rmSync(tmpData, { recursive: true, force: true }) } catch {}
+  }
+}
+
+async function verifyService(cwd, env) {
+  const checks = []
+  checks.push(await step('脚本语法', () => checkScripts(cwd, env)))
+  const tscBin = path.join(cwd, 'node_modules', 'typescript', 'bin', 'tsc')
+  if (existsSync(path.join(cwd, 'tsconfig.json')) && existsSync(tscBin)) {
+    checks.push(await step('类型检查', async () => {
+      const r = await run(process.execPath, [tscBin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd, env: buildEnv(env), timeoutMs: 120_000 })
+      if (r.timedOut) return { ok: false, detail: '类型检查超时' }
+      if (r.code !== 0) return { ok: false, detail: tscSummary(r.out) || `tsc 退出码 ${r.code}` }
+      return { ok: true, detail: '' }
+    }))
+  }
+  const hasFrontend = existsSync(path.join(cwd, 'package.json')) && existsSync(path.join(cwd, 'node_modules')) && viteBin(cwd)
+  if (hasFrontend) {
+    checks.push(await step('前端构建', () => viteBuild(cwd, buildEnv(env), { outDir: 'dist' })))
+  }
+  const prevOk = checks.every((c) => c.ok)
+  checks.push(prevOk
+    ? await step('服务启动与探活', () => serviceLiveSmoke(cwd, env))
+    : { name: '服务启动与探活', ok: false, skipped: true, detail: SKIPPED })
+  return { checks, editable: false, noDist: true }
+}
+
 export async function verify(cwd, { projectKind } = {}, env = process.env) {
   const kind = projectKind || 'template'
   let r
@@ -361,11 +549,7 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
     ], editable: false, noDist: true }
   }
   else if (kind === 'service') {
-    const checks = [await step('脚本语法', () => checkScripts(cwd, env))]
-    if (existsSync(path.join(cwd, 'package.json')) && existsSync(path.join(cwd, 'node_modules')) && viteBin(cwd)) {
-      checks.push(await step('前端构建', () => viteBuild(cwd, buildEnv(env), { outDir: 'dist' })))
-    }
-    r = { checks, editable: false, noDist: true }
+    r = await verifyService(cwd, env)
   }
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)
   // 报错里的绝对路径换成相对工作区的路径，便于 agent 阅读

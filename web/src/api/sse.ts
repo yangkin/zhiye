@@ -183,7 +183,7 @@ export function reduceEvent(s: TaskStreamState, e: TaskEvent): TaskStreamState {
     case 'confirm': {
       const c = p as ConfirmRequest;
       // 结束事件不带标题和条目，沿用 pending 时的
-      next.confirm = next.confirm?.id === c.id ? { ...next.confirm, ...c, title: c.title ?? next.confirm.title, items: c.items ?? next.confirm.items } : c;
+      next.confirm = next.confirm?.id === c.id ? { ...next.confirm, ...c, title: c.title ?? next.confirm.title, items: c.items ?? next.confirm.items, options: c.options ?? next.confirm.options } : c;
       const ti = next.tools.map((x) => x.name).lastIndexOf('request_confirm');
       if (ti >= 0) next.tools = next.tools.map((x, i) => (i === ti ? { ...x, summary: confirmSummary(x.summary, next.confirm) } : x));
       break;

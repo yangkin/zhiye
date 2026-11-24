@@ -11,6 +11,7 @@ import {
 import { createGuardExtension } from './guard.mjs'
 import { CLOUD_USAGE, systemPrompt } from './prompts.mjs'
 import { createConfirmExtension, createScreenshotExtension, createTodoExtension, snapshotBefore, stepDetail, toolSummary, ThinkingStream } from './steps.mjs'
+import { createSearchExtension, createServiceInspectExtension, createVerifyExtension } from './tools.mjs'
 
 export { toolSummary }
 import { emitEvent, log, RunnerError } from './util.mjs'
@@ -137,6 +138,17 @@ export class Agent {
       quietStartup: true,
     })
     const withShot = ['template', 'vue', 'static', 'vite'].includes(this.projectKind)
+    const isService = this.projectKind === 'service'
+    const extensionFactories = [
+      { name: 'zhiye-guard', factory: createGuardExtension({ cwd, projectKind: this.projectKind, agentDir, log }) },
+      { name: 'zhiye-todo', factory: createTodoExtension({ cwd, onTodo: (items) => this.onTodo(items) }) },
+      { name: 'zhiye-confirm', factory: createConfirmExtension({ emit: emitEvent, waiters: this.confirmWaiters, projectKind: this.projectKind, onAccepted: () => '云服务用法：\n' + CLOUD_USAGE }) },
+      { name: 'zhiye-search', factory: createSearchExtension({ cwd }) },
+      { name: 'zhiye-verify', factory: createVerifyExtension({ cwd, projectKind: this.projectKind, env }) },
+      ...(withShot ? [{ name: 'zhiye-screenshot', factory: createScreenshotExtension({ cwd, projectKind: this.projectKind }) }] : []),
+      ...(isService ? [{ name: 'zhiye-service-inspect', factory: createServiceInspectExtension({ agentDir }) }] : []),
+    ]
+    const allowedExtPaths = new Set(extensionFactories.map((e) => `<inline:${e.name}>`))
     const resourceLoader = new DefaultResourceLoader({
       cwd,
       agentDir,
@@ -148,14 +160,9 @@ export class Agent {
       noContextFiles: true,
       disabledBuiltinExtensions: ['mcp'],
       systemPrompt: systemPrompt(this.projectKind, cmd.cloudEnabled),
-      extensionFactories: [
-        { name: 'zhiye-guard', factory: createGuardExtension({ cwd, projectKind: this.projectKind, agentDir, log }) },
-        { name: 'zhiye-todo', factory: createTodoExtension({ cwd, onTodo: (items) => this.onTodo(items) }) },
-        { name: 'zhiye-confirm', factory: createConfirmExtension({ emit: emitEvent, waiters: this.confirmWaiters, onAccepted: () => '云服务用法：\n' + CLOUD_USAGE }) },
-        ...(withShot ? [{ name: 'zhiye-screenshot', factory: createScreenshotExtension({ cwd, projectKind: this.projectKind }) }] : []),
-      ],
+      extensionFactories,
       // 只保留织页自己的内联扩展，防止任何发现机制带进别的扩展
-      extensionsOverride: (base) => ({ ...base, extensions: base.extensions.filter((e) => ['<inline:zhiye-guard>', '<inline:zhiye-todo>', '<inline:zhiye-confirm>', '<inline:zhiye-screenshot>'].includes(e.path)) }),
+      extensionsOverride: (base) => ({ ...base, extensions: base.extensions.filter((e) => allowedExtPaths.has(e.path)) }),
       skillsOverride: () => ({ skills: [], diagnostics: [] }),
       promptsOverride: () => ({ prompts: [], diagnostics: [] }),
       agentsFilesOverride: () => ({ agentsFiles: [] }),
@@ -164,7 +171,7 @@ export class Agent {
     await resourceLoader.reload()
     const exts = resourceLoader.getExtensions()
     if (exts.errors.length) log('extension errors', exts.errors)
-    if (exts.extensions.length !== (withShot ? 4 : 3)) throw new RunnerError('INTERNAL', `织页扩展加载失败（${exts.extensions.length}）`)
+    if (exts.extensions.length !== extensionFactories.length) throw new RunnerError('INTERNAL', `织页扩展加载失败（${exts.extensions.length}/${extensionFactories.length}）`)
 
     let sessionManager
     if (cmd.sessionFile) {
@@ -181,7 +188,12 @@ export class Agent {
       thinkingLevel: THINKING[cmd.thinking] || 'low',
       modelRuntime,
       resourceLoader,
-      tools: ['read', 'write', 'edit', 'bash', 'todo_write', ...(this.projectKind === 'skill' ? [] : ['request_confirm']), ...(withShot ? ['screenshot'] : [])],
+      tools: [
+        'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files', 'verify_app',
+        ...(this.projectKind === 'skill' ? [] : ['request_confirm']),
+        ...(withShot ? ['screenshot'] : []),
+        ...(isService ? ['service_runtime_inspect'] : []),
+      ],
       sessionManager,
       settingsManager,
     })

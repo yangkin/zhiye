@@ -16,6 +16,8 @@ public final class RepoMap {
     private static final int MAX_FILES = 50;
     private static final int MAX_SYMBOLS_PER_FILE = 5;
     private static final int MAX_CHARS = 2600;
+    private static final int MAX_NOTES_CHARS = 1800;
+    public static final String PROJECT_NOTES_PATH = "docs/PROJECT_NOTES.md";
     private static final Set<String> IGNORED_DIRS = Set.of(".git", "node_modules", ".zhiye", "dist", "build", "target");
     private static final Set<String> TEXT_EXT = Set.of(
             "ts", "tsx", "js", "jsx", "mjs", "vue", "html", "css", "sql", "json", "py", "sh", "md"
@@ -37,6 +39,16 @@ public final class RepoMap {
     public static String build(Path workspace, String projectKind, List<VersionNote> recentVersions) {
         if (workspace == null || !Files.isDirectory(workspace)) return "";
         StringBuilder out = new StringBuilder();
+        Path notesPath = workspace.resolve(PROJECT_NOTES_PATH);
+        if (Files.isRegularFile(notesPath)) {
+            try {
+                String notes = Files.readString(notesPath, StandardCharsets.UTF_8).trim();
+                if (!notes.isEmpty()) {
+                    if (notes.length() > MAX_NOTES_CHARS) notes = notes.substring(0, MAX_NOTES_CHARS) + "\n…（已截断，可用 read 查看全文）";
+                    out.append("\n\n## 项目工程笔记（").append(PROJECT_NOTES_PATH).append("）\n").append(notes).append('\n');
+                }
+            } catch (IOException ignored) { }
+        }
         if (recentVersions != null && !recentVersions.isEmpty()) {
             out.append("\n\n## 最近版本演进\n");
             for (VersionNote v : recentVersions) {
@@ -98,7 +110,9 @@ public final class RepoMap {
     }
 
     private static int priority(String rel) {
+        if (rel.equals("server/index.mjs") || rel.equals("server/index.js")) return 0;
         if (rel.equals("src/App.tsx") || rel.equals("src/App.vue") || rel.equals("index.html")) return 0;
+        if (rel.startsWith("server/")) return 1;
         if (rel.equals("cloud/schema.sql") || rel.equals("cloud/policies.json")) return 1;
         if (rel.startsWith("functions/")) return 2;
         if (rel.startsWith("src/pages/") || rel.startsWith("src/views/") || rel.startsWith("src/components/")) return 3;

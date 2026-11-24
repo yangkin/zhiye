@@ -303,6 +303,10 @@ export function checkToolCall(toolName, input, { cwd, projectKind = 'template', 
     case 'todo_write':
     case 'request_confirm':
     case 'screenshot':
+    case 'find_files':
+    case 'grep_files':
+    case 'verify_app':
+    case 'service_runtime_inspect':
       return null
     default:
       return `不允许使用工具 ${toolName}`

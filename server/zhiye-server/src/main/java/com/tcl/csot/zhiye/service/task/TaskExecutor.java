@@ -154,10 +154,12 @@ public class TaskExecutor {
         }
     }
 
-    /** 对话中途补充：只在 agent 正在执行 prompt 时转给 runner；正在等「继续」时，补充的话就当作「继续」 */
+    /** 对话中途补充：只在 agent 正在执行 prompt 时转给 runner；正在等「继续」或「方案确认」时，补充的话直接作为用户的回复 */
     private boolean steer(TaskContext ctx, String text) {
         String waiting = ctx.pendingConfirmId;
-        if (waiting != null && "continue".equals(ctx.pendingConfirmKind)) return answerConfirm(ctx, waiting, true, text);
+        if (waiting != null && ("continue".equals(ctx.pendingConfirmKind) || "choice".equals(ctx.pendingConfirmKind))) {
+            return answerConfirm(ctx, waiting, true, text);
+        }
         var r = ctx.runner;
         if (r == null || ctx.cancelRequested || !"prompt".equals(ctx.currentCommand)) return false;
         r.sendAsync("steer", Json.obj().put("text", text));
@@ -166,10 +168,11 @@ public class TaskExecutor {
 
     static final List<String> CLOUD_CONFIRM_ITEMS = List.of("PostgreSQL 数据库（这个应用独立的一份表）", "文件存储（图片、附件、导出文件）", "预览页自动注入 SDK，不需要自己部署服务端");
 
-    /** runner 的 request_confirm：已启用就直接放行；否则发确认卡等用户选 */
+    /** runner 的 request_confirm：cloud 已启用就直接放行；cloud/choice 发确认卡等用户选 */
     private void onConfirmEvent(TaskContext ctx, JsonNode ev) {
         String id = ev.path("id").asText(), kind = ev.path("kind").asText(), state = ev.path("state").asText();
         ObjectNode p = Json.obj().put("id", id).put("kind", kind).put("state", state).put("reason", ev.path("reason").asText(""));
+        if (ev.has("title")) p.put("title", ev.path("title").asText(""));
         if (!"pending".equals(state)) {
             if (id.equals(ctx.pendingConfirmId)) { ctx.pendingConfirmId = null; ctx.pendingConfirmKind = null; }
             events.emit(ctx.id(), "confirm", p);
@@ -177,6 +180,14 @@ public class TaskExecutor {
         }
         var r = ctx.runner;
         if (r == null) return;
+        if ("choice".equals(kind)) {
+            ctx.pendingConfirmId = id;
+            ctx.pendingConfirmKind = kind;
+            if (!p.has("title") || p.path("title").asText("").isBlank()) p.put("title", "需要你确认一个方案细节");
+            if (ev.has("options") && ev.get("options").isArray()) p.set("options", ev.get("options"));
+            events.emit(ctx.id(), "confirm", p);
+            return;
+        }
         if (!"cloud".equals(kind)) { r.sendAsync("confirm", Json.obj().put("confirmId", id).put("accept", false)); return; }
         if (cloud != null && cloud.isOn(ctx.task.appId())) {
             r.sendAsync("confirm", Json.obj().put("confirmId", id).put("accept", true).put("note", "这个应用之前已经启用了云服务。"));
@@ -190,7 +201,7 @@ public class TaskExecutor {
         events.emit(ctx.id(), "confirm", p);
     }
 
-    /** 用户在确认卡上的选择：确认就先启用云服务，再把结果告诉 agent；「继续」类确认唤醒等待中的执行线程 */
+    /** 用户在确认卡上的选择：cloud 先启用云服务；choice 透传用户选项；continue 唤醒等待中的执行线程 */
     private boolean answerConfirm(TaskContext ctx, String id, boolean accept, String text) {
         if ("continue".equals(ctx.pendingConfirmKind)) {
             synchronized (ctx) {
@@ -202,12 +213,16 @@ public class TaskExecutor {
         }
         var r = ctx.runner;
         if (r == null || ctx.cancelRequested || id == null || !id.equals(ctx.pendingConfirmId)) return false;
+        String kind;
         synchronized (ctx) {
             if (!id.equals(ctx.pendingConfirmId)) return false;
+            kind = ctx.pendingConfirmKind;
             ctx.pendingConfirmId = null;
         }
         String note = "";
-        if (accept && "cloud".equals(ctx.pendingConfirmKind)) {
+        if ("choice".equals(kind)) {
+            note = text == null ? "" : text.trim();
+        } else if (accept && "cloud".equals(kind)) {
             AppRow app = apps.findById(ctx.task.appId()).orElseThrow();
             Map<String, Object> on = cloud.enable(app.workspaceId(), app.id());
             StringBuilder names = new StringBuilder();
@@ -514,6 +529,16 @@ public class TaskExecutor {
                 : jdbc.sql("select skill_app_ids from app where id = ?").param(app.id()).query(String.class).optional()
                         .map(js -> Json.read(js, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {})).orElse(List.of());
         List<com.tcl.csot.zhiye.service.skillhub.SkillRefs.Placed> skills = skillIds.isEmpty() ? List.of() : skillRefs.place(ctx.agentDir, skillIds);
+        if (app.isService() && monolithService != null) {
+            try {
+                ObjectNode snap = monolithService.inspectSnapshotForAgent(app);
+                if (snap != null) {
+                    Files.writeString(ctx.agentDir.resolve("runtime-inspect.json"), Json.write(snap), java.nio.charset.StandardCharsets.UTF_8);
+                }
+            } catch (Exception e) {
+                log.warn("写入全栈运行态快照失败 app={}：{}", app.id(), e.getMessage());
+            }
+        }
         startRunner(ctx, false);
         boolean modify = "modify".equals(t.type());
         JsonNode elementContext = input.get("elementContext");
@@ -551,7 +576,7 @@ public class TaskExecutor {
                     "state", "end", "ok", true));
 
         phase(ctx, "RUNNING", "正在编写代码", 20);
-        String instruction = modify ? Prompts.modify(input.path("content").asText(), elementContext, app.isSkill())
+        String instruction = modify ? Prompts.modify(input.path("content").asText(), elementContext, app.projectKind())
                 : Prompts.generate(app, assetPaths(app, app.assetIds()));
         if (modify && !msgAssets.isEmpty()) {
             StringBuilder sb = new StringBuilder("\n\n## 用户这次附带的素材（已放进项目）\n");
@@ -575,11 +600,13 @@ public class TaskExecutor {
                 events.emit(ctx.id(), "tool", Map.of("id", "fn-logs", "name", "read", "summary", "读取云函数报错日志", "state", "end", "ok", true));
             }
         }
-        if (app.isTemplateLike()) {
+        if (app.isTemplateLike() || app.isService()) {
             Set<String> taken = new HashSet<>();
             for (com.tcl.csot.zhiye.service.skillhub.SkillRefs.Placed s : skills) taken.add(s.name());
-            // 这两个内置技能的写法是 React 专用的（recharts / react-router），Vue 项目不提供
-            if (app.isVue()) taken.addAll(List.of("charts-dashboard", "multi-page-app"));
+            // React / Vue / 全栈按项目形态过滤不相关的内置技能，避免误导
+            if (app.isVue()) taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app"));
+            else if (app.isService()) taken.addAll(List.of("cloud-functions", "app-ai", "data-sources"));
+            else taken.add("fullstack-app");
             instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.catalogInstruction(skillRefs.placeBuiltin(ctx.agentDir, taken));
         }
         if (memories != null) {
@@ -1242,7 +1269,7 @@ public class TaskExecutor {
         }
         ArrayNode checks = v.path("checks").isArray() ? (ArrayNode) v.get("checks") : Json.M.createArrayNode();
         String shot = extractAndStripScreenshot(checks);
-        if (round == 0 && shot != null && app != null && app.isTemplateLike() && visualCritique != null && v.path("ok").asBoolean(false)) {
+        if (round == 0 && shot != null && app != null && (app.isTemplateLike() || app.isService()) && visualCritique != null && v.path("ok").asBoolean(false)) {
             Optional<String> issue = visualCritique.review(ctx.id(), app, shot);
             if (issue.isPresent()) {
                 if (v.isObject()) ((ObjectNode) v).put("ok", false);

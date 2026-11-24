@@ -287,16 +287,18 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const send = async (override?: string, forceModify = false) => {
     const content = (override ?? draft).trim();
     if (!content || sending) return;
-    // 做了一段、正在等「继续」：输入框里说的话就是「继续」（可以顺便补充要求），不进队列
-    const waitingContinue =
-      runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' && stream.confirm.kind === 'continue' ? stream.confirm : null;
-    if (runningTaskId && waitingContinue) {
+    // 正在等「继续」或「方案确认」：输入框里说的话直接作为回复发给当前任务，不进队列
+    const waitingPromptConfirm =
+      runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' && (stream.confirm.kind === 'continue' || stream.confirm.kind === 'choice')
+        ? stream.confirm
+        : null;
+    if (runningTaskId && waitingPromptConfirm) {
       setSending(true);
       setError('');
       try {
-        await api.confirmTask(runningTaskId, waitingContinue.id, true, content);
+        await api.confirmTask(runningTaskId, waitingPromptConfirm.id, true, content);
         setDraft('');
-        toast('好的，AI 接着做。');
+        toast(waitingPromptConfirm.kind === 'choice' ? '已回复，AI 正在按你的决定继续。' : '好的，AI 接着做。');
       } catch (err) {
         setError(errorMessage(err));
       } finally {

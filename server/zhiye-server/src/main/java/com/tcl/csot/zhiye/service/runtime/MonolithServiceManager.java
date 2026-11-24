@@ -1,6 +1,8 @@
 package com.tcl.csot.zhiye.service.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tcl.csot.zhiye.config.ServiceRuntimeProperties;
 import com.tcl.csot.zhiye.entity.AppRow;
 import com.tcl.csot.zhiye.entity.VersionRow;
@@ -10,6 +12,8 @@ import com.tcl.csot.zhiye.repository.VersionRepository;
 import com.tcl.csot.zhiye.service.repo.GitService;
 import com.tcl.csot.zhiye.util.Db;
 import com.tcl.csot.zhiye.util.Ids;
+import com.tcl.csot.zhiye.util.Json;
+import com.tcl.csot.zhiye.util.LogRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -560,6 +564,71 @@ public class MonolithServiceManager {
         m.put("buildLog", s == null || s.buildLog() == null ? "" : s.buildLog());
         m.put("lastError", s == null ? null : s.lastError());
         return m;
+    }
+
+    /** 为编码 Agent 生成只读脱敏的运行态快照（不含任何密钥值，仅含状态、环境变量键名、PG 表结构与脱敏日志）。 */
+    public ObjectNode inspectSnapshotForAgent(AppRow app) {
+        if (app == null || !app.isService()) return null;
+        ServiceRow s = find(app.id()).orElse(null);
+        if (s == null) return null;
+        ObjectNode root = Json.obj();
+        ObjectNode svc = root.putObject("service");
+        svc.put("status", effectiveStatus(s));
+        svc.put("runtime", s.runtime() == null ? "" : s.runtime());
+        svc.put("framework", s.framework() == null ? "" : s.framework());
+        svc.put("healthPath", s.healthPath() == null ? "/api/health" : s.healthPath());
+        if (s.buildCmd() != null) svc.put("buildCommand", s.buildCmd());
+        if (s.startCmd() != null) svc.put("startCommand", s.startCmd());
+        if (s.lastError() != null && !s.lastError().isBlank()) {
+            svc.put("lastError", LogRedactor.redact(s.lastError()));
+        }
+
+        ArrayNode envKeys = root.putArray("envKeys");
+        try {
+            List<String> keys = jdbc.sql("select env_key from app_service_env where app_id = ? order by env_key")
+                    .param(app.id()).query(String.class).list();
+            keys.forEach(envKeys::add);
+        } catch (Exception ignored) { }
+
+        ObjectNode db = root.putObject("database");
+        db.put("enabled", s.pgEnabled());
+        if (s.pgEnabled() && s.pgSchema() != null && !s.pgSchema().isBlank()) {
+            db.put("schemaName", s.pgSchema());
+            ArrayNode tables = db.putArray("tables");
+            try {
+                Map<String, List<String>> byTable = new LinkedHashMap<>();
+                jdbc.sql("""
+                        select table_name, column_name, data_type
+                          from information_schema.columns
+                         where table_schema = ?
+                         order by table_name, ordinal_position
+                        """).param(s.pgSchema()).query(rs -> {
+                    String tbl = rs.getString("table_name");
+                    String col = rs.getString("column_name") + ":" + rs.getString("data_type");
+                    byTable.computeIfAbsent(tbl, k -> new ArrayList<>()).add(col);
+                });
+                byTable.forEach((name, cols) -> {
+                    ObjectNode tn = tables.addObject();
+                    tn.put("name", name);
+                    ArrayNode cn = tn.putArray("columns");
+                    cols.stream().limit(40).forEach(cn::add);
+                });
+            } catch (Exception ignored) { }
+        }
+
+        String runtimeLogs = "";
+        try {
+            runtimeLogs = provider.logs(app.id(), app.slug(), 120);
+            if ((runtimeLogs == null || runtimeLogs.isBlank()) && s.previewVersionId() != null) {
+                runtimeLogs = provider.logs(previewAppId(app.id()), previewSlug(app.slug()), 120);
+            }
+        } catch (Exception ignored) { }
+        String combined = (runtimeLogs == null ? "" : runtimeLogs.trim());
+        if (combined.isEmpty() && s.buildLog() != null && !s.buildLog().isBlank()) {
+            combined = s.buildLog().trim();
+        }
+        root.put("recentLogs", LogRedactor.redact(combined));
+        return root;
     }
 
     public Map<String, Object> dockerfilePreview(String ws, String appId) throws Exception {

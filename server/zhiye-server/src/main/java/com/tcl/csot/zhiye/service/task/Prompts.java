@@ -12,6 +12,7 @@ public final class Prompts {
 
     static String generate(AppRow app, List<String> assetPaths) {
         if (app.isSkill()) return generateSkill(app, assetPaths);
+        if (app.isService()) return generateService(app, assetPaths);
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
         StringBuilder sb = new StringBuilder();
         boolean vue = app.isVue();
@@ -28,20 +29,46 @@ public final class Prompts {
             sb.append('\n');
         }
         sb.append(vue ? """
-                ## 要求
-                - 入口是 src/App.vue（`<script setup lang="ts">`），组件放在 src/components/（每个组件一个 .vue 文件）；只修改 src/、public/、index.html，以及上面「应用类型与指引」要求的目录（如 docs/）
+                ## 交付要求
+                - 入口是 `src/App.vue`（`<script setup lang="ts">`），组件放在 `src/components/`；只修改 `src/`、`public/`、`index.html` 及需要的 `docs/`
+                - 下拉选择统一使用 `src/components/CustomSelect.vue`（禁原生 `<select>`），面向桌面宽屏流式布局（`w-full`，右侧主区不套 `max-w-* mx-auto`）
                 """ : """
-                ## 要求
-                - 入口是 src/App.tsx，组件放在 src/components/；只修改 src/、public/、index.html，以及上面「应用类型与指引」要求的目录（如 skill/、docs/）
-                """);
-        sb.append("""
-                - 使用 Tailwind 类名写样式；不要引用任何外部网络资源（字体、图片、CDN 脚本）
-                - 界面文字全部使用中文；按钮、表单都要有真实可用的交互和明确反馈；所有下拉选择（筛选/表单/角色切换）必须使用模板预置的自定义下拉组件（React 用 `src/components/Select.tsx`，Vue 用 `src/components/CustomSelect.vue`），严禁使用浏览器原生 `<select>` 标签避免弹出系统深灰菜单破坏视觉统一
-                - 仅面向电脑桌面端（无需考虑手机移动端适配），必须原生适配不同电脑分辨率（1280px 笔记本 / 1440px / 1920px 办公屏 / 2K / 4K 大屏）：业务后台、管理台账、数据看板不仅外层壳（左侧导航 + 主内容区）必须 `w-full` 贴边，**`<main>` 右侧主工作区内部也不得套 `max-w-4xl` / `max-w-5xl` / `max-w-6xl` / `max-w-7xl` / `max-w-[1280px]` / `max-w-[1440px]` + `mx-auto`**（杜绝整页居中留白和「侧边栏贴左、右侧表格/卡片却缩在中间一小条」两种大屏留白）；表格外层必包 `overflow-x-auto`，表头、状态胶囊、单号、日期与操作列加 `whitespace-nowrap` 防止竖排折行
-                - 不要修改依赖（package.json），不要启动开发服务器
+                ## 交付要求
+                - 入口是 `src/App.tsx`，组件放在 `src/components/`；只修改 `src/`、`public/`、`index.html` 及需要的 `docs/`
+                - 下拉选择统一使用 `src/components/Select.tsx`（禁原生 `<select>`），面向桌面宽屏流式布局（`w-full`，右侧主区不套 `max-w-* mx-auto`）
                 """);
         sb.append(com.tcl.csot.zhiye.constants.Capabilities.GENERATE);
-        sb.append(vue ? "- 完成后运行 `npx vue-tsc --noEmit -p tsconfig.json` 自查类型错误\n" : "- 完成后运行 `npx tsc --noEmit` 自查类型错误\n");
+        sb.append("- 若需求存在影响架构或业务规则的关键歧义（如审批流分支、口径取舍），可调用 `request_confirm`（`kind: \"choice\"`）给用户 2～3 个清晰选项确认后再继续；普通细节请直接合理决策，不要频繁打断\n");
+        sb.append("- 写完核心代码后，简要维护 `docs/PROJECT_NOTES.md`（≤40 行，记录关键目录、数据表/状态约定、特殊业务规则），方便后续多轮迭代保持一致\n");
+        sb.append("- 收尾总结之前，务必先调用 `verify_app` 工具做完整构建与冒烟自检（有错就自己修好再复检），并调用 `screenshot`（`device: \"wide\"`）确认桌面宽屏效果\n");
+        sb.append(GENERATE_SUMMARY);
+        return sb.toString();
+    }
+
+    static String generateService(AppRow app, List<String> assetPaths) {
+        Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
+        StringBuilder sb = new StringBuilder();
+        sb.append("请在当前全栈项目骨架（前端 `src/` React 19 + Vite + TypeScript + Tailwind，后端 `server/index.mjs` Express）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
+        sb.append("## 应用类型与指引\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+        sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
+        if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
+        sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
+                .append("。主色 ").append(st.accent()).append("，浅色背景 ").append(st.light()).append("。\n\n");
+        if (!assetPaths.isEmpty()) {
+            sb.append("## 用户上传的素材（已放进项目）\n");
+            for (String p : assetPaths) sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
+            sb.append('\n');
+        }
+        sb.append("""
+                ## 全栈交付要求
+                - **同时实现前后端**：前端在 `src/`，后端在 `server/`（入口 `server/index.mjs`）；不要把业务数据只写死在前端内存或 localStorage 里，必须通过真实 `/api/...` 接口读写持久化数据
+                - **接口与持久化规范**：前端统一请求相对路径 `/api/...`（禁止硬编码 `localhost`）；后端监听 `0.0.0.0:${PORT || 8080}`，保留 `GET /api/health` 返回 200 JSON，数据写入 `process.env.DATA_DIR || '.data'`（原子落盘 `tmp -> rename`）并在检测到 `DATABASE_URL` 时支持 PostgreSQL，静态托管 `dist/` 与 SPA 回退
+                - **桌面宽屏与交互**：界面中文、面向桌面端全宽流式布局（`w-full`），表单/筛选交互真实联动后端接口并给出明确加载与错误提示；需要参考全栈最佳实践时可用 `read` 查看内置技能 `fullstack-app`
+                - 若需求存在关键业务歧义，可调用 `request_confirm`（`kind: "choice"`）让用户快速拍板；普通实现细节自行合理决策
+                - 简要维护 `docs/PROJECT_NOTES.md`（≤40 行，记录后端 API 清单、数据存储结构、前端核心模块与关键约定），供后续迭代直接复用
+                - 收尾总结之前，务必调用 `verify_app` 自检（自动验证类型检查、前端构建、后端临时起服与 `/api/health` 探活及页面冒烟），全部通过后再总结
+                """);
+        sb.append(com.tcl.csot.zhiye.constants.Capabilities.GENERATE);
         sb.append(GENERATE_SUMMARY);
         return sb.toString();
     }
@@ -107,11 +134,14 @@ public final class Prompts {
         return sb.toString();
     }
 
-    static String modify(String content, JsonNode ctx) { return modify(content, ctx, false); }
+    static String modify(String content, JsonNode ctx) { return modify(content, ctx, "template"); }
 
-    static String modify(String content, JsonNode ctx, boolean skill) {
-        if (skill) return "请按用户的要求修改当前的 skill 包（只有文件，不是网页）。\n\n## 用户的要求\n" + content + "\n\n## 约定\n" + Catalog.SKILL_HINT
-                + "\n\n## 要求\n- 严格遵循 SkillHub 规范：SKILL.md ≤500 行；配置头 name 仅小写字母/数字/`-`且不含版本号、description ≤120 字、有特定依赖时写具体 compatibility\n- 严禁包含凭证/密码/token/飞书用户 ID（ou_xxx），不得遗留缓存/调试日志/临时文件\n- 脚本只用标准库\n- 最后用一两句话总结你改了什么\n";
+    static String modify(String content, JsonNode ctx, boolean skill) { return modify(content, ctx, skill ? "skill" : "template"); }
+
+    static String modify(String content, JsonNode ctx, String projectKind) {
+        String kind = projectKind == null ? "template" : projectKind;
+        if ("skill".equals(kind)) return "请按用户的要求修改当前的 skill 包（只有文件，不是网页）。\n\n## 用户的要求\n" + content + "\n\n## 约定\n" + Catalog.SKILL_HINT
+                + "\n\n## 要求\n- 严格遵循 SkillHub 规范：SKILL.md ≤500 行；配置头 name 仅小写字母/数字/`-`且不含版本号、description ≤120 字、有特定依赖时写具体 compatibility\n- 严禁包含凭证/密码/token/飞书用户 ID（ou_xxx），不得遗留缓存/调试日志/临时文件\n- 脚本只用标准库；改完调用 `verify_app` 自查后再总结\n";
         StringBuilder sb = new StringBuilder();
         sb.append("请按用户的要求修改当前项目。\n\n## 用户的要求\n").append(content).append("\n\n");
         if (ctx != null && !ctx.isNull()) {
@@ -137,12 +167,17 @@ public final class Prompts {
             sb.append("- 行号可能因手动修改有偏移，请以元素内容为准\n");
             sb.append("\n只修改这个元素，除非要求明确涉及其他部分。\n\n");
         }
-        sb.append("""
-                ## 要求
-                - 保持其他内容和交互不变；使用 Tailwind 类名；不要引用外部网络资源
-                - 不要修改依赖，不要启动开发服务器
-                - 完成后运行 `npx tsc --noEmit` 自查
-                """);
+        String verifyHint = switch (kind) {
+            case "service" -> "- 如涉及排查运行异常、环境变量或表结构，先调用 `service_runtime_inspect` 查看真实运行日志与配置；改完后调用 `verify_app` 确认前后端构建、后端起服与 `/api/health` 通过";
+            case "vue" -> "- 改完后调用 `verify_app`（执行 vue-tsc、构建与冒烟自检）并用 `screenshot` 确认效果";
+            case "script" -> "- 改完后调用 `verify_app` 并用小样例数据实跑脚本确认无误";
+            case "static" -> "- 改完后调用 `verify_app` 并用 `screenshot` 确认无控制台报错与排版异常";
+            default -> "- 改完后调用 `verify_app`（执行类型检查、构建与冒烟自检），涉及界面变动时用 `screenshot` 复核";
+        };
+        sb.append("## 要求\n")
+                .append("- 优先使用 `find_files` / `grep_files` 精准定位目标文件，保持无关功能与交互不变；不要修改依赖，不要启动长期进程\n")
+                .append("- 若改动影响了目录结构、接口契约、数据表或关键业务规则，顺手同步更新 `docs/PROJECT_NOTES.md`\n")
+                .append(verifyHint).append('\n');
         sb.append(com.tcl.csot.zhiye.constants.Capabilities.MODIFY);
         sb.append(MODIFY_SUMMARY);
         return sb.toString();
@@ -173,12 +208,13 @@ public final class Prompts {
 
     public static String fix(JsonNode checks, int round, String projectKind) {
         String checkCmd = switch (projectKind == null ? "template" : projectKind) {
-            case "vue" -> "修复后再用 `npx vue-tsc --noEmit -p tsconfig.json` 自查";
-            case "script" -> "修复后用样例数据重新运行脚本自查";
-            case "static" -> "修复后再检查 HTML / CSS / 脚本报错";
-            case "skill" -> "修复后对照 SKILL.md 规范与引用路径自查";
-            case "vite" -> "修复后再用 `npm run build` 自查";
-            default -> "修复后再用 `npx tsc --noEmit -p tsconfig.json` 自查";
+            case "vue" -> "修复后调用 `verify_app`（vue-tsc + 构建 + 冒烟）自查";
+            case "script" -> "修复后调用 `verify_app` 并用样例数据重新运行脚本自查";
+            case "static" -> "修复后调用 `verify_app` 检查 HTML / CSS / 脚本报错";
+            case "skill" -> "修复后调用 `verify_app` 对照 SKILL.md 规范与引用路径自查";
+            case "vite" -> "修复后调用 `verify_app` 确认 `npm run build` 与冒烟通过";
+            case "service" -> "修复后调用 `verify_app` 确认类型检查、前端构建、后端启动与 `/api/health` 均通过";
+            default -> "修复后调用 `verify_app` 确认类型检查、构建与冒烟通过";
         };
         StringBuilder sb = new StringBuilder("平台校验没有通过（第 " + round + " 轮修复），请修复下面的问题，" + checkCmd + "：\n\n");
         for (JsonNode c : checks) {

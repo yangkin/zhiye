@@ -211,8 +211,12 @@ export function toolSummary(cwd, name, args = {}, { created } = {}) {
       return `执行命令：${c.length > 60 ? c.slice(0, 60) + '…' : c}`
     }
     case 'todo_write': return '更新待办清单'
-    case 'request_confirm': return args.kind === 'cloud' ? '启用 织页云服务' : '请求确认'
+    case 'request_confirm': return args.kind === 'cloud' ? '启用 织页云服务' : args.kind === 'choice' ? `向你确认 · ${String(args.title || args.reason || '方案选择').slice(0, 28)}` : '请求确认'
     case 'screenshot': return `截图自查 · ${args.device === 'wide' ? '宽屏 1920' : '桌面'}${args.route ? ' ' + String(args.route).slice(0, 40) : ''}`
+    case 'find_files': return `查找文件${args.pattern ? ' · ' + String(args.pattern).slice(0, 32) : args.dir ? ' · ' + String(args.dir).slice(0, 32) : ''}`
+    case 'grep_files': return `搜索代码 · ${String(args.query || '').slice(0, 32)}`
+    case 'verify_app': return '工程自检（构建与冒烟）'
+    case 'service_runtime_inspect': return `检查运行态${args.section && args.section !== 'all' ? ' · ' + args.section : ''}`
     default: return `调用工具 ${name}`
   }
 }
@@ -284,29 +288,46 @@ export function createTodoExtension({ cwd, onTodo }) {
 
 // ---------------- 需要用户确认的操作 ----------------
 
-export const CONFIRM_KINDS = ['cloud']
+export const CONFIRM_KINDS = ['cloud', 'choice']
 export const CONFIRM_TIMEOUT_MS = 10 * 60 * 1000
 
 /**
- * 请求用户确认的工具：发 { type:'confirm', id, kind, reason, state:'pending' }，等平台转来的 confirm 命令；
- * 结束时再发一次 state = accepted / declined / timeout。onAccepted(kind) 返回确认后要告诉模型的用法说明。
+ * 请求用户确认的工具：
+ * - kind=cloud：为应用启用共享云服务；
+ * - kind=choice：遇到影响架构/业务规则的关键歧义时，给用户 2～4 个简短选项快速拍板。
+ * 发 { type:'confirm', id, kind, title?, reason, options?, state:'pending' }，等平台转来的 confirm 命令；
+ * 结束时再发一次 state = accepted / declined / timeout。
  */
-export function createConfirmExtension({ emit, waiters, onAccepted = () => '', timeoutMs = CONFIRM_TIMEOUT_MS }) {
+export function createConfirmExtension({ emit, waiters, projectKind = 'template', onAccepted = () => '', timeoutMs = CONFIRM_TIMEOUT_MS }) {
   return (pi) => {
     pi.registerTool({
       name: 'request_confirm',
       label: '请求确认',
-      description: '需要用户确认才能做的操作（目前只有 kind=cloud：为这个应用启用云服务——数据库和文件存储）。调用后界面会弹出确认卡，等用户选择后返回结果。',
+      description: '需要用户拍板时调用：1) kind=cloud 为纯前端应用启用共享云服务（数据库与文件存储，全栈 service 项目不要调 cloud）；2) kind=choice 遇到影响实现方向或业务规则的关键歧义时，给用户 2～4 个清晰选项快速选择（第一项放你的推荐方案）。普通细节请自行合理决策，不要频繁打断用户。',
       parameters: Type.Object({
-        kind: Type.Union(CONFIRM_KINDS.map((k) => Type.Literal(k)), { description: '操作类型：cloud = 启用云服务' }),
-        reason: Type.String({ description: '一句话说明为什么需要（显示给用户），不超过 60 字' }),
+        kind: Type.Union(CONFIRM_KINDS.map((k) => Type.Literal(k)), { description: '操作类型：cloud = 启用云服务；choice = 向用户确认关键方案/规则选择' }),
+        title: Type.Optional(Type.String({ description: '仅 choice 时填写：确认卡标题（例如「审批驳回后如何流转？」），不超过 40 字' })),
+        reason: Type.String({ description: '一句话说明为什么需要确认（显示给用户），不超过 120 字' }),
+        options: Type.Optional(Type.Array(Type.String({ description: '单个选项文字，不超过 40 字' }), { description: '仅 choice 时必填：2～4 个清晰选项，第一项为推荐方案' })),
       }),
       async execute(toolCallId, params, signal) {
         const kind = params?.kind
         if (!CONFIRM_KINDS.includes(kind)) throw new Error(`不支持的确认类型：${kind}`)
+        if (kind === 'cloud' && projectKind === 'service') {
+          return { content: [{ type: 'text', text: '全栈/单体应用不需要启用静态站点云服务（请直接使用 DATA_DIR 或服务托管面板的独立 PostgreSQL DATABASE_URL）。' }], details: { state: 'declined' } }
+        }
         const reason = String(params?.reason || '').trim().slice(0, 120)
+        const title = String(params?.title || '').trim().slice(0, 40)
+        let options = []
+        if (kind === 'choice') {
+          options = (Array.isArray(params?.options) ? params.options : [])
+            .map((o) => String(o ?? '').trim().slice(0, 40))
+            .filter(Boolean)
+            .slice(0, 4)
+          if (options.length < 2) throw new Error('kind=choice 至少需要提供 2 个有效选项（options）')
+        }
         const id = 'cf_' + String(toolCallId || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(-24)
-        emit({ type: 'confirm', id, kind, reason, state: 'pending' })
+        emit({ type: 'confirm', id, kind, ...(title ? { title } : {}), reason, ...(options.length ? { options } : {}), state: 'pending' })
         const answer = await new Promise((resolve) => {
           const done = (v) => { clearTimeout(timer); waiters.delete(id); signal?.removeEventListener?.('abort', onAbort); resolve(v) }
           const onAbort = () => done({ state: 'aborted' })
@@ -315,12 +336,20 @@ export function createConfirmExtension({ emit, waiters, onAccepted = () => '', t
           if (signal?.aborted) onAbort()
           else signal?.addEventListener?.('abort', onAbort, { once: true })
         })
-        emit({ type: 'confirm', id, kind, reason, state: answer.state === 'aborted' ? 'declined' : answer.state })
+        emit({ type: 'confirm', id, kind, ...(title ? { title } : {}), reason, state: answer.state === 'aborted' ? 'declined' : answer.state })
         if (answer.state === 'aborted') throw new Error('任务已停止')
         let text
-        if (answer.state === 'accepted') text = `用户已确认，云服务已启用。${answer.note ? answer.note + '\n' : ''}\n${onAccepted(kind) || ''}`.trim()
-        else if (answer.state === 'timeout') text = '用户一直没有回应，按「暂不启用」处理：不要使用云服务，改用 localStorage 保存数据，并在总结里说明。'
-        else text = '用户选择暂不启用云服务：不要使用云服务，改用 localStorage 保存数据，并在总结里说明数据只存在当前浏览器、以后可以再启用。'
+        if (kind === 'choice') {
+          const picked = String(answer.note || '').trim()
+          if (answer.state === 'accepted' && picked) text = `用户已选择：「${picked}」。请严格按这个选择继续实现。`
+          else if (answer.state === 'accepted') text = `用户已确认采用推荐方案：「${options[0]}」。请按此方案继续实现。`
+          else if (answer.state === 'timeout') text = `用户暂未回应，请直接按第一项推荐方案「${options[0]}」继续实现，并在最终总结里说明该默认选择。`
+          else text = `用户选择按默认推荐继续，请直接采用「${options[0]}」继续实现。`
+        } else {
+          if (answer.state === 'accepted') text = `用户已确认，云服务已启用。${answer.note ? answer.note + '\n' : ''}\n${onAccepted(kind) || ''}`.trim()
+          else if (answer.state === 'timeout') text = '用户一直没有回应，按「暂不启用」处理：不要使用云服务，改用 localStorage 保存数据，并在总结里说明。'
+          else text = '用户选择暂不启用云服务：不要使用云服务，改用 localStorage 保存数据，并在总结里说明数据只存在当前浏览器、以后可以再启用。'
+        }
         return { content: [{ type: 'text', text }], details: { state: answer.state } }
       },
     })

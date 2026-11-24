@@ -128,15 +128,16 @@ export type TaskEventType =
   | 'steer'
   | 'confirm';
 
-/** agent 请求用户确认的操作（目前只有启用云服务） */
+/** agent 请求用户确认的操作（启用云服务 / 步数检查点继续 / 关键方案选择） */
 export interface ConfirmRequest {
   id: string;
-  /** cloud：启用云服务；continue：做了一段（步数检查点），问要不要继续 */
-  kind: 'cloud' | 'continue' | string;
+  /** cloud：启用云服务；continue：步数检查点问要不要继续；choice：agent 遇到关键歧义请用户拍板 */
+  kind: 'cloud' | 'continue' | 'choice' | string;
   state: 'pending' | 'accepted' | 'declined' | 'timeout';
   reason?: string;
   title?: string;
   items?: string[];
+  options?: string[];
   acceptLabel?: string;
   declineLabel?: string;
 }

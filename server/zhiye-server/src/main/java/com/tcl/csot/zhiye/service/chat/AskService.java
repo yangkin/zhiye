@@ -630,7 +630,7 @@ public class AskService {
         try {
             var files = git.listFiles(app.id(), v.gitCommit());
             out.append(files.stream().map(f -> f.path()).reduce((a, b) -> a + "、" + b).orElse("（空）"));
-            for (String key : List.of("SKILL.md", "src/App.tsx", "src/App.jsx", "src/App.vue", "index.html")) {
+            for (String key : List.of("docs/PROJECT_NOTES.md", "SKILL.md", "server/index.mjs", "src/App.tsx", "src/App.jsx", "src/App.vue", "index.html")) {
                 if (budget <= 0) break;
                 var bytes = git.readFile(app.id(), v.gitCommit(), key).orElse(null);
                 if (bytes == null) continue;
