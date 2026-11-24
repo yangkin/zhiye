@@ -1,15 +1,23 @@
 package com.tcl.csot.zhiye.service.runtime;
 
 import com.tcl.csot.zhiye.config.ServiceRuntimeProperties;
+import com.tcl.csot.zhiye.config.ZhiyeProperties;
+import com.tcl.csot.zhiye.service.repo.GitService;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -26,10 +34,17 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
 
     private final KubernetesClient client;
     private final ServiceRuntimeProperties props;
+    private final Path runtimeDir;
 
-    public KubernetesServiceRuntimeProvider(KubernetesClient client, ServiceRuntimeProperties props) {
+    @Autowired
+    public KubernetesServiceRuntimeProvider(KubernetesClient client, ServiceRuntimeProperties props, ZhiyeProperties zhiyeProps) {
         this.client = client;
         this.props = props;
+        this.runtimeDir = zhiyeProps != null && zhiyeProps.runtimePath() != null ? zhiyeProps.runtimePath() : Path.of("runtime");
+    }
+
+    public KubernetesServiceRuntimeProvider(KubernetesClient client, ServiceRuntimeProperties props) {
+        this(client, props, null);
     }
 
     @Override
@@ -43,14 +58,21 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
         StringBuilder buildLog = new StringBuilder();
         buildLog.append("[k8s] 目标命名空间=").append(ns).append(" 镜像=").append(imageRef).append("\n");
 
-        // 1. 若配置了 Harbor 镜像仓，执行 Kaniko 构建 Job
+        // 1. 若配置了 Harbor 镜像仓，在独立构建命名空间执行 Kaniko 构建 Job（并将版本源码与 Dockerfile 暂存至共享构建卷）
         if (!props.harborRegistry().isBlank()) {
+            String buildNs = props.buildNamespace();
             String jobName = (name + "-bld-" + Long.toString(System.currentTimeMillis(), 36));
             if (jobName.length() > 63) jobName = jobName.substring(0, 63).replaceAll("-+$", "");
-            String contextUrl = "dir:///workspace";
-            Job job = K8sServiceResourceFactory.buildKanikoJob(props, spec, jobName, imageRef, contextUrl);
-            client.batch().v1().jobs().inNamespace(ns).resource(job).create();
-            waitJobComplete(ns, jobName, Duration.ofSeconds(props.buildTimeoutSeconds()), buildLog);
+            Path stageDir = runtimeDir.resolve("k8s-builds").resolve(jobName);
+            stageBuildContext(spec, stageDir);
+            try {
+                String contextUrl = "dir:///workspace";
+                Job job = K8sServiceResourceFactory.buildKanikoJob(props, spec, jobName, imageRef, contextUrl);
+                client.batch().v1().jobs().inNamespace(buildNs).resource(job).create();
+                waitJobComplete(buildNs, jobName, Duration.ofSeconds(props.buildTimeoutSeconds()), buildLog);
+            } finally {
+                GitService.deleteRecursively(stageDir);
+            }
         } else {
             buildLog.append("[k8s] 未配置 harborRegistry，跳过 Kaniko 推送，直接使用目标镜像引用\n");
         }
@@ -157,6 +179,30 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
         if (d == null || d.getStatus() == null) return false;
         Integer ready = d.getStatus().getReadyReplicas();
         return ready != null && ready > 0;
+    }
+
+    private static void stageBuildContext(DeploySpec spec, Path stageDir) throws IOException {
+        Files.createDirectories(stageDir);
+        if (spec.sourceDir() != null && Files.isDirectory(spec.sourceDir())) {
+            try (var stream = Files.walk(spec.sourceDir())) {
+                for (Path src : (Iterable<Path>) stream::iterator) {
+                    Path rel = spec.sourceDir().relativize(src);
+                    if (rel.toString().isEmpty()) continue;
+                    String first = rel.getName(0).toString();
+                    if (".git".equals(first) || "node_modules".equals(first)) continue;
+                    Path dst = stageDir.resolve(rel);
+                    if (Files.isDirectory(src)) {
+                        Files.createDirectories(dst);
+                    } else if (Files.isRegularFile(src)) {
+                        Files.createDirectories(dst.getParent());
+                        Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+        }
+        if (spec.dockerfile() != null && !spec.dockerfile().isBlank()) {
+            Files.writeString(stageDir.resolve("Dockerfile"), spec.dockerfile(), StandardCharsets.UTF_8);
+        }
     }
 
     private void waitJobComplete(String ns, String jobName, Duration timeout, StringBuilder buildLog) throws InterruptedException {

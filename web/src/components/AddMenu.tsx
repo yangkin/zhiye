@@ -105,10 +105,12 @@ export function AddMenuButton({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!wrap.current?.contains(e.target as Node) && !menu.current?.contains(e.target as Node)) close();
+      const t = e.target instanceof Node ? e.target : null;
+      if (!t || (!wrap.current?.contains(t) && !menu.current?.contains(t))) close();
     };
     const onScroll = (e: Event) => {
-      if (!menu.current?.contains(e.target as Node)) close();
+      const t = e.target instanceof Node ? e.target : null;
+      if (!t || !menu.current?.contains(t)) close();
     };
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);

@@ -361,9 +361,11 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
     ], editable: false, noDist: true }
   }
   else if (kind === 'service') {
-    r = { checks: [
-      await step('脚本语法', () => checkScripts(cwd, env)),
-    ], editable: false, noDist: true }
+    const checks = [await step('脚本语法', () => checkScripts(cwd, env))]
+    if (existsSync(path.join(cwd, 'package.json')) && existsSync(path.join(cwd, 'node_modules')) && viteBin(cwd)) {
+      checks.push(await step('前端构建', () => viteBuild(cwd, buildEnv(env), { outDir: 'dist' })))
+    }
+    r = { checks, editable: false, noDist: true }
   }
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)
   // 报错里的绝对路径换成相对工作区的路径，便于 agent 阅读

@@ -106,12 +106,38 @@ export function HelpPanel() {
   const helpTab = useUi((s) => s.helpTab);
   const setHelpTab = useUi((s) => s.setHelpTab);
   const { data: workspace } = useQuery({ queryKey: qk.workspace, queryFn: api.workspace, enabled: open, staleTime: 5 * 60_000 });
+  const { data: remoteDocs } = useQuery({
+    queryKey: ['help-docs'],
+    queryFn: helpApi.docs,
+    enabled: open,
+    staleTime: 60_000,
+    retry: false,
+  });
   const wsId = workspace?.id ?? null;
 
   const [view, setView] = useState<'chat' | 'history'>('chat');
-  const [docChapterId, setDocChapterId] = useState<HelpDocChapter['id']>('limits');
+  const [docChapterId, setDocChapterId] = useState<string>('limits');
   const [docQuery, setDocQuery] = useState('');
   const [openFaqId, setOpenFaqId] = useState<string | null>('limits');
+
+  const docChapters = useMemo<HelpDocChapter[]>(() => {
+    const items = remoteDocs?.items;
+    if (!items || items.length === 0) return HELP_DOC_CHAPTERS;
+    const dynamic: HelpDocChapter[] = items.map((a) => ({
+      id: a.slug as HelpDocChapter['id'],
+      title: a.title,
+      shortTitle: a.shortTitle || a.title.slice(0, 8),
+      badge: a.badge || undefined,
+      summary: a.summary || '',
+      markdown: a.contentMd || '',
+      askPrompt: a.askPrompt || `帮我详细说明一下「${a.title}」`,
+    }));
+    if (!dynamic.some((c) => c.id === 'faq')) {
+      const faqCh = HELP_DOC_CHAPTERS.find((c) => c.id === 'faq');
+      if (faqCh) dynamic.push(faqCh);
+    }
+    return dynamic;
+  }, [remoteDocs]);
   const [convId, setConvId] = useState<string | null>(null);
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [msgs, setMsgs] = useState<UiMsg[]>([]);
@@ -198,10 +224,37 @@ export function HelpPanel() {
     if (saved && saved !== convId) void openConversation(saved);
   }, [open, wsId, convId, openConversation]);
 
-  // ---------- 键盘、滚动 ----------
+  // ---------- 键盘、焦点归还与滚动 ----------
+  const prevFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      prevFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      requestAnimationFrame(() => {
+        if (helpTab === 'chat' && view === 'chat' && inputRef.current) {
+          inputRef.current.focus();
+        } else {
+          panelRef.current?.querySelector<HTMLElement>('button, input, textarea, [tabindex]')?.focus();
+        }
+      });
+    } else if (!open && wasOpenRef.current) {
+      const target = prevFocusRef.current;
+      prevFocusRef.current = null;
+      if (target && document.contains(target)) {
+        requestAnimationFrame(() => target.focus());
+      }
+    }
+    wasOpenRef.current = open;
+  }, [open, helpTab, view]);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setOpen(false);
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, setOpen]);
@@ -482,8 +535,17 @@ export function HelpPanel() {
 
   const empty = msgs.length === 0 && !loadingConv;
   const placeholder = mode === 'report' ? '描述遇到的问题，可以附上截图' : '描述你的问题，或者跟我聊聊…';
-  const activeChapter = HELP_DOC_CHAPTERS.find((c) => c.id === docChapterId) ?? HELP_DOC_CHAPTERS[0];
+  const activeChapter = docChapters.find((c) => c.id === docChapterId) ?? docChapters[0];
   const kw = docQuery.trim().toLowerCase();
+  const filteredDocs = kw
+    ? docChapters.filter(
+        (ch) =>
+          ch.id !== 'faq' &&
+          (ch.title.toLowerCase().includes(kw) ||
+            ch.summary.toLowerCase().includes(kw) ||
+            ch.markdown.toLowerCase().includes(kw)),
+      )
+    : [];
   const filteredFaq = kw
     ? HELP.filter(
         (it) =>
@@ -567,7 +629,7 @@ export function HelpPanel() {
               ) : null}
             </div>
             <div className="xz-docs-pills" role="tablist" aria-label="文档章节">
-              {HELP_DOC_CHAPTERS.map((ch) => (
+              {docChapters.map((ch) => (
                 <button
                   key={ch.id}
                   type="button"
@@ -591,17 +653,40 @@ export function HelpPanel() {
               <div className="xz-docs-section">
                 <div className="xz-docs-banner">
                   <div>
-                    <h3>搜索结果（{filteredFaq.length} 条）</h3>
-                    <p>关键词「{docQuery.trim()}」匹配到的帮助条目与规范说明</p>
+                    <h3>搜索结果（{filteredDocs.length + filteredFaq.length} 条）</h3>
+                    <p>关键词「{docQuery.trim()}」匹配到的知识库文档与常见问题</p>
                   </div>
                   <button type="button" className="xz-ask-btn" onClick={() => askBotFromDoc(docQuery.trim())}>
                     <Icon name="spark" /> 直接问小织
                   </button>
                 </div>
-                {filteredFaq.length === 0 ? (
+                {filteredDocs.length === 0 && filteredFaq.length === 0 ? (
                   <p className="xz-muted">文档里没找到完全匹配的条目，点右上角「直接问小织」让我帮你解答～</p>
                 ) : (
                   <div className="xz-faq-list">
+                    {filteredDocs.map((ch) => (
+                      <div key={ch.id} className="xz-faq-card is-open">
+                        <button
+                          type="button"
+                          className="xz-faq-toggle"
+                          onClick={() => {
+                            setDocQuery('');
+                            setDocChapterId(ch.id);
+                          }}
+                        >
+                          <span className="xz-faq-q">
+                            <Icon name="book" />
+                            <b>{ch.title}</b>
+                          </span>
+                          <span className="xz-faq-arrow">→</span>
+                        </button>
+                        {ch.summary ? (
+                          <div className="xz-faq-a">
+                            <p>{ch.summary}</p>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
                     {filteredFaq.map((it) => (
                       <div key={it.id} className="xz-faq-card is-open">
                         <div className="xz-faq-q">

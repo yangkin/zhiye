@@ -398,6 +398,8 @@ public class ConversationService {
      * 它复述截图时会提到「开发skill」这类界面文字，曾把「照着做一个工作台」判成技能包。
      */
     static String inferType(List<ConversationRepository.MessageRow> messages, String requested) {
+        // 若用户在创造页明确选定了「全栈应用」（含点击全栈模板），绝不降级覆盖
+        if (Catalog.FULLSTACK_TYPE.equals(requested)) return Catalog.FULLSTACK_TYPE;
         StringBuilder user = new StringBuilder();
         String declared = null;
         for (ConversationRepository.MessageRow msg : messages) {
@@ -416,6 +418,8 @@ public class ConversationService {
 
     private static String inferTypeText(String raw) {
         String text = raw.toLowerCase(Locale.ROOT);
+        if (containsAny(text, "全栈应用", "全栈", "前后端一体", "前后端分离", "后端接口", "服务端接口", "自定义api", "自定义 api", "express 后端", "node 后端", "fastapi", "flask"))
+            return Catalog.FULLSTACK_TYPE;
         if (containsAny(text, "开发skill", "skill.md", "技能包", "技能应用", "做一个 skill", "生成 skill")) return Catalog.SKILL_TYPE;
         if (containsAny(text, "技术文档", "文档站", "文档网站", "开发文档", "使用文档", "api 文档", "api文档", "markdown 文档", "知识库"))
             return "技术文档";

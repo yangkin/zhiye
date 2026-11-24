@@ -22,8 +22,9 @@ import { Icon, type IconName } from '../lib/icons';
 import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { DashEmptyBox, DashPanelHead, fmtCompact, fmtNum } from './DashboardCharts';
+import { AdminKnowledgePanel } from './AdminKnowledgePanel';
 
-export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops';
+export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge';
 
 function OwnerBadge({
   ownerName,
@@ -162,10 +163,19 @@ export function AdminGovernancePanel({
   const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const urlTab = searchParams.get('tab') as GovTab | null;
-  const [govTab, setGovTabState] = useState<GovTab>(
-    urlTab && ['handover', 'sites', 'feedback', 'trash', 'ops'].includes(urlTab) ? urlTab : 'handover',
-  );
+  const normalizeGovTab = (raw: string | null): GovTab | null => {
+    if (!raw) return null;
+    if (raw === 'quota' || raw === 'quotas') return 'ops';
+    if (['handover', 'sites', 'feedback', 'trash', 'ops', 'knowledge'].includes(raw)) return raw as GovTab;
+    return null;
+  };
+  const urlTab = normalizeGovTab(searchParams.get('tab'));
+  const [govTab, setGovTabState] = useState<GovTab>(urlTab ?? 'handover');
+
+  useEffect(() => {
+    const next = normalizeGovTab(searchParams.get('tab'));
+    if (next && next !== govTab) setGovTabState(next);
+  }, [searchParams, govTab]);
 
   const setGovTab = (next: GovTab) => {
     setGovTabState(next);
@@ -189,6 +199,9 @@ export function AdminGovernancePanel({
 
   const myWsQ = useQuery({ queryKey: qk.workspace, queryFn: api.workspace });
   const myWorkspaceId = myWsQ.data?.id ?? '';
+  const kbListQ = useQuery({ queryKey: ['admin-help-knowledge'], queryFn: api.adminHelpKnowledgeList, staleTime: 30_000 });
+  const kbTotalCount = kbListQ.data?.items?.length ?? 5;
+  const kbEnabledCount = (kbListQ.data?.items ?? []).filter((x) => x.enabled).length;
 
   useEffect(() => {
     const fw = searchParams.get('fromWs');
@@ -742,6 +755,14 @@ export function AdminGovernancePanel({
       tone: rateLimitRejected > 0 ? 'rose' : 'slate',
       alert: rateLimitRejected > 0,
       healthy: rateLimitRejected === 0,
+    },
+    {
+      tab: 'knowledge',
+      icon: 'book',
+      label: '知识库维护',
+      value: `${kbTotalCount} 篇`,
+      sub: `启用 ${kbListQ.data ? kbEnabledCount : kbTotalCount} 篇 · 文档与小织同步`,
+      tone: 'violet',
     },
   ];
 
@@ -2525,6 +2546,15 @@ export function AdminGovernancePanel({
               </div>
             )}
           </div>
+        </div>
+      ) : null}
+
+      {/* ====================================================================
+         模块 6：帮助文档与小织知识库在线维护（单一事实来源）
+         ==================================================================== */}
+      {govTab === 'knowledge' ? (
+        <div className="gov-stack">
+          <AdminKnowledgePanel />
         </div>
       ) : null}
 

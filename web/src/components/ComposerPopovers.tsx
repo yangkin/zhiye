@@ -60,7 +60,8 @@ function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[], onClos
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => {
-      if (!refs.some((r) => r.current?.contains(e.target as Node))) cb.current();
+      const t = e.target instanceof Node ? e.target : null;
+      if (!t || !refs.some((r) => r.current?.contains(t))) cb.current();
     };
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -106,7 +107,10 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
   useOutside(open && !hubOpen, [box, anchor], onClose);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setHubOpen(false);
+      return;
+    }
     setActive(0);
     if (mentionQuery === null) {
       setQ('');
@@ -444,10 +448,12 @@ export function ModelModeButton({ models, modes, model, mode, onModel, onMode, c
 }
 
 /** 润色提示词：把粗略需求改写得更清楚；只在有内容时可用 */
-export function PolishButton({ value, onPolished, className = 'icon-button' }: { value: string; onPolished: (text: string) => void; className?: string }) {
+export function PolishButton({ value, onPolished, className = 'polish-button' }: { value: string; onPolished: (text: string) => void; className?: string }) {
   const [busy, setBusy] = useState(false);
+  const disabled = !value.trim() || busy;
+  const label = busy ? '润色中…' : '润色';
   const run = async () => {
-    if (!value.trim() || busy) return;
+    if (disabled) return;
     setBusy(true);
     try {
       const r = await api.polish(value);
@@ -460,8 +466,19 @@ export function PolishButton({ value, onPolished, className = 'icon-button' }: {
     }
   };
   return (
-    <button type="button" className={className} aria-label="润色提示词" title="润色提示词" disabled={!value.trim() || busy} onClick={() => void run()}>
-      <Icon name={busy ? 'refresh' : 'spark'} className={busy ? 'spinning' : ''} />
-    </button>
+    <span className="polish-wrap">
+      <button
+        type="button"
+        className={className}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => void run()}
+      >
+        <Icon name={busy ? 'refresh' : 'spark'} className={busy ? 'spinning' : ''} />
+      </button>
+      <span className="polish-tip" role="tooltip" aria-hidden="true">
+        {label}
+      </span>
+    </span>
   );
 }

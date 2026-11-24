@@ -59,6 +59,19 @@ public final class K8sServiceResourceFactory {
 
         List<Volume> volumes = new ArrayList<>();
         List<VolumeMount> mounts = new ArrayList<>();
+        // 挂载共享构建上下文卷的专属 subPath（只读），确保 Kaniko 只能读取本次构建的源码与 Dockerfile
+        if (!props.buildContextPvc().isBlank()) {
+            volumes.add(new VolumeBuilder()
+                    .withName("build-context")
+                    .withNewPersistentVolumeClaim(props.buildContextPvc(), true)
+                    .build());
+            mounts.add(new VolumeMountBuilder()
+                    .withName("build-context")
+                    .withMountPath("/workspace")
+                    .withSubPath("k8s-builds/" + jobName)
+                    .withReadOnly(true)
+                    .build());
+        }
         if (!props.harborSecretName().isBlank()) {
             volumes.add(new VolumeBuilder()
                     .withName("docker-config")
@@ -70,10 +83,11 @@ public final class K8sServiceResourceFactory {
             mounts.add(new VolumeMountBuilder().withName("docker-config").withMountPath("/kaniko/.docker").withReadOnly(true).build());
         }
 
+        // 构建 Job 调度在独立构建命名空间（zhiye-builds），不与运行态 zhiye-apps 的 1C 1G LimitRange 冲突
         return new JobBuilder()
                 .withNewMetadata()
                 .withName(jobName)
-                .withNamespace(props.namespace())
+                .withNamespace(props.buildNamespace())
                 .withLabels(labels(spec.appId(), spec.slug()))
                 .endMetadata()
                 .withNewSpec()
@@ -85,6 +99,9 @@ public final class K8sServiceResourceFactory {
                 .withNewSpec()
                 .withRestartPolicy("Never")
                 .withAutomountServiceAccountToken(false)
+                .withNewSecurityContext()
+                .withNewSeccompProfile().withType("RuntimeDefault").endSeccompProfile()
+                .endSecurityContext()
                 .addNewContainer()
                 .withName("kaniko")
                 .withImage(props.kanikoImage())

@@ -65,6 +65,43 @@
 .cp-composer.composer textarea { font-size: clamp(14px, 0.95vw, 15.5px); line-height: 1.75; min-height: clamp(88px, 13.5vh, 132px); max-height: clamp(144px, 24vh, 260px); color: #2d253d; }
 .cp-composer.composer textarea::placeholder { color: #a199b0; }
 .cp-composer .send-button { width: 42px; height: 42px; border-radius: 14px; }
+.cp-composer .composer-actions { display: inline-flex; align-items: center; gap: 6px; }
+.polish-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
+.polish-button {
+  width: 32px; height: 32px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; color: #7e63c9;
+  cursor: pointer; transition: background .16s ease, color .16s ease, transform .16s ease;
+}
+.polish-button .icon { width: 18px; height: 18px; }
+.polish-button:hover:not(:disabled) {
+  background: #f4effe; color: #5b3db5;
+  transform: scale(1.06);
+}
+.polish-button:focus-visible { outline: 2px solid #b79cf0; outline-offset: 2px; }
+.polish-button:disabled {
+  background: transparent; border: 0; color: #c0b7cf;
+  cursor: not-allowed; opacity: 1; transform: none;
+}
+.polish-tip {
+  position: absolute; left: 50%; bottom: calc(100% + 9px);
+  transform: translate(-50%, 4px);
+  padding: 5px 10px; border-radius: 8px;
+  background: #241d35; color: #fff;
+  font-size: 12px; font-weight: 500; line-height: 1.35; letter-spacing: .2px; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(26, 19, 46, .22);
+  pointer-events: none; opacity: 0;
+  transition: opacity .14s ease, transform .14s ease; z-index: 20;
+}
+.polish-tip::after {
+  content: ""; position: absolute; left: 50%; top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: #241d35;
+}
+.polish-wrap:hover .polish-tip,
+.polish-wrap:focus-within .polish-tip {
+  opacity: 1; transform: translate(-50%, 0);
+}
 
 /* ---------- 小织 ---------- */
 .cp-pet { position: absolute; right: 30px; top: -80px; z-index: 2; }
@@ -435,7 +472,7 @@ body.studio-mode .chat-panel { overflow: clip; }
 .chat-files-tab{flex:0 1 auto}
 .chat-files-tools{flex:none}
 .chat-files-tab>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.conversation-scroll{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(to bottom,#000 calc(100% - 32px),transparent)}
+.conversation-scroll{padding-bottom:44px;-webkit-mask-image:none;mask-image:none}
 .conversation-composer{border-radius:22px}
 
 /* 帮助抽屉打开时只留抽屉里的小织 */

@@ -47,7 +47,8 @@ public class MonolithServiceManager {
             int idleSleepMin, boolean pgEnabled, String pgSchema, String pgRole, String pgPasswordEnc,
             boolean pvcEnabled, int pvcSizeGi, String status, String desiredVersionId, String runningVersionId,
             String imageRef, String endpointUrl, Instant lastAccessAt, Instant lastStartedAt,
-            String lastError, String buildLog, Instant createdAt, Instant updatedAt
+            String lastError, String buildLog, Instant createdAt, Instant updatedAt,
+            String previewVersionId, String previewEndpointUrl, String previewStatus
     ) {
         static ServiceRow map(ResultSet rs, int i) throws SQLException {
             return new ServiceRow(
@@ -60,7 +61,8 @@ public class MonolithServiceManager {
                     rs.getString("status"), rs.getString("desired_version_id"), rs.getString("running_version_id"),
                     rs.getString("image_ref"), rs.getString("endpoint_url"), Db.ts(rs, "last_access_at"),
                     Db.ts(rs, "last_started_at"), rs.getString("last_error"), rs.getString("build_log"),
-                    Db.ts(rs, "created_at"), Db.ts(rs, "updated_at"));
+                    Db.ts(rs, "created_at"), Db.ts(rs, "updated_at"),
+                    rs.getString("preview_version_id"), rs.getString("preview_endpoint_url"), rs.getString("preview_status"));
         }
     }
 
@@ -111,30 +113,131 @@ public class MonolithServiceManager {
         }).orElse(null);
     }
 
-    /** 导入或新建单体应用版本后初始化配置并立刻构建部署。 */
+    /** 导入或新建单体应用版本后初始化配置并立刻构建部署到线上槽位。 */
     public ServiceRow initializeAndDeploy(AppRow app, VersionRow ver) throws Exception {
         synchronized (lockFor(app.id())) {
-            ServiceRow existing = find(app.id()).orElse(null);
-            if (existing == null) {
-                checkWorkspaceServiceCount(app.workspaceId(), app.id());
-                ServiceRuntimeDetector.Spec detected = detectFromCommit(app.id(), ver.gitCommit())
-                        .orElse(new ServiceRuntimeDetector.Spec("node", app.framework(), "", "", "", "npm start", 8080, "/", 512, 500));
-                int initMem = Math.min(Math.max(128, detected.memoryMb()), props.maxMemoryMb());
-                int initCpu = Math.min(Math.max(100, detected.cpuMillicores()), props.maxCpuMillicores());
-                int initIdle = props.allowNeverSleep()
-                        ? Math.max(0, props.defaultIdleSleepMinutes())
-                        : Math.max(props.minIdleSleepMinutes(), props.defaultIdleSleepMinutes());
-                jdbc.sql("insert into app_service (app_id, runtime, framework, frontend_dir, backend_dir, build_cmd, start_cmd, port, health_path, memory_mb, cpu_millicores, idle_sleep_min, status, desired_version_id) "
-                                + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-                        .params(app.id(), detected.runtime(), detected.framework(), detected.frontendDir(), detected.backendDir(),
-                                detected.buildCmd(), detected.startCmd(), detected.port(), detected.healthPath(),
-                                initMem, initCpu, initIdle, "building", ver.id())
-                        .update();
-                jdbc.sql("update app set framework = ?, updated_at = now() where id = ?")
-                        .params(detected.framework(), app.id()).update();
-            }
-            return deployLocked(app, ver);
+            ensureInitializedLocked(app, ver);
+            ServiceRow row = deployLocked(app, ver);
+            clearPreviewSlotLocked(app);
+            return row;
         }
+    }
+
+    /** 正式发布到线上槽位（FS-04）：构建与健康检查通过后切流到线上公开地址，并清理多余的预览槽位。 */
+    public ServiceRow publishDeploy(AppRow app, VersionRow ver) throws Exception {
+        return initializeAndDeploy(app, ver);
+    }
+
+    /**
+     * 预览槽位部署（FS-04）：用于 AI 生成/修改、代码在线编辑、历史版本恢复。
+     * - 若应用已发布 V1，绝不改动或中断线上 V1 槽位，仅独立更新预览槽位（appId-prev）；
+     * - 确认预览无误后，由用户点击「发布」调用 publishDeploy 正式切流。
+     */
+    public ServiceRow deployPreview(AppRow app, VersionRow ver) throws Exception {
+        synchronized (lockFor(app.id())) {
+            ensureInitializedLocked(app, ver);
+            ServiceRow cur = find(app.id()).orElseThrow();
+            enforceRunQuota(app, cur);
+            if (cur.pgEnabled()) {
+                var p = dbService.ensureSchema(app.id(), cur.pgSchema(), cur.pgRole(), cur.pgPasswordEnc());
+                jdbc.sql("update app_service set pg_schema=?, pg_role=?, pg_password_enc=? where app_id=?")
+                        .params(p.schema(), p.role(), p.passwordEnc(), app.id()).update();
+                cur = find(app.id()).orElseThrow();
+            }
+            String prevAppId = previewAppId(app.id());
+            String prevSlug = previewSlug(app.slug());
+            Path tempSrc = Files.createTempDirectory("zhiye-svc-prev-");
+            try {
+                git.checkout(app.id(), ver.gitCommit(), tempSrc, "service");
+                ServiceRuntimeProvider.DeploySpec spec = buildDeploySpec(app, cur, ver, tempSrc, prevAppId, prevSlug);
+                ServiceRuntimeProvider.DeployResult res = provider.deploy(spec);
+                boolean hasLive = app.publishedVersionId() != null && !app.publishedVersionId().isBlank() && cur.runningVersionId() != null;
+                if (hasLive) {
+                    jdbc.sql("update app_service set preview_version_id = ?, preview_endpoint_url = ?, preview_status = 'running', "
+                                    + "desired_version_id = ?, build_log = ?, last_error = null, updated_at = now() where app_id = ?")
+                            .params(ver.id(), res.endpointUrl(), ver.id(), truncate(res.buildLog(), 64_000), app.id()).update();
+                } else {
+                    // 尚未发布过任何版本：同步把状态标为 running，便于工作台预览与状态展示一致
+                    jdbc.sql("update app_service set status = 'running', preview_version_id = ?, preview_endpoint_url = ?, preview_status = 'running', "
+                                    + "desired_version_id = ?, build_log = ?, last_error = null, last_started_at = now(), last_access_at = now(), updated_at = now() where app_id = ?")
+                            .params(ver.id(), res.endpointUrl(), ver.id(), truncate(res.buildLog(), 64_000), app.id()).update();
+                }
+                logEvent(true, "SERVICE_PREVIEW_DEPLOY", app, "单体服务预览槽位更新成功：" + app.name() + "（V" + ver.number() + "，线上版本不受影响）",
+                        truncate(res.buildLog(), 8_000), Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive));
+                return find(app.id()).orElseThrow();
+            } catch (Exception e) {
+                String msg = truncate(e.getMessage(), 4000);
+                boolean hasLive = app.publishedVersionId() != null && !app.publishedVersionId().isBlank() && cur.runningVersionId() != null;
+                if (hasLive) {
+                    jdbc.sql("update app_service set preview_status = 'failed', last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
+                            .params(msg, msg, app.id()).update();
+                } else {
+                    jdbc.sql("update app_service set status = 'failed', preview_status = 'failed', last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
+                            .params(msg, msg, app.id()).update();
+                }
+                logEvent(false, "SERVICE_PREVIEW_DEPLOY", app, "单体服务预览部署失败：" + app.name() + " · " + truncate(msg, 180),
+                        msg, Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive));
+                throw e;
+            } finally {
+                GitService.deleteRecursively(tempSrc);
+            }
+        }
+    }
+
+    private void ensureInitializedLocked(AppRow app, VersionRow ver) throws Exception {
+        ServiceRow existing = find(app.id()).orElse(null);
+        if (existing != null) return;
+        checkWorkspaceServiceCount(app.workspaceId(), app.id());
+        ServiceRuntimeDetector.Spec detected = detectFromCommit(app.id(), ver.gitCommit())
+                .orElse(new ServiceRuntimeDetector.Spec("node", app.framework(), "", "", "", "npm start", 8080, "/", 512, 500));
+        int initMem = Math.min(Math.max(128, detected.memoryMb()), props.maxMemoryMb());
+        int initCpu = Math.min(Math.max(100, detected.cpuMillicores()), props.maxCpuMillicores());
+        int initIdle = props.allowNeverSleep()
+                ? Math.max(0, props.defaultIdleSleepMinutes())
+                : Math.max(props.minIdleSleepMinutes(), props.defaultIdleSleepMinutes());
+        jdbc.sql("insert into app_service (app_id, runtime, framework, frontend_dir, backend_dir, build_cmd, start_cmd, port, health_path, memory_mb, cpu_millicores, idle_sleep_min, status, desired_version_id) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                .params(app.id(), detected.runtime(), detected.framework(), detected.frontendDir(), detected.backendDir(),
+                        detected.buildCmd(), detected.startCmd(), detected.port(), detected.healthPath(),
+                        initMem, initCpu, initIdle, "building", ver.id())
+                .update();
+        jdbc.sql("update app set framework = ?, updated_at = now() where id = ?")
+                .params(detected.framework(), app.id()).update();
+    }
+
+    private void clearPreviewSlotLocked(AppRow app) {
+        try {
+            provider.stop(previewAppId(app.id()), previewSlug(app.slug()));
+        } catch (Exception ignored) {}
+        jdbc.sql("update app_service set preview_version_id = null, preview_endpoint_url = null, preview_status = null where app_id = ?")
+                .param(app.id()).update();
+    }
+
+    private static String previewAppId(String appId) { return appId + "-prev"; }
+    private static String previewSlug(String slug) { return slug + "-prev"; }
+
+    /** 工作台预览代理入口：优先路由到当前版本的预览槽位；若当前版本与线上已发布版本一致，直接复用线上槽位。 */
+    public String ensurePreviewAwake(String appId) throws Exception {
+        ServiceRow cur = find(appId).orElseThrow(() -> new IllegalStateException("该应用尚未配置单体运行托管"));
+        AppRow app = apps.findById(appId).orElseThrow(() -> new IllegalStateException("应用不存在"));
+        String targetVid = app.currentVersionId() != null ? app.currentVersionId() : cur.desiredVersionId();
+        // 如果当前版本就是已发布且正在运行的线上版本，直接复用线上槽位
+        if (targetVid != null && targetVid.equals(cur.runningVersionId()) && cur.previewEndpointUrl() == null) {
+            return ensureAwake(appId, false);
+        }
+        String prevAppId = previewAppId(app.id());
+        String prevSlug = previewSlug(app.slug());
+        if ("running".equals(cur.previewStatus()) && cur.previewEndpointUrl() != null && !cur.previewEndpointUrl().isBlank()
+                && Objects.equals(targetVid, cur.previewVersionId()) && provider.isRunning(prevAppId, prevSlug)) {
+            return cur.previewEndpointUrl();
+        }
+        if ("stopped".equals(cur.status())) {
+            throw new IllegalStateException("应用已手动停止，请在「服务托管」点击启动或重新部署");
+        }
+        VersionRow ver = targetVid == null ? null : versions.find(targetVid).orElse(null);
+        if (ver == null) return ensureAwake(appId, false);
+        ServiceRow updated = deployPreview(app, ver);
+        return updated.previewEndpointUrl();
     }
 
     /** 对已有单体应用重新构建并部署指定版本（默认当前版本）。 */
@@ -154,9 +257,17 @@ public class MonolithServiceManager {
         return statusView(ws, appId);
     }
 
-    /** 网关请求进入时调用：如果休眠或未运行则透明拉起并返回内部 endpointUrl。 */
+    /** 网关请求进入时调用：仅当处于休眠态（sleeping）或进程意外退出时透明拉起；手动停止（stopped）绝不被访客流量唤醒。 */
     public String ensureAwake(String appId) throws Exception {
+        return ensureAwake(appId, false);
+    }
+
+    /** 显式启动或网关唤醒：allowStopped=true 仅由作者「启动」或管理员「启动」调用。 */
+    public String ensureAwake(String appId, boolean allowStopped) throws Exception {
         ServiceRow cur = find(appId).orElseThrow(() -> new IllegalStateException("该应用尚未配置单体运行托管"));
+        if (!allowStopped && "stopped".equals(cur.status())) {
+            throw new IllegalStateException("应用已手动停止，暂不对外提供服务（请由作者在工作台「服务托管」点击启动或重新部署）");
+        }
         if ("running".equals(cur.status()) && cur.endpointUrl() != null && !cur.endpointUrl().isBlank()) {
             AppRow app = apps.findById(appId).orElse(null);
             if (app != null && provider.isRunning(appId, app.slug())) {
@@ -166,11 +277,11 @@ public class MonolithServiceManager {
         synchronized (lockFor(appId)) {
             ServiceRow s = find(appId).orElseThrow(() -> new IllegalStateException("该应用尚未配置单体运行托管"));
             AppRow app = apps.findById(appId).orElseThrow(() -> new IllegalStateException("应用不存在"));
+            if (!allowStopped && "stopped".equals(s.status())) {
+                throw new IllegalStateException("应用已手动停止，暂不对外提供服务（请由作者在工作台「服务托管」点击启动或重新部署）");
+            }
             if ("running".equals(s.status()) && s.endpointUrl() != null && provider.isRunning(appId, app.slug())) {
                 return s.endpointUrl();
-            }
-            if ("stopped".equals(s.status()) && s.runningVersionId() == null) {
-                throw new IllegalStateException("应用处于已停止状态，请在工作台「服务托管」点击启动或重新部署");
             }
             String vid = s.runningVersionId() != null ? s.runningVersionId() : app.publishedVersionId();
             if (vid == null) vid = app.currentVersionId();
@@ -242,7 +353,7 @@ public class MonolithServiceManager {
 
     public Map<String, Object> start(String ws, String appId) throws Exception {
         AppRow app = requireServiceApp(ws, appId);
-        ensureAwake(app.id());
+        ensureAwake(app.id(), true);
         return statusView(ws, appId);
     }
 
@@ -275,7 +386,7 @@ public class MonolithServiceManager {
     /** 管理员治理操作：按 appId 唤醒启动 */
     public Map<String, Object> adminStart(String appId) throws Exception {
         AppRow app = apps.findById(appId).filter(AppRow::isService).orElseThrow(() -> ApiException.notFound("单体应用"));
-        ensureAwake(app.id());
+        ensureAwake(app.id(), true);
         return statusView(app.workspaceId(), appId);
     }
 
@@ -290,6 +401,7 @@ public class MonolithServiceManager {
     private void stopInternal(AppRow app) {
         synchronized (lockFor(app.id())) {
             try { provider.stop(app.id(), app.slug()); } catch (Exception e) { log.warn("停止单体服务异常 app={}: {}", app.id(), e.getMessage()); }
+            clearPreviewSlotLocked(app);
             jdbc.sql("update app_service set status = 'stopped', updated_at = now() where app_id = ?").param(app.id()).update();
             logEvent(true, "SERVICE_STOP", app, "单体服务已停止：" + app.name(), null, Map.of("provider", provider.name()));
         }
@@ -298,6 +410,7 @@ public class MonolithServiceManager {
     private void sleepInternal(AppRow app) {
         synchronized (lockFor(app.id())) {
             try { provider.sleep(app.id(), app.slug()); } catch (Exception e) { log.warn("休眠单体服务异常 app={}: {}", app.id(), e.getMessage()); }
+            clearPreviewSlotLocked(app);
             jdbc.sql("update app_service set status = 'sleeping', updated_at = now() where app_id = ?").param(app.id()).update();
             logEvent(true, "SERVICE_SLEEP", app, "单体服务已休眠（缩容到 0）：" + app.name(), null, Map.of("provider", provider.name()));
         }
@@ -314,21 +427,30 @@ public class MonolithServiceManager {
         return statusView(ws, appId);
     }
 
-    /** 应用下线或删除时清理全部运行时资源。 */
+    /** 软删除进入「最近删除」时仅停止运行进程并释放算力，完整保留 PostgreSQL Schema 与 /data 持久化卷，供管理员恢复应用后继续读写原数据。 */
+    public void stopForTrash(AppRow app) {
+        if (app == null || !app.isService()) return;
+        stopInternal(app);
+    }
+
+    /** 永久清理（Purge）时彻底销毁运行时容器/目录、PVC 与独立 PostgreSQL Schema/角色。 */
     public void destroyForApp(AppRow app, boolean dropSchema) {
         if (app == null || !app.isService()) return;
         synchronized (lockFor(app.id())) {
             ServiceRow s = find(app.id()).orElse(null);
+            try {
+                provider.destroy(previewAppId(app.id()), previewSlug(app.slug()));
+            } catch (Exception ignored) {}
             try {
                 provider.destroy(app.id(), app.slug());
             } catch (Exception e) {
                 log.warn("销毁单体服务运行实例失败 app={}: {}", app.id(), e.getMessage());
             }
             if (dropSchema && s != null && s.pgSchema() != null) {
-                dbService.dropSchemaIfExists(s.pgSchema());
+                dbService.dropSchemaAndRole(s.pgSchema(), s.pgRole());
             }
             jdbc.sql("update app_service set status = 'stopped', endpoint_url = null, updated_at = now() where app_id = ?").param(app.id()).update();
-            logEvent(true, "SERVICE_DESTROY", app, "单体服务运行资源已清理：" + app.name() + (dropSchema ? "（含数据库 Schema）" : ""),
+            logEvent(true, "SERVICE_DESTROY", app, "单体服务运行资源已彻底清理：" + app.name() + (dropSchema ? "（含数据库 Schema 与角色）" : ""),
                     null, Map.of("dropSchema", dropSchema, "provider", provider.name()));
         }
     }
@@ -428,6 +550,9 @@ public class MonolithServiceManager {
         AppRow app = requireServiceApp(ws, appId);
         ServiceRow s = find(app.id()).orElse(null);
         String runtimeLogs = provider.logs(app.id(), app.slug(), tail);
+        if ((runtimeLogs == null || runtimeLogs.isBlank()) && s != null && s.previewVersionId() != null) {
+            runtimeLogs = provider.logs(previewAppId(app.id()), previewSlug(app.slug()), tail);
+        }
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("status", s == null ? "stopped" : effectiveStatus(s));
         m.put("provider", provider.name());
@@ -488,6 +613,9 @@ public class MonolithServiceManager {
         m.put("status", effectiveStatus(s));
         m.put("desiredVersionId", s.desiredVersionId());
         m.put("runningVersionId", s.runningVersionId());
+        m.put("previewVersionId", s.previewVersionId());
+        m.put("previewStatus", s.previewStatus());
+        m.put("hasUnpublishedChanges", app.currentVersionId() != null && !Objects.equals(app.currentVersionId(), app.publishedVersionId()));
         m.put("imageRef", s.imageRef());
         m.put("lastAccessAt", Db.iso(s.lastAccessAt()));
         m.put("lastStartedAt", Db.iso(s.lastStartedAt()));
@@ -641,6 +769,11 @@ public class MonolithServiceManager {
     }
 
     private ServiceRuntimeProvider.DeploySpec buildDeploySpec(AppRow app, ServiceRow s, VersionRow ver, Path sourceDir) throws Exception {
+        return buildDeploySpec(app, s, ver, sourceDir, app.id(), app.slug());
+    }
+
+    private ServiceRuntimeProvider.DeploySpec buildDeploySpec(AppRow app, ServiceRow s, VersionRow ver, Path sourceDir,
+                                                              String targetAppId, String targetSlug) throws Exception {
         Map<String, String> env = new LinkedHashMap<>();
         jdbc.sql("select env_key, value_enc from app_service_env where app_id = ?").param(app.id())
                 .query((rs, i) -> Map.entry(rs.getString(1), rs.getString(2))).list()
@@ -659,7 +792,7 @@ public class MonolithServiceManager {
                 : DockerfileGenerator.generate(toSpec(s), props);
 
         return new ServiceRuntimeProvider.DeploySpec(
-                app.id(), app.slug(), ver.id(), s.runtime(), s.framework(), s.frontendDir(), s.backendDir(),
+                targetAppId, targetSlug, ver.id(), s.runtime(), s.framework(), s.frontendDir(), s.backendDir(),
                 s.buildCmd(), s.startCmd(), s.port(), s.healthPath(), s.memoryMb(), s.cpuMillicores(),
                 s.pvcEnabled(), s.pvcSizeGi(), sourceDir, dockerfile, env);
     }
@@ -685,8 +818,12 @@ public class MonolithServiceManager {
     private String effectiveStatus(ServiceRow s) {
         if ("running".equals(s.status())) {
             AppRow app = apps.findById(s.appId()).orElse(null);
-            if (app != null && !provider.isRunning(app.id(), app.slug())) {
-                return "sleeping";
+            if (app != null) {
+                boolean liveUp = provider.isRunning(app.id(), app.slug());
+                boolean prevUp = s.previewEndpointUrl() != null && provider.isRunning(previewAppId(app.id()), previewSlug(app.slug()));
+                if (!liveUp && !prevUp) {
+                    return "sleeping";
+                }
             }
         }
         return s.status();

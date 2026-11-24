@@ -178,7 +178,7 @@ public class VersionService {
                 target.buildId());
         jdbc.sql("update app set current_version_id = ?, phase = 'ready', updated_at = now() where id = ?").params(v.id(), app.id()).update();
         if (app.isService() && monolithService != null) {
-            monolithService.initializeAndDeploy(apps.findById(app.id()).orElse(app), v);
+            monolithService.deployPreview(apps.findById(app.id()).orElse(app), v);
         }
         // 对话里留一行记录，方便回看「什么时候回到了哪个版本」
         messages.insert(app.id(), "system", "已回到 V" + target.number() + "，内容已保存为 V" + v.number(), null, null, "ok");

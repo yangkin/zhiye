@@ -184,7 +184,7 @@ export function CreatePage() {
 
   const submit = async (overridePrompt?: string) => {
     const prompt = (overridePrompt ?? f.prompt).trim();
-    if (!prompt) return toast('先写下你的应用想法吧。');
+    if (!prompt) return toast('先写下你的应用想法吧。', 'error');
     if (submitting || active) return;
     // 默认就走对话：聊完再写，或者边聊边写（生成中补充会排队）
     setSubmitting(true);
@@ -422,7 +422,6 @@ export function CreatePage() {
               pickedSourceIds={f.sources.map((s) => s.id)}
               onPickSource={(s) => f.set({ sources: [...useCreateForm.getState().sources, { id: s.id, name: s.name }] })}
             />
-            <PolishButton value={f.prompt} onPolished={(text) => f.set({ prompt: text })} />
             <ModelModeButton models={models} modes={modes} model={f.model} mode={f.mode} onModel={(m) => f.set({ model: m })} onMode={(m) => f.set({ mode: m })} />
             <button
               ref={skillBtn}
@@ -436,7 +435,8 @@ export function CreatePage() {
               技能
             </button>
           </div>
-          <div>
+          <div className="composer-actions">
+            <PolishButton value={f.prompt} onPolished={(text) => f.set({ prompt: text })} />
             <button
               className="send-button"
               aria-label="发送"

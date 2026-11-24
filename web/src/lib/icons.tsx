@@ -83,4 +83,4 @@ export function Icon({ name, className = '' }: { name: IconName; className?: str
   );
 }
 
-export const kindIcon = { 日常开发: 'code', 开发网站: 'web', 开发skill: 'skill', 技术文档: 'book' } as const;
+export const kindIcon = { 日常开发: 'code', 开发网站: 'web', 全栈应用: 'cloud', 开发skill: 'skill', 技术文档: 'book' } as const;

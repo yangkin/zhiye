@@ -60,35 +60,46 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
         return zhiyeProps.runtimePath().resolve("services").resolve(appId);
     }
 
+    private Path canonicalDataDir(String appId) {
+        String baseId = appId != null && appId.endsWith("-prev") ? appId.substring(0, appId.length() - 5) : appId;
+        return zhiyeProps.runtimePath().resolve("services").resolve(baseId).resolve("data");
+    }
+
     public Path staticDir(String appId) {
+        return appDir(appId).resolve("static");
+    }
+
+    public Path staticDir(String appId, boolean preview) {
+        if (preview) {
+            Path p = appDir(appId + "-prev").resolve("static");
+            if (Files.isDirectory(p)) return p;
+        }
         return appDir(appId).resolve("static");
     }
 
     @Override
     public DeployResult deploy(DeploySpec spec) throws Exception {
-        stop(spec.appId(), spec.slug());
-
         Path base = appDir(spec.appId());
-        Path work = base.resolve("work");
-        Path dataDir = base.resolve("data");
-        Path staticOut = base.resolve("static");
+        Path stageWork = base.resolve("work-stage");
+        Path stageStatic = base.resolve("static-stage");
+        Path dataDir = canonicalDataDir(spec.appId());
         Files.createDirectories(dataDir);
-        GitService.deleteRecursively(work);
-        GitService.deleteRecursively(staticOut);
-        copyDir(spec.sourceDir(), work);
+        GitService.deleteRecursively(stageWork);
+        GitService.deleteRecursively(stageStatic);
+        copyDir(spec.sourceDir(), stageWork);
 
         StringBuilder buildLog = new StringBuilder();
         buildLog.append("[zhiye] 准备部署单体应用 runtime=").append(spec.runtime())
                 .append(" framework=").append(spec.framework()).append("\n");
 
-        // 1. 前后端一体：若存在独立前端目录，先构建或复制静态产物
+        // 1. 前后端一体：若存在独立前端目录，先构建或复制静态产物（在 staging 目录执行，构建失败不影响旧版运行）
         if (spec.frontendDir() != null && !spec.frontendDir().isBlank()) {
-            Path fdir = work.resolve(spec.frontendDir());
+            Path fdir = stageWork.resolve(spec.frontendDir());
             if (Files.isDirectory(fdir)) {
                 buildLog.append("[zhiye] 处理前端目录: ").append(spec.frontendDir()).append("\n");
                 if (Files.isRegularFile(fdir.resolve("package.json"))) {
                     if (Files.isDirectory(fdir.resolve("dist"))) {
-                        copyDir(fdir.resolve("dist"), staticOut);
+                        copyDir(fdir.resolve("dist"), stageStatic);
                         buildLog.append("[zhiye] 复用已存在的 ").append(spec.frontendDir()).append("/dist\n");
                     } else {
                         String npmCmd = props.npmRegistry().isBlank()
@@ -98,25 +109,37 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                         runBuildCmd(fdir, npmCmd, spec.envVars(), buildLog);
                         Path dist = Files.isDirectory(fdir.resolve("dist")) ? fdir.resolve("dist")
                                 : Files.isDirectory(fdir.resolve("build")) ? fdir.resolve("build") : fdir;
-                        copyDir(dist, staticOut);
+                        copyDir(dist, stageStatic);
                     }
                 } else {
-                    copyDir(fdir, staticOut);
+                    copyDir(fdir, stageStatic);
                 }
             }
         }
 
-        // 2. 后端编译 / 依赖安装
-        Path bdir = (spec.backendDir() == null || spec.backendDir().isBlank()) ? work : work.resolve(spec.backendDir());
-        if (!Files.isDirectory(bdir)) throw new IllegalStateException("找不到后端目录：" + spec.backendDir());
+        // 2. 后端编译 / 依赖安装（构建失败直接抛出，保持线上旧版进程存活）
+        Path bdirStage = (spec.backendDir() == null || spec.backendDir().isBlank()) ? stageWork : stageWork.resolve(spec.backendDir());
+        if (!Files.isDirectory(bdirStage)) throw new IllegalStateException("找不到后端目录：" + spec.backendDir());
 
-        String buildCmd = resolveLocalBuildCmd(spec, base, bdir);
+        String buildCmd = resolveLocalBuildCmd(spec, base, bdirStage);
         if (buildCmd != null && !buildCmd.isBlank()) {
             buildLog.append("[zhiye] 执行构建命令: ").append(buildCmd).append("\n");
-            runBuildCmd(bdir, buildCmd, spec.envVars(), buildLog);
+            runBuildCmd(bdirStage, buildCmd, spec.envVars(), buildLog);
         } else {
             buildLog.append("[zhiye] 无需额外构建步骤\n");
         }
+
+        // 构建通过后切换运行目录并重启该槽位进程
+        stop(spec.appId(), spec.slug());
+        Path work = base.resolve("work");
+        Path staticOut = base.resolve("static");
+        GitService.deleteRecursively(work);
+        GitService.deleteRecursively(staticOut);
+        Files.move(stageWork, work, StandardCopyOption.REPLACE_EXISTING);
+        if (Files.isDirectory(stageStatic)) {
+            Files.move(stageStatic, staticOut, StandardCopyOption.REPLACE_EXISTING);
+        }
+        Path bdir = (spec.backendDir() == null || spec.backendDir().isBlank()) ? work : work.resolve(spec.backendDir());
 
         // Java Maven/Gradle 构建产物自动归位为 app.jar，兼容统一启动命令 java -jar app.jar
         if ("java".equals(spec.runtime()) && !Files.isRegularFile(bdir.resolve("app.jar"))) {
@@ -141,7 +164,7 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
         }
         Path base = appDir(spec.appId());
         Path work = base.resolve("work");
-        Path dataDir = base.resolve("data");
+        Path dataDir = canonicalDataDir(spec.appId());
         Path staticOut = base.resolve("static");
         Files.createDirectories(dataDir);
         if (!Files.isDirectory(work)) {
@@ -332,6 +355,18 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
             return rawBuild;
         }
         if ("node".equals(spec.runtime()) && Files.isRegularFile(bdir.resolve("package.json"))) {
+            // 若命中本地全栈模板缓存且尚未安装 node_modules，直接软链免去重复 npm install
+            Path cachedNm = zhiyeProps.runtimePath().resolve("fullstack-template-cache/node_modules");
+            Path cachedPkg = zhiyeProps.runtimePath().resolve("fullstack-template-cache/package.json");
+            Path localNm = bdir.resolve("node_modules");
+            try {
+                if (!Files.exists(localNm, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                        && Files.isDirectory(cachedNm) && Files.isRegularFile(cachedPkg)
+                        && Arrays.equals(Files.readAllBytes(bdir.resolve("package.json")), Files.readAllBytes(cachedPkg))) {
+                    Files.createSymbolicLink(localNm, cachedNm);
+                }
+            } catch (Exception ignored) {}
+            if (Files.exists(localNm, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return rawBuild;
             boolean hasDeps = false;
             try {
                 String raw = Files.readString(bdir.resolve("package.json"), StandardCharsets.UTF_8);

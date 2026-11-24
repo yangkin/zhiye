@@ -1,7 +1,7 @@
 // 由 docs/api-contract.md 手写而来。接口变更时先改约定，再同步这里。
 
-export type AppType = '日常开发' | '开发网站' | '开发skill' | '技术文档';
-export const APP_TYPES: AppType[] = ['日常开发', '开发网站', '开发skill', '技术文档'];
+export type AppType = '日常开发' | '开发网站' | '全栈应用' | '开发skill' | '技术文档';
+export const APP_TYPES: AppType[] = ['日常开发', '开发网站', '全栈应用', '开发skill', '技术文档'];
 /** stopped：生成时被主动停止，还没有任何版本（和 failed 分开显示） */
 export type AppPhase = 'planning' | 'plan' | 'generating' | 'ready' | 'failed' | 'stopped';
 export type StyleId = 'lavender' | 'mint' | 'sand' | 'rose' | 'ink' | 'cyber';
@@ -41,6 +41,7 @@ export interface Task extends TaskRef {
   progress: number;
   error: { code: string; message: string } | null;
   resultVersionId: string | null;
+  result?: Record<string, unknown> | null;
   resumable: boolean;
   /** 最新的待办清单（todo 事件） */
   todos?: TodoItem[] | null;
@@ -505,6 +506,36 @@ export interface MonolithLogs {
 export interface MonolithDockerfile {
   custom: boolean;
   content: string;
+}
+
+export interface HelpKnowledgeArticle {
+  id: string;
+  slug: string;
+  category: 'limits' | 'monolith' | 'preflight' | 'cloud' | 'guide' | 'faq' | string;
+  title: string;
+  shortTitle: string;
+  badge?: string | null;
+  summary: string;
+  contentMd: string;
+  keywords: string;
+  askPrompt: string;
+  sortOrder: number;
+  forDocs: boolean;
+  forBot: boolean;
+  enabled: boolean;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WorkspaceMemoryItem {
+  id: string;
+  category: 'profile' | 'preference' | 'stack' | 'domain' | 'rule';
+  categoryLabel: string;
+  content: string;
+  source: 'manual' | 'auto';
+  enabled: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 }
 
 // ---- 应用访问统计 ----

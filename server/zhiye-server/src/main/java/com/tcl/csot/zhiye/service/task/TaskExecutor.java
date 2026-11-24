@@ -84,6 +84,9 @@ public class TaskExecutor {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
+
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
                         VersionService versionService, GitService git, SandboxProvider sandbox, TaskTokenService tokens,
@@ -351,7 +354,13 @@ public class TaskExecutor {
     private void runPlan(TaskContext ctx) throws Exception {
         AppRow app = apps.findById(ctx.task.appId()).orElseThrow(() -> new TaskContext.Fail("NOT_FOUND", "应用不存在"));
         phase(ctx, "RUNNING", "正在生成创造计划", 30);
-        String system = app.isSkill() ? """
+        String system = app.isService() ? """
+                你是「织页」的全栈应用规划助手。根据用户的需求写一份清晰的前后端一体创造计划，用来指导编码 agent 在 React + Vite + TypeScript（src/）与 Node.js Express 后端（server/index.mjs）骨架上完成真实可运行的全栈应用。
+                只输出一个 JSON 对象，不要输出其他文字：
+                {"name": "简洁的中文应用名，不超过 16 字", "shape": "service", "scale": "normal", "planDoc": "Markdown 格式的创造计划"}
+                planDoc 结构：# 应用名称 / ## 应用目标 / ## 前端页面与交互（路由、核心组件、图表/看板/表单交互）/ ## 后端 REST API 契约（列出每条 GET/POST/PATCH/DELETE /api/... 路径、入参、出参及校验规则，含 GET /api/health）/ ## 数据持久化方案（DATA_DIR 文件存储或 PG 表结构、种子数据）/ ## 验收标准。
+                要求：前端全部通过相对路径 /api/... 调用后端，后端绑定 0.0.0.0:${PORT:-8080}，遵守单应用 1C 1G 约束，不引入 Redis/Kafka/微服务。总字数 400～1000 字。
+                """ : app.isSkill() ? """
                 你是「织页」的技能规划助手。根据用户的需求写一份简洁的中文创造计划，用来指导编码 agent 编写一个符合 SkillHub 规范的 skill 包（只有文件，不是网页）。
                 只输出一个 JSON 对象，不要输出其他文字：
                 {"name": "SkillHub 显示名称（建议按「厂区/业务域/系统 - 场景用途」命名，不超过 20 字，避免仅用 SPC、助手等简称泛称）", "planDoc": "Markdown 格式的创造计划"}
@@ -386,7 +395,8 @@ public class TaskExecutor {
         String user = "用户选的类型（只是参考，不要被它限制）：" + app.type() + "\n类型指引：" + Catalog.typeHint(app.type())
                 + "\n生成模式：" + app.mode() + "\n用户需求：\n" + app.prompt()
                 + (skillText.isBlank() ? "" : "\n\n## 参考技能（计划必须遵循其中的规范、格式与流程）\n" + skillText)
-                + dataSources.summary(app.id());
+                + dataSources.summary(app.id())
+                + (memories == null ? "" : memories.promptSection(app.workspaceId()));
         // 会话里附的截图、需求文档也要给计划看：只给文字时模型会写「未提供截图」，计划只能靠复述猜
         List<com.tcl.csot.zhiye.service.chat.AskAttachments.Attached> planAssets = planAttachments(app);
         if (!planAssets.isEmpty()) user += "\n\n用户附上了下面的素材（截图请按图里的界面理解需求，计划里不要再写「未提供截图」）：";
@@ -414,9 +424,11 @@ public class TaskExecutor {
             if (name.isEmpty()) name = null;
             else if (name.length() > 40) name = name.substring(0, 40);
         }
-        // 形态由模型决定：web/doc 用 React 模板，vue 用 Vue 模板，static 用静态模板，script 用脚本模板
+        // 形态由模型决定：web/doc 用 React 模板，vue 用 Vue 模板，static 用静态模板，script 用脚本模板，service 用全栈模板
         String shape = j == null ? null : Json.text(j, "shape");
         String kind = kindForShape(shape);
+        // 用户显式选择了「全栈应用」时，不降级回纯前端模板
+        if (app.isService() && !"service".equals(kind)) kind = null;
         // 只在还没有任何版本时换模板（换模板会覆盖仓库的初始提交）
         if (kind != null && app.currentVersionId() != null) kind = null;
         if (kind != null && !kind.equals(app.projectKind())) {
@@ -445,6 +457,7 @@ public class TaskExecutor {
             case "static" -> "static";
             case "script" -> "script";
             case "skill" -> "skill";
+            case "service", "fullstack" -> "service";
             default -> null;
         };
     }
@@ -455,6 +468,7 @@ public class TaskExecutor {
             case "script" -> "script-template";
             case "static" -> "static-template";
             case "vue" -> "vue-template";
+            case "service" -> "fullstack-template";
             default -> "app-template";
         };
     }
@@ -462,6 +476,7 @@ public class TaskExecutor {
     static String shapeLabel(String kind) {
         return switch (kind) {
             case "script" -> "命令行脚本";
+            case "service" -> "前后端全栈应用";
             case "static" -> "静态页面";
             case "skill" -> "技能包";
             case "vue" -> "网页应用（Vue）";
@@ -567,6 +582,10 @@ public class TaskExecutor {
             if (app.isVue()) taken.addAll(List.of("charts-dashboard", "multi-page-app"));
             instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.catalogInstruction(skillRefs.placeBuiltin(ctx.agentDir, taken));
         }
+        if (memories != null) {
+            String memSection = memories.promptSection(app.workspaceId());
+            if (!memSection.isBlank()) instruction += memSection;
+        }
         String text = continuing && resumed ? Prompts.continuePrevious(input.path("continueContent").asText(), instruction)
                 : resumed && (!retry || resume.path("continueWork").asBoolean(false)) ? Prompts.resume(instruction) : instruction;
         String summary = prompt(ctx, text);
@@ -588,11 +607,11 @@ public class TaskExecutor {
         String title = modify ? modifyTitle(input.path("content").asText()) : "页面与交互生成完成";
         VersionRow ver = commit(ctx, app, title, modify ? "modify" : "generate", false);
         if (app.isService() && monolithService != null) {
-            phase(ctx, "COMMITTING", "正在重新构建并部署单体服务", 92);
+            phase(ctx, "COMMITTING", "正在构建并更新预览服务", 92);
             try {
-                monolithService.initializeAndDeploy(app, ver);
+                monolithService.deployPreview(app, ver);
             } catch (Exception e) {
-                throw new TaskContext.Fail("BUILD_FAILED", "单体服务重新部署失败：" + e.getMessage());
+                throw new TaskContext.Fail("BUILD_FAILED", "单体服务预览部署失败（已发布线上版本不受影响）：" + e.getMessage());
             }
         }
         String cloudNote = app.isService() ? null : applyCloudSchema(ctx, app);
@@ -665,15 +684,16 @@ public class TaskExecutor {
         if (app.isService()) {
             VersionRow ver = commit(ctx, app, "代码编辑 · " + files.size() + " 个文件", "code", false);
             if (monolithService != null) {
-                phase(ctx, "RUNNING", "正在重新构建并部署单体服务", 85);
+                phase(ctx, "RUNNING", "正在构建并更新预览服务", 85);
                 try {
-                    monolithService.initializeAndDeploy(app, ver);
-                    versionService.publishInternal(app.id(), ver.id());
+                    monolithService.deployPreview(app, ver);
                 } catch (Exception e) {
-                    throw new TaskContext.Fail("BUILD_FAILED", "代码已保存，但单体服务重新部署失败：" + e.getMessage());
+                    throw new TaskContext.Fail("BUILD_FAILED", "代码已保存，但预览服务启动失败（已发布线上版本不受影响）：" + e.getMessage());
                 }
             }
-            messages.insert(app.id(), "assistant", "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "），单体服务已重新部署生效。", null, t.id(), "ok");
+            messages.insert(app.id(), "assistant",
+                    "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "），工作台预览已更新；线上已发布版本保持不变，确认无误后点击右上角 **「发布」** 切流上线。",
+                    null, t.id(), "ok");
             succeed(ctx, ver.id(), Json.obj().put("files", files.size()));
             return;
         }
@@ -914,6 +934,10 @@ public class TaskExecutor {
             Path saved = depsDir(app.id()).resolve("node_modules");
             Path target = ctx.workspace.resolve("node_modules");
             if (Files.isDirectory(saved, LinkOption.NOFOLLOW_LINKS) && !Files.exists(target, LinkOption.NOFOLLOW_LINKS)) linkTree(saved, target);
+        } else if (app.isService() && Files.isRegularFile(ctx.workspace.resolve("package.json")) && Files.isRegularFile(ctx.workspace.resolve("server/index.mjs"))) {
+            Path nm = props.runtimePath().resolve("fullstack-template-cache/node_modules");
+            Path link = ctx.workspace.resolve("node_modules");
+            if (Files.isDirectory(nm) && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) Files.createSymbolicLink(link, nm);
         }
     }
 

@@ -199,8 +199,8 @@ public class SiteFilter extends OncePerRequestFilter {
             }
         }
         boolean isAdmin = previewAuthorized || (user != null && access.isAdmin(appId, user));
-        boolean inWorkbenchFrame = previewAuthorized || "iframe".equalsIgnoreCase(req.getHeader("Sec-Fetch-Dest"));
-        String ct = serviceProxy.proxy(app, path, req, res, user, isAdmin, inWorkbenchFrame);
+        // 仅当携带合法作者预览令牌（previewAuthorized）时切到预览槽位；普通访客（含被外站 iframe 嵌入）严格访问线上已发布槽位
+        String ct = serviceProxy.proxy(app, path, req, res, user, isAdmin, previewAuthorized);
         if (!previewAuthorized && "GET".equalsIgnoreCase(req.getMethod()) && ct != null && ct.toLowerCase().contains("text/html")
                 && !PageViewRecorder.isBot(req.getHeader("User-Agent"))) {
             pageViews.record(appId);

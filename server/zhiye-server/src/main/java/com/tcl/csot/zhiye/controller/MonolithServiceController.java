@@ -57,7 +57,14 @@ public class MonolithServiceController {
     @PostMapping("/deploy")
     public Map<String, Object> deploy(@PathVariable String appId, @RequestBody(required = false) JsonNode body) throws Exception {
         String vid = body != null && body.hasNonNull("versionId") ? body.path("versionId").asText() : null;
-        return manager.redeploy(ws(), appId, vid);
+        try {
+            return manager.redeploy(ws(), appId, vid);
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "DEPLOY_FAILED",
+                    "重新部署失败（请查看构建/运行日志并检查环境变量或启动命令）：" + e.getMessage());
+        }
     }
 
     @PostMapping("/start")
@@ -100,6 +107,6 @@ public class MonolithServiceController {
         String sub = uri.startsWith(prefix) ? uri.substring(prefix.length()) : "/";
         if (sub.isEmpty()) sub = "/";
         SsoUser user = ssoAuth == null ? null : ssoAuth.currentUser(req).orElse(null);
-        proxy.proxy(app, sub, req, res, user, true);
+        proxy.proxy(app, sub, req, res, user, false, true);
     }
 }

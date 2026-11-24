@@ -20,11 +20,19 @@ import java.util.Map;
 @RequestMapping("/api/help")
 public class HelpController {
     private final HelpService help;
+    private final com.tcl.csot.zhiye.service.help.HelpKnowledgeService knowledge;
     private final CurrentPrincipal principal;
 
-    public HelpController(HelpService help, CurrentPrincipal principal) {
+    public HelpController(HelpService help, com.tcl.csot.zhiye.service.help.HelpKnowledgeService knowledge, CurrentPrincipal principal) {
         this.help = help;
+        this.knowledge = knowledge;
         this.principal = principal;
+    }
+
+    /** 公开读取已启用的帮助文档与限制说明（左侧「帮助文档」单一事实来源） */
+    @GetMapping("/docs")
+    public Map<String, Object> docs() {
+        return Map.of("items", knowledge.publicDocs());
     }
 
     public record SendBody(String content, List<String> assetIds) {}

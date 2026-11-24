@@ -225,13 +225,15 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
     setBusy(kind);
     try {
       await fn();
-      await qc.invalidateQueries({ queryKey: ['service-status', app.id] });
-      await qc.invalidateQueries({ queryKey: ['service-logs', app.id] });
-      await qc.invalidateQueries({ queryKey: ['app', app.id] });
       toast(okMsg);
     } catch (e) {
       toast(errorMessage(e), 'error');
     } finally {
+      await Promise.allSettled([
+        qc.invalidateQueries({ queryKey: ['service-status', app.id] }),
+        qc.invalidateQueries({ queryKey: ['service-logs', app.id] }),
+        qc.invalidateQueries({ queryKey: ['app', app.id] }),
+      ]);
       setBusy(null);
     }
   };
@@ -272,6 +274,32 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
   const maxPvc = svc?.quota?.maxPvcSizeGi ?? 5;
   const minIdle = svc?.quota?.allowNeverSleep ? 0 : (svc?.quota?.minIdleSleepMinutes ?? 5);
   const allowNeverSleep = !!svc?.quota?.allowNeverSleep;
+
+  // 即时表单校验：输入越界或非法变量名时立即标红提示，无需等提交报错
+  const portErr = !Number.isFinite(port) || port < 1024 || port > 65535 ? '端口范围须在 1024～65535 之间' : '';
+  const memErr = !Number.isFinite(memoryMb) || memoryMb < 128 || memoryMb > maxMem ? `内存配额须在 128～${maxMem} MB 之间` : '';
+  const cpuErr = !Number.isFinite(cpuMillicores) || cpuMillicores < 100 || cpuMillicores > maxCpu ? `CPU 配额须在 100～${maxCpu} mCPU 之间` : '';
+  const idleErr = !Number.isFinite(idleSleepMin) || idleSleepMin < minIdle || idleSleepMin > 10080 ? `休眠超时须在 ${minIdle}～10080 分钟之间` : '';
+  const pvcErr = pvcEnabled && (!Number.isFinite(pvcSizeGi) || pvcSizeGi < 1 || pvcSizeGi > maxPvc) ? `卷容量须在 1～${maxPvc} Gi 之间` : '';
+  const hasConfigErr = Boolean(portErr || memErr || cpuErr || idleErr || pvcErr);
+
+  const RESERVED_ENV_KEYS = new Set(['PORT', 'SERVER_PORT', 'HOST', 'DATA_DIR', 'STATIC_DIR']);
+  const envRowErrors = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of envRows) {
+      const k = r.key.trim();
+      if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    return envRows.map((r) => {
+      const k = r.key.trim();
+      if (!k) return r.value.trim() ? '变量名不能为空' : '';
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(k)) return '仅允许字母、数字和下划线，且不能以数字开头';
+      if (RESERVED_ENV_KEYS.has(k.toUpperCase())) return `${k.toUpperCase()} 为平台保留变量，不可覆盖`;
+      if ((counts.get(k) ?? 0) > 1) return `变量名 ${k} 重复`;
+      return '';
+    });
+  }, [envRows]);
+  const hasEnvErr = envRowErrors.some(Boolean);
 
   return (
     <div className="svc-pane">
@@ -429,7 +457,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
               <div className="svc-grid-4">
                 <label className="svc-field">
                   <span>监听端口</span>
-                  <div className="svc-input-unit">
+                  <div className="svc-input-unit" style={portErr ? { borderColor: '#dc2626' } : undefined}>
                     <input
                       type="number"
                       min={1024}
@@ -439,6 +467,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                     />
                     <em>TCP</em>
                   </div>
+                  {portErr ? <small style={{ color: '#dc2626', fontSize: 11.5 }}>{portErr}</small> : null}
                 </label>
                 <label className="svc-field">
                   <span>健康检查路径</span>
@@ -452,7 +481,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 </label>
                 <label className="svc-field">
                   <span>内存配额（上限 {maxMem} MB）</span>
-                  <div className="svc-input-unit">
+                  <div className="svc-input-unit" style={memErr ? { borderColor: '#dc2626' } : undefined}>
                     <input
                       type="number"
                       min={128}
@@ -463,10 +492,11 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                     />
                     <em>MB</em>
                   </div>
+                  {memErr ? <small style={{ color: '#dc2626', fontSize: 11.5 }}>{memErr}</small> : null}
                 </label>
                 <label className="svc-field">
                   <span>CPU 配额（上限 {maxCpu} mCPU）</span>
-                  <div className="svc-input-unit">
+                  <div className="svc-input-unit" style={cpuErr ? { borderColor: '#dc2626' } : undefined}>
                     <input
                       type="number"
                       min={100}
@@ -477,6 +507,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                     />
                     <em>mCPU</em>
                   </div>
+                  {cpuErr ? <small style={{ color: '#dc2626', fontSize: 11.5 }}>{cpuErr}</small> : null}
                 </label>
               </div>
               {svc?.quota ? (
@@ -644,7 +675,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 <button
                   type="button"
                   className="subtle-button"
-                  disabled={!!busy}
+                  disabled={!!busy || hasConfigErr}
                   onClick={() =>
                     void runAction('save-cfg', () => api.serviceUpdateConfig(app.id, saveConfigPayload()), '服务配置已保存。')
                   }
@@ -654,7 +685,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={!!busy}
+                  disabled={!!busy || hasConfigErr}
                   onClick={() =>
                     void runAction(
                       'save-cfg-deploy',
@@ -710,64 +741,69 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                   </div>
                   {envRows.map((row, idx) => {
                     const revealed = !!revealedKeys[idx];
+                    const rowErr = envRowErrors[idx];
                     return (
-                      <div key={idx} className="svc-env-row">
-                        <input
-                          type="text"
-                          className="is-mono"
-                          placeholder="KEY_NAME"
-                          value={row.key}
-                          onChange={(e) =>
-                            setEnvRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r)))
-                          }
-                        />
-                        <input
-                          type={row.secret && !revealed ? 'password' : 'text'}
-                          className="is-mono"
-                          placeholder={row.keepExisting ? '已加密保存（留空保持不变，输入新值可覆盖）' : '输入变量值'}
-                          value={row.value}
-                          onChange={(e) =>
-                            setEnvRows((prev) =>
-                              prev.map((r, i) =>
-                                i === idx ? { ...r, value: e.target.value, keepExisting: false } : r,
-                              ),
-                            )
-                          }
-                        />
-                        <div className="svc-env-controls">
-                          <label className="svc-env-sec" title="勾选后密文脱敏展示">
-                            <input
-                              type="checkbox"
-                              checked={row.secret}
-                              onChange={(e) =>
-                                setEnvRows((prev) =>
-                                  prev.map((r, i) => (i === idx ? { ...r, secret: e.target.checked } : r)),
-                                )
-                              }
-                            />
-                            机密
-                          </label>
-                          {row.secret && !row.keepExisting ? (
-                            <button
-                              type="button"
-                              className="svc-icon-btn"
-                              aria-label={revealed ? '隐藏明文' : '显示明文'}
-                              title={revealed ? '隐藏明文' : '显示明文'}
-                              onClick={() => setRevealedKeys((prev) => ({ ...prev, [idx]: !prev[idx] }))}
-                            >
-                              <Icon name="eye" />
-                            </button>
-                          ) : null}
+                      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div className="svc-env-row">
+                          <input
+                            type="text"
+                            className="is-mono"
+                            placeholder="KEY_NAME"
+                            style={rowErr ? { borderColor: '#dc2626' } : undefined}
+                            value={row.key}
+                            onChange={(e) =>
+                              setEnvRows((prev) => prev.map((r, i) => (i === idx ? { ...r, key: e.target.value } : r)))
+                            }
+                          />
+                          <input
+                            type={row.secret && !revealed ? 'password' : 'text'}
+                            className="is-mono"
+                            placeholder={row.keepExisting ? '已加密保存（留空保持不变，输入新值可覆盖）' : '输入变量值'}
+                            value={row.value}
+                            onChange={(e) =>
+                              setEnvRows((prev) =>
+                                prev.map((r, i) =>
+                                  i === idx ? { ...r, value: e.target.value, keepExisting: false } : r,
+                                ),
+                              )
+                            }
+                          />
+                          <div className="svc-env-controls">
+                            <label className="svc-env-sec" title="勾选后密文脱敏展示">
+                              <input
+                                type="checkbox"
+                                checked={row.secret}
+                                onChange={(e) =>
+                                  setEnvRows((prev) =>
+                                    prev.map((r, i) => (i === idx ? { ...r, secret: e.target.checked } : r)),
+                                  )
+                                }
+                              />
+                              机密
+                            </label>
+                            {row.secret && !row.keepExisting ? (
+                              <button
+                                type="button"
+                                className="svc-icon-btn"
+                                aria-label={revealed ? '隐藏明文' : '显示明文'}
+                                title={revealed ? '隐藏明文' : '显示明文'}
+                                onClick={() => setRevealedKeys((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                              >
+                                <Icon name="eye" />
+                              </button>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            className="svc-icon-btn is-danger"
+                            aria-label="删除变量"
+                            title="删除"
+                            onClick={() => setEnvRows((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            <Icon name="trash" />
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          className="svc-icon-btn is-danger"
-                          aria-label="删除变量"
-                          title="删除"
-                          onClick={() => setEnvRows((prev) => prev.filter((_, i) => i !== idx))}
-                        >
-                          <Icon name="trash" />
-                        </button>
+                        {rowErr ? <small style={{ color: '#dc2626', fontSize: 11.5, paddingLeft: 2 }}>{rowErr}</small> : null}
                       </div>
                     );
                   })}
@@ -781,7 +817,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 <button
                   type="button"
                   className="subtle-button"
-                  disabled={!!busy}
+                  disabled={!!busy || hasEnvErr}
                   onClick={() =>
                     void runAction(
                       'save-env',
@@ -795,7 +831,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 <button
                   type="button"
                   className="primary-button"
-                  disabled={!!busy}
+                  disabled={!!busy || hasEnvErr}
                   onClick={() =>
                     void runAction(
                       'save-env-apply',

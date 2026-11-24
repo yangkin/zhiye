@@ -38,6 +38,11 @@ public class ServiceProxyHandler {
             "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length"
     );
 
+    /** 严禁透传到业务应用容器的平台敏感 Cookie 名称（前缀不区分大小写）。 */
+    private static final Set<String> PLATFORM_COOKIES = Set.of(
+            "zhiye_ws", "zhiye_sso", "zhiye_admin", "zhiye_session", "jsessionid"
+    );
+
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -62,11 +67,11 @@ public class ServiceProxyHandler {
                         SsoUser user, boolean isAdmin, boolean previewMode) throws IOException {
         String cleanPath = (targetPath == null || targetPath.isEmpty()) ? "/" : (targetPath.startsWith("/") ? targetPath : "/" + targetPath);
 
-        // 前后端一体（本地模式）：非 /api 请求优先匹配已构建的静态资源
+        // 前后端一体（本地模式）：非 /api 请求优先匹配对应槽位（预览 vs 线上）已构建的静态资源
         if (provider instanceof LocalServiceRuntimeProvider local
                 && ("GET".equalsIgnoreCase(req.getMethod()) || "HEAD".equalsIgnoreCase(req.getMethod()))
                 && !cleanPath.startsWith("/api/") && !cleanPath.equals("/api")) {
-            Path staticDir = local.staticDir(app.id());
+            Path staticDir = local.staticDir(app.id(), previewMode);
             if (Files.isDirectory(staticDir) && tryServeStatic(staticDir, cleanPath, res, "HEAD".equalsIgnoreCase(req.getMethod()))) {
                 manager.recordAccess(app.id());
                 return res.getContentType();
@@ -75,10 +80,10 @@ public class ServiceProxyHandler {
 
         String endpoint;
         try {
-            endpoint = manager.ensureAwake(app.id());
+            endpoint = previewMode ? manager.ensurePreviewAwake(app.id()) : manager.ensureAwake(app.id());
         } catch (Exception e) {
-            log.warn("唤醒单体应用失败 app={} slug={}: {}", app.id(), app.slug(), e.getMessage());
-            writeError(res, 503, "应用正在启动或启动失败", e.getMessage());
+            log.warn("唤醒单体应用失败 app={} slug={} preview={}: {}", app.id(), app.slug(), previewMode, e.getMessage());
+            writeError(res, 503, "应用正在启动或已停止", e.getMessage());
             return null;
         }
         manager.recordAccess(app.id());
@@ -121,6 +126,13 @@ public class ServiceProxyHandler {
             String h = headerNames.nextElement();
             String lower = h.toLowerCase(Locale.ROOT);
             if (HOP_BY_HOP.contains(lower) || lower.startsWith("x-zhiye-")) continue;
+            // 安全边界（FS-02）：工作台同域预览绝不向用户容器透传平台 Cookie / Authorization
+            if (previewMode && ("cookie".equals(lower) || "authorization".equals(lower))) continue;
+            if (!previewMode && "cookie".equals(lower)) {
+                String filtered = stripPlatformCookies(req.getHeader(h));
+                if (!filtered.isEmpty()) builder.header("Cookie", filtered);
+                continue;
+            }
             Enumeration<String> vals = req.getHeaders(h);
             while (vals.hasMoreElements()) {
                 builder.header(h, vals.nextElement());
@@ -158,7 +170,7 @@ public class ServiceProxyHandler {
         // 前后端一体 SPA 回退：后端对非 /api 路径返回 404 时尝试回退到前端 static/index.html
         if (up.statusCode() == 404 && provider instanceof LocalServiceRuntimeProvider local
                 && "GET".equals(method) && !cleanPath.startsWith("/api/") && !ContentTypes.hasExtension(cleanPath)) {
-            Path index = local.staticDir(app.id()).resolve("index.html");
+            Path index = local.staticDir(app.id(), previewMode).resolve("index.html");
             if (Files.isRegularFile(index)) {
                 try (InputStream ignored = up.body()) {}
                 res.setStatus(200);
@@ -173,7 +185,8 @@ public class ServiceProxyHandler {
         for (var entry : up.headers().map().entrySet()) {
             String lower = entry.getKey().toLowerCase(Locale.ROOT);
             if (HOP_BY_HOP.contains(lower)) continue;
-            if (previewMode && "x-frame-options".equals(lower)) continue;
+            // 工作台预览模式：剥离 X-Frame-Options，且禁止用户应用向平台主域写入 Set-Cookie
+            if (previewMode && ("x-frame-options".equals(lower) || "set-cookie".equals(lower))) continue;
             for (String v : entry.getValue()) {
                 if (previewMode && "content-security-policy".equals(lower)) {
                     String relaxed = stripFrameAncestors(v);
@@ -235,6 +248,21 @@ public class ServiceProxyHandler {
             }
         }
         return sb.isEmpty() ? "/" : sb.toString();
+    }
+
+    private static String stripPlatformCookies(String rawCookie) {
+        if (rawCookie == null || rawCookie.isBlank()) return "";
+        String[] pairs = rawCookie.split(";");
+        List<String> kept = new ArrayList<>();
+        for (String p : pairs) {
+            String trimmed = p.trim();
+            if (trimmed.isEmpty()) continue;
+            int eq = trimmed.indexOf('=');
+            String name = (eq > 0 ? trimmed.substring(0, eq) : trimmed).trim().toLowerCase(Locale.ROOT);
+            if (PLATFORM_COOKIES.contains(name) || name.startsWith("zhiye_")) continue;
+            kept.add(trimmed);
+        }
+        return String.join("; ", kept);
     }
 
     private static String esc(String s) {

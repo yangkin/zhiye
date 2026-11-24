@@ -18,6 +18,7 @@ export function templateFor(type: AppType): Template {
 const taglines: Record<AppType, string> = {
   日常开发: '内部工具 · 数据随手可查',
   开发网站: '网页应用 · 打开即用',
+  全栈应用: '前后端一体 · 独立 API 与持久存储',
   开发skill: '技能包 · 让 AI 更懂业务',
   技术文档: '技术文档 · 随时可下载',
 };

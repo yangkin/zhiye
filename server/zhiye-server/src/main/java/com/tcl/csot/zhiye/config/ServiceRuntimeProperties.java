@@ -47,11 +47,15 @@ public record ServiceRuntimeProperties(
         Integer maxWorkspaceRunningMemoryMb,
         Integer maxWorkspaceRunningCpuMillicores,
         Integer maxPlatformRunningMemoryMb,
-        Integer maxPlatformRunningCpuMillicores
+        Integer maxPlatformRunningCpuMillicores,
+        String buildNamespace,
+        String buildContextPvc
 ) {
     public ServiceRuntimeProperties {
         if (provider == null || provider.isBlank()) provider = "local";
         if (namespace == null || namespace.isBlank()) namespace = "zhiye-apps";
+        if (buildNamespace == null || buildNamespace.isBlank()) buildNamespace = "zhiye-builds";
+        if (buildContextPvc == null || buildContextPvc.isBlank()) buildContextPvc = "zhiye-runtime";
         if (harborRegistry == null) harborRegistry = "";
         if (harborSecretName == null) harborSecretName = "harbor-registry-secret";
         if (kanikoImage == null || kanikoImage.isBlank()) kanikoImage = "gcr.io/kaniko-project/executor:v1.23.2";

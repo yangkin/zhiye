@@ -163,7 +163,13 @@ function Dialog() {
       void qc.invalidateQueries({ queryKey: ['history'] });
       if (t.status === 'SUCCEEDED') {
         setOpen(false);
-        toast('代码已导入并部署完成。');
+        const res = t.result as Record<string, unknown> | undefined;
+        const deployPending = Boolean(res?.deployPending) || res?.status === 'failed';
+        if (deployPending) {
+          toast('源码已保存为 V1，但服务启动未就绪：请打开「服务托管」查看日志并补齐配置后重试。', 'error');
+        } else {
+          toast('代码已导入并部署完成。');
+        }
         navigate('/apps/' + t.appId);
       } else {
         setTask(null);

@@ -149,6 +149,14 @@ async function prompt(text) {
       event({ type: 'tool', id: 't' + turn + 'b', name: 'write', summary: '修改 SKILL.md', state: 'end', ok: true })
       return { text: '已编写周报生成 skill：SKILL.md、references/format.md、scripts/weekly.py。', turns: turn, aborted: false, error: null }
     }
+    if (fs.existsSync(path.join(cwd, 'server/index.mjs'))) {
+      // 全栈模板（测试用）：保留可运行的 Express 后端，同时输出最小可用静态 dist/index.html 便于本地直启
+      const distDir = path.join(cwd, 'dist')
+      fs.mkdirSync(distDir, { recursive: true })
+      fs.writeFileSync(path.join(distDir, 'index.html'), '<!doctype html><html><body><h1>全栈应用已生成</h1></body></html>')
+      event({ type: 'tool', id: 't' + turn + 'b', name: 'write', summary: '编写 server/index.mjs 与前端页面', state: 'end', ok: true })
+      return { text: '已完成前后端全栈应用生成（Express API + React 前端）。', turns: turn, aborted: false, error: null }
+    }
     const serviceEntry = ['app.py', 'main.py'].find((f) => fs.existsSync(path.join(cwd, f)))
     if (serviceEntry && text.includes('请按用户的要求修改')) {
       const p = path.join(cwd, serviceEntry)

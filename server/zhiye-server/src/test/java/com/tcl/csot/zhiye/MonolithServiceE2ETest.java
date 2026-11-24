@@ -171,20 +171,37 @@ class MonolithServiceE2ETest extends IntegrationTest {
             assertThat(df.path("custom").asBoolean()).isFalse();
             assertThat(df.path("content").asText()).contains("FROM python:").contains("USER 10001");
 
-            // 6. 代码在线编辑 → 自动提交 V2 并重新部署生效；再恢复回 V1 → 自动重新部署 V1
+            // 6. FS-04 预览与线上分离：代码在线编辑 → 仅更新预览槽位 V2，线上公开地址保持 V1；点「发布」后才切流到 V2
             String v1Id = app.path("currentVersion").path("id").asText();
             JsonNode editTask = c.ok(c.post("/api/apps/" + appId + "/code", Map.of(
                     "baseVersionId", v1Id,
                     "files", List.of(Map.of("path", "main.py", "content", pyMain.replace("Python Monolith V1", "Python Monolith V2")))
             )));
             assertThat(c.waitTask(editTask.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+            // 线上仍为 V1，工作台预览已为 V2
+            assertThat(c.getWithHost("/", host).body()).contains("Python Monolith V1");
+            assertThat(c.get("/api/apps/" + appId + "/service/preview/").body()).contains("Python Monolith V2");
+            // 点击「发布」后，线上切流至 V2
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
             assertThat(c.getWithHost("/", host).body()).contains("Python Monolith V2");
 
-            // 6b. 恢复 V1 → 自动重新部署回 V1
+            // 6b. 恢复 V1 → 仅更新预览为 V1，线上保持 V2；再点「发布」切回 V1
             c.ok(c.post("/api/versions/" + v1Id + "/restore", Map.of()));
+            assertThat(c.getWithHost("/", host).body()).contains("Python Monolith V2");
+            assertThat(c.get("/api/apps/" + appId + "/service/preview/").body()).contains("Python Monolith V1");
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
             assertThat(c.getWithHost("/", host).body()).contains("Python Monolith V1");
 
-            // 6c. 禁止对单体服务误开启静态云服务 + 校验含中文路径的代理转发 + 校验平台事件日志落库
+            // 6c. P1-03 手动停止后访客流量绝不唤醒（区别于休眠 sleeping），只有显式启动才恢复
+            c.ok(c.post("/api/apps/" + appId + "/service/stop", Map.of()));
+            assertThat(c.ok(c.get("/api/apps/" + appId + "/service")).path("status").asText()).isEqualTo("stopped");
+            var stoppedVisit = c.getWithHost("/", host);
+            assertThat(stoppedVisit.status()).isEqualTo(503);
+            assertThat(c.ok(c.get("/api/apps/" + appId + "/service")).path("status").asText()).isEqualTo("stopped");
+            c.ok(c.post("/api/apps/" + appId + "/service/start", Map.of()));
+            assertThat(c.getWithHost("/", host).status()).isEqualTo(200);
+
+            // 6d. 禁止对单体服务误开启静态云服务 + 校验含中文路径的代理转发 + 校验平台事件日志落库
             var cloudRej = c.post("/api/apps/" + appId + "/cloud/enable", Map.of());
             assertThat(cloudRej.status()).isEqualTo(400);
             assertThat(c.getWithHost("/api/%E6%B5%8B%E8%AF%95%20%E8%B7%AF%E5%BE%84", host).status()).isEqualTo(200);
@@ -192,12 +209,14 @@ class MonolithServiceE2ETest extends IntegrationTest {
                     .param(appId).query(Long.class).single();
             assertThat(svcEvents).isGreaterThanOrEqualTo(3);
 
-            // 7. 删除应用 → 清理进程并回收 PG Schema
+            // 7. FS-05 软删除进入「最近删除」→ 线上停止（404）但保留 PG Schema 与持久化数据供管理员恢复无损
             assertThat(c.delete("/api/apps/" + appId).status()).isEqualTo(204);
             assertThat(c.getWithHost("/", host).status()).isEqualTo(404);
-            boolean schemaDropped = jdbc.sql("select exists(select 1 from information_schema.schemata where schema_name = ?)")
+            boolean schemaPreserved = jdbc.sql("select exists(select 1 from information_schema.schemata where schema_name = ?)")
                     .param(pgSchema).query(Boolean.class).single();
-            assertThat(schemaDropped).isFalse();
+            assertThat(schemaPreserved).isTrue();
+            // 清理测试 Schema 避免污染测试库
+            jdbc.sql("drop schema if exists " + pgSchema + " cascade").update();
         } finally {
             c.delete("/api/apps/" + appId);
         }
@@ -461,7 +480,7 @@ class MonolithServiceE2ETest extends IntegrationTest {
         try {
             assertThat(c.getWithHost("/", host).json().path("version").asText()).isEqualTo("v1-greeting");
 
-            // 通过对话发送修改指令 -> runner 修改 app.py -> 提交 V2 -> 自动重新部署
+            // 通过对话发送修改指令 -> runner 修改 app.py -> 提交 V2 -> 仅更新预览槽位，线上保持 V1
             JsonNode posted = c.ok(c.post("/api/apps/" + appId + "/messages",
                     Map.of("content", "请把接口返回的字段改成\"v2-from-chat\"")));
             JsonNode done = c.waitTask(posted.path("task").path("id").asText());
@@ -470,10 +489,17 @@ class MonolithServiceE2ETest extends IntegrationTest {
             JsonNode appV2 = c.ok(c.get("/api/apps/" + appId));
             assertThat(appV2.path("currentVersion").path("number").asInt()).isEqualTo(2);
             assertThat(appV2.path("service").path("status").asText()).isEqualTo("running");
+            assertThat(c.getWithHost("/", host).json().path("version").asText()).isEqualTo("v1-greeting");
+            assertThat(c.get("/api/apps/" + appId + "/service/preview/").json().path("version").asText()).isEqualTo("v2-from-chat");
+
+            // 点击发布 -> 线上切换为 V2
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
             assertThat(c.getWithHost("/", host).json().path("version").asText()).isEqualTo("v2-from-chat");
 
-            // 回滚到 V1 -> 自动重新部署 V1 -> 线上接口恢复 v1-greeting
+            // 回滚到 V1 -> 预览恢复 v1-greeting，再发布后线上恢复 v1-greeting
             c.ok(c.post("/api/versions/" + v1Id + "/restore", Map.of()));
+            assertThat(c.get("/api/apps/" + appId + "/service/preview/").json().path("version").asText()).isEqualTo("v1-greeting");
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
             assertThat(c.getWithHost("/", host).json().path("version").asText()).isEqualTo("v1-greeting");
         } finally {
             c.delete("/api/apps/" + appId);
@@ -546,6 +572,122 @@ class MonolithServiceE2ETest extends IntegrationTest {
             c.delete("/api/apps/" + id1);
             c.delete("/api/apps/" + id2);
             if (id3 != null) c.delete("/api/apps/" + id3);
+        }
+    }
+
+    @Test
+    void conversationalCreateFullstackAppE2E() throws Exception {
+        Client c = client();
+        JsonNode created = c.ok(c.post("/api/apps", Map.of(
+                "type", "全栈应用",
+                "prompt", "帮我创建一个全栈设备点检与异常工单系统，前后端一体，带持久化列表接口",
+                "mode", "快速",
+                "model", "auto",
+                "assetIds", List.of()
+        )));
+        String appId = created.path("id").asText();
+        try {
+            assertThat(created.path("projectKind").asText()).isEqualTo("service");
+            assertThat(created.path("type").asText()).isEqualTo("全栈应用");
+            assertThat(created.path("phase").asText()).isEqualTo("planning");
+
+            // 1. 计划任务完成，仍保持 service 形态
+            JsonNode planDone = c.waitTask(created.path("activeTask").path("id").asText());
+            assertThat(planDone.path("status").asText()).as(planDone.toString()).isEqualTo("SUCCEEDED");
+            JsonNode planned = c.ok(c.get("/api/apps/" + appId));
+            assertThat(planned.path("phase").asText()).isEqualTo("plan");
+            assertThat(planned.path("projectKind").asText()).isEqualTo("service");
+
+            // 2. 点击「开始生成」→ 自动生成前后端代码、提交 V1、自动启动 Express 服务
+            JsonNode genTask = c.ok(c.post("/api/apps/" + appId + "/generate", Map.of()));
+            JsonNode genDone = c.waitTask(genTask.path("id").asText());
+            assertThat(genDone.path("status").asText()).as(genDone.toString()).isEqualTo("SUCCEEDED");
+
+            JsonNode app = c.ok(c.get("/api/apps/" + appId));
+            assertThat(app.path("phase").asText()).isEqualTo("ready");
+            assertThat(app.path("projectKind").asText()).isEqualTo("service");
+            assertThat(app.path("currentVersion").path("number").asInt()).isEqualTo(1);
+            assertThat(app.path("service").path("runtime").asText()).isEqualTo("node");
+            assertThat(app.path("service").path("status").asText()).isEqualTo("running");
+            assertThat(app.path("service").path("idleSleepMin").asInt()).isEqualTo(2880);
+
+            // 3. 预览代理 /api/apps/{id}/service/preview/* 访问 Express /api/health 与 /api/items CRUD
+            var health = c.get("/api/apps/" + appId + "/service/preview/api/health");
+            assertThat(health.status()).as(health.body()).isEqualTo(200);
+            assertThat(health.json().path("ok").asBoolean()).isTrue();
+
+            var addItem = c.post("/api/apps/" + appId + "/service/preview/api/items", Map.of("title", "T11 曝光机异常点检"));
+            assertThat(addItem.status()).as(addItem.body()).isEqualTo(201);
+            assertThat(addItem.json().path("title").asText()).isEqualTo("T11 曝光机异常点检");
+
+            var listItems = c.get("/api/apps/" + appId + "/service/preview/api/items");
+            assertThat(listItems.status()).isEqualTo(200);
+            assertThat(listItems.body()).contains("T11 曝光机异常点检");
+
+            // 4. 发布后通过独立子域名网关访问 SPA 页面与后端接口
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
+            JsonNode pubApp = c.ok(c.get("/api/apps/" + appId));
+            String host = siteHost(pubApp);
+            var home = c.getWithHost("/", host);
+            assertThat(home.status()).isEqualTo(200);
+            assertThat(home.body()).contains("<div id=\"root\"></div>").contains("/assets/");
+            var missingAsset = c.getWithHost("/assets/does-not-exist.js", host);
+            assertThat(missingAsset.status()).isEqualTo(404);
+            var liveHealth = c.getWithHost("/api/health", host);
+            assertThat(liveHealth.status()).isEqualTo(200);
+            assertThat(liveHealth.json().path("ok").asBoolean()).isTrue();
+        } finally {
+            c.delete("/api/apps/" + appId);
+        }
+    }
+
+    @Test
+    void previewProxyStripsPlatformCredentialsAndSetCookieAndEnforcesTenantDbRole() throws Exception {
+        Client c = client();
+        String py = """
+                import json, os
+                from http.server import BaseHTTPRequestHandler, HTTPServer
+                class H(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        body = json.dumps({
+                            "cookie": self.headers.get("Cookie", ""),
+                            "auth": self.headers.get("Authorization", ""),
+                            "adminHeader": self.headers.get("X-Zhiye-Admin-Token", ""),
+                        }).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Set-Cookie", "evil_session=hijack; Path=/")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                HTTPServer(("127.0.0.1", int(os.environ.get("PORT", "8080"))), H).serve_forever()
+                """;
+        JsonNode app = importServiceZip(c, "sec-proxy.zip", "安全边界校验服务", Map.of(
+                "requirements.txt", "# stdlib\n",
+                "main.py", py
+        ));
+        String appId = app.path("id").asText();
+        try {
+            // FS-02：同域预览代理绝不透传平台 Cookie / Authorization / Admin Token，且剥离上游 Set-Cookie
+            var prev = c.send("GET", "/api/apps/" + appId + "/service/preview/api/check", null, Map.of(
+                    "Authorization", "Bearer super-secret-platform-token",
+                    "X-Zhiye-Admin-Token", "secret-admin-token"
+            ));
+            assertThat(prev.status()).isEqualTo(200);
+            assertThat(prev.json().path("cookie").asText()).isEmpty();
+            assertThat(prev.json().path("auth").asText()).isEmpty();
+            assertThat(prev.json().path("adminHeader").asText()).isEmpty();
+            assertThat(prev.raw().headers().allValues("set-cookie")).isEmpty();
+
+            // FS-01：开启 PG 托管后必须签发独立最小权限角色（绝非平台默认主账号）
+            JsonNode cfg = c.ok(c.patch("/api/apps/" + appId + "/service", Map.of("pgEnabled", true)));
+            String pgSchema = cfg.path("pgSchema").asText();
+            String pgRole = jdbc.sql("select pg_role from app_service where app_id = ?").param(appId).query(String.class).single();
+            assertThat(pgRole).isEqualTo(pgSchema + "_u");
+            assertThat(pgRole).isNotEqualTo("zhiye");
+            jdbc.sql("drop schema if exists " + pgSchema + " cascade").update();
+        } finally {
+            c.delete("/api/apps/" + appId);
         }
     }
 }

@@ -102,3 +102,72 @@ spec:
     pods: "160"
     persistentvolumeclaims: "160"
     requests.storage: "500Gi"
+---
+# 独立构建命名空间（zhiye-builds）：隔离 Kaniko 镜像构建 Job 与运行态 zhiye-apps 的 1C 1G LimitRange 及 restricted PSS
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zhiye-builds
+  labels:
+    app.kubernetes.io/part-of: zhiye
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zhiye-service-builder
+  namespace: zhiye-builds
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zhiye-service-builder
+  namespace: zhiye-builds
+subjects:
+  - kind: ServiceAccount
+    name: zhiye-api
+    namespace: zhiye
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: zhiye-service-builder
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: zhiye-build-container-limits
+  namespace: zhiye-builds
+spec:
+  limits:
+    - type: Container
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      min:
+        cpu: "200m"
+        memory: "256Mi"
+      default:
+        cpu: "2"
+        memory: "3Gi"
+      defaultRequest:
+        cpu: "500m"
+        memory: "1Gi"
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: zhiye-builds-namespace-quota
+  namespace: zhiye-builds
+spec:
+  hard:
+    limits.cpu: "16"
+    limits.memory: "32Gi"
+    pods: "16"

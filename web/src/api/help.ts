@@ -78,6 +78,7 @@ const json = (body: unknown): RequestInit => ({
 const enc = encodeURIComponent;
 
 export const helpApi = {
+  docs: () => call<{ items: import('./types').HelpKnowledgeArticle[] }>('/api/help/docs'),
   conversations: () => call<HelpConversation[]>('/api/help/conversations'),
   create: () => call<HelpConversation>('/api/help/conversations', { method: 'POST' }),
   messages: (id: string) => call<HelpMessage[]>(`/api/help/conversations/${enc(id)}/messages`),

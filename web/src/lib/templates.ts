@@ -18,24 +18,34 @@ export interface SceneTemplate {
   prompt: string;
 }
 
-/** 轻量工具类模板通用要求 */
-const SAMPLE = `通用要求：
-- 桌面宽屏全宽流式布局，信息层级清晰，不做窄容器大留白
+/** 企业工具类模板通用要求（深度多视图 + 持久化 + 真实导入导出） */
+const SAMPLE = `通用要求（企业级深度标准）：
+- 桌面宽屏全宽流式布局（左侧可折叠导航 + 顶部全局筛选 + 右侧主工作区），信息层级清晰，不做窄容器大留白
+- 至少包含「总览看板」「业务明细/操作台」「统计分析或设置」多视图切换，配套真实 Recharts 联动图表与 KPI 指标卡
 - 所有下拉筛选使用自定义下拉组件，不要使用浏览器原生 <select> 弹窗
-- 所有筛选、录入、计算和导出按钮均具备真实可运行交互，不做空壳按钮
-- 所有数据使用虚构的示例数据（内置在前端代码中），不连接真实系统`;
+- 内置 25～40 条贴近业务的确定性仿真数据并持久化到 localStorage，支持真实新增/编辑/删除/搜索/筛选/批量导入 CSV 及导出真实 .xlsx 报表，不做空壳按钮
+- 所有数据为虚构脱敏示例数据，不连接 MES/ERP 真实生产库`;
 
 /** 技术文档类模板通用要求：成品是一份可下载的 Markdown 文档，不是网页 */
 const DOC_SAMPLE =
   '内容为虚构示例，不含真实地址、账号和密钥；结构清晰、可直接复用，直接输出一份可下载的 Markdown 文档，不需要做成网页。';
 
-/** 内部业务系统类模板通用要求：多页面、多人共用，可平滑升级到云服务 / 数据源 */
-const APP_DATA = `通用要求：
-- 桌面宽屏全宽流式布局（左侧导航 + 右侧主工作区），适配 1440px～4K 显示器，不要窄容器留白
+/** 内部业务系统类模板通用要求：多页面复杂闭环、AI 辅助、真实导入导出，可平滑升级到云服务 / 数据源 */
+const APP_DATA = `通用要求（复杂企业级业务系统标准）：
+- 多页面 HashRouter 架构（左侧可折叠侧边导航 + 顶部全局筛选栏 + 右侧全宽主工作区），适配 1440px～4K 宽屏，禁止窄容器留白
+- 完整业务闭环：包含「经营/业务驾驶舱（KPI + Recharts 多维联动图表）」「主业务列表与看板双视图（支持拖拽或状态机流转、校验非法回退）」「右侧抽屉/详情页（含完整操作时间轴、备注与附件）」「报表中心（支持导出真实多 Sheet .xlsx 报表及 CSV 拖拽导入逐行校验预览）」
 - 所有筛选、状态和角色选择器均使用自定义下拉组件，不要使用浏览器原生 <select> 弹窗
-- 先内置 20～30 条贴近业务的虚构示例数据，打开即可体验完整的查询、新建、流转、统计与导出闭环；不连接真实系统
-- 需要多人共用时，可在工作台一键启用云服务保存数据；如果绑定了数据源，列表和统计优先使用数据源的真实数据
+- 内置 30+ 条高仿真确定性种子数据并自动 localStorage 持久化（刷新不丢失），提供「一键 AI 智能分析/诊断」按钮调用平台 window.zhiye.ai（未就绪时优雅提示）
+- 需要多人共用时，可在工作台一键启用云服务保存数据与文件；如果绑定了数据源，列表和统计优先使用数据源真实数据
 - 角色先用右上角「切换角色」演示，接入员工登录后再按真实身份控制权限`;
+
+/** 前后端一体全栈应用模板通用要求（React + Vite + TS 前端 + Node.js Express 后端 + /data 持久化） */
+const FULLSTACK_RULE = `全栈架构与工程要求（织页全栈单体标准）：
+- 前端位于 src/（React 19 + TypeScript + Tailwind + Recharts + Lucide + HashRouter 多页面），所有请求一律使用相对路径 /api/...，禁止写死 localhost
+- 后端位于 server/index.mjs（Express），监听 0.0.0.0 与 process.env.PORT || 8080，必须提供 GET /api/health，并托管 dist/ 静态产物与 SPA 路由回退
+- 后端实现完整 REST API（GET/POST/PATCH/DELETE + 聚合统计接口 + 参数校验与清晰中文报错），业务数据原子写入 process.env.DATA_DIR || '.data' 持久化（首次启动自动幂等注入丰富业务种子数据，重启/休眠唤醒不丢失），并读取华星 SSO 请求头 X-Zhiye-User-*
+- 界面包含多页面导航、联动 KPI 与 Recharts 图表、业务状态流转与真实 .xlsx/CSV 导入导出，桌面 1440px～4K 宽屏铺满无溢出
+- 遵守单应用 1C 1G 约束，不引入 Redis/Kafka/MySQL 等外部中间件，完成后运行 tsc、npm run build 与 node --check server/index.mjs 验证`;
 
 /** 数据看板类模板通用要求：联动筛选、目标与预警、自动结论、下钻、导出 */
 const DASH = `通用要求：
@@ -823,6 +833,110 @@ ${DOC_SAMPLE}`,
 - 每个处置步骤用编号列表，命令放代码块
 ${DOC_SAMPLE}`,
   },
+  // ================ 全栈应用：前后端一体企业级系统（6 个） ================
+  {
+    id: 'fs-yield-8d',
+    type: '全栈应用',
+    title: '产线良率指挥与 8D 闭环全栈平台',
+    scene: '制造 · 全栈',
+    desc: 'React + Express 真实前后端：SPC 良率趋势、6×4 基板缺陷热力图、8D 看板与持久化 API',
+    thumb: 'dashboard',
+    style: 'ink',
+    prompt: `打造一个前后端一体的「产线良率指挥与 8D 异常闭环全栈平台」（React + Express 真实接口与持久化）：
+- 前端五大页面：
+  1）产线驾驶舱：按厂别（T1/T2/T9/T11）、工序段（Array/Cell/Module）、时间段向后端 /api/dashboard 请求实时聚合数据，展示 SPC 良率预警条、5 个 KPI 指标卡、双轴良率趋势图、缺陷帕累托柏拉图和站点良率对比图；
+  2）Glass 基板缺陷热力图：交互式 SVG 6×4 面板切割缺陷图，点击缺陷点调用 /api/lots/:lotId 打开制程履历抽屉与 5 道工序时间轴；
+  3）8D 异常看板与详情：四列状态流转看板（待围堵 → 根因分析 → 措施验证 → 已关闭，由后端校验顺序流转并记录流转审计日志）+ D1-D8 详情编辑；
+  4）机台健康矩阵：支持预警/停机机台调用 POST /api/machines/:id/report-issue 一键生成关联 8D 单；
+  5）报表中心：调用后端导出多 Sheet 报表与批量 CSV 批次导入入库。
+- 后端 REST API：/api/health、/api/dashboard、/api/lots、/api/lots/:id、/api/eightd（CRUD + 状态流转 PATCH /api/eightd/:id/transition）、/api/machines、/api/import/csv，全部持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'fs-equip-spare',
+    type: '全栈应用',
+    title: '设备报修与备件库存全栈系统',
+    scene: '设备 · 全栈',
+    desc: '前后端联动的报修派单、备件领用扣减库存、低库存自动预警与维保成本核算',
+    thumb: 'booking',
+    style: 'mint',
+    prompt: `做一个前后端一体的「设备报修与备件库存全栈系统」（React + Express 真实后端校验与库存原子扣减）：
+- 页面模块：
+  1）设备运维总览：今日故障数、MTTR/MTBF 趋势图、低库存备件预警横幅、机台故障 Top10；
+  2）报修工单闭环：待接单 → 排查维修 → 待验收 → 已关闭，维修工程师填报更换备件时，后端事务校验库存充足并原子扣减备件数量、自动生成出入库流水；
+  3）备件仓库台账：支持入库、领用、盘点、安全库存阈值设置、呆滞件标红提醒；
+  4）预防性保养（PM）排程与执行记录、Excel 台账导出。
+- 后端 REST API：/api/health、/api/orders（CRUD + 状态流转与领料扣库）、/api/spares（库存与安全阈值）、/api/spares/logs（不可篡改出入库流水）、/api/stats/oee，全部持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'fs-rd-tracker',
+    type: '全栈应用',
+    title: '研发需求与缺陷追踪全栈看板',
+    scene: '研发 · 全栈',
+    desc: '迭代燃尽图、多列拖拽看板、需求-缺陷关联树、工时汇总与服务端筛选分页',
+    thumb: 'todo',
+    style: 'lavender',
+    prompt: `打造一个类 Linear / Jira 质感的「研发需求与缺陷追踪全栈平台」（React + Express）：
+- 页面模块：
+  1）迭代驾驶舱：当前 Sprint 燃尽图（计划剩余 vs 实际剩余）、按负责人负载条形图、P0/P1 阻断缺陷预警；
+  2）看板 & 列表双视图：待规划 / 开发中 / 测试中 / 已上线拖拽流转，支持服务端多条件筛选（迭代、优先级、模块、负责人、关键词）；
+  3）工作项详情抽屉：关联子任务、缺陷复现步骤、评论流与状态变更审计记录；
+  4）发版检查清单（Release Notes 一键生成与导出）。
+- 后端 REST API：/api/health、/api/sprints、/api/issues（分页筛选 CRUD + 状态流转 + 评论）、/api/analytics/burndown，持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'fs-customer-complaint',
+    type: '全栈应用',
+    title: '客户品质客诉与 5Why 追溯全栈系统',
+    scene: '质量 · 全栈',
+    desc: 'RMA 客诉登记、SLA 倒计时预警、5Why 因果树编辑、批次召回评估与月度 PPM 分析',
+    thumb: 'dashboard',
+    style: 'rose',
+    prompt: `打造一个「客户品质客诉与 5Why 追溯全栈系统」（React + Express 真实前后端）：
+- 页面模块：
+  1）客诉质量总览：月度客诉件数与 PPM 趋势、客户分布饼图、超时 SLA（24h 围堵 / 7d 结案）红灯预警；
+  2）客诉工单台账与详情：客户/型号/不良现象/受影响 Lot 登记、5Why 交互式逐层追问编辑器、责任部门会签与附件清单；
+  3）批次影响范围评估器：按机台与时间窗反查潜在关联批次，一键导出隔离清单；
+  4）月度质量复盘报告导出（.xlsx）。
+- 后端 REST API：/api/health、/api/complaints（CRUD + SLA 计算 + 5Why 保存）、/api/complaints/:id/signoff、/api/analytics/ppm，持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'fs-doc-report-hub',
+    type: '全栈应用',
+    title: 'CSV/Excel 数据清洗与报表中心全栈服务',
+    scene: '办公 · 全栈',
+    desc: '服务端批量解析校验 CSV/JSON、规则引擎清洗异常值、版本化归档与报表下载',
+    thumb: 'counter',
+    style: 'sand',
+    prompt: `做一个「产线数据清洗与报表归档全栈服务」（React + Express）：
+- 页面模块：
+  1）数据上传与规则配置：拖拽上传 CSV/Excel 数据，配置字段映射、缺失值填充、异常范围（如良率 0～100%）与去重规则，提交给后端清洗；
+  2）清洗报告与异常高亮表：展示总行数、通过数、异常修正/剔除明细，支持人工修正后确认入库；
+  3）历史数据集版本库：每次归档形成快照，支持两期数据差异对比与图表趋势分析；
+  4）一键导出清洗后的标准 Excel 报表与 JSON 接口。
+- 后端 REST API：/api/health、/api/datasets（上传解析、规则校验清洗、快照列表、对比接口 /api/datasets/diff、下载），数据与快照持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'fs-meeting-action',
+    type: '全栈应用',
+    title: '经营周会纪要与行动项追踪全栈平台',
+    scene: '办公 · 全栈',
+    desc: '议题归档、责任人行动项拆解、逾期红灯自动升级与部门闭环率排行',
+    thumb: 'landing',
+    style: 'cyber',
+    prompt: `做一个「经营周会纪要与行动项（Action Item）闭环全栈平台」（React + Express）：
+- 页面模块：
+  1）闭环率驾驶舱：各部门按期完成率排行、逾期未闭环行动项红灯看板、近 8 周关闭率趋势；
+  2）会议纪要工作台：按周会/专项会归档会议背景、决议要点，并一键拆解为带责任人、截止日、里程碑的行动项；
+  3）我的待办与进展打卡：责任人更新百分比进度与阻塞原因，自动记录历史进展时间轴；
+  4）周会前一键导出「上期遗留 + 本期新增」汇总 Excel。
+- 后端 REST API：/api/health、/api/meetings、/api/actions（CRUD + 进展打卡 + 逾期统计）、/api/analytics/closure，持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
   {
     id: 'doc-equipment-manual',
     type: '技术文档',
@@ -839,7 +953,7 @@ ${DOC_SAMPLE}`,
 ];
 
 /** 未选定具体类型时，在输入框下方展示的 4 个跨类别代表性快捷模板 */
-export const FEATURED_TEMPLATE_IDS = ['dash-cockpit', 'repair-order', 'skill-8d', 'doc-mes-api'] as const;
+export const FEATURED_TEMPLATE_IDS = ['fs-yield-8d', 'dash-cockpit', 'repair-order', 'skill-8d'] as const;
 
 export const templatesOf = (type: AppType) => TEMPLATES.filter((t) => t.type === type);
 

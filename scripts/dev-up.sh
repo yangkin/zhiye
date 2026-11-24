@@ -13,7 +13,7 @@ if ! pg_isready -h 127.0.0.1 -p "$ZHIYE_PG_PORT" -q; then
 fi
 echo "✓ PostgreSQL 127.0.0.1:$ZHIYE_PG_PORT"
 
-# 2. 生成应用模板依赖缓存（React 模板 / Vue 模板各一份，锁文件与 runner 镜像共用 deploy/docker/*/package-lock.json）
+# 2. 生成应用模板依赖缓存（React / Vue / Fullstack 模板）
 for pair in template-cache:app-template vue-template-cache:vue-template; do
   cache="${pair%%:*}"; tpl="${pair##*:}"; lock="deploy/docker/$cache/package-lock.json"
   if [ ! -d "runtime/$cache/node_modules" ] || ! cmp -s "packages/$tpl/package.json" "runtime/$cache/package.json" || ! cmp -s "$lock" "runtime/$cache/package-lock.json"; then
@@ -21,6 +21,10 @@ for pair in template-cache:app-template vue-template-cache:vue-template; do
     (cd "runtime/$cache" && npm ci --no-audit --no-fund)
   fi
 done
+if [ ! -d "runtime/fullstack-template-cache/node_modules" ] || ! cmp -s "packages/fullstack-template/package.json" "runtime/fullstack-template-cache/package.json"; then
+  mkdir -p "runtime/fullstack-template-cache" && cp "packages/fullstack-template/package.json" "runtime/fullstack-template-cache/"
+  (cd "runtime/fullstack-template-cache" && npm install --no-audit --no-fund)
+fi
 echo "✓ 模板依赖缓存"
 
 # 3. 前端

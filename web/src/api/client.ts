@@ -710,6 +710,28 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  // ---- 动态帮助知识库管理（实时同步帮助文档与小织机器人） ----
+  adminHelpKnowledgeList: () =>
+    request<{ items: import('./types').HelpKnowledgeArticle[] }>('/api/admin/help-knowledge'),
+  adminHelpKnowledgeCreate: (body: Partial<import('./types').HelpKnowledgeArticle>) =>
+    request<import('./types').HelpKnowledgeArticle>('/api/admin/help-knowledge', { method: 'POST', body }),
+  adminHelpKnowledgeUpdate: (id: string, body: Partial<import('./types').HelpKnowledgeArticle>) =>
+    request<import('./types').HelpKnowledgeArticle>(`/api/admin/help-knowledge/${enc(id)}`, { method: 'PATCH', body }),
+  adminHelpKnowledgeDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/help-knowledge/${enc(id)}`, { method: 'DELETE' }),
+  // ---- 个人工作空间长期记忆 ----
+  workspaceMemories: () =>
+    request<{ items: import('./types').WorkspaceMemoryItem[]; maxItems: number; autoLearnEnabled: boolean }>('/api/workspace/memories'),
+  workspaceMemorySetAutoLearn: (autoLearnEnabled: boolean) =>
+    request<{ autoLearnEnabled: boolean }>('/api/workspace/memories/settings', { method: 'PATCH', body: { autoLearnEnabled } }),
+  workspaceMemoryCreate: (body: { category: string; content: string }) =>
+    request<import('./types').WorkspaceMemoryItem>('/api/workspace/memories', { method: 'POST', body }),
+  workspaceMemoryUpdate: (id: string, body: { category?: string; content?: string; enabled?: boolean }) =>
+    request<import('./types').WorkspaceMemoryItem>(`/api/workspace/memories/${enc(id)}`, { method: 'PATCH', body }),
+  workspaceMemoryDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/workspace/memories/${enc(id)}`, { method: 'DELETE' }),
+  workspaceMemoryClearAll: () =>
+    request<{ ok: boolean; deleted: number }>('/api/workspace/memories', { method: 'DELETE' }),
 };
 
 export const errorMessage = (error: unknown, fallback = '操作未完成，请重试。') =>

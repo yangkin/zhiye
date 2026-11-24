@@ -75,6 +75,7 @@ public class Views {
         m.put("progress", t.progress());
         m.put("error", t.errorCode() == null ? null : Map.of("code", t.errorCode(), "message", Objects.toString(t.errorMessage(), "")));
         m.put("resultVersionId", t.resultVersionId());
+        if (t.result() != null && !t.result().isNull()) m.put("result", t.result());
         m.put("tokenUsed", t.tokenUsed());
         m.put("resumable", "CANCELLED".equals(t.status()) && tasks.checkpoint(t.id()).isPresent());
         m.put("retryable", "FAILED".equals(t.status()) && !"import".equals(t.type()) && !"clone".equals(t.type()));

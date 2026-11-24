@@ -209,11 +209,40 @@ public class AdminController {
         return clusterSandbox.reclaimExpiredLeases(actor);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.help.HelpKnowledgeService helpKnowledge;
+
     @PostMapping("/services/{appId}/{action}")
     public Map<String, Object> controlService(@PathVariable String appId,
                                               @PathVariable String action,
                                               HttpServletRequest req) throws Exception {
         String actor = admin.requireActor(req, principal.workspaceId());
         return admin.controlMonolithService(appId, action, actor);
+    }
+
+    // ---------- 帮助知识库在线维护（实时同步帮助文档 + 小织机器人） ----------
+    @GetMapping("/help-knowledge")
+    public Map<String, Object> listHelpKnowledge(HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return Map.of("items", helpKnowledge == null ? java.util.List.of() : helpKnowledge.adminList());
+    }
+
+    @PostMapping("/help-knowledge")
+    public Map<String, Object> createHelpKnowledge(@RequestBody JsonNode body, HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return helpKnowledge.create(body, actor);
+    }
+
+    @PatchMapping("/help-knowledge/{id}")
+    public Map<String, Object> updateHelpKnowledge(@PathVariable String id, @RequestBody JsonNode body, HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return helpKnowledge.update(id, body, actor);
+    }
+
+    @DeleteMapping("/help-knowledge/{id}")
+    public Map<String, Object> deleteHelpKnowledge(@PathVariable String id, HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        helpKnowledge.delete(id);
+        return Map.of("ok", true);
     }
 }

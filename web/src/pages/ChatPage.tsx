@@ -16,6 +16,7 @@ import { copyMessage, msgTime } from '../workbench/ChatPanel';
 import { FileCard, ThinkingBlock, plainAnswer, splitFiles } from './ChatParts';
 import { ChatFilesPanel, filesKey, type OpenFile } from './ChatFiles';
 import { confirmDialog } from '../components/ConfirmDialog';
+import { loadDraft, saveDraft } from '../lib/drafts';
 
 export interface ChatNavigationState {
   initialMessage: string;
@@ -76,8 +77,8 @@ export function ChatPage() {
 
   const [title, setTitle] = useState('新会话');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [prompt, setPrompt] = useState('');
-  const [type, setType] = useState<AppType>(initial?.type ?? '开发网站');
+  const [prompt, setPrompt] = useState(() => (id ? loadDraft<string>('chat:' + id) ?? '' : ''));
+  const [type, setType] = useState<AppType>(() => initial?.type ?? (id ? loadDraft<AppType>('chat-type:' + id) : null) ?? '开发网站');
   const [model, setModel] = useState(initial?.model ?? 'auto');
   const [mode, setMode] = useState<Mode>(initial?.mode ?? '适中');
   const [attachments, setAttachments] = useState<Asset[]>(initial?.attachments ?? []);
@@ -128,11 +129,11 @@ export function ChatPage() {
     action.current = null;
     askAbort.current?.abort();
     setMessages([]);
-    setPrompt('');
+    setPrompt(id ? loadDraft<string>('chat:' + id) ?? '' : '');
     setActionError('');
     setAsking(false);
     setBuilding(false);
-    setType(initial?.type ?? '开发网站');
+    setType(initial?.type ?? (id ? loadDraft<AppType>('chat-type:' + id) : null) ?? '开发网站');
     setModel(initial?.model ?? 'auto');
     setMode(initial?.mode ?? '适中');
     setAttachments(initial?.attachments ?? []);
@@ -141,6 +142,16 @@ export function ChatPage() {
     setFilesOpen(false);
     setOpenFile(null);
   }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    saveDraft('chat:' + id, prompt.trim() ? prompt : null);
+  }, [id, prompt]);
+
+  useEffect(() => {
+    if (!id) return;
+    saveDraft('chat-type:' + id, type === '全栈应用' || initial?.type ? type : null);
+  }, [id, type, initial?.type]);
 
   useEffect(() => () => askAbort.current?.abort(), []);
 
@@ -228,6 +239,7 @@ export function ChatPage() {
     ]);
     if (!again) {
       setPrompt('');
+      if (id) saveDraft('chat:' + id, null);
       setAttachments([]);
     }
     const ctrl = new AbortController();
@@ -315,6 +327,27 @@ export function ChatPage() {
           <Icon name="back" />
         </Link>
         <div className="conversation-title" title={title}>{title}</div>
+        {type === '全栈应用' ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#6d28d9',
+              background: '#f3edff',
+              border: '1px solid #dfd2fa',
+              borderRadius: 999,
+              padding: '2px 10px',
+              whiteSpace: 'nowrap',
+            }}
+            title="已锁定前后端一体全栈应用模式（React + Express + 独立托管）"
+          >
+            <Icon name="cloud" />
+            全栈应用模式
+          </span>
+        ) : null}
         {fileCount ? (
           <button type="button" className={`conversation-files ${filesOpen ? 'active' : ''}`} aria-pressed={filesOpen} onClick={() => setFilesOpen((v) => !v)}>
             <Icon name="clip" />

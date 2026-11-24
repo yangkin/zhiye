@@ -32,7 +32,7 @@ class K8sServiceRuntimeTest {
                 "https://maven.csot.internal/repository/public", "https://goproxy.csot.internal",
                 "csi-nas", true, "zhiye", "app.kubernetes.io/part-of", "zhiye",
                 List.of("10.96.0.10/32"), 20, 60, 5, 120, 200,
-                1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000);
+                1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000, "zhiye-builds", "zhiye-runtime");
     }
 
     @Test
@@ -65,7 +65,15 @@ class K8sServiceRuntimeTest {
                 Path.of("."), "FROM python:3.11-slim", Map.of("DATABASE_URL", "postgresql://u:p@pg/db"));
 
         Job job = K8sServiceResourceFactory.buildKanikoJob(props, spec, "zhiye-svc-yield-api-bld", "harbor.csot.internal/zhiye-app-yield-api:ver-1", "dir:///workspace");
+        assertThat(job.getMetadata().getNamespace()).isEqualTo("zhiye-builds");
         assertThat(job.getSpec().getTemplate().getSpec().getAutomountServiceAccountToken()).isFalse();
+        assertThat(job.getSpec().getTemplate().getSpec().getSecurityContext().getSeccompProfile().getType()).isEqualTo("RuntimeDefault");
+        assertThat(job.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts())
+                .anySatisfy(vm -> {
+                    assertThat(vm.getMountPath()).isEqualTo("/workspace");
+                    assertThat(vm.getSubPath()).isEqualTo("k8s-builds/zhiye-svc-yield-api-bld");
+                    assertThat(vm.getReadOnly()).isTrue();
+                });
         assertThat(job.getSpec().getTemplate().getSpec().getContainers().get(0).getArgs())
                 .contains("--build-arg=PIP_INDEX_URL=https://pypi.csot.internal/simple", "--build-arg=GOPROXY=https://goproxy.csot.internal");
 

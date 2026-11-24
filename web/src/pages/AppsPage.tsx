@@ -551,7 +551,7 @@ function DeleteAppModal({ app, onClose }: { app: AppSummary; onClose: () => void
         </>
       }
     >
-      <p className="notice-box">删除后应用、版本记录和线上地址都会移除，且无法恢复。</p>
+      <p className="notice-box">删除后应用将移入「最近删除」，线上地址立即暂停访问；如需找回，可联系平台管理员恢复（已保留持久化数据）。</p>
       {error ? (
         <p className="inline-error" role="alert">
           {error}

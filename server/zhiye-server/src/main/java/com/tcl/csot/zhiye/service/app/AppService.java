@@ -45,6 +45,9 @@ public class AppService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
+
     public AppService(AppRepository apps, TaskService taskService, TaskRepository tasks, MessageRepository messages,
                       DraftRepository drafts, VersionRepository versions, VersionService versionService, GitService git,
                       Views views, JdbcClient jdbc, com.tcl.csot.zhiye.service.workspace.QuotaService quota) {
@@ -104,17 +107,22 @@ public class AppService {
         // 明显是命令行/脚本的需求（例如「写一个 python 程序清洗 excel」）→ 脚本项目，没有页面预览
         boolean script = "日常开发".equals(type) && Catalog.looksLikeScript(prompt);
         String kind = script ? "script" : Catalog.projectKindFor(type);
+        boolean visualEditable = !"skill".equals(kind) && !"script".equals(kind) && !"service".equals(kind);
         String desc = userText(prompt);
         AppRow row = new AppRow(id, ws, name, named, type, desc.length() > 60 ? desc.substring(0, 60) : desc, prompt,
                 skill ? prompt : "", "lavender", false, mode, model, false,
                 skill ? "generating" : "planning", "create", null,
-                kind, true, Ids.slug(), assetIds, null, null, null, null, null);
+                kind, visualEditable, Ids.slug(), assetIds, null, null, null, null, null);
         apps.insert(row);
+        if (memories != null) memories.learnFromPrompt(ws, prompt);
         if (!skillAppIds.isEmpty())
             jdbc.sql("update app set skill_app_ids = ?::jsonb where id = ?").params(Json.write(skillAppIds), id).update();
         dataSources.bindAll(id, sourceIds);
         try {
-            git.initFromTemplate(id, row.isSkill() ? "skill-template" : row.isScript() ? "script-template" : "app-template");
+            String tpl = row.isSkill() ? "skill-template"
+                    : row.isScript() ? "script-template"
+                    : row.isService() ? "fullstack-template" : "app-template";
+            git.initFromTemplate(id, tpl);
         } catch (Exception e) {
             apps.softDelete(id);
             git.deleteRepo(id);
@@ -304,8 +312,8 @@ public class AppService {
         AppRow app = require(ws, id);
         if (tasks.activeForApp(app.id()).isPresent())
             throw ApiException.conflict("APP_BUSY", "应用有正在进行的任务，请先停止任务再删除");
-        // 删除即下线：站点地址立刻返回 404，单体应用同时销毁容器/进程与独立 Schema
-        if (app.isService() && monolithService != null) monolithService.destroyForApp(app, true);
+        // 软删除进入「最近删除」：线上链接立即停服下线，单体应用仅停进程、保留持久化 Schema 与 /data 卷，供管理员恢复时数据无损；永久清除（purge）时才彻底销毁
+        if (app.isService() && monolithService != null) monolithService.stopForTrash(app);
         jdbc.sql("update app set published_version_id = null where id = ?").param(app.id()).update();
         jdbc.sql("update deployment set status = 'inactive' where app_id = ? and status = 'active'").param(app.id()).update();
         drafts.delete(app.id());
@@ -373,6 +381,7 @@ public class AppService {
         if (cont != null && t.input().has("continueFromTask")) taskService.consumeCheckpoint(cont.path("continueFromTask").asText());
         var msg = messages.insert(app.id(), "user", content, ctx, t.id(), "pending", msgAssets.isEmpty() ? null : msgAssets,
                 msgSkills.isEmpty() ? null : msgSkills);
+        if (memories != null) memories.learnFromPrompt(ws, content);
         apps.touch(app.id());
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("message", views.message(msg));
@@ -531,7 +540,7 @@ public class AppService {
         if (app.isService()) {
             if (monolithService == null) throw ApiException.conflict("SERVICE_DISABLED", "当前环境未启用单体后端托管服务");
             try {
-                monolithService.initializeAndDeploy(app, v);
+                monolithService.publishDeploy(app, v);
             } catch (Exception e) {
                 throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "DEPLOY_FAILED", "单体服务部署失败：" + e.getMessage());
             }

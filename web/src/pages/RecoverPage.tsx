@@ -14,7 +14,13 @@ export function RecoverPage() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const token = decodeURIComponent(window.location.hash.replace(/^#/, '')).trim();
+    let token = '';
+    try {
+      token = decodeURIComponent(window.location.hash.replace(/^#/, '')).trim();
+    } catch {
+      setError('恢复链接格式已损坏，请重新复制完整的恢复链接后打开。');
+      return;
+    }
     if (!token) {
       setError('恢复链接不完整，请复制完整的链接后重新打开。');
       return;

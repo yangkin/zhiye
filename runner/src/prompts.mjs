@@ -160,9 +160,13 @@ export const APP_AI = `
 - 先用 \`window.zhiye?.ai\` 判断是否可用（本地直接打开 dist 时没有），不可用时给出提示而不是报错。需要时用 read 读取内置技能 app-ai 的说明。`
 
 const SERVICE = `
-## 项目形态（单体后端 / 全栈应用）
-- 这是一个运行在织页容器托管环境中的单体后端或前后端一体项目（Python / Node.js / Java / Go）。
-- 服务监听端口必须优先读取环境变量 \`PORT\`（默认 \`8080\`），绑定 \`0.0.0.0\`；不要把端口写死或改造成需要额外微服务中间件的架构。
+## 项目形态（单体后端 / 前后端全栈应用）
+- 这是一个运行在织页容器托管环境中的单体后端或前后端一体全栈项目（单应用上限 1C 1G，支持 Python / Node.js / Java / Go）。
+- 若仓库基于全栈骨架（根目录有 \`package.json\` + \`server/index.mjs\` + \`src/\`）：
+  - 前端在 \`src/\`（React 19 + TypeScript + Tailwind + Recharts + Lucide），所有接口请求**一律用相对路径 \`/api/...\`**，严禁写死 \`http://localhost:xxxx\`。
+  - 后端在 \`server/index.mjs\`（Express），必须监听 \`0.0.0.0\` 与 \`process.env.PORT || 8080\`，保留 \`GET /api/health\`，把所有业务数据持久化到 \`process.env.DATA_DIR || '.data'\`（使用原子写 \`tmp -> rename\` 避免损坏），并静态托管 \`dist/\` 与 SPA 回退。
+  - 写完代码后务必运行 \`npx tsc --noEmit -p tsconfig.json && npm run build\` 与 \`node --check server/index.mjs\` 确认前后端零语法/类型错误。
+- 服务监听端口必须优先读取环境变量 \`PORT\`（默认 \`8080\`），绑定 \`0.0.0.0\`；不要把端口写死或改造成需要额外微服务/Redis/Kafka 中间件的架构。
 - 数据库与存储由工作台「服务托管」提供：PostgreSQL 连接串通过 \`DATABASE_URL\` / \`JDBC_DATABASE_URL\` 注入，持久化目录通过 \`DATA_DIR\`（默认 \`/data\`）注入；不要使用静态站点的 \`cloud/schema.sql\`、\`window.zhiye\` 或 \`request_confirm(cloud)\`。
 - 平台网关已透传华星 SSO 身份请求头（\`X-Zhiye-User-Id\` / \`X-Zhiye-User-Login\` / \`X-Zhiye-User-Name\` / \`X-Zhiye-User-Admin\`），可直接读取。
 - 尽量沿用项目原有目录结构、语言和框架风格，修改完后端或前端代码后保持语法正确与启动入口一致（无需调用静态页面的 screenshot 工具）。`

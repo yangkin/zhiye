@@ -62,6 +62,12 @@ public class HelpService {
     @org.springframework.beans.factory.annotation.Autowired
     private com.tcl.csot.zhiye.service.llm.LlmRouter router;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private HelpKnowledgeService knowledge;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
+
     public HelpService(HelpRepository repo, JdbcClient jdbc, ObjectStore store, UpstreamClient upstream, UsageService usage,
                        FaultState faults, ZhiyeProperties props) {
         this.repo = repo;
@@ -209,7 +215,10 @@ public class HelpService {
         body.put("reasoning_effort", "low");
         body.putObject("stream_options").put("include_usage", true);
         ArrayNode msgs = body.putArray("messages");
-        msgs.addObject().put("role", "system").put("content", HelpPrompt.SYSTEM);
+        if (memories != null) memories.learnFromPrompt(ws, c);
+        String sysPrompt = (knowledge != null ? knowledge.buildBotSystemPrompt() : HelpPrompt.SYSTEM)
+                + (memories != null ? memories.promptSection(ws) : "");
+        msgs.addObject().put("role", "system").put("content", sysPrompt);
         // 上游要求对话以 user 开头
         int start = 0;
         while (start < ctx.size() && !"user".equals(ctx.get(start).role())) start++;
