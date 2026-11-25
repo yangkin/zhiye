@@ -19,6 +19,8 @@ export default defineConfig({
           groups: [
             { name: 'vendor', test: /node_modules[\\/](react|react-dom|react-router|@tanstack|zustand)/ },
             { name: 'markdown', test: /node_modules[\\/](marked|dompurify|fflate)/ },
+            { name: 'templates', test: /src[\\/](lib[\\/]templates|components[\\/]SceneThumb)\.(ts|tsx)$/ },
+            { name: 'help', test: /src[\\/](components[\\/]HelpPanel|lib[\\/]helpFaq)\.(ts|tsx)$/ },
           ],
         },
       },

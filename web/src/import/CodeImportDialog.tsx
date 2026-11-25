@@ -110,7 +110,22 @@ function ImportReport({ manifest, rootDir, onRootDir }: { manifest: ImportManife
           ))}
         </ul>
       ) : (
-        <p className="code-report-ok">{primary ? '没有发现会影响部署的问题。' : `将部署 ${dirLabel(rootDir)}。`}</p>
+        <>
+          <p className="code-report-ok">{primary ? '没有发现会影响部署的问题。' : `将部署 ${dirLabel(rootDir)}。`}</p>
+          {!primary && c?.kind !== 'service' && (manifest.candidates ?? []).some((x) => x.dir !== rootDir && x.kind === 'service') ? (
+            <ul>
+              <li className="risk">
+                <strong>
+                  <i aria-hidden="true">!</i>
+                  仅部署前端子目录，同仓库后端不会启动
+                </strong>
+                <p>
+                  你选择了仅部署 {dirLabel(rootDir)}，压缩包里的后端服务目录不会被构建和运行；若前端请求了 <code>localhost</code> 或该后端的 <code>/api/*</code> 接口，上线后将无法访问。如需前后端一起运行，请选择根目录或后端服务目录。
+                </p>
+              </li>
+            </ul>
+          ) : null}
+        </>
       )}
     </section>
   );
@@ -336,7 +351,7 @@ function Dialog() {
               <FolderArt />
               <h2>代码导入</h2>
               <p>支持纯前端项目（HTML、Vite / Vue / React / Umi / dist 产物）以及 Python、Node.js、Java、Go 单体后端与前后端一体项目</p>
-              <p>自动识别运行环境并容器化托管（支持同域前后端免跨域、托管 PostgreSQL Schema、/data 卷与闲置自动休眠）</p>
+              <p>自动识别运行环境并容器化托管（同域免跨域、内置 PostgreSQL Schema、/data 持久化与自动休眠）</p>
               <p>
                 拖拽项目文件夹、.zip 或 .html 到这里，或{' '}
                 <button type="button" className="code-inline" disabled={busy} onClick={() => fileRef.current?.click()}>

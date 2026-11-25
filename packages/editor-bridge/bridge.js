@@ -20,6 +20,56 @@
     if (data) for (var k in data) msg[k] = data[k]
     try { window.parent.postMessage(msg, '*') } catch (e) { /* ignore */ }
   }
+
+  // ---------- 预览运行异常捕获（JS 报错 / Promise 未捕获 / 同源 /api/* 4xx/5xx） ----------
+  var errSent = 0
+  var errSeen = {}
+  function reportRuntimeError(kind, message, extra) {
+    if (errSent >= 10) return
+    var msg = String(message || '').trim().slice(0, 400)
+    if (!msg) return
+    var key = kind + ':' + msg
+    if (errSeen[key]) return
+    errSeen[key] = true
+    errSent++
+    var payload = { kind: kind, message: msg }
+    if (extra) for (var k in extra) payload[k] = extra[k]
+    send('runtime-error', payload)
+  }
+  window.addEventListener('error', function (ev) {
+    var msg = (ev && ev.message) || (ev && ev.error && ev.error.message) || ''
+    var src = ev && ev.filename ? String(ev.filename).split('/').pop() : ''
+    var detail = ev && ev.error && ev.error.stack ? String(ev.error.stack).slice(0, 600) : ''
+    if (msg) reportRuntimeError('js', msg, { source: src, line: ev.lineno || 0, detail: detail })
+  })
+  window.addEventListener('unhandledrejection', function (ev) {
+    var r = ev && ev.reason
+    var msg = r ? (typeof r === 'string' ? r : (r.message || String(r))) : '未处理的异步异常'
+    var detail = r && r.stack ? String(r.stack).slice(0, 600) : ''
+    reportRuntimeError('promise', msg, { detail: detail })
+  })
+  if (typeof window.fetch === 'function') {
+    var origFetch = window.fetch.bind(window)
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || ''
+      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase()
+      return origFetch(input, init).then(function (res) {
+        try {
+          if (res && res.status >= 400 && /(\/api\/|^\/api$)/.test(url)) {
+            reportRuntimeError('api', method + ' ' + url.slice(0, 120) + ' 返回 HTTP ' + res.status, { url: url.slice(0, 200), status: res.status, method: method })
+          }
+        } catch (e) { /* ignore */ }
+        return res
+      }, function (err) {
+        try {
+          if (/(\/api\/|^\/api$)/.test(url)) {
+            reportRuntimeError('api', method + ' ' + url.slice(0, 120) + ' 请求失败：' + (err && err.message ? err.message : '网络异常'), { url: url.slice(0, 200), status: 0, method: method })
+          }
+        } catch (e) { /* ignore */ }
+        throw err
+      })
+    }
+  }
   function isUi(el) { return !el || !el.closest || !!el.closest('[data-zhiye-editor-ui]') }
   function locOf(el) { return el && el.getAttribute && el.getAttribute('data-loc') }
   function target(el) { if (!el || isUi(el)) return null; return el.closest ? el.closest('[data-loc]') : null }

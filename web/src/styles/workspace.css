@@ -149,11 +149,11 @@ body.studio-mode{background:var(--st-bg);color:var(--st-ink)}
 .studio-device-group>button{height:31px;width:30px;color:var(--st-muted);display:flex;align-items:center;justify-content:center;border-radius:6px;padding:0}
 .studio-device-group>button>.icon{width:17px;height:17px}
 .studio-device-group>button.active{background:var(--st-raised);color:var(--st-ink-2);box-shadow:0 1px 3px var(--st-shadow)}
-.studio-tool-button{width:30px;height:31px;display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:7px;color:var(--st-muted)}
+.studio-tool-button{width:30px;height:31px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:7px;color:var(--st-muted)}
 .studio-tool-button>.icon{width:17px;height:17px}
 .studio-tool-button:hover{background:var(--st-active);color:var(--st-ink-2)}
-.studio-route-bar{height:40px;max-width:435px;min-width:155px;flex:1;display:flex;align-items:center;border:1px solid var(--st-line);background:var(--st-raised);border-radius:10px;padding:0 5px;gap:5px;margin:auto}
-.studio-route-picker{flex:1;height:35px;display:flex;align-items:center;justify-content:center;color:var(--st-ink);font-size:14px;padding:0 7px;position:relative;min-width:70px}
+.studio-route-bar{height:40px;max-width:440px;min-width:190px;flex:1;display:flex;align-items:center;border:1px solid var(--st-line);background:var(--st-raised);border-radius:10px;padding:0 5px;gap:5px;margin:auto;overflow:hidden}
+.studio-route-picker{flex:1;height:35px;display:flex;align-items:center;justify-content:center;color:var(--st-ink);font-size:13.5px;padding:0 22px 0 8px;position:relative;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .studio-route-picker>.icon{position:absolute;right:6px;width:12px;height:12px;color:var(--st-muted)}
 .studio-dialog-modify{display:inline-flex;align-items:center;gap:7px;color:var(--st-muted);font-size:13px;padding:8px 3px;min-width:99px;justify-content:end;white-space:nowrap}
 .studio-dialog-modify>.icon{width:18px;height:18px}
@@ -334,7 +334,7 @@ body.studio-mode{background:var(--st-bg);color:var(--st-ink)}
 .publish-access{margin:14px 0 4px}
 .publish-access .field-label{display:block;margin-bottom:8px}
 @media(max-width:480px){.publish-detail>span{flex-direction:column;gap:3px}.publish-detail b{text-align:left}}
-.studio-identity-picker.zy-select{height:28px;min-width:66px;font-size:11px;border-radius:7px;padding:0 22px 0 8px;margin:0 2px}
+.studio-identity-picker.zy-select{flex:none;height:28px;min-width:72px;width:auto;font-size:11.5px;border-radius:7px;padding:0 7px 0 9px;gap:4px;margin:0 2px;white-space:nowrap}
 @media(max-width:970px){.cc-access-options{grid-template-columns:1fr}.cc{padding:14px}.cc-search input{width:90px}}
 .cc-fn-stat{font-size:11px;color:var(--st-faint);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis}
 .cc-fn-stat.bad{color:var(--st-danger)}
@@ -412,3 +412,30 @@ body.studio-mode{background:var(--st-bg);color:var(--st-ink)}
 /* 「关闭云服务」要看得出是个按钮 */
 .cc-nav .cc-link{font-size:12px;color:var(--st-muted);border:1px solid var(--st-line);background:var(--st-bg);text-align:center;justify-content:center}
 .cc-nav .cc-link:hover:not(:disabled){color:var(--st-danger);border-color:var(--st-danger)}
+
+/* 发布按钮未发布改动强提示 + 预览运行异常一键修复条 + 发布分享二维码卡 */
+.studio-publish.has-unpublished{background:linear-gradient(135deg,#6f42d8,#5231b5);box-shadow:0 3px 12px rgba(105,65,216,.28)}
+.studio-publish-dot{width:7px;height:7px;border-radius:50%;background:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.32);flex:none;animation:zy-pulse-dot 1.8s ease-in-out infinite}
+@keyframes zy-pulse-dot{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.25);opacity:.78}}
+
+.preview-error-banner{margin:0;padding:8px 14px;background:linear-gradient(90deg,#fff5f6,#fff9f5);border-bottom:1px solid #f6cfd6;color:#7f1d2e;font-size:12px}
+.preview-error-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.preview-error-msg{display:flex;align-items:center;gap:7px;min-width:0;flex:1}
+.preview-error-msg .icon{width:14px;height:14px;color:#dc3f59;flex:none}
+.preview-error-msg b{white-space:nowrap;font-weight:600}
+.preview-error-sample{color:#9a3a4a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.preview-error-actions{display:inline-flex;align-items:center;gap:6px;flex:none}
+.preview-error-link{border:0;background:transparent;color:#8c3b4c;font-size:12px;padding:4px 7px;border-radius:6px;cursor:pointer}
+.preview-error-link:hover{background:rgba(220,63,89,.1)}
+.preview-error-fix{border:0;background:#dc3f59;color:#fff;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;cursor:pointer;box-shadow:0 2px 6px rgba(220,63,89,.24)}
+.preview-error-fix:hover:not(:disabled){background:#c22d47}
+.preview-error-fix:disabled{opacity:.6;cursor:default}
+.preview-error-list{margin:8px 0 2px;padding:8px 10px 8px 22px;background:#fff;border:1px solid #f4d6dc;border-radius:8px;display:grid;gap:4px;font-size:11.5px;color:#4a232b;max-height:140px;overflow:auto}
+.preview-error-list code{background:#fdecef;color:#b8253f;padding:1px 5px;border-radius:4px;font-size:10.5px;margin-right:4px}
+
+.publish-share-card{margin-top:12px;padding:12px;border-radius:12px;border:1px solid #e8e2f5;background:linear-gradient(135deg,#faf8ff,#ffffff);display:flex;align-items:center;gap:14px}
+.publish-qr-svg{flex:none;border-radius:8px;border:1px solid #ebe5f6;box-shadow:0 2px 8px rgba(45,31,84,.06)}
+.publish-share-info{display:flex;flex-direction:column;gap:5px;min-width:0}
+.publish-share-info b{font-size:13px;color:#1f1a2d}
+.publish-share-info p{margin:0;font-size:11.5px;color:#6d6480;line-height:1.45}
+.publish-share-info .subtle-button{align-self:flex-start;margin-top:2px;height:30px;padding:0 11px;font-size:12px}

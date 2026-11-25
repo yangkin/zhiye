@@ -1,5 +1,6 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { Icon } from '../lib/icons';
 
 /** X-APM 风格右侧滑出详情 / 编辑抽屉：保留左侧台账上下文，顶部支持迷你趋势区，底部固定审计留痕栏 */
@@ -24,6 +25,10 @@ export function DetailDrawer({
   footer?: ReactNode;
   children: ReactNode;
 }) {
+  const drawerRef = useRef<HTMLElement>(null);
+  const titleId = useId();
+  useDialogFocus(drawerRef, open);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -44,15 +49,17 @@ export function DetailDrawer({
       }}
     >
       <aside
+        ref={drawerRef}
         className="xa-drawer"
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
         style={{ width: `min(${width}px, 94vw)` }}
       >
         <header className="xa-drawer-head">
           <div className="xa-drawer-head-copy">
             <div className="xa-drawer-title-row">
-              <h3>{title}</h3>
+              <h3 id={titleId}>{title}</h3>
               {badge}
             </div>
             {sub ? <p className="xa-drawer-sub">{sub}</p> : null}

@@ -326,7 +326,7 @@ public class MonolithServiceManager {
         } catch (Exception ignored) {}
     }
 
-    /** 定时扫描：把超过 idle_sleep_min 分钟无访问的运行中单体服务自动缩容到 0（休眠态）。 */
+    /** 定时扫描：1) 超过 idle_sleep_min 分钟无访问的线上单体服务缩容到 0；2) 超过 preview_idle_sleep_min（默认 30 分钟）的预览槽位单独缩容休眠，节省双槽位内存。 */
     @Scheduled(fixedDelayString = "${zhiye.service-runtime.idle-sweep-ms:60000}")
     public void sleepIdleServices() {
         List<ServiceRow> idle = jdbc.sql(
@@ -351,6 +351,31 @@ public class MonolithServiceManager {
                 });
             } catch (Exception e) {
                 log.warn("闲置休眠扫描异常 app={}: {}", s.appId(), e.getMessage());
+            }
+        }
+        // 工作台预览槽位独立短休眠（默认 30 分钟）：不影响线上正式版，避免双槽位长期占用双倍内存
+        int previewIdleMin = 30;
+        List<ServiceRow> idlePreviews = jdbc.sql(
+                "select * from app_service where preview_status = 'running' "
+                        + "and updated_at < now() - (? * interval '1 minute')")
+                .param(previewIdleMin)
+                .query(ServiceRow::map).list();
+        for (ServiceRow s : idlePreviews) {
+            try {
+                apps.findById(s.appId()).ifPresent(app -> {
+                    synchronized (lockFor(app.id())) {
+                        try {
+                            provider.sleep(previewAppId(app.id()), previewSlug(app.slug()));
+                            jdbc.sql("update app_service set preview_status = 'sleeping' where app_id = ? and preview_status = 'running'")
+                                    .param(app.id()).update();
+                            log.info("全栈预览槽位闲置自动休眠（不影响线上版）app={} idleMin={}", app.id(), previewIdleMin);
+                        } catch (Exception e) {
+                            log.warn("预览槽位休眠失败 app={}: {}", app.id(), e.getMessage());
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                log.warn("预览槽位休眠扫描异常 app={}: {}", s.appId(), e.getMessage());
             }
         }
     }

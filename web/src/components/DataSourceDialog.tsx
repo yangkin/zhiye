@@ -65,6 +65,11 @@ function SourceList({ onAddApi, onEdit, onTest }: { onAddApi: () => void; onEdit
       <p className="source-intro">
         从 API 网关添加当前账号<b>可调用的查询接口</b>后，在对话框「＋ → 数据源」里选择，生成的应用就能用真实数据。接口地址和凭证只保存在平台，不会出现在页面代码里。
       </p>
+      <div className="source-eco-strip" aria-label="企业生态连接能力">
+        <span><b>AGW 真实接口</b> · 查 MES / 设备 / 经营数据</span>
+        <span><b>飞书生态联动</b> · 群机器人卡片 / 多维表格互导</span>
+        <span><b>华星 SSO 身份</b> · 自动识别工号与审批角色</span>
+      </div>
       <div className="source-list-head">
         <span>{list.data ? `共 ${list.data.length} 个` : ''}</span>
         <div className="source-list-buttons">

@@ -129,8 +129,12 @@ function Workbench({ id }: { id: string }) {
 
   // 任务跟踪：优先进行中的任务；否则展示最近一次失败/停止的任务（用于「继续」「重试」）
   const activeId = app?.activeTask?.id ?? null;
+  const [historicalId, setHistoricalId] = useState<string | null>(null);
   useEffect(() => {
-    if (activeId) setTrackedId(activeId);
+    if (activeId) {
+      setTrackedId(activeId);
+      setHistoricalId(null);
+    }
   }, [activeId]);
   const tasksQ = useQuery({
     queryKey: qk.appTasks(id),
@@ -142,9 +146,13 @@ function Workbench({ id }: { id: string }) {
     if (trackedId || activeId || !tasksQ.data?.length || !app) return;
     const latest = [...tasksQ.data].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     const newerThanVersion = !app.currentVersion || latest.createdAt > app.currentVersion.createdAt;
-    if ((latest.status === 'FAILED' || latest.status === 'CANCELLED') && newerThanVersion) setTrackedId(latest.id);
+    if ((latest.status === 'FAILED' || latest.status === 'CANCELLED') && newerThanVersion) {
+      setTrackedId(latest.id);
+      setHistoricalId(latest.id);
+    }
   }, [tasksQ.data, trackedId, activeId, app]);
   const taskId = activeId ?? trackedId;
+  const isHistoricalTask = !!taskId && taskId === historicalId && !activeId;
 
   const cloudQ = useQuery({ queryKey: ['cloud', id], queryFn: () => api.cloudStatus(id!), enabled: !!id && !!app && !isSkillApp(app) && !isServiceApp(app) });
   const cloudOn = cloudQ.data?.enabled ?? false;
@@ -183,6 +191,57 @@ function Workbench({ id }: { id: string }) {
     setRefreshKey((k) => k + 1);
     toast('预览已刷新。');
   };
+  // 预览运行异常捕获（由 editor-bridge 通过 postMessage 上报：JS 报错 / 未捕获 Promise / 同源 /api/* 4xx/5xx）
+  const [previewErrors, setPreviewErrors] = useState<Array<{ kind: string; message: string; source?: string; line?: number; detail?: string; url?: string; status?: number }>>([]);
+  const [previewErrExpanded, setPreviewErrExpanded] = useState(false);
+  const [fixingPreviewErr, setFixingPreviewErr] = useState(false);
+  useEffect(() => {
+    setPreviewErrors([]);
+    setPreviewErrExpanded(false);
+  }, [frameKey]);
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!frameRef.current?.contentWindow || e.source !== frameRef.current.contentWindow) return;
+      const d = e.data;
+      if (!d || d.channel !== 'zhiye-editor' || d.type !== 'runtime-error' || !d.message) return;
+      setPreviewErrors((prev) => {
+        if (prev.length >= 10 || prev.some((x) => x.kind === d.kind && x.message === d.message)) return prev;
+        return [...prev, { kind: String(d.kind || 'js'), message: String(d.message), source: d.source ? String(d.source) : undefined, line: Number(d.line) || undefined, detail: d.detail ? String(d.detail) : undefined, url: d.url ? String(d.url) : undefined, status: typeof d.status === 'number' ? d.status : undefined }];
+      });
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const sendPreviewErrorsToAi = async () => {
+    if (!app || !previewErrors.length || fixingPreviewErr) return;
+    const lines = previewErrors.map((err, idx) => {
+      const loc = err.source ? `（${err.source}${err.line ? ':' + err.line : ''}）` : '';
+      const extra = err.detail ? `\n  堆栈摘要：${err.detail.split('\n').slice(0, 3).join(' | ')}` : '';
+      return `${idx + 1}. [${err.kind.toUpperCase()}] ${err.message}${loc}${extra}`;
+    });
+    const prompt = `预览页面在运行时出现以下 ${previewErrors.length} 处异常，请定位根因并彻底修复：\n\n${lines.join('\n')}\n\n修完后请调用 verify_app 自检确认不再报错。`;
+    if (busyHere || blocked.otherApp) {
+      useChat.getState().setDraft(prompt);
+      toast('当前有任务运行中，已把报错详情填入左侧输入框。');
+      return;
+    }
+    setFixingPreviewErr(true);
+    try {
+      const ok = await beforeTask();
+      if (!ok) return;
+      const res = await api.sendMessage(app.id, { content: prompt });
+      setPreviewErrors([]);
+      setPreviewErrExpanded(false);
+      onTaskStarted(res.task);
+      toast('已把预览报错交给 AI 定位修复。');
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setFixingPreviewErr(false);
+    }
+  };
+
   const editor = useVisualEditor(app, frameRef, frameSrc ? `${frameSrc}#${refreshKey}` : null, editMode === 'manual', lockedEarly);
   const [codeChoice, setCodeChoice] = useState<null | { resolve: (go: boolean) => void; saving: boolean; error: string }>(null);
   const editorRef = useRef(editor);
@@ -240,7 +299,7 @@ function Workbench({ id }: { id: string }) {
     },
     [id, invalidate, qc],
   );
-  const stream = useTaskStream(taskId, onFinished);
+  const stream = useTaskStream(taskId, onFinished, { historical: isHistoricalTask });
 
   // 写文件 / 改文件的工具调用结束时刷新文件树（只读已有版本的文件；没有版本时显示生成中）
   const writesDone = stream.tools.filter((t) => t.state === 'end' && /write|edit|create|patch|写|改|创建|修改|新建/i.test(t.name + ' ' + t.summary)).length;
@@ -251,6 +310,7 @@ function Workbench({ id }: { id: string }) {
 
   const onTaskStarted = useCallback(
     (t: Task) => {
+      setHistoricalId(null);
       setTrackedId(t.id);
       qc.setQueryData(qk.app(id), (old: typeof app) =>
         old ? { ...old, activeTask: isTerminal(t.status) ? null : { id: t.id, type: t.type, status: t.status } } : old,
@@ -509,12 +569,32 @@ function Workbench({ id }: { id: string }) {
               <Icon name="globe" />
               <span>{script ? '导出源码' : '发布到 SkillHub'}</span>
             </button>
-          ) : (
-            <button className="studio-publish" disabled={!ready} onClick={() => setModal('publish')}>
-              <Icon name="globe" />
-              <span>发布</span>
-            </button>
-          )}
+          ) : (() => {
+            const publishedVer = app.publishedVersionId ? versions.find((x) => x.id === app.publishedVersionId) : null;
+            const hasUnpublished = Boolean(app.publishedVersionId && currentVersion && app.publishedVersionId !== currentVersion.id);
+            return (
+              <button
+                className={`studio-publish ${hasUnpublished ? 'has-unpublished' : ''}`}
+                disabled={!ready}
+                title={
+                  hasUnpublished
+                    ? `当前预览已是 V${currentVersion?.number}，线上同事看到的仍是 ${publishedVer ? `V${publishedVer.number}` : '旧版本'}；点击发布同步上线`
+                    : app.publishedVersionId
+                      ? '线上已是当前版本，点击管理访问范围或分享链接'
+                      : '发布上线并生成内网分享链接'
+                }
+                onClick={() => setModal('publish')}
+              >
+                <Icon name="globe" />
+                <span>
+                  {hasUnpublished
+                    ? `更新线上${publishedVer && currentVersion ? ` (V${publishedVer.number}→V${currentVersion.number})` : ''}`
+                    : '发布'}
+                </span>
+                {hasUnpublished ? <i className="studio-publish-dot" aria-label="有未发布改动" /> : null}
+              </button>
+            );
+          })()}
           <span className="studio-action-divider" />
           <button
             className={`studio-square ${previewCollapsed ? 'active' : ''}`}
@@ -684,6 +764,43 @@ function Workbench({ id }: { id: string }) {
                 <div className="old-version-banner">
                   正在预览历史版本 V{previewVersion.number}
                   <button onClick={() => setPreviewVersion(null)}>返回当前版本</button>
+                </div>
+              ) : null}
+              {previewErrors.length > 0 && !previewVersion ? (
+                <div className="preview-error-banner" role="alert">
+                  <div className="preview-error-head">
+                    <span className="preview-error-msg">
+                      <Icon name="alert" />
+                      <b>检测到 {previewErrors.length} 处预览运行异常</b>
+                      <span className="preview-error-sample">{previewErrors[0].message}</span>
+                    </span>
+                    <div className="preview-error-actions">
+                      <button type="button" className="preview-error-link" onClick={() => setPreviewErrExpanded((v) => !v)}>
+                        {previewErrExpanded ? '收起' : '详情'}
+                      </button>
+                      <button type="button" className="preview-error-link" onClick={() => setPreviewErrors([])}>
+                        忽略
+                      </button>
+                      <button
+                        type="button"
+                        className="preview-error-fix"
+                        disabled={fixingPreviewErr}
+                        onClick={() => void sendPreviewErrorsToAi()}
+                      >
+                        {fixingPreviewErr ? '正在发送…' : '一键交给 AI 修复'}
+                      </button>
+                    </div>
+                  </div>
+                  {previewErrExpanded ? (
+                    <ul className="preview-error-list">
+                      {previewErrors.map((err, i) => (
+                        <li key={i}>
+                          <code>{err.kind.toUpperCase()}</code> {err.message}
+                          {err.source ? <small>（{err.source}{err.line ? `:${err.line}` : ''}）</small> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </div>
               ) : null}
               <div

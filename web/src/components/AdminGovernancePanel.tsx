@@ -713,7 +713,7 @@ export function AdminGovernancePanel({
       icon: 'grid',
       label: '应用与交接',
       value: fmtNum(allAppsCount),
-      sub: `${fmtNum(workspaceOptions.length)} 个空间 · 归属转移与交接`,
+      sub: `${fmtNum(workspaceOptions.length)} 空间 · 资产与交接`,
       tone: 'violet',
     },
     {
@@ -752,7 +752,7 @@ export function AdminGovernancePanel({
           : activeTaskCount > 0
             ? `${fmtNum(activeTaskCount)} 运行中`
             : '正常',
-      sub: `任务 ${activeTaskCount} · 限流 ${fmtNum(rateLimitRejected)} · 配额 ${customQuotaCount} · SSO ${ssoUserCount}`,
+      sub: `任务 ${activeTaskCount} · 限流 ${fmtNum(rateLimitRejected)} · 配额 ${customQuotaCount}`,
       tone: rateLimitRejected > 0 ? 'rose' : 'slate',
       alert: rateLimitRejected > 0,
       healthy: rateLimitRejected === 0,
@@ -823,18 +823,23 @@ export function AdminGovernancePanel({
             role="tab"
             tabIndex={govTab === item.tab ? 0 : -1}
             aria-selected={govTab === item.tab}
+            data-tone={item.alert ? 'rose' : item.tone}
             className={`gov-pulse-card ${govTab === item.tab ? 'active' : ''} ${item.alert ? 'is-alert' : ''}`}
             onClick={() => setGovTab(item.tab)}
           >
             <div className="gov-pulse-top">
-              <span className="gov-pulse-label">
+              <span className="gov-pulse-icon" aria-hidden="true">
                 <Icon name={item.icon} />
-                <span>{item.label}</span>
               </span>
-              {item.alert ? <i className="gov-dot alert" aria-hidden="true" /> : null}
+              <span className="gov-pulse-label">{item.label}</span>
+              {item.alert ? (
+                <i className="gov-dot alert" aria-hidden="true" />
+              ) : govTab === item.tab ? (
+                <i className="gov-dot active-dot" aria-hidden="true" />
+              ) : null}
             </div>
             <strong className={item.alert ? 'is-alert' : item.healthy ? 'is-ok' : ''}>{item.value}</strong>
-            <small>{item.sub}</small>
+            <small title={item.sub}>{item.sub}</small>
           </button>
         ))}
       </div>

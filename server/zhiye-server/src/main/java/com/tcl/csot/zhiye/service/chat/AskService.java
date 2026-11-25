@@ -179,6 +179,9 @@ public class AskService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
+
     public interface Sink {
         void event(String name, Object data) throws Exception;
     }
@@ -245,10 +248,10 @@ public class AskService {
     }
 
     static final String INTENT_SYSTEM = """
-            你在织页的应用工作台里，判断用户这句话是要「修改应用」、「另做一个应用」还是只是「提问 / 咨询」。
-            - modify：要求改代码、改界面、加功能、加页面或模块、修 bug、调整样式或文案、替换数据，哪怕语气委婉（「能不能把…改成…」「这里再加个…」）。
+            你在织页的应用工作台里，判断用户这句话是要「直接修改应用」、「另做一个应用」还是「先提问/先排查（排查确认需要改时再自动转入修改）」。
+            - modify：明确要求直接改代码、改界面、加功能、加页面或模块、调整样式或文案、替换数据，且不需要先排查未知根因。
             - new：要做一个和当前应用无关的、全新的应用或网站（例如当前是待办清单，用户说「再帮我写一个招聘网站」）。只要能算当前应用的一部分（新页面、新模块、相关功能），都算 modify。
-            - ask：询问原理、实现方式、使用方法、对比建议、让你解释或评估，不要求现在改动。
+            - ask：询问原理、实现方式、使用方法、对比建议、让你解释或评估；或者要求「先帮我查一下为什么不对/报错，有问题再改」这类需要先查代码/数据/日志定位根因的请求（工作台问答支持先查再自动转入修改）。
             只输出一个单词：modify、new 或 ask。
             """;
 
@@ -549,6 +552,27 @@ public class AskService {
                     }
                     return;
                 }
+                // 检查模型是否发起了 handoff_to_modify（排查完根因，正式交接给编码 Agent 修改源码）
+                if (hasApp) {
+                    for (JsonNode call : toolCalls) {
+                        if ("handoff_to_modify".equals(call.path("function").path("name").asText(""))) {
+                            JsonNode hArgs = Json.obj();
+                            try { hArgs = Json.M.readTree(call.path("function").path("arguments").asText("{}")); } catch (Exception ignored) { }
+                            String summary = hArgs.path("summary").asText("已定位根因，正在转入代码修改…").trim();
+                            String instruction = hArgs.path("instruction").asText("").trim();
+                            if (!instruction.isEmpty()) {
+                                if (answer.length() == 0 && !summary.isEmpty()) {
+                                    answer.append(summary);
+                                    emit(sink, "delta", Json.obj().put("text", summary));
+                                }
+                                emit(sink, "handoff", Json.obj().put("summary", summary).put("instruction", instruction));
+                                done.accept(new Reply(answer.toString(), thinking.toString()));
+                                emit(sink, "done", Json.obj());
+                                return;
+                            }
+                        }
+                    }
+                }
                 // 把 assistant 的 tool_calls 原样放回历史，再追加每个工具结果
                 ObjectNode assistant = msgs.addObject().put("role", "assistant");
                 if (text.length() > 0) assistant.put("content", text.toString()); else assistant.putNull("content");
@@ -693,6 +717,14 @@ public class AskService {
             p4.putObject("limit").put("type", "integer").put("description", "返回最新多少行（默认 10，最多 50）");
             tools.add(tool("cloud_data", "查看应用的云数据：不传表名列出所有表和行数，传表名返回最新若干行", p4, null));
         }
+        if (monolithService != null && apps.findById(appId).map(a -> a.isService()).orElse(false)) {
+            ObjectNode p5 = Json.obj();
+            tools.add(tool("service_logs", "查看全栈/单体应用的运行状态、脱敏环境变量键名、PG 表结构与最近运行日志（只读）", p5, null));
+        }
+        ObjectNode p6 = Json.obj();
+        p6.putObject("summary").put("type", "string").put("description", "给用户看的一两句排查结论，例如「已定位到是列表接口缺少状态过滤导致，正在为你修复。」");
+        p6.putObject("instruction").put("type", "string").put("description", "带精确文件路径、根因和修改要点的指令，将直接交给编码 Agent 执行修改");
+        tools.add(tool("handoff_to_modify", "仅当用户明确希望修复/改动，且你已查明根因准备立即修改代码时调用；纯咨询问答绝对不要调用", p6, "instruction"));
         return tools;
     }
 
@@ -725,6 +757,12 @@ public class AskService {
                 case "search" -> searchTool(appId, commit, args.path("pattern").asText(""), args.path("prefix").asText(""));
                 case "cloud_data" -> cloud == null ? "云服务不可用"
                         : cloud.askData(appId, args.path("table").asText(""), args.path("limit").asInt(10));
+                case "service_logs" -> {
+                    if (monolithService == null) yield "单体服务不可用";
+                    var a = apps.findById(appId).orElse(null);
+                    ObjectNode snap = monolithService.inspectSnapshotForAgent(a);
+                    yield snap == null ? "当前全栈服务尚未首次部署，暂无运行态日志。" : Json.write(snap);
+                }
                 default -> "未知工具：" + name;
             };
         } catch (Exception e) {

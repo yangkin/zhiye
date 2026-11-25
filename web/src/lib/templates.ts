@@ -937,6 +937,110 @@ ${FULLSTACK_RULE}`,
 - 后端 REST API：/api/health、/api/meetings、/api/actions（CRUD + 进展打卡 + 逾期统计）、/api/analytics/closure，持久化到 DATA_DIR。
 ${FULLSTACK_RULE}`,
   },
+  // ================ 企业生态联动（AGW 真实数据 + 飞书 + 办公闭环，6 个） ================
+  {
+    id: 'eco-agw-feishu-alert',
+    type: '全栈应用',
+    title: '良率超限监控 + 飞书群告警机器人',
+    scene: '生态 · 飞书告警',
+    desc: '对接 AGW/产线接口监控良率与机台异常，超阈自动推飞书交互卡片并支持认领闭环',
+    thumb: 'dashboard',
+    style: 'rose',
+    prompt: `打造一个「产线良率超限监控 + 飞书群告警机器人」全栈应用（React + Express，参考内置技能 fullstack-app 与 feishu-ecosystem）：
+- 解决痛点：把产线/AGW 真实监控指标与飞书值班群打通，不再只是静态展示页。
+- 页面模块：
+  1）实时告警驾驶舱：各厂区/工段良率监控卡、告警阈值配置（按产线设置红/黄线）、近 24 小时触发趋势图；
+  2）飞书机器人配置与测试：支持读取服务端环境变量 FEISHU_WEBHOOK_URL / FEISHU_WEBHOOK_SECRET 状态，提供交互式飞书卡片实时预览、「发送测试告警卡片」按钮与完整推送历史（未配 Webhook 时进入演练模式记录卡片并引导配置）；
+  3）告警认领与处置闭环：值班工程师（读取 SSO 请求头 X-Zhiye-User-Name）一键认领告警、填写围堵措施并结案，结案时自动向飞书群推送绿色结案卡片；
+  4）支持手工/AGW 数据接入校验与批量导入最新巡检数据。
+- 后端 REST API：/api/health、/api/rules（阈值规则 CRUD）、/api/alerts（异常触发/认领/结案）、/api/feishu/test 与 /api/feishu/logs，数据原子持久化到 DATA_DIR。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'eco-feishu-bitable-inspect',
+    type: '全栈应用',
+    title: '飞书多维表格同步 · 点检与整改台账',
+    scene: '生态 · 多维表格',
+    desc: '兼容飞书多维表格 Bitable API 与 Excel 双向互导，点检异常自动派单并回写状态',
+    thumb: 'todo',
+    style: 'mint',
+    prompt: `做一个「飞书多维表格同步 · 产线点检与整改台账」全栈应用（React + Express，参考内置技能 feishu-ecosystem）：
+- 页面模块：
+  1）同步状态总览：展示与飞书多维表格（环境变量 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_ID）的同步状态、上次同步时间与「立即同步 / 演练同步」按钮；
+  2）点检整改台账：按厂区/机台/严重度/整改状态筛选，支持快速勾选点检项、上传现场说明并流转状态（待整改 → 整改中 → 待复核 → 已关闭）；
+  3）字段映射与 Excel/CSV 双向互导：支持直接导入飞书多维表格导出的 .xlsx/.csv 并智能映射列名，也支持一键导出标准多维表格格式回填；
+  4）逾期整改项支持一键汇总生成飞书群催办卡片。
+- 后端 REST API：/api/health、/api/inspections（CRUD + 状态流转 + 批量导入）、/api/bitable/sync（支持真实 Bitable API 与无凭证演练模式）、/api/bitable/status。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'eco-feishu-approval-hub',
+    type: '全栈应用',
+    title: '跨部门事项审批与飞书卡片催办台',
+    scene: '生态 · 飞书审批',
+    desc: '华星 SSO 识别发起人与审批人，支持多级会签、飞书审批通知卡片与超时一键催办',
+    thumb: 'booking',
+    style: 'lavender',
+    prompt: `做一个「跨部门事项审批与飞书卡片催办工作台」（React + Express，参考内置技能 feishu-ecosystem）：
+- 页面模块：
+  1）个人待办首屏：通过平台透传的 SSO 身份头（X-Zhiye-User-Name / X-Zhiye-User-Login）自动区分「我发起的」「待我审批」「抄送给我」，顶部显示待批数与平均审批时长；
+  2）多类型申请发起：支持设备变更、临时权限、异常特采、预算审批四类动态表单，提交后自动生成审批流并推送蓝色飞书待审批通知卡片；
+  3）审批详情抽屉：完整时间轴、会签意见、通过/驳回操作，超时 24 小时未批可点「飞书一键催办」推橙色催办卡；
+  4）部门审批效率看板与月度归档导出（.xlsx）。
+- 后端 REST API：/api/health、/api/me、/api/approvals（发起/审批/驳回/催办/查询）、/api/feishu/notify-logs。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'eco-meeting-feishu-ai',
+    type: '日常开发',
+    title: '会议纪要 AI 提炼 + 飞书群卡片助手',
+    scene: '生态 · 办公AI',
+    desc: '粘贴会议记录或飞书文字，AI 自动抽取决议、行动项与责任人，一键生成飞书卡片与 Word',
+    thumb: 'todo',
+    style: 'cyber',
+    prompt: `做一个「会议纪要 AI 提炼 + 飞书群卡片助手」（结合应用内 AI 与办公导出）：
+- 页面模块：
+  1）双栏工作台：左侧粘贴原始会议速记/群聊记录/语音转写稿（内置 3 份华星产线早会/项目周会示例一键试用），右侧点击「AI 智能提炼」（调用 window.zhiye.ai.chat，不可用时给出清晰规则解析兜底）；
+  2）结构化纪要编辑器：自动拆出「会议结论」「行动项（事项 / 责任人 / 截止日 / 优先级）」「风险阻塞」三块，支持行内增删改；
+  3）飞书群卡片预览与一键复制：实时预览标准飞书交互卡片样式，支持一键复制 Markdown 纪要发飞书群、复制飞书交互卡片 JSON、或导出标准行动项 Excel（.xlsx）；
+  4）历史纪要归档与未闭环行动项跟踪。
+${APP_DATA}`,
+  },
+  {
+    id: 'eco-weekly-report-bot',
+    type: '全栈应用',
+    title: '多源周报汇总与飞书定时播报中心',
+    scene: '生态 · 办公报表',
+    desc: '汇总团队成员周报与产线指标，自动生成管理层摘要、导出 Excel 并一键播报至飞书群',
+    thumb: 'counter',
+    style: 'sand',
+    prompt: `做一个「多源周报汇总与飞书播报中心」全栈应用（React + Express，参考内置技能 feishu-ecosystem）：
+- 页面模块：
+  1）本周提交进度墙：按小组/成员查看本周周报提交状态（已交/未交），支持一键生成飞书催交提醒；
+  2）周报填写与指标录入：本周重点成果、核心 KPI 达成、下周计划、需协调风险；
+  3）部门汇总驾驶舱：服务端自动按主题归类全部成员周报，输出部门红黄绿风险矩阵、关键指标对比图与高管一页纸汇总视图；
+  4）一键播报飞书群（发送富文本周报汇总卡片）与一键导出标准汇总 Excel。
+- 后端 REST API：/api/health、/api/reports（提交/修改/按周次聚合）、/api/reports/summary、/api/feishu/broadcast。
+${FULLSTACK_RULE}`,
+  },
+  {
+    id: 'eco-spare-feishu-dispatch',
+    type: '全栈应用',
+    title: '备件低库存预警 + 飞书值班群派单',
+    scene: '生态 · 设备联动',
+    desc: '库存跌破安全线自动触发飞书采购/维保群预警卡片，支持扫码式领用核销与请购跟进',
+    thumb: 'todo',
+    style: 'mint',
+    prompt: `做一个「备件低库存预警 + 飞书值班群派单系统」全栈应用（React + Express，参考内置技能 feishu-ecosystem）：
+- 页面模块：
+  1）备件安全库存监控：按关键度与库存健康度展示备件台账，低于安全库存自动标红预警；
+  2）扫码/快速领用出库：选择机台与工单号扣减库存（服务端原子校验防负库存），当出库导致库存跌破安全阈值时，后端自动推送飞书预警卡片到采购/设备群；
+  3）请购单跟进：低库存备件一键转请购单（待审批 → 已下单 → 在途 → 已入库），入库自动回补库存并推送飞书到货通知；
+  4）月度消耗排行图表与盘点表 Excel 导出。
+- 后端 REST API：/api/health、/api/spares、/api/spares/:id/checkout（原子扣减 + 阈值触发飞书告警）、/api/requisitions、/api/feishu/logs。
+${FULLSTACK_RULE}`,
+  },
+
   {
     id: 'doc-equipment-manual',
     type: '技术文档',
@@ -953,7 +1057,7 @@ ${DOC_SAMPLE}`,
 ];
 
 /** 未选定具体类型时，在输入框下方展示的 4 个跨类别代表性快捷模板 */
-export const FEATURED_TEMPLATE_IDS = ['fs-yield-8d', 'dash-cockpit', 'repair-order', 'skill-8d'] as const;
+export const FEATURED_TEMPLATE_IDS = ['eco-agw-feishu-alert', 'eco-feishu-approval-hub', 'dash-cockpit', 'skill-8d'] as const;
 
 export const templatesOf = (type: AppType) => TEMPLATES.filter((t) => t.type === type);
 

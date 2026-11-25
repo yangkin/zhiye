@@ -325,6 +325,7 @@ export function LogsPage() {
     label: string;
     value: string;
     sub: string;
+    tone: 'violet' | 'rose' | 'amber' | 'indigo' | 'teal';
     alert?: boolean;
   }[] = [
     {
@@ -336,6 +337,7 @@ export function LogsPage() {
         taskActive > 0
           ? `进行中 ${fmtNum(taskActive)} · 近 7 天失败 ${fmtNum(taskFailed)}`
           : `近 7 天成功 ${fmtNum(taskSumQ.data?.summary?.succeeded ?? 0)} · 失败 ${fmtNum(taskFailed)}`,
+      tone: 'violet',
     },
     {
       id: 'events',
@@ -343,6 +345,7 @@ export function LogsPage() {
       label: '异常与网关',
       value: evErrors > 0 ? `${fmtNum(evErrors)} 异常` : fmtNum(evTotal),
       sub: `近 7 天共 ${fmtNum(evTotal)} 条事件 · 异常 ${fmtNum(evErrors)} 条`,
+      tone: evErrors > 0 ? 'rose' : 'amber',
       alert: evErrors > 0,
     },
     {
@@ -354,6 +357,7 @@ export function LogsPage() {
         sbxFailed > 0
           ? `活跃 ${fmtNum(sbxActive)} · 启动失败 ${fmtNum(sbxFailed)}`
           : `当前活跃 ${fmtNum(sbxActive)} · 平均冷启动 ${fmtDurationMs(sbxAvgMs)}`,
+      tone: sbxFailed > 0 ? 'rose' : 'indigo',
       alert: sbxFailed > 0,
     },
     {
@@ -362,6 +366,7 @@ export function LogsPage() {
       label: '云函数与数据源',
       value: fmtNum(fnTotal + srcTotal),
       sub: `云函数 ${fmtNum(fnTotal)} · 数据源 ${fmtNum(srcTotal)}${cloudErrs > 0 ? ` · 失败 ${fmtNum(cloudErrs)}` : ''}`,
+      tone: 'teal',
     },
   ];
 
@@ -420,18 +425,23 @@ export function LogsPage() {
             role="tab"
             tabIndex={mainTab === card.id ? 0 : -1}
             aria-selected={mainTab === card.id}
+            data-tone={card.tone}
             className={`gov-pulse-card ${mainTab === card.id ? 'active' : ''} ${card.alert ? 'is-alert' : ''}`}
             onClick={() => setMainTab(card.id)}
           >
             <div className="gov-pulse-top">
-              <span className="gov-pulse-label">
+              <span className="gov-pulse-icon" aria-hidden="true">
                 <Icon name={card.icon} />
-                <span>{card.label}</span>
               </span>
-              {card.alert ? <i className="gov-dot alert" aria-hidden="true" /> : null}
+              <span className="gov-pulse-label">{card.label}</span>
+              {card.alert ? (
+                <i className="gov-dot alert" aria-hidden="true" />
+              ) : mainTab === card.id ? (
+                <i className="gov-dot active-dot" aria-hidden="true" />
+              ) : null}
             </div>
             <strong className={card.alert ? 'is-alert' : ''}>{card.value}</strong>
-            <small>{card.sub}</small>
+            <small title={card.sub}>{card.sub}</small>
           </button>
         ))}
       </div>

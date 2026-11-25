@@ -442,6 +442,61 @@ function renderMiniUi(t: SceneTemplate, p: Palette): ReactNode {
         </div>
       );
 
+    /* ============ 企业生态联动（AGW + 飞书 + 办公闭环） ============ */
+    case 'eco-agw-feishu-alert':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>AGW 良率 → 飞书机器人</code><b className="is-warn-pill">超限推送</b></div>
+          <div className="st-tk-row"><b className="is-p0">飞书卡</b><span>T11 Array 良率跌破 95.5%</span><em>已推送</em></div>
+        </div>
+      );
+
+    case 'eco-feishu-bitable-inspect':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>飞书多维表格 · Bitable</code><b className="is-live">双向同步</b></div>
+          <div className="st-pipe">
+            <span>点检台账</span><i>⇄</i><span className="is-hi">多维表格</span><i>→</i><span>飞书催办</span>
+          </div>
+        </div>
+      );
+
+    case 'eco-feishu-approval-hub':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>华星 SSO · 飞书审批卡</code><b className="is-live">待批 4</b></div>
+          <div className="st-flow-steps">
+            <span className="is-done">发起</span><i /><span className="is-cur">会签</span><i /><span>飞书通知</span>
+          </div>
+        </div>
+      );
+
+    case 'eco-meeting-feishu-ai':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>AI 纪要提炼 · 飞书卡片</code><b className="is-live">一键导出</b></div>
+          <div className="st-pipe">
+            <span>会议速记</span><i>→</i><span className="is-hi">AI 行动项</span><i>→</i><span>飞书群卡</span>
+          </div>
+        </div>
+      );
+
+    case 'eco-weekly-report-bot':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>/api/reports · 飞书播报</code><b className="is-live">18/20 已交</b></div>
+          <div className="st-check-row"><i className="is-ok">✓</i><span>部门周报自动聚合 · 推送高管群</span><b>就绪</b></div>
+        </div>
+      );
+
+    case 'eco-spare-feishu-dispatch':
+      return (
+        <div className="st-fs-rich">
+          <div className="st-fs-top"><code>库存扣减 → 飞书值班群</code><b className="is-warn-pill">低库预警</b></div>
+          <div className="st-tk-row"><b className="is-p0">请购</b><span>真空阀芯余量 2（安全线 5）</span><em>已派单</em></div>
+        </div>
+      );
+
     /* ============ 开发 skill（深色终端卡，按技能展示专属命令/文件） ============ */
     case 'skill-8d':
     case 'skill-sql':

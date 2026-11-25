@@ -409,6 +409,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed')
         .slice(-24)
         .map((m) => ({ role: m.role, content: m.content.slice(0, m.content.includes('[[file:') ? 40000 : 2000) }));
+      let handoffReq: { summary?: string; instruction: string } | null = null;
       try {
         await api.ask(
           {
@@ -421,6 +422,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           (t) => setAsking((r) => (r ? { ...r, a: r.a + t } : r)),
           undefined,
           (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
+          (h) => { handoffReq = h; },
         );
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
@@ -431,6 +433,19 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       } finally {
         setAsking(null);
         setSending(false);
+      }
+      if (handoffReq && !otherBusy) {
+        const picked = handoffReq as { summary?: string; instruction: string };
+        toast(picked.summary || '已定位根因，自动转入代码修改。');
+        try {
+          if (!beforeSend || (await beforeSend())) {
+            const res = await api.sendMessage(app.id, { content: picked.instruction });
+            qc.setQueryData<Message[]>(qk.messages(app.id), (old) => [...(old ?? []), res.message]);
+            onTaskStarted(res.task);
+          }
+        } catch (err) {
+          setError(errorMessage(err));
+        }
       }
       return;
     }

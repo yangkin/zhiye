@@ -206,10 +206,15 @@ export function reduceEvent(s: TaskStreamState, e: TaskEvent): TaskStreamState {
  * 订阅任务 SSE。进度来自服务端事件和真实任务快照；SSE 被代理缓冲或断连时每 3 秒回查一次，避免卡片永久停在旧状态。
  * onFinished 在流里收到 finished（或快照即为终态）后调用一次，参数为最新的 Task。
  */
-export function useTaskStream(taskId: string | null | undefined, onFinished?: (task: Task) => void): TaskStreamState {
+export function useTaskStream(
+  taskId: string | null | undefined,
+  onFinished?: (task: Task) => void,
+  opts?: { historical?: boolean },
+): TaskStreamState {
   const [state, setState] = useState<TaskStreamState>(() => empty(taskId ?? null));
   const cb = useRef(onFinished);
   cb.current = onFinished;
+  const historical = !!opts?.historical;
 
   useEffect(() => {
     setState(empty(taskId ?? null));
@@ -250,6 +255,13 @@ export function useTaskStream(taskId: string | null | undefined, onFinished?: (t
         );
       })
       .catch(() => undefined);
+
+    // 历史已结束任务（进入已有应用时仅用于展示重试/继续卡片）：不建立 SSE 也不重复弹完成/失败提示
+    if (historical) {
+      return () => {
+        closed = true;
+      };
+    }
 
     const open = () => {
       es = new EventSource(api.taskEventsUrl(taskId), { withCredentials: true });
@@ -298,7 +310,7 @@ export function useTaskStream(taskId: string | null | undefined, onFinished?: (t
       window.clearInterval(reconcile);
       es?.close();
     };
-  }, [taskId]);
+  }, [taskId, historical]);
 
   return state;
 }

@@ -1,14 +1,42 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ApiError, api, errorMessage, type AccessLevel } from '../api/client';
 import { useInvalidateApp } from '../api/queries';
 import { waitForTask } from '../api/sse';
 import { isServiceApp, isSkillApp, type AppDetail, type Task } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText } from '../lib/format';
+import { encodeQrMatrix } from '../lib/qr';
 import { toast } from '../lib/store';
 import { Modal } from '../components/Modal';
 import { useQuery } from '@tanstack/react-query';
 import { ACCESS_OPTIONS, AccessForm, type AccessFormState } from './CloudConsole';
+
+function QrPreview({ value, size = 104 }: { value: string; size?: number }) {
+  const matrix = useMemo(() => encodeQrMatrix(value), [value]);
+  if (!matrix) return null;
+  const n = matrix.length;
+  const quiet = 2;
+  const total = n + quiet * 2;
+  const cells: string[] = [];
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      if (matrix[r][c]) cells.push(`M${c + quiet},${r + quiet}h1v1h-1z`);
+    }
+  }
+  return (
+    <svg
+      className="publish-qr-svg"
+      width={size}
+      height={size}
+      viewBox={`0 0 ${total} ${total}`}
+      role="img"
+      aria-label="站点访问二维码"
+    >
+      <rect width={total} height={total} fill="#ffffff" rx="1.5" />
+      <path d={cells.join('')} fill="#1f1a2d" />
+    </svg>
+  );
+}
 
 interface Props {
   app: AppDetail;
@@ -146,16 +174,35 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
             <b>{formatEffectiveAccess(effectiveAccess.level, effectiveAccess.membersCount)}</b>
           </span>
         </div>
-        <label className="field-label">访问地址</label>
+        <label className="field-label">访问地址与快捷分享</label>
         <div className="copy-field">
           <span>{siteUrl}</span>
           <button
             className="icon-button"
             aria-label="复制站点地址"
+            title="复制地址"
             onClick={async () => toast((await copyText(siteUrl)) ? '站点地址已复制。' : '请手动复制地址。')}
           >
             <Icon name="copy" />
           </button>
+        </div>
+        <div className="publish-share-card">
+          <QrPreview value={siteUrl} size={92} />
+          <div className="publish-share-info">
+            <b>直接发到飞书群或让同事扫码打开</b>
+            <p>已附带应用名称、访问范围说明和直达链接，粘贴即用。</p>
+            <button
+              type="button"
+              className="subtle-button"
+              onClick={async () => {
+                const accessLabel = formatEffectiveAccess(effectiveAccess.level, effectiveAccess.membersCount);
+                const msg = `【${app.name}】已上线（${accessLabel}）\n访问地址：${siteUrl}`;
+                toast((await copyText(msg)) ? '飞书分享话术已复制，直接粘贴即可发送。' : '请手动复制分享内容。');
+              }}
+            >
+              <Icon name="copy" /> 复制飞书分享话术
+            </button>
+          </div>
         </div>
         <p className="muted-note">之后恢复旧版本或继续修改，都不会影响线上内容，直到你再次发布。</p>
       </Modal>
@@ -206,6 +253,36 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
         <label className="field-label">谁能打开</label>
         <AccessForm appId={app.id} compact onBlocked={onBlocked} onStateChange={onAccessStateChange} />
       </div>
+      {app.siteUrl ? (
+        <div className="publish-share-card">
+          <QrPreview value={app.siteUrl} size={76} />
+          <div className="publish-share-info">
+            <b>快捷分享当前线上站点</b>
+            <p>同事扫码或粘贴飞书话术即可直达，无需重新发布。</p>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="subtle-button"
+                onClick={async () => {
+                  const acc = accessStateRef.current;
+                  const accessLabel = acc ? formatEffectiveAccess(acc.level, acc.membersCount) : '线上可访问';
+                  const msg = `【${app.name}】已上线（${accessLabel}）\n访问地址：${app.siteUrl}`;
+                  toast((await copyText(msg)) ? '飞书分享话术已复制，直接粘贴即可发送。' : '请手动复制分享内容。');
+                }}
+              >
+                <Icon name="copy" /> 复制飞书分享话术
+              </button>
+              <button
+                type="button"
+                className="subtle-button"
+                onClick={async () => toast((await copyText(app.siteUrl!)) ? '站点地址已复制。' : '请手动复制地址。')}
+              >
+                复制地址
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {/* 只留一条最要紧的提示 */}
       {blocked.tables.length ? (
         <p className="cc-warn" role="alert">

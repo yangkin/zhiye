@@ -239,7 +239,10 @@ export function AddMenuButton({
             data-sub="data"
             className={`add-menu-item ${sub === 'data' ? 'active' : ''}`}
             onMouseEnter={() => setSub('data')}
-            onClick={() => setSub(sub === 'data' ? false : 'data')}
+            onClick={() => {
+              setSub('data');
+              requestAnimationFrame(() => menu.current?.querySelector<HTMLElement>('.add-submenu [role="menuitem"]')?.focus());
+            }}
           >
             <Icon name="database" />
             <span>
