@@ -122,6 +122,58 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
     }
 
     @Override
+    public DeployResult deployPrebuilt(DeploySpec spec, String existingImageRef, Path artifactDir) throws Exception {
+        if (existingImageRef == null || existingImageRef.isBlank()) {
+            return deploy(spec);
+        }
+        String ns = props.namespace();
+        String name = K8sServiceResourceFactory.resourceName(spec.slug());
+        StringBuilder buildLog = new StringBuilder();
+        buildLog.append("[k8s] 复用已构建通过的镜像（0 重建晋升/回滚）: ").append(existingImageRef).append("\n");
+
+        var secret = K8sServiceResourceFactory.buildEnvSecret(props, spec);
+        if (client.secrets().inNamespace(ns).withName(secret.getMetadata().getName()).get() == null) {
+            client.secrets().inNamespace(ns).resource(secret).create();
+        } else {
+            client.secrets().inNamespace(ns).resource(secret).update();
+        }
+        if (spec.pvcEnabled()) {
+            var existingPvc = client.persistentVolumeClaims().inNamespace(ns).withName(name + "-data").get();
+            if (existingPvc == null) {
+                client.persistentVolumeClaims().inNamespace(ns).resource(K8sServiceResourceFactory.buildPvc(props, spec)).create();
+            }
+        }
+        var svc = K8sServiceResourceFactory.buildService(props, spec);
+        var existingSvc = client.services().inNamespace(ns).withName(name).get();
+        if (existingSvc == null) {
+            client.services().inNamespace(ns).resource(svc).create();
+        } else {
+            if (existingSvc.getSpec() != null && existingSvc.getSpec().getClusterIP() != null) {
+                svc.getSpec().setClusterIP(existingSvc.getSpec().getClusterIP());
+            }
+            client.services().inNamespace(ns).resource(svc).update();
+        }
+        if (props.networkPolicyEnabled()) {
+            var netpol = K8sServiceResourceFactory.buildNetworkPolicy(props, spec);
+            if (client.network().v1().networkPolicies().inNamespace(ns).withName(netpol.getMetadata().getName()).get() == null) {
+                client.network().v1().networkPolicies().inNamespace(ns).resource(netpol).create();
+            } else {
+                client.network().v1().networkPolicies().inNamespace(ns).resource(netpol).update();
+            }
+        }
+        var deployment = K8sServiceResourceFactory.buildDeployment(props, spec, existingImageRef, 1);
+        if (client.apps().deployments().inNamespace(ns).withName(name).get() == null) {
+            client.apps().deployments().inNamespace(ns).resource(deployment).create();
+        } else {
+            client.apps().deployments().inNamespace(ns).resource(deployment).update();
+        }
+        waitDeploymentReady(ns, name, Duration.ofSeconds(props.wakeTimeoutSeconds()));
+        String endpoint = "http://" + name + "." + ns + ".svc.cluster.local";
+        buildLog.append("[k8s] 滚动切换就绪，内部服务地址: ").append(endpoint).append("\n");
+        return new DeployResult(endpoint, existingImageRef, buildLog.toString());
+    }
+
+    @Override
     public String wake(DeploySpec spec, String imageRef) throws Exception {
         String ns = props.namespace();
         String name = K8sServiceResourceFactory.resourceName(spec.slug());

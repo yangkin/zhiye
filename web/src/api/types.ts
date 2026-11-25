@@ -443,11 +443,98 @@ export interface MonolithEnvVar {
 export interface MonolithRelease {
   id: string;
   versionId: string | null;
+  slot?: 'live' | 'preview' | string;
   status: 'building' | 'succeeded' | 'failed';
   imageRef: string | null;
+  durationMs?: number | null;
+  promotedFromReleaseId?: string | null;
+  errorCategory?: string | null;
+  rollbackable?: boolean;
+  zeroRebuildReady?: boolean;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+}
+
+export interface DeployDiagnosis {
+  category: string;
+  severity: string;
+  title: string;
+  summary: string;
+  rootCause: string;
+  suggestedFixes: string[];
+  missingModules?: string[];
+  envHints?: string[];
+  autoHealable: boolean;
+  excerpt?: string;
+}
+
+export interface ServiceMetrics {
+  provider: string;
+  running: boolean;
+  pid: number | null;
+  port: number | null;
+  rssMb: number | null;
+  cpuPercent: number | null;
+  uptimeSeconds: number | null;
+  memoryLimitMb: number;
+  cpuLimitMillicores: number;
+  releases: {
+    totalReleases: number;
+    succeededReleases: number;
+    successRate: number;
+    avgBuildMs: number;
+    maxBuildMs: number;
+  };
+}
+
+export interface ServiceDbTables {
+  pgEnabled: boolean;
+  schema: string | null;
+  role: string | null;
+  tables: {
+    name: string;
+    estimatedRows: number;
+    columns: { name: string; type: string; nullable: boolean; defaultValue: string | null }[];
+  }[];
+}
+
+export interface ServiceDbQueryResult {
+  schema: string;
+  durationMs: number;
+  readOnly: boolean;
+  kind: 'query' | 'update';
+  columns: string[];
+  rows: Record<string, unknown>[];
+  rowCount?: number;
+  affectedRows?: number;
+}
+
+export interface ServiceTopology {
+  appId: string;
+  customized: boolean;
+  yaml: string;
+  services: Record<string, unknown>[];
+  updatedAt: string | null;
+}
+
+export interface ServiceGitCicd {
+  configured: boolean;
+  provider: 'gitlab' | 'github' | 'mock' | string;
+  repoUrl: string;
+  branch: string;
+  hasWebhookSecret: boolean;
+  hasAccessToken: boolean;
+  autoDeploy: boolean;
+  deploySlot: 'preview' | 'live' | string;
+  lastCommitSha?: string | null;
+  lastCommitMsg?: string | null;
+  lastSyncAt?: string | null;
+  lastStatus?: string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+  webhookPath: string;
+  generatedWebhookSecret?: string;
 }
 
 export interface MonolithServiceStatus {
@@ -474,6 +561,10 @@ export interface MonolithServiceStatus {
   status: 'building' | 'running' | 'sleeping' | 'stopped' | 'failed';
   desiredVersionId?: string | null;
   runningVersionId?: string | null;
+  previewVersionId?: string | null;
+  previewStatus?: string | null;
+  canPromotePreview?: boolean;
+  diagnosis?: DeployDiagnosis | null;
   imageRef?: string | null;
   lastAccessAt?: string | null;
   lastStartedAt?: string | null;

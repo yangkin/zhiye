@@ -601,6 +601,50 @@ export const api = {
     request<import('./types').MonolithLogs>(`/api/apps/${enc(appId)}/service/logs?tail=${tail}`),
   serviceDockerfile: (appId: string) =>
     request<import('./types').MonolithDockerfile>(`/api/apps/${enc(appId)}/service/dockerfile`),
+  servicePromotePreview: (appId: string) =>
+    request<import('./types').MonolithServiceStatus>(`/api/apps/${enc(appId)}/service/promote`, { method: 'POST' }),
+  serviceRollbackRelease: (appId: string, releaseId: string) =>
+    request<import('./types').MonolithServiceStatus>(
+      `/api/apps/${enc(appId)}/service/releases/${enc(releaseId)}/rollback`,
+      { method: 'POST' },
+    ),
+  serviceDiagnosis: (appId: string) =>
+    request<import('./types').DeployDiagnosis>(`/api/apps/${enc(appId)}/service/diagnosis`),
+  serviceAutoHeal: (appId: string) =>
+    request<{ taskId: string; status: string; diagnosis: import('./types').DeployDiagnosis }>(
+      `/api/apps/${enc(appId)}/service/auto-heal`,
+      { method: 'POST' },
+    ),
+  serviceMetrics: (appId: string) =>
+    request<import('./types').ServiceMetrics>(`/api/apps/${enc(appId)}/service/metrics`),
+  serviceDbTables: (appId: string) =>
+    request<import('./types').ServiceDbTables>(`/api/apps/${enc(appId)}/service/db/tables`),
+  serviceDbQuery: (appId: string, sql: string, allowWrite = false, limit = 100) =>
+    request<import('./types').ServiceDbQueryResult>(`/api/apps/${enc(appId)}/service/db/query`, {
+      method: 'POST',
+      body: { sql, allowWrite, limit },
+    }),
+  serviceTopology: (appId: string) =>
+    request<import('./types').ServiceTopology>(`/api/apps/${enc(appId)}/service/topology`),
+  serviceSaveTopology: (appId: string, yaml: string) =>
+    request<import('./types').ServiceTopology>(`/api/apps/${enc(appId)}/service/topology`, {
+      method: 'PUT',
+      body: { yaml },
+    }),
+  serviceGitCicd: (appId: string) =>
+    request<import('./types').ServiceGitCicd>(`/api/apps/${enc(appId)}/service/git-cicd`),
+  serviceSaveGitCicd: (appId: string, input: Record<string, unknown>) =>
+    request<import('./types').ServiceGitCicd>(`/api/apps/${enc(appId)}/service/git-cicd`, {
+      method: 'PUT',
+      body: input,
+    }),
+  serviceTriggerGitCicd: (appId: string, commitMessage?: string, branch?: string) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/service/git-cicd/trigger`, {
+      method: 'POST',
+      body: { commitMessage, branch },
+    }),
+  serviceExportBundleUrl: (appId: string) => `/api/apps/${enc(appId)}/service/export-bundle`,
+  serviceDeployLogStreamUrl: (appId: string) => `/api/apps/${enc(appId)}/service/deploy-logs/stream`,
 
   // 导入
   uploadImport: (file: Blob, fileName: string, folderName?: string, signal?: AbortSignal) => {

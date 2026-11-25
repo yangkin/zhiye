@@ -49,7 +49,7 @@ public class SsoAuthFilter extends OncePerRequestFilter {
             return;
         }
         String uri = req.getRequestURI();
-        if (uri.equals("/api/meta") || uri.startsWith("/api/auth/")) {
+        if (uri.equals("/api/meta") || uri.startsWith("/api/auth/") || uri.startsWith("/api/webhooks/")) {
             req.setAttribute(RequestPrincipal.ATTR_WS, "");   // 不创建匿名工作空间
             chain.doFilter(req, res);
             return;
