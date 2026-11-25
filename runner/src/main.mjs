@@ -12,6 +12,8 @@ const { Agent } = await import('./agent.mjs')
 const { verify } = await import('./verify.mjs')
 const { applyVisualPatches } = await import('./visual.mjs')
 const { importArchive, installDeps } = await import('./importer.mjs')
+const { runQaReview } = await import('./qa.mjs')
+const { generateArchitectureSummary } = await import('./code-intel.mjs')
 
 const token = process.env.ZHIYE_RUNNER_TOKEN
 if (!token) {
@@ -31,6 +33,8 @@ const HANDLERS = {
     try { return await currentPrompt } finally { currentPrompt = null }
   },
   verify: (c) => verify(cwd, c),
+  qa_review: (c) => runQaReview(c, { cwd }),
+  arch_summary: (c) => ({ markdown: generateArchitectureSummary(cwd, c?.projectKind || 'template') }),
   visual: (c) => {
     if (c.projectKind === 'skill') throw new RunnerError('BAD_REQUEST', '技能项目不支持可视化编辑')
     if (c.projectKind && c.projectKind !== 'template' && c.projectKind !== 'static') throw new RunnerError('BAD_REQUEST', '这个项目类型不支持可视化编辑')

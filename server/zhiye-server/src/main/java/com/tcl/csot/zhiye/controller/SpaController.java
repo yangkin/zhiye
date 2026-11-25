@@ -32,7 +32,7 @@ public class SpaController {
     @GetMapping({"/", "/**"})
     public ResponseEntity<?> serve(HttpServletRequest req) throws Exception {
         String uri = req.getRequestURI();
-        if (uri.startsWith("/api/") || uri.equals("/api") || uri.startsWith("/llm/"))
+        if (uri.startsWith("/api/") || uri.equals("/api") || uri.startsWith("/llm/") || uri.startsWith("/internal/"))
             throw com.tcl.csot.zhiye.exception.ApiException.ofKey(HttpStatus.NOT_FOUND, "NOT_FOUND", "zhiye.error.api-not-found", "接口不存在");
         Path root = props.webDistPath();
         String rel = java.net.URLDecoder.decode(uri, StandardCharsets.UTF_8).replaceFirst("^/+", "");

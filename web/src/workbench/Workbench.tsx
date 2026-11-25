@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
-import { qk, useActiveTask, useApp, useInvalidateApp, useVersions } from '../api/queries';
+import { qk, useApp, useInvalidateApp, useVersions } from '../api/queries';
 import { useTaskStream, waitForTask } from '../api/sse';
 import { isScriptApp, isServiceApp, isSkillApp, isTerminal, type Message, type Task, type Version } from '../api/types';
 import { Icon, kindIcon } from '../lib/icons';
@@ -111,7 +111,6 @@ function Workbench({ id }: { id: string }) {
   const [visualTaskId, setVisualTaskId] = useState<string | null>(null);
   const visualTaskRef = useRef<{ id: string; resolve: (t: Task) => void } | null>(null);
   const [savedCard, setSavedCard] = useState(false);
-  const activeQ = useActiveTask(5000);
   const frameRef = useRef<HTMLIFrameElement>(null);
 
   // 深色工作台 + 切换应用时清掉上一个应用的元素上下文
@@ -158,8 +157,8 @@ function Workbench({ id }: { id: string }) {
   const cloudOn = cloudQ.data?.enabled ?? false;
   const baseFrameSrc = previewVersion ? previewVersion.previewUrl : (app?.previewUrl ?? null);
   const frameSrc = baseFrameSrc && cloudOn && previewAs !== 'admin' ? `${baseFrameSrc}?__as=${previewAs}` : baseFrameSrc;
-  const otherActiveEarly = activeQ.data && app && activeQ.data.appId !== app.id ? activeQ.data : null;
-  const lockedEarly = (!!app?.activeTask && !isTerminal(app.activeTask.status)) || !!otherActiveEarly;
+  // Harness V2：支持同一工作空间跨应用并行任务（默认上限 3，由服务端 QuotaService 兜底），单应用仍串行防冲突
+  const lockedEarly = !!app?.activeTask && !isTerminal(app.activeTask.status);
   const vp = usePreviewViewport('auto');
   const openTab = (value: Tab) => {
     setTab(value);
@@ -368,10 +367,9 @@ function Workbench({ id }: { id: string }) {
     );
 
   const ready = app.phase === 'ready' && !!app.currentVersion;
-  // 每人同时只能有 1 个进行中的修改：本应用的 activeTask，或其他应用里的任务
-  const otherActive = activeQ.data && activeQ.data.appId !== app.id ? activeQ.data : null;
+  // Harness V2：支持跨应用并行（工作空间并发上限由服务端控制），仅锁定本应用的进行中任务
   const busyHere = !!app.activeTask && !isTerminal(app.activeTask.status);
-  const blocked: BusyInfo = { busy: busyHere || !!otherActive, otherApp: otherActive ? { id: otherActive.appId, name: otherActive.appName } : null };
+  const blocked: BusyInfo = { busy: busyHere, otherApp: null };
   const goApp = (appId: string) => navigate('/apps/' + appId);
   const draftCount = editor.patches.length;
 

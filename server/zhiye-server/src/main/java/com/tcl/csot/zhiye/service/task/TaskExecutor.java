@@ -87,6 +87,12 @@ public class TaskExecutor {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.mcp.McpRegistryService mcpRegistry;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private CheckpointService checkpoints;
+
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
                         VersionService versionService, GitService git, SandboxProvider sandbox, TaskTokenService tokens,
@@ -539,6 +545,20 @@ public class TaskExecutor {
                 log.warn("写入全栈运行态快照失败 app={}：{}", app.id(), e.getMessage());
             }
         }
+        // Harness V2：写入企业 MCP 清单（脱敏）+ 绑定数据源探测快照，供智能体 mcp_list/mcp_call 与 inspect_source 使用
+        if (mcpRegistry != null) {
+            mcpRegistry.writeCatalogForAgent(ctx.agentDir);
+        }
+        if (!app.isSkill()) {
+            writeSourcesInspectSnapshot(ctx.agentDir, app.id());
+        }
+        // 任务开始前自动打一份前置检查点（便于时间旅行一键回退到改动前状态）
+        if (checkpoints != null && !resumed && app.currentVersionId() != null) {
+            versions.find(app.currentVersionId()).ifPresent(prev -> checkpoints.record(
+                    app.id(), app.workspaceId(), t.id(), prev.id(), "pre_task",
+                    "任务前自动快照（V" + prev.number() + "）", prev.gitCommit(), prev.gitTree(),
+                    checkpoints.readSchemaSqlFromCommit(app.id(), prev.gitCommit()), null));
+        }
         startRunner(ctx, false);
         boolean modify = "modify".equals(t.type());
         JsonNode elementContext = input.get("elementContext");
@@ -631,8 +651,57 @@ public class TaskExecutor {
             if (fixSummary != null && !fixSummary.isBlank()) fixes.add(fixSummary.trim());
         }
 
+        // Harness V2：刷新项目架构摘要 .zhiye/architecture.md，并执行独立对抗式 QA 验收环
+        try {
+            call(ctx, "arch_summary", Json.obj().put("projectKind", app.projectKind()));
+        } catch (Exception ignored) {}
+
+        JsonNode qaVerdict = null;
+        if (props.task().qaGateEnabled() && !app.isSkill() && !app.isScript()) {
+            int maxQa = Math.max(1, props.task().qaMaxRounds());
+            String reqText = modify ? input.path("content").asText("") : app.prompt();
+            for (int qaRound = 1; qaRound <= maxQa; qaRound++) {
+                phase(ctx, "VERIFYING", "独立 QA 子智能体正在实测验收（第 " + qaRound + " 轮）", 82);
+                try {
+                    ObjectNode qaCmd = Json.obj();
+                    qaCmd.put("agentDir", ctx.agentDir.toString());
+                    qaCmd.put("projectKind", app.projectKind());
+                    qaCmd.put("round", qaRound);
+                    qaCmd.put("maxTurns", props.task().qaMaxTurns());
+                    qaCmd.put("requirement", reqText == null ? "" : reqText);
+                    qaCmd.put("planDoc", app.planDoc() == null ? "" : app.planDoc());
+                    qaCmd.putObject("model").put("provider", props.runner().modelProvider()).put("id", props.runner().modelId());
+                    qaVerdict = call(ctx, "qa_review", qaCmd);
+                } catch (Exception e) {
+                    log.warn("独立 QA 验收调用跳过 app={} round={}: {}", app.id(), qaRound, e.getMessage());
+                    break;
+                }
+                boolean qaOk = qaVerdict != null && qaVerdict.path("passed").asBoolean(true);
+                int qaScore = qaVerdict == null ? 0 : qaVerdict.path("score").asInt(0);
+                int defectCnt = qaVerdict != null && qaVerdict.path("defects").isArray() ? qaVerdict.path("defects").size() : 0;
+                events.emit(ctx.id(), "stage", Map.of("label", qaOk
+                        ? "独立 QA 实测验收通过（" + qaScore + " 分）"
+                        : "独立 QA 发现 " + defectCnt + " 处阻断问题（" + qaScore + " 分），自动打回修复"));
+                if (qaOk || qaRound >= maxQa) break;
+
+                phase(ctx, "RUNNING", "正在根据独立 QA 实测缺陷自动修复（第 " + qaRound + " 轮）", 76);
+                String qaFix = prompt(ctx, formatQaFixPrompt(qaVerdict, qaRound));
+                if (qaFix != null && !qaFix.isBlank()) fixes.add(qaFix.trim());
+
+                // 修复后重新走一次构建与冒烟门禁
+                phase(ctx, "VERIFYING", "QA 修复后重新校验构建与冒烟", 80);
+                JsonNode recheck = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app, fixRounds + qaRound)));
+                if (recheck.path("ok").asBoolean(false)) passed = recheck;
+            }
+        }
+
         String title = modify ? modifyTitle(input.path("content").asText()) : "页面与交互生成完成";
         VersionRow ver = commit(ctx, app, title, modify ? "modify" : "generate", false);
+        if (checkpoints != null) {
+            checkpoints.record(app.id(), app.workspaceId(), t.id(), ver.id(), "post_task",
+                    "V" + ver.number() + " · " + title, ver.gitCommit(), ver.gitTree(),
+                    checkpoints.readSchemaSqlFromCommit(app.id(), ver.gitCommit()), qaVerdict);
+        }
         if (app.isService() && monolithService != null) {
             phase(ctx, "COMMITTING", "正在构建并更新预览服务", 92);
             try {
@@ -648,6 +717,11 @@ public class TaskExecutor {
         if (app.isSkill()) finalSummary = finalSummary.replace("预览已就绪", "").trim() + "\n\n技能包已" + (modify ? "更新" : "生成") + "，可在「代码」中查看。";
         // 校验通过后由系统补「检查结果」（失败路径不走这里）；模型给的 [[next]] 下一步始终放在最后一行
         finalSummary = composeSummary(finalSummary, fixes, checkSummary(passed == null ? null : passed.path("checks")));
+        if (qaVerdict != null && !qaVerdict.path("rawFallback").asBoolean(false)) {
+            String qaLine = (qaVerdict.path("passed").asBoolean(true) ? "**独立 QA 实测验收**：已通过（" : "**独立 QA 实测验收**：")
+                    + qaVerdict.path("score").asInt(0) + " 分）· " + qaVerdict.path("summary").asText("");
+            finalSummary = withNoteBeforeNext(finalSummary, qaLine);
+        }
         if (cloudNote != null) finalSummary = withNoteBeforeNext(finalSummary, cloudNote);
         if (modify) messages.setStatusByTask(t.id(), "ok");
         messages.insert(app.id(), "assistant", finalSummary, null, t.id(), "ok");
@@ -658,6 +732,60 @@ public class TaskExecutor {
     static String modifyTitle(String content) {
         String c = content.trim().replaceAll("\\s+", " ");
         return c.length() > 24 ? c.substring(0, 24) + "…" : c;
+    }
+
+    /** 将绑定数据源的元信息与可选安全探活样例写入 {agentDir}/sources-inspect.json，供 inspect_source 读取。 */
+    private void writeSourcesInspectSnapshot(Path agentDir, String appId) {
+        try {
+            var list = dataSources.boundSources(appId);
+            if (list.isEmpty()) return;
+            ObjectNode root = Json.obj();
+            ArrayNode arr = root.putArray("sources");
+            for (var s : list) {
+                ObjectNode item = arr.addObject();
+                item.put("key", s.key());
+                item.put("name", s.name());
+                item.put("method", s.method());
+                item.put("description", s.description() == null ? "" : s.description());
+                item.put("sample", s.sample() == null ? "" : s.sample());
+                item.set("params", Json.M.valueToTree(s.params()));
+                // 对于无必填参数的 GET 只读数据源，启动前尝试一次安全探活获取真实 JSON 字段样例
+                boolean safeGet = "GET".equalsIgnoreCase(s.method())
+                        && s.params().stream().noneMatch(com.tcl.csot.zhiye.service.source.DataSourceService.Param::required);
+                if (safeGet) {
+                    try {
+                        Map<String, Object> probe = dataSources.query(appId, s.key(), null, "agent_probe");
+                        ObjectNode lp = item.putObject("liveProbe");
+                        lp.put("status", probe.get("status") instanceof Number n ? n.intValue() : 200);
+                        String json = Json.write(probe.get("data"));
+                        lp.put("sample", json.length() > 2500 ? json.substring(0, 2500) : json);
+                    } catch (Exception ignored) {}
+                }
+            }
+            Files.createDirectories(agentDir);
+            Files.writeString(agentDir.resolve("sources-inspect.json"), Json.write(root), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("写入数据源探测快照失败 app={}：{}", appId, e.getMessage());
+        }
+    }
+
+    private static String formatQaFixPrompt(JsonNode qaVerdict, int round) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("独立 QA 子智能体在第 ").append(round).append(" 轮实测验收中发现以下阻断问题，请逐项彻底修复，并用 `browser_test`（全栈同步用 `test_endpoint`）复测通过：\n\n");
+        sb.append("QA 结论：").append(qaVerdict.path("summary").asText("")).append("\n\n");
+        JsonNode defects = qaVerdict.path("defects");
+        if (defects.isArray()) {
+            int i = 1;
+            for (JsonNode d : defects) {
+                sb.append(i++).append(". [").append(d.path("severity").asText("high").toUpperCase()).append("] ")
+                        .append(d.path("area").asText("页面/功能")).append("\n")
+                        .append("   - 复现步骤：").append(d.path("repro").asText("")).append("\n")
+                        .append("   - 期望表现：").append(d.path("expected").asText("")).append("\n")
+                        .append("   - 实际问题：").append(d.path("actual").asText("")).append("\n");
+            }
+        }
+        sb.append("\n修复完成后务必调用 `verify_app` 确认全量构建与冒烟通过。");
+        return sb.toString();
     }
 
     // ================= visual_save =================
