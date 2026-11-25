@@ -93,6 +93,9 @@ public class TaskExecutor {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private CheckpointService checkpoints;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.runtime.LiveWorkspaceService liveWorkspace;
+
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
                         VersionService versionService, GitService git, SandboxProvider sandbox, TaskTokenService tokens,
@@ -702,6 +705,10 @@ public class TaskExecutor {
                     "V" + ver.number() + " · " + title, ver.gitCommit(), ver.gitTree(),
                     checkpoints.readSchemaSqlFromCommit(app.id(), ver.gitCommit()), qaVerdict);
         }
+        // Phase 2：同步新版本与验证产物到持久化活体开发环境（支撑 Snapshot-to-Deploy 与热更新）
+        if (liveWorkspace != null) {
+            liveWorkspace.syncAfterTask(app, ctx.workspace, ver.gitCommit());
+        }
         if (app.isService() && monolithService != null) {
             phase(ctx, "COMMITTING", "正在构建并更新预览服务", 92);
             try {
@@ -1078,7 +1085,9 @@ public class TaskExecutor {
         git.checkout(app.id(), commit, ctx.workspace, app.projectKind());
         signals.setWorkspace(ctx.id(), ctx.workspace);
         Files.createDirectories(ctx.agentDir);
-        if (app.isTemplateLike()) {
+        // Phase 2：优先复用持久化活体工作区里已安装的热依赖层（包含通过 install_package 扩展的包）
+        boolean warmLinked = liveWorkspace != null && liveWorkspace.attachWarmDepsToTask(app.id(), ctx.workspace);
+        if (!warmLinked && app.isTemplateLike()) {
             // React 模板和 Vue 模板各有一份预装依赖缓存，工作区的 node_modules 链接过去
             boolean vue = app.isVue();
             Path nm = props.runtimePath().resolve(vue ? "vue-template-cache/node_modules" : "template-cache/node_modules");

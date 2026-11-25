@@ -47,6 +47,8 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
     private final ZhiyeProperties zhiyeProps;
     private final ServiceRuntimeProperties props;
     private final ConcurrentHashMap<String, RunningProc> procs = new ConcurrentHashMap<>();
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private LiveWorkspaceService liveWorkspace;
 
     public LocalServiceRuntimeProvider(ZhiyeProperties zhiyeProps, ServiceRuntimeProperties props) {
         this.zhiyeProps = zhiyeProps;
@@ -117,12 +119,35 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
             }
         }
 
-        // 2. 后端编译 / 依赖安装（构建失败直接抛出，保持线上旧版进程存活）
+        // 2. 后端编译 / 依赖安装（优先命中活体开发环境 Snapshot-to-Deploy 热缓存，构建失败保持线上旧版存活）
         Path bdirStage = (spec.backendDir() == null || spec.backendDir().isBlank()) ? stageWork : stageWork.resolve(spec.backendDir());
         if (!Files.isDirectory(bdirStage)) throw new IllegalStateException("找不到后端目录：" + spec.backendDir());
 
+        boolean reusedWarmNodeDeps = false;
+        if (liveWorkspace != null && "node".equalsIgnoreCase(spec.runtime())) {
+            String depsHash = LiveWorkspaceService.computeDepsHash(bdirStage);
+            var snap = liveWorkspace.findWarmSnapshot(spec.appId(), depsHash);
+            if (snap.isPresent() && snap.get().nodeModulesDir() != null && !Files.exists(bdirStage.resolve("node_modules"), LinkOption.NOFOLLOW_LINKS)) {
+                try {
+                    Files.createSymbolicLink(bdirStage.resolve("node_modules"), snap.get().nodeModulesDir().toAbsolutePath());
+                    reusedWarmNodeDeps = true;
+                    buildLog.append("[zhiye] 命中活体工作区 Snapshot-to-Deploy 依赖缓存（depsHash=")
+                            .append(depsHash.length() > 8 ? depsHash.substring(0, 8) : depsHash)
+                            .append("，免重装 node_modules）\n");
+                } catch (Exception ignored) {}
+            }
+            if (snap.isPresent() && snap.get().distDir() != null && !Files.isDirectory(bdirStage.resolve("dist"))) {
+                try {
+                    copyDir(snap.get().distDir(), bdirStage.resolve("dist"));
+                    buildLog.append("[zhiye] 复用活体工作区已验证前端构建产物 dist/\n");
+                } catch (Exception ignored) {}
+            }
+        }
+
         String buildCmd = resolveLocalBuildCmd(spec, base, bdirStage);
-        if (buildCmd != null && !buildCmd.isBlank()) {
+        if (reusedWarmNodeDeps && buildCmd != null && (buildCmd.contains("npm ci") || buildCmd.contains("npm install")) && !buildCmd.contains("npm run build")) {
+            buildLog.append("[zhiye] 已命中热依赖缓存，跳过重复依赖安装\n");
+        } else if (buildCmd != null && !buildCmd.isBlank()) {
             buildLog.append("[zhiye] 执行构建命令: ").append(buildCmd).append("\n");
             runBuildCmd(bdirStage, buildCmd, spec.envVars(), buildLog);
         } else {

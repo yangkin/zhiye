@@ -23,6 +23,7 @@ import { useVisualEditor } from '../editor/useVisualEditor';
 import { ChatPanel } from './ChatPanel';
 import { CloudPane, FilesPane } from './Panes';
 import { ServiceRuntimePane } from './ServiceRuntimePane';
+import { LiveWorkspaceDock } from './LiveWorkspaceDock';
 import { PublishModal } from './PublishModal';
 import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
@@ -99,6 +100,7 @@ function Workbench({ id }: { id: string }) {
   const [maximized, setMaximized] = useState(false);
   // 右侧面板可以整块收起，把宽度让给对话（对照 meoo 的预览收缩）
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
+  const [liveDockOpen, setLiveDockOpen] = useState(false);
   const [editMode, setEditMode] = useState<null | 'chat' | 'manual'>(null);
   const [previewVersion, setPreviewVersion] = useState<Version | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -554,6 +556,16 @@ function Workbench({ id }: { id: string }) {
           </button>
         </div>
         <div className="studio-header-actions">
+          <button
+            type="button"
+            className={`studio-square ${liveDockOpen ? 'active' : ''}`}
+            aria-label="活体开发环境与终端"
+            title="活体开发环境、安全终端与实时 Dev 日志"
+            disabled={!ready}
+            onClick={() => setLiveDockOpen((v) => !v)}
+          >
+            <Icon name="code" />
+          </button>
           <button className="studio-square" aria-label="下载应用" disabled={!ready} onClick={() => setModal('download')}>
             <Icon name="download" />
           </button>
@@ -954,6 +966,7 @@ function Workbench({ id }: { id: string }) {
           ) : (
             <CloudPane appId={app.id} />
           )}
+          {liveDockOpen && ready ? <LiveWorkspaceDock appId={app.id} onClose={() => setLiveDockOpen(false)} /> : null}
         </section>
         ) : null}
       </div>

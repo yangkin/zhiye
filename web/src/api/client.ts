@@ -830,6 +830,43 @@ export const api = {
       `/api/admin/mcp-servers/${enc(serverKey)}/test`,
       { method: 'POST', body },
     ),
+  // ---- Phase 2：持久化活体开发环境（Live Dev Sandbox） ----
+  liveWorkspaceStatus: (appId: string) =>
+    request<{
+      appId: string;
+      projectKind: string;
+      status: string;
+      alive: boolean;
+      devPort: number | null;
+      devMode: string | null;
+      devUrl: string | null;
+      depsHash: string | null;
+      hasNodeModules: boolean;
+      hasDist: boolean;
+      snapshotCommit: string | null;
+      snapshotReady: boolean;
+      idleSleepMin: number;
+      lastError: string | null;
+      lastActiveAt: string | null;
+      logs: string[];
+    }>(`/api/apps/${enc(appId)}/live-workspace`),
+  liveWorkspaceStart: (appId: string) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/live-workspace/start`, { method: 'POST', body: {} }),
+  liveWorkspaceSleep: (appId: string) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/live-workspace/sleep`, { method: 'POST', body: {} }),
+  liveWorkspaceReset: (appId: string) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/live-workspace/reset`, { method: 'POST', body: {} }),
+  liveWorkspaceExec: (appId: string, command: string) =>
+    request<{
+      ok: boolean;
+      exitCode: number;
+      timedOut: boolean;
+      stdout: string;
+      stderr: string;
+      durationMs: number;
+      command: string;
+    }>(`/api/apps/${enc(appId)}/live-workspace/exec`, { method: 'POST', body: { command } }),
+  liveWorkspaceLogsUrl: (appId: string) => `/api/apps/${enc(appId)}/live-workspace/logs/stream`,
 };
 
 export const errorMessage = (error: unknown, fallback = '操作未完成，请重试。') =>
