@@ -56,6 +56,18 @@ public final class K8sServiceResourceFactory {
         if (!props.mavenMirrorUrl().isBlank()) args.add("--build-arg=MAVEN_MIRROR_URL=" + props.mavenMirrorUrl());
         if (!props.goProxy().isBlank()) args.add("--build-arg=GOPROXY=" + props.goProxy());
         args.addAll(props.kanikoExtraArgs());
+        // Deploy Engine V2：启用 Harbor 分层镜像缓存仓库，避免源码微调重装依赖
+        if (!props.harborRegistry().isBlank()) {
+            boolean hasCache = args.stream().anyMatch(a -> a.startsWith("--cache"));
+            if (!hasCache) args.add("--cache=true");
+            if (args.stream().noneMatch(a -> a.startsWith("--cache-copy-layers"))) {
+                args.add("--cache-copy-layers=true");
+            }
+            if (args.stream().noneMatch(a -> a.startsWith("--cache-repo="))) {
+                String reg = props.harborRegistry().replaceAll("/+$", "");
+                args.add("--cache-repo=" + reg + "/zhiye-build-cache");
+            }
+        }
 
         List<Volume> volumes = new ArrayList<>();
         List<VolumeMount> mounts = new ArrayList<>();

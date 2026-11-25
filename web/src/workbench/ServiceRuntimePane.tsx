@@ -5,9 +5,10 @@ import type { AppDetail, MonolithEnvVar } from '../api/types';
 import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
+import { ServiceCicdTopologyTab, ServiceDbTab } from './DeployEngineTabs';
 
-type SubTab = 'config' | 'env' | 'logs' | 'dockerfile';
-type LogView = 'runtime' | 'build' | 'releases';
+type SubTab = 'config' | 'env' | 'logs' | 'db' | 'cicd' | 'dockerfile';
+type LogView = 'runtime' | 'build' | 'sse' | 'releases';
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   running: { label: '运行中', tone: 'ok' },
@@ -180,8 +181,34 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
     queryFn: () => api.serviceDockerfile(app.id),
     enabled: sub === 'dockerfile',
   });
+  const metricsQ = useQuery({
+    queryKey: ['service-metrics', app.id],
+    queryFn: () => api.serviceMetrics(app.id),
+    refetchInterval: 10000,
+  });
+
+  // 实时 SSE 部署流水日志
+  const [sseLines, setSseLines] = useState<{ type: string; stage: string; line: string; ts: string }[]>([]);
+  useEffect(() => {
+    if (sub !== 'logs' || logView !== 'sse') return;
+    const es = new EventSource(api.serviceDeployLogStreamUrl(app.id));
+    const push = (e: MessageEvent) => {
+      try {
+        const d = JSON.parse(e.data);
+        setSseLines((prev) => [...prev.slice(-220), d]);
+      } catch {
+        setSseLines((prev) => [...prev.slice(-220), { type: 'log', stage: 'build', line: String(e.data), ts: '' }]);
+      }
+    };
+    es.addEventListener('stage', push);
+    es.addEventListener('log', push);
+    es.addEventListener('done', push);
+    es.addEventListener('error', push);
+    return () => es.close();
+  }, [app.id, sub, logView]);
 
   const svc = statusQ.data;
+  const metrics = metricsQ.data;
 
   // 配置表单状态
   const [buildCmd, setBuildCmd] = useState('');
@@ -319,6 +346,11 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
             <span className="svc-chip is-mono">
               {memoryMb} MB · {cpuMillicores} mCPU
             </span>
+            {metrics?.running && metrics.rssMb != null ? (
+              <span className="svc-chip is-mono" title={`PID ${metrics.pid ?? '—'} · 端口 ${metrics.port ?? '—'} · 历史成功率 ${metrics.releases.successRate}%`}>
+                实占 {metrics.rssMb} MB{metrics.cpuPercent != null ? ` · CPU ${metrics.cpuPercent}%` : ''}
+              </span>
+            ) : null}
           </div>
           <div className="svc-meta-row">
             {app.siteUrl ? (
@@ -346,11 +378,23 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
           </div>
         </div>
         <div className="svc-actions">
+          {svc?.canPromotePreview ? (
+            <button
+              type="button"
+              className="subtle-button"
+              disabled={!!busy}
+              title="将已验证的预览槽位产物 0 重建零停机晋升到线上"
+              onClick={() => void runAction('promote', () => api.servicePromotePreview(app.id), '预览槽位已 0 重建零停机晋升上线！')}
+            >
+              <Icon name="arrow" />
+              {busy === 'promote' ? '晋升中…' : '0重建晋升'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="primary-button"
             disabled={!!busy}
-            onClick={() => void runAction('deploy', () => api.serviceDeploy(app.id), '已重新构建并部署单体服务。')}
+            onClick={() => void runAction('deploy', () => api.serviceDeploy(app.id), '已蓝绿零停机重新构建并部署单体服务。')}
           >
             <Icon name="refresh" className={busy === 'deploy' ? 'spinning' : ''} />
             {busy === 'deploy' ? '部署中…' : '重新部署'}
@@ -402,18 +446,41 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
         <div className="svc-error-banner" role="alert">
           <div className="svc-error-head">
             <Icon name="alert" />
-            <b>最近一次构建 / 启动异常</b>
-            <button
-              type="button"
-              className="svc-link-btn"
-              onClick={() => {
-                setSub('logs');
-                setLogView('runtime');
-              }}
-            >
-              查看完整日志 →
-            </button>
+            <b>{svc.diagnosis ? `${svc.diagnosis.title} (${svc.diagnosis.category})` : '最近一次构建 / 启动异常'}</b>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button
+                type="button"
+                className="primary-button"
+                style={{ padding: '4px 10px', fontSize: 12 }}
+                disabled={!!busy}
+                onClick={() =>
+                  void runAction(
+                    'auto-heal',
+                    () => api.serviceAutoHeal(app.id),
+                    '已创建 AI 部署自愈任务！请在左侧对话栏观察自动修复与验证进度。',
+                  )
+                }
+              >
+                <Icon name="spark" /> {busy === 'auto-heal' ? '启动自愈…' : 'AI 一键自愈修复'}
+              </button>
+              <button
+                type="button"
+                className="svc-link-btn"
+                onClick={() => {
+                  setSub('logs');
+                  setLogView('runtime');
+                }}
+              >
+                查看完整日志 →
+              </button>
+            </div>
           </div>
+          {svc.diagnosis?.suggestedFixes?.length ? (
+            <div style={{ fontSize: 12, marginBottom: 6, opacity: 0.9 }}>
+              <b>诊断建议：</b>
+              {svc.diagnosis.suggestedFixes.join('；')}
+            </div>
+          ) : null}
           <pre>{svc.lastError}</pre>
         </div>
       ) : null}
@@ -424,7 +491,9 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
           [
             ['config', '运行与存储配置', 'settings'],
             ['env', `环境变量 (${svc?.envVars?.length ?? 0})`, 'lock'],
-            ['logs', '运行与构建日志', 'terminal'],
+            ['logs', '日志与发布回滚', 'terminal'],
+            ['db', 'PostgreSQL 控制台', 'database'],
+            ['cicd', 'CI/CD 与多服务拓扑', 'globe'],
             ['dockerfile', 'Dockerfile', 'code'],
           ] as const
         ).map(([k, label, icon]) => (
@@ -873,15 +942,24 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 <button
                   type="button"
                   role="tab"
+                  aria-selected={logView === 'sse'}
+                  className={logView === 'sse' ? 'active' : ''}
+                  onClick={() => setLogView('sse')}
+                >
+                  实时部署流 (SSE)
+                </button>
+                <button
+                  type="button"
+                  role="tab"
                   aria-selected={logView === 'releases'}
                   className={logView === 'releases' ? 'active' : ''}
                   onClick={() => setLogView('releases')}
                 >
-                  发布历史 ({svc?.releases?.length ?? 0})
+                  发布历史与回滚 ({svc?.releases?.length ?? 0})
                 </button>
               </div>
 
-              {logView !== 'releases' ? (
+              {logView !== 'releases' && logView !== 'sse' ? (
                 <div className="svc-logs-tools">
                   <label className="svc-log-search">
                     <Icon name="search" />
@@ -921,24 +999,50 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
               ) : null}
             </div>
 
-            {logView === 'releases' ? (
+            {logView === 'sse' ? (
+              <div className="svc-code-window">
+                <div className="svc-code-win-bar">
+                  <div className="svc-win-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                  <span className="svc-win-title">deploy-stream · 实时构建与蓝绿切流事件流 (SSE)</span>
+                  <span className="svc-win-meta">{sseLines.length} 条事件</span>
+                </div>
+                <div className={`svc-terminal-body ${wrapLogs ? 'is-wrap' : 'is-nowrap'}`}>
+                  {sseLines.length === 0 ? (
+                    <div className="svc-terminal-empty">已连接实时部署事件流，点击「重新部署」或「0重建晋升」即可实时观看蓝绿切流过程。</div>
+                  ) : (
+                    sseLines.map((ev, idx) => (
+                      <div key={idx} className={`svc-log-line is-${ev.type === 'error' ? 'err' : ev.type === 'done' || ev.type === 'stage' ? 'sys' : 'info'}`}>
+                        <span className="svc-line-no">{idx + 1}</span>
+                        <span className="svc-line-code">
+                          [{ev.stage}] {ev.line}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : logView === 'releases' ? (
               <section className="svc-section-card">
                 {(svc?.releases ?? []).length === 0 ? (
                   <div className="svc-empty-box">
                     <Icon name="history" />
                     <b>暂无发布记录</b>
-                    <p>每次导入、保存代码或点击「重新部署」都会自动沉淀一条发布流水。</p>
+                    <p>每次导入、保存代码或点击「重新部署」都会自动沉淀一条不可变发布快照。</p>
                   </div>
                 ) : (
                   <div className="svc-release-table-wrap">
                     <table className="svc-release-table">
                       <thead>
                         <tr>
-                          <th>状态</th>
+                          <th>状态 / 槽位</th>
                           <th>镜像 / 构建产物</th>
-                          <th>版本 ID</th>
+                          <th>耗时</th>
                           <th>开始时间</th>
-                          <th>异常信息</th>
+                          <th>操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -948,15 +1052,42 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                               <span className={`svc-rel-st is-${r.status}`}>
                                 {r.status === 'succeeded' ? '成功' : r.status === 'failed' ? '失败' : '构建中'}
                               </span>
+                              <span className="svc-chip" style={{ marginLeft: 6, fontSize: 11 }}>
+                                {r.slot === 'preview' ? '预览' : '线上'}
+                              </span>
+                              {r.promotedFromReleaseId ? (
+                                <span className="svc-chip is-accent" style={{ marginLeft: 4, fontSize: 10.5 }}>
+                                  0重建
+                                </span>
+                              ) : null}
                             </td>
                             <td>
                               <code>{r.imageRef || '—'}</code>
+                              {r.error ? <div className="is-err-cell" style={{ fontSize: 11.5 }}>{r.errorCategory ? `[${r.errorCategory}] ` : ''}{r.error}</div> : null}
                             </td>
-                            <td>
-                              <code className="is-muted">{r.versionId || '—'}</code>
-                            </td>
+                            <td className="is-nowrap">{r.durationMs != null ? `${(r.durationMs / 1000).toFixed(2)}s` : '—'}</td>
                             <td className="is-nowrap">{r.startedAt ? fmtTime(r.startedAt) : '—'}</td>
-                            <td className="is-err-cell">{r.error || '—'}</td>
+                            <td className="is-nowrap">
+                              {r.rollbackable ? (
+                                <button
+                                  type="button"
+                                  className="svc-pill-toggle"
+                                  disabled={!!busy}
+                                  title={r.zeroRebuildReady ? '命中不可变产物快照，0 重建秒级回滚' : '从版本仓库回滚'}
+                                  onClick={() =>
+                                    void runAction(
+                                      `rollback-${r.id}`,
+                                      () => api.serviceRollbackRelease(app.id, r.id),
+                                      r.zeroRebuildReady ? '已 0 重建零停机秒级回滚到该发布快照！' : '已回滚到该历史版本。',
+                                    )
+                                  }
+                                >
+                                  <Icon name="history" /> {busy === `rollback-${r.id}` ? '回滚中…' : '秒级回滚'}
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1004,6 +1135,10 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
               </div>
             )}
           </div>
+        ) : sub === 'db' ? (
+          <ServiceDbTab appId={app.id} pgEnabled={!!svc?.pgEnabled} />
+        ) : sub === 'cicd' ? (
+          <ServiceCicdTopologyTab appId={app.id} />
         ) : (
           <div className="svc-logs-shell">
             <div className="svc-code-window is-tall">
@@ -1015,10 +1150,13 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 </div>
                 <span className="svc-win-title">Dockerfile</span>
                 <span className="svc-win-badge">
-                  {dfQ.data?.custom ? '仓库自定义 Dockerfile' : '平台自动生成 · 非 root 多阶段构建'}
+                  {dfQ.data?.custom ? '仓库自定义 Dockerfile' : '平台自动生成 · 分层缓存 + 非 root 多阶段构建'}
                 </span>
                 <div className="svc-win-actions">
                   <span className="svc-win-meta">{dockerfileLines.length} 行</span>
+                  <a className="svc-win-copy" href={api.serviceExportBundleUrl(app.id)} download style={{ textDecoration: 'none' }}>
+                    <Icon name="download" /> 导出 Docker/Helm 包
+                  </a>
                   <button
                     type="button"
                     className="svc-win-copy"

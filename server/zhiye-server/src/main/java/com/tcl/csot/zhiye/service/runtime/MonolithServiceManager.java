@@ -80,6 +80,10 @@ public class MonolithServiceManager {
     private final ServiceRuntimeProperties props;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeployDiagnosisService diagnosisService;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DeployLogBroadcaster deployLogBroadcaster;
     private final ConcurrentHashMap<String, Object> appLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastTouchMs = new ConcurrentHashMap<>();
 
@@ -127,15 +131,60 @@ public class MonolithServiceManager {
         }
     }
 
-    /** 正式发布到线上槽位（FS-04）：构建与健康检查通过后切流到线上公开地址，并清理多余的预览槽位。 */
+    /** 正式发布到线上槽位（Deploy Engine V2）：若预览槽位已构建通过同一版本，自动走 0 重建晋升切流；否则正常构建切流。 */
     public ServiceRow publishDeploy(AppRow app, VersionRow ver) throws Exception {
-        return initializeAndDeploy(app, ver);
+        synchronized (lockFor(app.id())) {
+            ensureInitializedLocked(app, ver);
+            ServiceRow row = deployOrPromoteLocked(app, ver);
+            clearPreviewSlotLocked(app);
+            return row;
+        }
+    }
+
+    /** 手动一键将已验证的预览槽位晋升至线上（0 重建零停机切流）。 */
+    public Map<String, Object> promotePreview(String ws, String appId) throws Exception {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow cur = find(app.id()).orElseThrow(() -> ApiException.notFound("单体服务配置"));
+        String prevVid = cur.previewVersionId();
+        if (prevVid == null || prevVid.isBlank()) {
+            throw ApiException.conflict("NO_PREVIEW_SLOT", "当前没有可晋升的预览槽位版本，请先预览或重新部署");
+        }
+        VersionRow ver = versions.find(prevVid).filter(v -> v.appId().equals(app.id()))
+                .orElseThrow(() -> ApiException.notFound("预览版本"));
+        synchronized (lockFor(app.id())) {
+            deployOrPromoteLocked(app, ver);
+            clearPreviewSlotLocked(app);
+        }
+        return statusView(ws, appId);
+    }
+
+    /** 秒级回滚到历史发布记录（命中不可变产物快照或已有镜像时 0 重建零停机切流）。 */
+    public Map<String, Object> rollbackToRelease(String ws, String appId, String releaseId) throws Exception {
+        AppRow app = requireServiceApp(ws, appId);
+        record RelTarget(String id, String versionId, String status, String imageRef, String artifactDir) {}
+        RelTarget rel = jdbc.sql("select id, version_id, status, image_ref, artifact_dir from app_service_release where id = ? and app_id = ?")
+                .params(releaseId, app.id())
+                .query((rs, i) -> new RelTarget(rs.getString("id"), rs.getString("version_id"),
+                        rs.getString("status"), rs.getString("image_ref"), rs.getString("artifact_dir")))
+                .optional().orElseThrow(() -> ApiException.notFound("发布记录"));
+        if (!"succeeded".equals(rel.status())) {
+            throw ApiException.validation("仅支持回滚到构建成功的发布记录（当前状态=" + rel.status() + "）");
+        }
+        if (rel.versionId() == null || rel.versionId().isBlank()) {
+            throw ApiException.validation("该发布记录缺少版本信息，无法回滚");
+        }
+        VersionRow ver = versions.find(rel.versionId()).filter(v -> v.appId().equals(app.id()))
+                .orElseThrow(() -> ApiException.notFound("目标版本"));
+        synchronized (lockFor(app.id())) {
+            deployWithPrebuiltCandidateLocked(app, ver, rel.id(), rel.imageRef(), rel.artifactDir(), "rollback");
+        }
+        return statusView(ws, appId);
     }
 
     /**
-     * 预览槽位部署（FS-04）：用于 AI 生成/修改、代码在线编辑、历史版本恢复。
+     * 预览槽位部署（FS-04 + Deploy Engine V2）：用于 AI 生成/修改、代码在线编辑、历史版本恢复。
      * - 若应用已发布 V1，绝不改动或中断线上 V1 槽位，仅独立更新预览槽位（appId-prev）；
-     * - 确认预览无误后，由用户点击「发布」调用 publishDeploy 正式切流。
+     * - 记录不可变预览构建产物快照（artifact_dir / image_ref），点击「发布」时可直接 0 重建晋升上线。
      */
     public ServiceRow deployPreview(AppRow app, VersionRow ver) throws Exception {
         synchronized (lockFor(app.id())) {
@@ -148,6 +197,12 @@ public class MonolithServiceManager {
                         .params(p.schema(), p.role(), p.passwordEnc(), app.id()).update();
                 cur = find(app.id()).orElseThrow();
             }
+            String relId = Ids.newId("srel");
+            long t0 = System.currentTimeMillis();
+            jdbc.sql("insert into app_service_release (id, app_id, version_id, slot, status) values (?,?,?,?,?)")
+                    .params(relId, app.id(), ver.id(), "preview", "building").update();
+            if (deployLogBroadcaster != null) deployLogBroadcaster.reset(app.id(), "preview", ver.id());
+
             String prevAppId = previewAppId(app.id());
             String prevSlug = previewSlug(app.slug());
             Path tempSrc = Files.createTempDirectory("zhiye-svc-prev-");
@@ -155,22 +210,28 @@ public class MonolithServiceManager {
                 git.checkout(app.id(), ver.gitCommit(), tempSrc, "service");
                 ServiceRuntimeProvider.DeploySpec spec = buildDeploySpec(app, cur, ver, tempSrc, prevAppId, prevSlug);
                 ServiceRuntimeProvider.DeployResult res = provider.deploy(spec);
+                long durationMs = System.currentTimeMillis() - t0;
                 boolean hasLive = app.publishedVersionId() != null && !app.publishedVersionId().isBlank() && cur.runningVersionId() != null;
                 if (hasLive) {
                     jdbc.sql("update app_service set preview_version_id = ?, preview_endpoint_url = ?, preview_status = 'running', "
                                     + "desired_version_id = ?, build_log = ?, last_error = null, updated_at = now() where app_id = ?")
                             .params(ver.id(), res.endpointUrl(), ver.id(), truncate(res.buildLog(), 64_000), app.id()).update();
                 } else {
-                    // 尚未发布过任何版本：同步把状态标为 running，便于工作台预览与状态展示一致
                     jdbc.sql("update app_service set status = 'running', preview_version_id = ?, preview_endpoint_url = ?, preview_status = 'running', "
                                     + "desired_version_id = ?, build_log = ?, last_error = null, last_started_at = now(), last_access_at = now(), updated_at = now() where app_id = ?")
                             .params(ver.id(), res.endpointUrl(), ver.id(), truncate(res.buildLog(), 64_000), app.id()).update();
                 }
+                jdbc.sql("update app_service_release set status = 'succeeded', image_ref = ?, artifact_dir = ?, duration_ms = ?, build_log = ?, finished_at = now() where id = ?")
+                        .params(res.imageRef(), res.artifactDir(), durationMs, truncate(res.buildLog(), 64_000), relId).update();
                 logEvent(true, "SERVICE_PREVIEW_DEPLOY", app, "单体服务预览槽位更新成功：" + app.name() + "（V" + ver.number() + "，线上版本不受影响）",
-                        truncate(res.buildLog(), 8_000), Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive));
+                        truncate(res.buildLog(), 8_000), Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive, "releaseId", relId, "durationMs", durationMs));
                 return find(app.id()).orElseThrow();
             } catch (Exception e) {
+                long durationMs = System.currentTimeMillis() - t0;
                 String msg = truncate(e.getMessage(), 4000);
+                var diag = diagnoseFailure(msg, msg, cur, app);
+                jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, duration_ms = ?, error_category = ?, diagnosis_json = ?::jsonb, finished_at = now() where id = ?")
+                        .params(msg, msg, durationMs, diag == null ? null : diag.category(), diag == null ? null : Json.write(diag.toMap()), relId).update();
                 boolean hasLive = app.publishedVersionId() != null && !app.publishedVersionId().isBlank() && cur.runningVersionId() != null;
                 if (hasLive) {
                     jdbc.sql("update app_service set preview_status = 'failed', last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
@@ -180,7 +241,7 @@ public class MonolithServiceManager {
                             .params(msg, msg, app.id()).update();
                 }
                 logEvent(false, "SERVICE_PREVIEW_DEPLOY", app, "单体服务预览部署失败：" + app.name() + " · " + truncate(msg, 180),
-                        msg, Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive));
+                        msg, Map.of("runtime", cur.runtime(), "versionId", ver.id(), "hasLive", hasLive, "releaseId", relId));
                 throw e;
             } finally {
                 GitService.deleteRecursively(tempSrc);
@@ -729,21 +790,125 @@ public class MonolithServiceManager {
                 }).list();
         m.put("envVars", envList);
 
-        List<Map<String, Object>> releases = jdbc.sql("select id, version_id, status, image_ref, error, started_at, finished_at from app_service_release where app_id = ? order by started_at desc limit 10")
+        List<Map<String, Object>> releases = jdbc.sql("""
+                select id, version_id, slot, status, image_ref, artifact_dir, duration_ms,
+                       promoted_from_release_id, error_category, error, started_at, finished_at
+                  from app_service_release
+                 where app_id = ?
+                 order by started_at desc
+                 limit 15
+                """)
                 .param(app.id()).query((rs, i) -> {
                     Map<String, Object> rm = new LinkedHashMap<>();
+                    String st = rs.getString("status");
+                    String artDir = rs.getString("artifact_dir");
+                    boolean hasSnap = artDir != null && !artDir.isBlank() && Files.isDirectory(Path.of(artDir));
                     rm.put("id", rs.getString("id"));
                     rm.put("versionId", rs.getString("version_id"));
-                    rm.put("status", rs.getString("status"));
+                    rm.put("slot", rs.getString("slot"));
+                    rm.put("status", st);
                     rm.put("imageRef", rs.getString("image_ref"));
+                    rm.put("durationMs", rs.getObject("duration_ms") == null ? null : rs.getLong("duration_ms"));
+                    rm.put("promotedFromReleaseId", rs.getString("promoted_from_release_id"));
+                    rm.put("errorCategory", rs.getString("error_category"));
                     rm.put("error", rs.getString("error"));
+                    rm.put("rollbackable", "succeeded".equals(st) && rs.getString("version_id") != null);
+                    rm.put("zeroRebuildReady", "succeeded".equals(st) && (hasSnap || (props.isK8s() && rs.getString("image_ref") != null)));
                     rm.put("startedAt", Db.iso(Db.ts(rs, "started_at")));
                     rm.put("finishedAt", Db.iso(Db.ts(rs, "finished_at")));
                     return rm;
                 }).list();
         m.put("releases", releases);
+        m.put("canPromotePreview", s.previewVersionId() != null && !s.previewVersionId().isBlank() && "running".equals(s.previewStatus()));
+        if (s.lastError() != null && !s.lastError().isBlank()) {
+            var diag = diagnoseFailure(s.lastError(), s.buildLog(), s, app);
+            if (diag != null) m.put("diagnosis", diag.toMap());
+        }
         m.put("quota", quotaUsageView(ws));
         return m;
+    }
+
+    /** 结构化部署诊断报告（供前端告警卡片与 AI 一键自愈使用）。 */
+    public Map<String, Object> diagnosisView(String ws, String appId) {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow s = find(app.id()).orElseThrow(() -> ApiException.notFound("单体服务配置"));
+        String rtLogs = "";
+        try {
+            rtLogs = provider.logs(app.id(), app.slug(), 120);
+            if ((rtLogs == null || rtLogs.isBlank()) && s.previewVersionId() != null) {
+                rtLogs = provider.logs(previewAppId(app.id()), previewSlug(app.slug()), 120);
+            }
+        } catch (Exception ignored) {}
+        DeployDiagnosisService svc = diagnosisService != null ? diagnosisService : new DeployDiagnosisService();
+        var d = svc.diagnose(s.lastError(), s.buildLog(), rtLogs, s.runtime(), s.port(), s.healthPath());
+        Map<String, Object> out = new LinkedHashMap<>(d.toMap());
+        out.put("status", effectiveStatus(s));
+        out.put("runtime", s.runtime());
+        out.put("framework", s.framework());
+        return out;
+    }
+
+    /** 采集应用实时运行指标与历史发布 SLA 统计。 */
+    public Map<String, Object> metricsView(String ws, String appId) {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow s = find(app.id()).orElse(null);
+        ServiceRuntimeProvider.RuntimeMetrics rm = provider.metrics(app.id(), app.slug());
+        if (!rm.running() && s != null && s.previewVersionId() != null) {
+            rm = provider.metrics(previewAppId(app.id()), previewSlug(app.slug()));
+        }
+        Map<String, Object> stats = jdbc.sql("""
+                select count(*) as total,
+                       count(*) filter (where status = 'succeeded') as ok_cnt,
+                       coalesce(avg(duration_ms) filter (where status = 'succeeded' and duration_ms is not null), 0)::bigint as avg_ms,
+                       coalesce(max(duration_ms) filter (where status = 'succeeded'), 0)::bigint as max_ms
+                  from app_service_release
+                 where app_id = ?
+                """).param(app.id()).query((rs, i) -> {
+            long total = rs.getLong("total");
+            long ok = rs.getLong("ok_cnt");
+            Map<String, Object> st = new LinkedHashMap<>();
+            st.put("totalReleases", total);
+            st.put("succeededReleases", ok);
+            st.put("successRate", total == 0 ? 100.0 : Math.round(ok * 1000.0 / total) / 10.0);
+            st.put("avgBuildMs", rs.getLong("avg_ms"));
+            st.put("maxBuildMs", rs.getLong("max_ms"));
+            return st;
+        }).single();
+
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("provider", rm.provider());
+        m.put("running", rm.running());
+        m.put("pid", rm.pid());
+        m.put("port", rm.port());
+        m.put("rssMb", rm.rssMb());
+        m.put("cpuPercent", rm.cpuPercent());
+        m.put("uptimeSeconds", rm.uptimeSeconds());
+        m.put("memoryLimitMb", s == null ? props.maxMemoryMb() : s.memoryMb());
+        m.put("cpuLimitMillicores", s == null ? props.maxCpuMillicores() : s.cpuMillicores());
+        m.put("releases", stats);
+        return m;
+    }
+
+    /** 在线 PostgreSQL 表浏览（严格限定本应用专属 pg_schema）。 */
+    public Map<String, Object> listDbTables(String ws, String appId) {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow s = find(app.id()).orElseThrow(() -> ApiException.notFound("单体服务配置"));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("pgEnabled", s.pgEnabled());
+        m.put("schema", s.pgSchema());
+        m.put("role", s.pgRole());
+        m.put("tables", s.pgEnabled() && s.pgSchema() != null ? dbService.listTables(s.pgSchema()) : List.of());
+        return m;
+    }
+
+    /** 在线 PostgreSQL 受控 SQL 查询（使用该应用专属最小权限 PG 角色执行，内核级隔离）。 */
+    public Map<String, Object> queryDb(String ws, String appId, String sql, boolean allowWrite, int limit) {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow s = find(app.id()).orElseThrow(() -> ApiException.notFound("单体服务配置"));
+        if (!s.pgEnabled()) {
+            throw ApiException.validation("请先在「运行与存储配置」开启并保存「托管 PostgreSQL Schema」");
+        }
+        return dbService.executeScopedSql(s.pgSchema(), s.pgRole(), s.pgPasswordEnc(), sql, allowWrite, limit);
     }
 
     private Map<String, Object> quotaUsageView(String ws) {
@@ -817,14 +982,89 @@ public class MonolithServiceManager {
         }
     }
 
+    private ServiceRow deployOrPromoteLocked(AppRow app, VersionRow ver) throws Exception {
+        record Cand(String id, String imageRef, String artifactDir) {}
+        Optional<Cand> previewCand = jdbc.sql("""
+                select id, image_ref, artifact_dir
+                  from app_service_release
+                 where app_id = ? and version_id = ? and status = 'succeeded'
+                 order by started_at desc
+                 limit 1
+                """).params(app.id(), ver.id())
+                .query((rs, i) -> new Cand(rs.getString("id"), rs.getString("image_ref"), rs.getString("artifact_dir")))
+                .optional();
+        if (previewCand.isPresent()) {
+            Cand c = previewCand.get();
+            boolean hasLocalSnap = c.artifactDir() != null && !c.artifactDir().isBlank() && Files.isDirectory(Path.of(c.artifactDir()).resolve("work"));
+            boolean hasK8sImage = props.isK8s() && c.imageRef() != null && !c.imageRef().isBlank();
+            if (hasLocalSnap || hasK8sImage) {
+                return deployWithPrebuiltCandidateLocked(app, ver, c.id(), c.imageRef(), c.artifactDir(), "promote");
+            }
+        }
+        return deployLocked(app, ver);
+    }
+
+    private ServiceRow deployWithPrebuiltCandidateLocked(AppRow app, VersionRow ver, String sourceReleaseId,
+                                                         String existingImageRef, String artifactDirStr, String actionKind) throws Exception {
+        ServiceRow cur = find(app.id()).orElseThrow();
+        enforceRunQuota(app, cur);
+        String relId = Ids.newId("srel");
+        long t0 = System.currentTimeMillis();
+        jdbc.sql("insert into app_service_release (id, app_id, version_id, slot, status, promoted_from_release_id) values (?,?,?,?,?,?)")
+                .params(relId, app.id(), ver.id(), "live", "building", sourceReleaseId).update();
+        if (deployLogBroadcaster != null) deployLogBroadcaster.reset(app.id(), actionKind, ver.id());
+
+        if (cur.pgEnabled()) {
+            var p = dbService.ensureSchema(app.id(), cur.pgSchema(), cur.pgRole(), cur.pgPasswordEnc());
+            jdbc.sql("update app_service set pg_schema=?, pg_role=?, pg_password_enc=? where app_id=?")
+                    .params(p.schema(), p.role(), p.passwordEnc(), app.id()).update();
+            cur = find(app.id()).orElseThrow();
+        }
+
+        Path tempSrc = Files.createTempDirectory("zhiye-svc-promo-");
+        try {
+            git.checkout(app.id(), ver.gitCommit(), tempSrc, "service");
+            ServiceRuntimeProvider.DeploySpec spec = buildDeploySpec(app, cur, ver, tempSrc);
+            Path snapPath = (artifactDirStr == null || artifactDirStr.isBlank()) ? null : Path.of(artifactDirStr);
+            ServiceRuntimeProvider.DeployResult res = provider.deployPrebuilt(spec, existingImageRef, snapPath);
+            long durationMs = System.currentTimeMillis() - t0;
+
+            jdbc.sql("update app_service set status = 'running', running_version_id = ?, desired_version_id = ?, image_ref = ?, endpoint_url = ?, "
+                            + "build_log = ?, last_error = null, last_started_at = now(), last_access_at = now(), updated_at = now() where app_id = ?")
+                    .params(ver.id(), ver.id(), res.imageRef(), res.endpointUrl(), truncate(res.buildLog(), 64_000), app.id()).update();
+            jdbc.sql("update app_service_release set status = 'succeeded', image_ref = ?, artifact_dir = ?, duration_ms = ?, build_log = ?, finished_at = now() where id = ?")
+                    .params(res.imageRef(), res.artifactDir(), durationMs, truncate(res.buildLog(), 64_000), relId).update();
+            String evtAction = "rollback".equals(actionKind) ? "SERVICE_ROLLBACK" : "SERVICE_PROMOTE";
+            String evtLabel = "rollback".equals(actionKind) ? "秒级回滚成功" : "0 重建晋升上线成功";
+            logEvent(true, evtAction, app, "单体服务" + evtLabel + "：" + app.name() + "（V" + ver.number() + "，" + durationMs + "ms）",
+                    truncate(res.buildLog(), 12_000), Map.of("versionId", ver.id(), "sourceReleaseId", sourceReleaseId, "releaseId", relId, "durationMs", durationMs));
+            return find(app.id()).orElseThrow();
+        } catch (Exception e) {
+            long durationMs = System.currentTimeMillis() - t0;
+            String msg = truncate(e.getMessage(), 4000);
+            var diag = diagnoseFailure(msg, msg, cur, app);
+            jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, duration_ms = ?, error_category = ?, diagnosis_json = ?::jsonb, finished_at = now() where id = ?")
+                    .params(msg, msg, durationMs, diag == null ? null : diag.category(), diag == null ? null : Json.write(diag.toMap()), relId).update();
+            // 蓝绿切流失败时若线上旧实例仍存活，保留 running 状态仅写入 last_error，绝不误报宕机
+            boolean stillAlive = provider.isRunning(app.id(), app.slug());
+            jdbc.sql("update app_service set status = ?, last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
+                    .params(stillAlive ? "running" : "failed", msg, msg, app.id()).update();
+            throw e;
+        } finally {
+            GitService.deleteRecursively(tempSrc);
+        }
+    }
+
     private ServiceRow deployLocked(AppRow app, VersionRow ver) throws Exception {
         ServiceRow cur = find(app.id()).orElseThrow();
         enforceRunQuota(app, cur);
         String relId = Ids.newId("srel");
-        jdbc.sql("insert into app_service_release (id, app_id, version_id, status) values (?,?,?,?)")
-                .params(relId, app.id(), ver.id(), "building").update();
+        long t0 = System.currentTimeMillis();
+        jdbc.sql("insert into app_service_release (id, app_id, version_id, slot, status) values (?,?,?,?,?)")
+                .params(relId, app.id(), ver.id(), "live", "building").update();
         jdbc.sql("update app_service set status = 'building', desired_version_id = ?, last_error = null, updated_at = now() where app_id = ?")
                 .params(ver.id(), app.id()).update();
+        if (deployLogBroadcaster != null) deployLogBroadcaster.reset(app.id(), "live", ver.id());
 
         // 若已开启 PG 托管，确保 Schema 与凭证就绪
         if (cur.pgEnabled()) {
@@ -839,26 +1079,41 @@ public class MonolithServiceManager {
             git.checkout(app.id(), ver.gitCommit(), tempSrc, "service");
             ServiceRuntimeProvider.DeploySpec spec = buildDeploySpec(app, cur, ver, tempSrc);
             ServiceRuntimeProvider.DeployResult res = provider.deploy(spec);
+            long durationMs = System.currentTimeMillis() - t0;
 
             jdbc.sql("update app_service set status = 'running', running_version_id = ?, image_ref = ?, endpoint_url = ?, "
                             + "build_log = ?, last_error = null, last_started_at = now(), last_access_at = now(), updated_at = now() where app_id = ?")
                     .params(ver.id(), res.imageRef(), res.endpointUrl(), truncate(res.buildLog(), 64_000), app.id()).update();
-            jdbc.sql("update app_service_release set status = 'succeeded', image_ref = ?, build_log = ?, finished_at = now() where id = ?")
-                    .params(res.imageRef(), truncate(res.buildLog(), 64_000), relId).update();
-            logEvent(true, "SERVICE_DEPLOY", app, "单体服务部署成功：" + app.name() + "（" + cur.runtime() + " / " + cur.framework() + "）",
-                    truncate(res.buildLog(), 12_000), Map.of("runtime", cur.runtime(), "framework", cur.framework(), "imageRef", res.imageRef(), "provider", provider.name(), "releaseId", relId));
+            jdbc.sql("update app_service_release set status = 'succeeded', image_ref = ?, artifact_dir = ?, duration_ms = ?, build_log = ?, finished_at = now() where id = ?")
+                    .params(res.imageRef(), res.artifactDir(), durationMs, truncate(res.buildLog(), 64_000), relId).update();
+            logEvent(true, "SERVICE_DEPLOY", app, "单体服务部署成功：" + app.name() + "（" + cur.runtime() + " / " + cur.framework() + "，" + durationMs + "ms）",
+                    truncate(res.buildLog(), 12_000), Map.of("runtime", cur.runtime(), "framework", cur.framework(), "imageRef", res.imageRef(), "provider", provider.name(), "releaseId", relId, "durationMs", durationMs));
             return find(app.id()).orElseThrow();
         } catch (Exception e) {
+            long durationMs = System.currentTimeMillis() - t0;
             String msg = truncate(e.getMessage(), 4000);
-            jdbc.sql("update app_service set status = 'failed', last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
-                    .params(msg, msg, app.id()).update();
-            jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, finished_at = now() where id = ?")
-                    .params(msg, msg, relId).update();
+            var diag = diagnoseFailure(msg, msg, cur, app);
+            boolean stillAlive = provider.isRunning(app.id(), app.slug());
+            jdbc.sql("update app_service set status = ?, last_error = ?, build_log = ?, updated_at = now() where app_id = ?")
+                    .params(stillAlive ? "running" : "failed", msg, msg, app.id()).update();
+            jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, duration_ms = ?, error_category = ?, diagnosis_json = ?::jsonb, finished_at = now() where id = ?")
+                    .params(msg, msg, durationMs, diag == null ? null : diag.category(), diag == null ? null : Json.write(diag.toMap()), relId).update();
             logEvent(false, "SERVICE_DEPLOY", app, "单体服务部署失败：" + app.name() + " · " + truncate(msg, 180),
                     msg, Map.of("runtime", cur.runtime(), "framework", cur.framework(), "provider", provider.name(), "releaseId", relId));
             throw e;
         } finally {
             GitService.deleteRecursively(tempSrc);
+        }
+    }
+
+    private DeployDiagnosisService.Diagnosis diagnoseFailure(String error, String buildLog, ServiceRow cur, AppRow app) {
+        try {
+            DeployDiagnosisService svc = diagnosisService != null ? diagnosisService : new DeployDiagnosisService();
+            String rtLogs = "";
+            try { rtLogs = provider.logs(app.id(), app.slug(), 80); } catch (Exception ignored) {}
+            return svc.diagnose(error, buildLog, rtLogs, cur.runtime(), cur.port(), cur.healthPath());
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
