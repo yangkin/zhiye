@@ -646,6 +646,40 @@ export const api = {
   serviceExportBundleUrl: (appId: string) => `/api/apps/${enc(appId)}/service/export-bundle`,
   serviceDeployLogStreamUrl: (appId: string) => `/api/apps/${enc(appId)}/service/deploy-logs/stream`,
 
+  // Phase 4: 企业连接器中心 & 自动化触发器 & 公域飞书控制面
+  connectorsList: () => request<Record<string, unknown>[]>('/api/connectors'),
+  adminConnectorsList: () => request<Record<string, unknown>[]>('/api/admin/connectors'),
+  adminConnectorSave: (input: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/api/admin/connectors', { method: 'POST', body: input }),
+  adminConnectorDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/connectors/${enc(id)}`, { method: 'DELETE' }),
+  adminConnectorTest: (id: string) =>
+    request<Record<string, unknown>>(`/api/admin/connectors/${enc(id)}/test`, { method: 'POST' }),
+  adminConnectorAudits: (connectorId?: string, limit = 30) =>
+    request<Record<string, unknown>[]>(
+      `/api/admin/connectors/audits?limit=${limit}${connectorId ? `&connectorId=${enc(connectorId)}` : ''}`,
+    ),
+  appTriggersList: (appId: string) => request<Record<string, unknown>[]>(`/api/apps/${enc(appId)}/triggers`),
+  appTriggerSave: (appId: string, input: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/triggers`, { method: 'POST', body: input }),
+  appTriggerDelete: (appId: string, triggerId: string) =>
+    request<{ ok: boolean }>(`/api/apps/${enc(appId)}/triggers/${enc(triggerId)}`, { method: 'DELETE' }),
+  appTriggerRun: (appId: string, triggerId: string, payload?: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/apps/${enc(appId)}/triggers/${enc(triggerId)}/run`, {
+      method: 'POST',
+      body: payload ?? {},
+    }),
+  appTriggerRuns: (appId: string, triggerId?: string, limit = 25) =>
+    request<Record<string, unknown>[]>(
+      `/api/apps/${enc(appId)}/triggers/runs?limit=${limit}${triggerId ? `&triggerId=${enc(triggerId)}` : ''}`,
+    ),
+  adminFeishuSessions: (limit = 20) =>
+    request<Record<string, unknown>[]>(`/api/admin/feishu/sessions?limit=${limit}`),
+  adminFeishuSimulate: (input: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/api/admin/feishu/simulate', { method: 'POST', body: input }),
+  adminFeishuCardAction: (input: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/api/admin/feishu/card-action', { method: 'POST', body: input }),
+
   // 导入
   uploadImport: (file: Blob, fileName: string, folderName?: string, signal?: AbortSignal) => {
     const form = new FormData();

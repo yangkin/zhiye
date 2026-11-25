@@ -25,6 +25,8 @@ public class FnApiController {
     private final CloudService cloud;
     private final DataSourceService sources;
     private final AppAiService ai;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService connectors;
 
     public FnApiController(FunctionService fns, CloudService cloud, DataSourceService sources, AppAiService ai) {
         this.fns = fns;
@@ -95,5 +97,50 @@ public class FnApiController {
     public Map<String, Object> ai(@RequestBody JsonNode b, HttpServletRequest req) {
         var t = token(req);
         return ai.chat(t.appId(), t.who(), b);
+    }
+
+    @PostMapping("/feishu/send-card")
+    public Map<String, Object> feishuSendCard(@RequestBody JsonNode b, HttpServletRequest req) {
+        var t = token(req);
+        if (connectors == null) throw ApiException.notFound("企业连接器服务");
+        List<Map<String, String>> fields = new ArrayList<>();
+        if (b.has("fields") && b.get("fields").isArray()) {
+            b.get("fields").forEach(n -> fields.add(Map.of("label", n.path("label").asText(""), "value", n.path("value").asText(""))));
+        }
+        List<Map<String, Object>> buttons = new ArrayList<>();
+        if (b.has("buttons") && b.get("buttons").isArray()) {
+            b.get("buttons").forEach(n -> buttons.add(com.tcl.csot.zhiye.util.Json.convert(n, Map.class)));
+        }
+        return connectors.sendFeishuCard(
+                b.path("connectorId").asText(""), t.appId(),
+                b.path("title").asText("织页云函数通知"), b.path("content").asText(""),
+                b.path("templateColor").asText("blue"), fields, buttons);
+    }
+
+    @PostMapping("/bitable/{op}")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> bitable(@PathVariable String op, @RequestBody JsonNode b, HttpServletRequest req) {
+        var t = token(req);
+        if (connectors == null) throw ApiException.notFound("企业连接器服务");
+        String connId = b.path("connectorId").asText("");
+        Map<String, Object> opts = new LinkedHashMap<>();
+        if (b.has("appToken")) opts.put("appToken", b.path("appToken").asText(""));
+        if (b.has("tableId")) opts.put("tableId", b.path("tableId").asText(""));
+        if (b.has("pageSize")) opts.put("pageSize", b.path("pageSize").asInt(20));
+        return switch (op) {
+            case "list" -> connectors.bitableList(connId, t.appId(), opts);
+            case "create" -> connectors.bitableCreate(connId, t.appId(),
+                    b.has("fields") ? com.tcl.csot.zhiye.util.Json.convert(b.get("fields"), Map.class) : Map.of(), opts);
+            case "update" -> connectors.bitableUpdate(connId, t.appId(), b.path("recordId").asText(""),
+                    b.has("fields") ? com.tcl.csot.zhiye.util.Json.convert(b.get("fields"), Map.class) : Map.of(), opts);
+            default -> throw ApiException.notFound("多维表格操作");
+        };
+    }
+
+    @PostMapping("/org/employees")
+    public Map<String, Object> orgEmployees(@RequestBody JsonNode b, HttpServletRequest req) {
+        token(req);
+        if (connectors == null) return Map.of("employees", List.of());
+        return Map.of("employees", connectors.searchOrgEmployees(b.path("q").asText("")));
     }
 }

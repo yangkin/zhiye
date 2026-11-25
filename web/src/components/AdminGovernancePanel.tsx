@@ -25,6 +25,7 @@ import { DashEmptyBox, DashPanelHead, fmtCompact, fmtNum } from './DashboardChar
 import { AdminKnowledgePanel } from './AdminKnowledgePanel';
 import { AdminLoginAllowlistPanel } from './AdminLoginAllowlistPanel';
 import { AdminMcpPanel } from './AdminMcpPanel';
+import { AdminFeishuConnectorPanel } from './AdminFeishuConnectorPanel';
 
 export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
 
@@ -2398,6 +2399,7 @@ export function AdminGovernancePanel({
           </div>
 
           <AdminMcpPanel />
+          <AdminFeishuConnectorPanel />
 
           <div className="dash-panel">
             <DashPanelHead
