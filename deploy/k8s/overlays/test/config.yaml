@@ -4,19 +4,27 @@ metadata:
   name: zhiye-config
   namespace: zhiye
 data:
-  ZHIYE_DB_URL: jdbc:postgresql://<rds 测试库>:5432/zhiye
-  ZHIYE_PUBLIC_BASE_URL: https://zhiye-test.example.com
-  ZHIYE_PREVIEW_BASE: https://preview.zhiye-test.example.com
-  ZHIYE_SITE_HOST_SUFFIX: sites.zhiye-test.example.com
-  ZHIYE_S3_BUCKET: <测试 bucket>
-  ZHIYE_RUNNER_IMAGE: <registry>.cn-shenzhen.cr.aliyuncs.com/zhiye/zhiye-runner:<版本>
-  # 公司 OpenSandbox Server（占位：换成公司测试环境地址）
-  ZHIYE_OPENSANDBOX_DOMAIN: <opensandbox-server 域名:端口>
-  ZHIYE_OPENSANDBOX_PROTOCOL: https
-  # 公司沙箱命名空间里指向同一 NAS 的 RWX PVC（占位）
-  ZHIYE_SANDBOX_PVC: <共享 RWX PVC 名称>
+  ZHIYE_DB_URL: jdbc:postgresql://10.110.170.10:5432/zhiye
+  ZHIYE_AUTH_MODE: sso
+  ZHIYE_FIVESTAR_ENABLED: "true"
+  ZHIYE_FIVESTAR_MOCK: "false"
+  ZHIYE_SKILLHUB_ENABLED: "true"
+  ZHIYE_SKILLHUB_MOCK: "false"
+  ZHIYE_PUBLIC_BASE_URL: https://zhiye.csot.tcl.com
+  ZHIYE_PREVIEW_BASE: https://preview.zhiye.csot.tcl.com
+  ZHIYE_SITE_HOST_SUFFIX: zhiye.csot.tcl.com
+  ZHIYE_SSO_REDIRECT_URL: https://zhiye.csot.tcl.com/access_token
+  ZHIYE_S3_ENDPOINT: http://clouds3.csot.tcl.com:8082
+  ZHIYE_S3_REGION: default
+  ZHIYE_S3_BUCKET: zhiye
+  ZHIYE_S3_PATH_STYLE: "true"
+  ZHIYE_RUNNER_IMAGE: 10.110.27.113/zhiye/zhiye-runner:v0.1.1-test
+  ZHIYE_SANDBOX_PROVIDER: k8s
+  # 自建 k8s 沙箱与主服务同在 zhiye，复用现有 RWX PVC
+  ZHIYE_SANDBOX_NAMESPACE: zhiye
+  ZHIYE_SANDBOX_PVC: zhiye-runtime
   # 平台首任管理员 SSO 账号白名单（多个用英文逗号分隔）
-  ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin"
+  ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin,yangkai37"
   # 数据源代理允许访问的公司内网域名（按需增删）
   ZHIYE_SOURCES_ALLOWED_HOSTS: "*.csot.tcl.com"
   # 以下仅 legacy k8s provider 回滚时使用

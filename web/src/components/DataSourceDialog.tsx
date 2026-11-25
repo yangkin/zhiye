@@ -10,17 +10,17 @@ import { Select } from './Select';
 import { confirmDialog } from './ConfirmDialog';
 import { AgwCatalog } from './AgwCatalog';
 
-const TYPES: DataSourceParam['type'][] = ['string', 'number', 'integer', 'boolean', 'date'];
-const TYPE_LABEL: Record<DataSourceParam['type'], string> = { string: '文本', number: '数字', integer: '整数', boolean: '是/否', date: '日期' };
-const AUTH_LABEL: Record<DataSourceInfo['authType'], string> = { none: '无需鉴权', bearer: 'Bearer 令牌', header: '自定义请求头', basic: 'Basic（用户名:密码）', agw: 'API 网关签名' };
+const TYPES: DataSourceParam['type'][] = ['string', 'number', 'integer', 'boolean', 'date', 'json'];
+const TYPE_LABEL: Record<DataSourceParam['type'], string> = { string: '文本', number: '数字', integer: '整数', boolean: '是/否', date: '日期', json: 'JSON' };
+const AUTH_LABEL: Record<DataSourceInfo['authType'], string> = { none: '无需鉴权', bearer: 'Bearer 令牌', header: '自定义请求头', basic: 'Basic（用户名:密码）', agw: 'API 网关签名', agw_key: 'API 网关项目 Key', agw_client: 'API 网关客户端模式', agw_user: 'API 网关用户模式' };
 
-type View = { kind: 'list' } | { kind: 'agw' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
+type View = { kind: 'list' } | { kind: 'catalog' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
 
 export function useSources(enabled = true) {
   return useQuery({ queryKey: qk.sources, queryFn: api.sources, enabled, staleTime: 30_000 });
 }
 
-/** 数据源管理：登记公司内部的查询类接口，凭证只存在服务端。 */
+/** 数据源管理：从 API 网关（AGW）添加当前账号可调用的查询接口，凭证只存在服务端。 */
 export function DataSourceDialog() {
   const open = useUi((s) => s.sourcesOpen);
   const setOpen = useUi((s) => s.setSourcesOpen);
@@ -30,15 +30,15 @@ export function DataSourceDialog() {
     setOpen(false);
     setView({ kind: 'list' });
   };
-  const title = view.kind === 'edit' ? (view.source ? '编辑数据源' : '登记数据源') : view.kind === 'test' ? `试调用 · ${view.source.name}` : view.kind === 'agw' ? 'API 网关' : '数据源';
+  const title = view.kind === 'catalog' ? '可调用 API' : view.kind === 'edit' ? '编辑数据源' : view.kind === 'test' ? `试调用 · ${view.source.name}` : '数据源与 API';
   return (
     <Modal title={title} onClose={close} className="source-modal">
       {view.kind === 'list' ? (
-        <SourceList onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} onAgw={() => setView({ kind: 'agw' })} />
+        <SourceList onAddApi={() => setView({ kind: 'catalog' })} onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} />
+      ) : view.kind === 'catalog' ? (
+        <AgwCatalog onDone={() => setView({ kind: 'list' })} />
       ) : view.kind === 'edit' ? (
         <SourceForm source={view.source} onDone={(s) => setView(s ? { kind: 'test', source: s } : { kind: 'list' })} />
-      ) : view.kind === 'agw' ? (
-        <AgwCatalog onBack={() => setView({ kind: 'list' })} onDone={(source) => setView({ kind: 'test', source })} />
       ) : (
         <SourceTest source={view.source} onBack={() => setView({ kind: 'list' })} />
       )}
@@ -46,7 +46,7 @@ export function DataSourceDialog() {
   );
 }
 
-function SourceList({ onEdit, onTest, onAgw }: { onEdit: (s: DataSourceInfo | null) => void; onTest: (s: DataSourceInfo) => void; onAgw: () => void }) {
+function SourceList({ onAddApi, onEdit, onTest }: { onAddApi: () => void; onEdit: (s: DataSourceInfo | null) => void; onTest: (s: DataSourceInfo) => void }) {
   const qc = useQueryClient();
   const list = useSources();
   const remove = async (s: DataSourceInfo) => {
@@ -63,14 +63,13 @@ function SourceList({ onEdit, onTest, onAgw }: { onEdit: (s: DataSourceInfo | nu
   return (
     <div className="source-list">
       <p className="source-intro">
-        登记公司内部的<b>查询类接口</b>后，在对话框「＋ → 数据源」里选择，生成的应用就能用真实数据。接口地址和凭证只保存在平台，不会出现在页面代码里。
+        从 API 网关添加当前账号<b>可调用的查询接口</b>后，在对话框「＋ → 数据源」里选择，生成的应用就能用真实数据。接口地址和凭证只保存在平台，不会出现在页面代码里。
       </p>
       <div className="source-list-head">
         <span>{list.data ? `共 ${list.data.length} 个` : ''}</span>
         <div className="source-list-buttons">
-          <button type="button" className="subtle-button" onClick={onAgw}>从 API 网关添加</button>
-          <button type="button" className="primary-button" onClick={() => onEdit(null)}>
-            <Icon name="plus" /> 登记数据源
+          <button type="button" className="primary-button" onClick={onAddApi}>
+            <Icon name="web" /> 选择可调用 API
           </button>
         </div>
       </div>
@@ -80,7 +79,7 @@ function SourceList({ onEdit, onTest, onAgw }: { onEdit: (s: DataSourceInfo | nu
         <div className="source-empty">
           <Icon name="database" />
           <b>还没有数据源</b>
-          <p>例如「MES 产线日产量」：填上接口地址、参数和返回示例即可。</p>
+          <p>点上方「选择可调用 API」，从 API 网关添加你有权调用的接口；新接口请先在 AGW 侧登记。</p>
         </div>
       ) : null}
       <ul>
@@ -273,7 +272,7 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
           </label>
         ) : null}
       </div>
-      {f.authType !== 'none' ? (
+      {!['none', 'agw_client', 'agw_user'].includes(f.authType) ? (
         <label>
           <span className="field-label">{f.authType === 'agw' ? 'AppSecret' : '凭证'}{source?.hasSecret ? '（已保存，留空表示不修改）' : ''}</span>
           <input
@@ -288,6 +287,8 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
           <small className="muted-note">凭证加密保存在平台，只在代理请求时使用，不会返回给浏览器。</small>
         </label>
       ) : null}
+      {f.authType === 'agw_client' ? <small className="muted-note">系统身份调用，权限由 AGW 客户端授权决定，无需填写密钥。</small> : null}
+      {f.authType === 'agw_user' ? <small className="muted-note">按工作空间所有者的统一认证工号换取用户令牌，由 AGW 校验该用户的权限。</small> : null}
       <label>
         <span className="field-label">返回示例（JSON，AI 据此写解析代码）</span>
         <textarea className="field mono" rows={5} value={f.sample} placeholder='{"rows":[{"hour":8,"input":130,"output":120,"yield":0.92}]}' onChange={(e) => set({ sample: e.target.value })} />
@@ -328,7 +329,8 @@ function SourceTest({ source, onBack }: { source: DataSourceInfo; onBack: () => 
       void qc.invalidateQueries({ queryKey: ['sourceCalls', source.id] });
     }
   };
-  const usage = `await window.zhiye.source.query('${source.key}'${source.params.length ? `, { ${source.params.map((p) => `${p.name}: ${p.example ? JSON.stringify(p.example) : '…'}`).join(', ')} }` : ''})`;
+  const exampleValue = (p: DataSourceParam) => p.type === 'json' ? (p.example || '{ … }') : (p.example ? JSON.stringify(p.example) : '…');
+  const usage = `await window.zhiye.source.query('${source.key}'${source.params.length ? `, { ${source.params.map((p) => `${p.name}: ${exampleValue(p)}`).join(', ')} }` : ''})`;
   return (
     <div className="source-test">
       <p className="source-usage">
@@ -340,11 +342,23 @@ function SourceTest({ source, onBack }: { source: DataSourceInfo; onBack: () => 
           {source.params.map((p) => (
             <label key={p.name}>
               <span className="field-label">
-                {p.name}
+                {p.name === '_body' ? '完整 JSON 请求体' : p.name}
                 {p.required ? <i>*</i> : null}
-                <small>{TYPE_LABEL[p.type]}{p.description ? ` · ${p.description}` : ''}</small>
+                <small>{TYPE_LABEL[p.type]}{p.name === '_body' ? ' · 填写后覆盖其他参数' : p.description ? ` · ${p.description}` : ''}</small>
               </span>
-              <input className="field mono" value={values[p.name] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))} />
+              {p.type === 'json' ? (
+                <textarea
+                  className="field mono source-json-input"
+                  aria-label={p.name === '_body' ? '完整 JSON 请求体' : p.name}
+                  rows={p.name === '_body' ? 7 : 4}
+                  maxLength={20000}
+                  placeholder={'{"appId":"填写接口要求的 appId","其他字段":"按接口契约填写"}'}
+                  value={values[p.name] ?? ''}
+                  onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
+                />
+              ) : (
+                <input className="field mono" aria-label={p.name} value={values[p.name] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))} />
+              )}
             </label>
           ))}
         </div>

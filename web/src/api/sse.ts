@@ -203,7 +203,7 @@ export function reduceEvent(s: TaskStreamState, e: TaskEvent): TaskStreamState {
 }
 
 /**
- * 订阅任务 SSE。进度只来自服务端事件（以及首次 GET 任务的快照），不使用计时器。
+ * 订阅任务 SSE。进度来自服务端事件和真实任务快照；SSE 被代理缓冲或断连时每 3 秒回查一次，避免卡片永久停在旧状态。
  * onFinished 在流里收到 finished（或快照即为终态）后调用一次，参数为最新的 Task。
  */
 export function useTaskStream(taskId: string | null | undefined, onFinished?: (task: Task) => void): TaskStreamState {
@@ -282,8 +282,20 @@ export function useTaskStream(taskId: string | null | undefined, onFinished?: (t
       };
     };
     open();
+    const reconcile = window.setInterval(() => {
+      if (closed || finishedFired) return;
+      api.getTask(taskId).then((task) => {
+        if (closed || finishedFired) return;
+        setState((s) => reduceEvent(
+          { ...s, task, todos: task.todos ?? s.todos },
+          { seq: 0, createdAt: new Date().toISOString(), type: 'status', payload: { status: task.status, phaseLabel: task.phaseLabel, progress: task.progress } },
+        ));
+        if (isTerminal(task.status)) void finish();
+      }).catch(() => undefined);
+    }, 3000);
     return () => {
       closed = true;
+      window.clearInterval(reconcile);
       es?.close();
     };
   }, [taskId]);

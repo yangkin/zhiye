@@ -227,4 +227,25 @@ class PipelineTest extends IntegrationTest {
         assertThat(c.delete("/api/apps/" + appId).status()).isEqualTo(204);
         assertThat(c.get("/api/apps/" + appId).status()).isEqualTo(404);
     }
+
+    @Test
+    void staticAssetsUseCachedGzip() throws Exception {
+        Client c = client();
+        String home = c.get("/create").body();
+        var m = java.util.regex.Pattern.compile("src=\"([^\"]+\\.js)\"").matcher(home);
+        assertThat(m.find()).as(home).isTrue();
+        String path = m.group(1);
+        byte[] raw = c.get(path).raw().body();
+        Client.Res zipped = c.send("GET", path, null, Map.of("Accept-Encoding", "br, gzip"));
+        assertThat(zipped.status()).isEqualTo(200);
+        assertThat(zipped.raw().headers().firstValue("content-encoding")).hasValue("gzip");
+        assertThat(zipped.raw().headers().allValues("vary")).contains("Accept-Encoding");
+        assertThat(zipped.raw().headers().firstValue("cache-control")).hasValueSatisfying(v -> assertThat(v).contains("immutable"));
+        assertThat(zipped.raw().body().length).isLessThan(raw.length);
+        try (var in = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(zipped.raw().body()))) {
+            assertThat(in.readAllBytes()).isEqualTo(raw);
+        }
+        Client.Res again = c.send("GET", path, null, Map.of("Accept-Encoding", "gzip"));
+        assertThat(again.raw().body()).isEqualTo(zipped.raw().body());
+    }
 }

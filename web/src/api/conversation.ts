@@ -1,5 +1,5 @@
 import { ApiError, ASK_INTERRUPTED, newIdempotencyKey } from './client';
-import type { AppDetail, AppSummary, AppType, Asset, Mode } from './types';
+import type { AppDetail, AppSummary, AppType, Asset, DataSourceInfo, Mode } from './types';
 
 export interface ConversationSummary {
   id: string;
@@ -43,6 +43,8 @@ export interface ConversationDetail extends ConversationSummary {
   model?: string;
   mode?: Mode;
   assets?: Asset[];
+  /** 会话级连接，创建应用时自动绑定；不是一次性消息附件 */
+  sources?: DataSourceInfo[];
 }
 
 export type TrashAppSummary = AppSummary & { deletedAt?: string | null };
@@ -56,7 +58,7 @@ export interface HistorySummary {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   body?: unknown;
 }
 
@@ -188,15 +190,17 @@ async function askConversation(
 }
 
 export const api = {
-  createConversation: () => request<ConversationSummary>('/api/conversations', { method: 'POST', body: {} }),
+  createConversation: (sourceIds: string[] = []) => request<ConversationSummary>('/api/conversations', { method: 'POST', body: { sourceIds } }),
   conversations: () => request<ConversationSummary[]>('/api/conversations'),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${enc(id)}`),
+  updateConversationSources: (id: string, sourceIds: string[]) =>
+    request<{ sources: DataSourceInfo[] }>(`/api/conversations/${enc(id)}/sources`, { method: 'PUT', body: { sourceIds } }),
   askConversation,
   /** 停止回答；finished=true 表示服务端其实已经答完并保存了 */
   stopAsk: (id: string) => request<{ finished: boolean }>(`/api/conversations/${enc(id)}/ask/stop`, { method: 'POST', body: {} }),
   buildConversation: (
     id: string,
-    input: { type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[] },
+    input: { type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[]; sourceIds?: string[] },
   ) => request<AppDetail>(`/api/conversations/${enc(id)}/build`, { method: 'POST', body: input }),
   deleteConversation: (id: string) => request<void>(`/api/conversations/${enc(id)}`, { method: 'DELETE' }),
   conversationFiles: (id: string) => request<ConversationFile[]>(`/api/conversations/${enc(id)}/files`),

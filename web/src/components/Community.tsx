@@ -9,6 +9,15 @@ import { Modal } from './Modal';
 
 export const authorOf = (t: Pick<TemplateItem, 'author' | 'mine'>) => t.author || (t.mine ? '我' : '华星织友');
 
+export function FeaturedBadge({ inline = false }: { inline?: boolean }) {
+  return (
+    <span className={inline ? 'work-featured-inline' : 'work-featured-badge'} aria-label="平台精选置顶作品" title="平台精选置顶作品">
+      <Icon name="spark" />
+      精选
+    </span>
+  );
+}
+
 export function countLabel(n: number) {
   return n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + 'w' : n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
 }
@@ -32,6 +41,7 @@ export function WorkCover({ t, live = true }: { t: TemplateItem; live?: boolean 
         <Icon name="copy" />
         模板
       </span>
+      {t.featured ? <FeaturedBadge /> : null}
     </div>
   );
 }

@@ -6,6 +6,8 @@ import com.tcl.csot.zhiye.client.UpstreamClient;
 import com.tcl.csot.zhiye.config.FivestarProperties;
 import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.util.Json;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class LlmRouter {
+    private static final Logger log = LoggerFactory.getLogger(LlmRouter.class);
+
     /** 模型标识：auto 或 "供应商ID:模型ID" */
     public static final String AUTO = "auto";
 
@@ -67,15 +71,58 @@ public class LlmRouter {
         Cached c = cache.get(key);
         long now = System.currentTimeMillis();
         if (c != null && c.until > now) return c.route;
+        Boolean multimodal = null;
+        if (ref == null) {
+            JsonNode available = openclaw.availableModels(account);
+            JsonNode selected = null;
+            for (JsonNode m : available) if (m.path("preferred").asBoolean(false)) { selected = m; break; }
+            if (selected == null && available.isArray() && !available.isEmpty()) selected = available.get(0);
+            if (selected != null) {
+                ref = selected.path("providerId").asText() + ":" + selected.path("modelId").asText();
+                multimodal = selected.path("multimodal").asBoolean(true);
+            }
+        }
         JsonNode d = openclaw.route(account, ref);
         String base = d.path("baseUrl").asText(""), key2 = d.path("virtualKey").asText(""), model = d.path("providerModelName").asText("");
         if (base.isBlank() || key2.isBlank() || model.isBlank())
             throw new ApiException(HttpStatus.BAD_GATEWAY, "FIVESTAR_NO_MODEL", "五星AI岛里还没有可用的模型，请先在五星AI岛配置模型");
+        if (multimodal == null) multimodal = multimodalOf(account, ref);
         LlmRoute r = new LlmRoute(base.replaceAll("/+$", ""), key2, model, d.path("providerName").asText("fivestar"),
                 Map.of("X-User-Id", account, "X-Project-Id", fs.projectId()), account,
-                d.path("modelName").asText(d.path("modelId").asText(model)), false);
+                d.path("modelName").asText(d.path("modelId").asText(model)), false, multimodal);
         cache.put(key, new Cached(r, now + Math.max(0, fs.routeCacheSeconds()) * 1000L));
         return r;
+    }
+
+    /** 模型的多模态能力（availableModels 里的 multimodal 标记）；查不到或调用失败时按多模态处理，不额外降级 */
+    private boolean multimodalOf(String account, String ref) {
+        try {
+            for (JsonNode m : openclaw.availableModels(account)) {
+                String id = m.path("providerId").asText() + ":" + m.path("modelId").asText();
+                if (id.equals(ref)) return m.path("multimodal").asBoolean(true);
+            }
+        } catch (Exception e) {
+            log.debug("读取模型多模态能力失败（{}）：{}", ref, e.getMessage());
+        }
+        return true;
+    }
+
+    /** 员工的多模态模型路由（带图调用自动切换用）：preferred 的多模态模型优先；没有可用多模态模型时返回 null */
+    public LlmRoute visionFor(String account) {
+        try {
+            JsonNode available = openclaw.availableModels(account);
+            JsonNode selected = null;
+            for (JsonNode m : available)
+                if (m.path("multimodal").asBoolean(false) && m.path("preferred").asBoolean(false)) { selected = m; break; }
+            if (selected == null)
+                for (JsonNode m : available) if (m.path("multimodal").asBoolean(false)) { selected = m; break; }
+            if (selected == null) return null;
+            String ref = selected.path("providerId").asText() + ":" + selected.path("modelId").asText();
+            return forAccount(account, ref);
+        } catch (Exception e) {
+            log.debug("没有可用的多模态模型路由（{}）：{}", account, e.getMessage());
+            return null;
+        }
     }
 
     /** 网关拒绝了虚拟密钥（被回收或重建）时清掉缓存，下次重新取 */

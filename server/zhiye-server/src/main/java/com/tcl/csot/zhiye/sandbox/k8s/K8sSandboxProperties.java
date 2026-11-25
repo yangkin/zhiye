@@ -36,6 +36,8 @@ public record K8sSandboxProperties(
         @DefaultValue Map<String, String> subPathRewrites,
         /** runner 访问模型网关的集群内地址；为空时用 TaskExecutor 给的地址 */
         String gatewayUrl,
+        /** 沙箱内 runner 的 HTTP 控制端口（工作进程通过 Pod IP 直连） */
+        @DefaultValue("8790") int controlPort,
         @DefaultValue Resources resources,
         /** 等待 Pod Running 的最长时间 */
         @DefaultValue("120") int startupTimeoutSeconds,

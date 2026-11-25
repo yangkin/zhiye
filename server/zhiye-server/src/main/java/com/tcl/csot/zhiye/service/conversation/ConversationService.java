@@ -43,6 +43,8 @@ public class ConversationService {
 
     private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
     private final ConversationFileService files;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.tcl.csot.zhiye.service.source.DataSourceService dataSources;
 
     public ConversationService(ConversationRepository repo, AskService ask, AppService apps, AskAttachments attachments,
                                org.springframework.jdbc.core.simple.JdbcClient jdbc, ConversationFileService files) {
@@ -60,7 +62,7 @@ public class ConversationService {
     /** type：创造页选的应用类型（只作参考，形态仍由模型判断） */
     public record Prepared(String workspaceId, String conversationId, String content,
                            List<String> skillAppIds, List<JsonNode> history, String type,
-                           List<AskAttachments.Attached> assets) {}
+                           List<AskAttachments.Attached> assets, String sourceContext) {}
 
     public List<Map<String, Object>> files(String ws, String id) {
         require(ws, id);
@@ -130,7 +132,26 @@ public class ConversationService {
         String title = body == null ? "" : body.path("title").asText("").trim();
         if (title.isEmpty()) title = ConversationRepository.DEFAULT_TITLE;
         if (title.length() > MAX_TITLE_CHARS) throw ApiException.validation("对话标题最多 " + MAX_TITLE_CHARS + " 字");
-        return view(repo.create(ws, title));
+        List<String> sourceIds = dataSources.validateIds(ws, stringIds(body, "sourceIds"));
+        return view(repo.create(ws, title, sourceIds));
+    }
+
+    public List<Map<String, Object>> updateSources(String ws, String id, List<String> sourceIds) {
+        require(ws, id);
+        List<String> valid = dataSources.validateIds(ws, sourceIds);
+        repo.updateSources(id, valid);
+        return dataSources.selection(ws, valid);
+    }
+
+    private static List<String> stringIds(JsonNode body, String field) {
+        if (body == null || !body.path(field).isArray()) return List.of();
+        List<String> out = new ArrayList<>();
+        for (JsonNode id : body.get(field)) if (id.isTextual() && !id.asText().isBlank()) out.add(id.asText());
+        return out;
+    }
+
+    private static List<String> sourceIds(JsonNode value) {
+        return stringIds(Json.obj().set("ids", value == null ? Json.M.createArrayNode() : value), "ids");
     }
 
     /** 历史页的会话记录：带消息数、文件数，以及从这段会话创建的应用（应用已删除则不带） */
@@ -172,6 +193,7 @@ public class ConversationService {
         List<Map<String, Object>> messages = new ArrayList<>();
         for (ConversationRepository.MessageRow msg : repo.messages(id)) messages.add(viewMessage(msg));
         m.put("messages", messages);
+        m.put("sources", dataSources.selection(ws, sourceIds(c.sourceIds())));
         // 从这段会话创建的最新应用：重新打开会话时还能找到入口和进度
         jdbc.sql("""
                 select a.id, a.name, a.phase from app_conversation ac join app a on a.id = ac.app_id
@@ -207,7 +229,7 @@ public class ConversationService {
      * 这样刷新页面后仍能继续多轮对话，且不会把本轮 user 重复传给模型。
      */
     public Prepared prepareAsk(String ws, String id, JsonNode body) {
-        require(ws, id);
+        ConversationRepository.ConversationRow conversation = require(ws, id);
         String content = ask.validate(body == null ? null : body.path("content").asText(""));
         List<String> skillAppIds = List.copyOf(AskService.ids(body));
         List<JsonNode> history = requestedHistory(body);
@@ -221,7 +243,8 @@ public class ConversationService {
         if (firstUser) repo.titleFromFirstUser(id, title(content));
         repo.touch(id);
         String type = body == null ? "" : body.path("type").asText("");
-        return new Prepared(ws, id, content, skillAppIds, history, Catalog.TYPES.contains(type) ? type : null, attached);
+        return new Prepared(ws, id, content, skillAppIds, history, Catalog.TYPES.contains(type) ? type : null, attached,
+                dataSources.conversationSummary(ws, sourceIds(conversation.sourceIds())));
     }
 
     /** 只有回答完整产生后才保存 assistant；会话已被删除时不写回。 */
@@ -257,7 +280,7 @@ public class ConversationService {
 
     /** 创建应用前整理完整对话，而不是只拼接用户消息。 */
     public Map<String, Object> build(String ws, String id, BuildRequest request, String idemKey) throws Exception {
-        require(ws, id);
+        ConversationRepository.ConversationRow conversation = require(ws, id);
         List<ConversationRepository.MessageRow> messages = repo.messages(id);
         boolean hasUser = false;
         for (ConversationRepository.MessageRow msg : messages) {
@@ -279,8 +302,11 @@ public class ConversationService {
             if (msg.assetIds() != null) for (JsonNode n : msg.assetIds()) if (n.isTextual()) assetIds.add(n.asText());
         }
         if (req.assetIds() != null) assetIds.addAll(req.assetIds());
+        LinkedHashSet<String> selectedSources = new LinkedHashSet<>();
+        for (var source : dataSources.visibleSelection(ws, sourceIds(conversation.sourceIds()))) selectedSources.add(source.id());
+        if (req.sourceIds() != null) selectedSources.addAll(req.sourceIds());
         AppService.CreateRequest create = new AppService.CreateRequest(type, prompt, req.mode(), req.model(),
-                List.copyOf(assetIds), null, req.skillAppIds(), req.sourceIds());
+                List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources));
         Map<String, Object> app = apps.create(ws, create, idemKey);
         Object appId = app.get("id");
         if (appId != null) {

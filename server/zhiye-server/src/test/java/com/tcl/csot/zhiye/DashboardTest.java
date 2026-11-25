@@ -58,13 +58,13 @@ class DashboardTest extends IntegrationTest {
                 .param(taskId).update();
         jdbc.sql("insert into app_fn_log (app_id, name, ok, duration_ms) values (?, 'calcStats', true, 42), (?, 'calcStats', false, 88)")
                 .params(appId, appId).update();
-        JsonNode ds = c.ok(c.post("/api/sources", Map.of(
+        JsonNode ds = registerSource(c, Map.of(
                 "key", "dash_test_src",
                 "name", "看板测试数据源",
                 "method", "GET",
                 "url", "http://127.0.0.1:" + port + "/api/meta",
                 "authType", "none"
-        )));
+        ));
         jdbc.sql("insert into data_source_call (source_id, app_id, origin, status, ok, duration_ms) values (?, ?, 'preview', 200, true, 18)")
                 .params(ds.path("id").asText(), appId).update();
         c.ok(c.post("/api/conversations", Map.of()));

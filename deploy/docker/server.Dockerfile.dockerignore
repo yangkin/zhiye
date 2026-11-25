@@ -11,6 +11,7 @@
 !e2e/package.json
 !packages/app-template/**
 !packages/vue-template/**
+!packages/fullstack-template/**
 !packages/skill-template/**
 !packages/static-template/**
 !packages/script-template/**

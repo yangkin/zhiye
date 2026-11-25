@@ -3,7 +3,11 @@ package com.tcl.csot.zhiye.storage;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.checksums.RequestChecksumCalculation;
+import software.amazon.awssdk.core.checksums.ResponseChecksumValidation;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -26,6 +30,10 @@ public class S3ObjectStore implements ObjectStore {
         var b = S3Client.builder()
                 .httpClientBuilder(UrlConnectionHttpClient.builder())
                 .region(Region.of(region))
+                // Ceph / 部分 S3 兼容存储不支持 SDK 2.29+ 默认的 CRC32 校验与 aws-chunked 编码（putObject 400），
+                // 恢复为只在操作必需时计算校验
+                .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
+                .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
                 .forcePathStyle(pathStyle);
         if (endpoint != null && !endpoint.isBlank()) b.endpointOverride(URI.create(endpoint));
         if (accessKey != null && !accessKey.isBlank())

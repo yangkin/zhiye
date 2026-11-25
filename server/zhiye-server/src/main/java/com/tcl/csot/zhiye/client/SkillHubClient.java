@@ -61,7 +61,7 @@ public interface SkillHubClient {
     Submission publish(String token, PublishInput in, byte[] zip, String zipName);
 
     /** 某个版本的审核状态 */
-    ReviewState reviewState(String token, long skillId, long versionId);
+    ReviewState reviewState(String token, long skillId, String version);
 
     /** 修改某个版本的可见范围（限定范围发布，覆盖即生效） */
     void setVisibleScope(String token, long skillId, long versionId, String visibleOrgCodePath);

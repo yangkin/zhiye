@@ -5,7 +5,7 @@ import { api, errorMessage } from '../api/client';
 import { Icon } from '../lib/icons';
 import { copyText, fmtDate } from '../lib/format';
 import { toast } from '../lib/store';
-import { authorOf, countLabel, useLikeWork, useUseWork, WorkCover } from '../components/Community';
+import { authorOf, countLabel, FeaturedBadge, useLikeWork, useUseWork, WorkCover } from '../components/Community';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Modal } from '../components/Modal';
 import { Select } from '../components/Select';
@@ -122,6 +122,7 @@ export function WorkPage() {
         <h1>
           {t.name}
           <span className="work-type">{t.type}</span>
+          {t.featured ? <FeaturedBadge inline /> : null}
         </h1>
         <p className="work-desc">{t.description || '作者还没有写介绍，看看左边的效果吧。'}</p>
         <div className="work-actions">

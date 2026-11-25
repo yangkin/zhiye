@@ -10,6 +10,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties("zhiye.auth")
 public record AuthProperties(
         @DefaultValue("anonymous") String mode,
+        /** 登录白名单：开启后仅 platform_login_allowlist 内启用人员与管理员可登录；默认关闭（本地/测试开放） */
+        @DefaultValue("false") boolean loginAllowlistEnabled,
         @DefaultValue Sso sso) {
 
     public boolean ssoEnabled() { return "sso".equalsIgnoreCase(mode); }

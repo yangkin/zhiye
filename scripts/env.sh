@@ -8,6 +8,11 @@ if [[ "$(uname -s)" == MINGW64_NT* || "$(uname -s)" == MINGW32_NT* || "$(uname -
   if [ -f "$ZHIYE_ROOT/runtime/tools/deno/deno.exe" ]; then
     export ZHIYE_FUNCTIONS_DENO="${ZHIYE_FUNCTIONS_DENO:-$(cygpath -m "$ZHIYE_ROOT/runtime/tools/deno/deno.exe")}"
   fi
+  if [ -z "${ZHIYE_CHROME_PATH:-}" ]; then
+    for chrome in '/c/Program Files/Google/Chrome/Application/chrome.exe' '/c/Program Files (x86)/Google/Chrome/Application/chrome.exe'; do
+      if [ -f "$chrome" ]; then export ZHIYE_CHROME_PATH="$(cygpath -m "$chrome")"; break; fi
+    done
+  fi
 else
   export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
   export ZHIYE_NODE_DIR="${ZHIYE_NODE_DIR:-$HOME/.nvm/versions/node/v24.14.1/bin}"

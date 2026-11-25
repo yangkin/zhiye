@@ -127,7 +127,14 @@ public class GatewayController {
         String model = parsed.path("model").asText(props.llm().model());
         // 五星模式：runner 不知道员工的路由，模型名在这里换成 llm-gateway 上的 xclaw-{工号}-{供应商}/{模型}
         if (!route.local() && parsed.isObject()) {
+            // runner 侧模型定义固定是多模态，实际路由可能不是：带图的调用自动切到该员工的多模态模型
+            if (!route.multimodal() && hasImages(parsed)) {
+                LlmRoute vision = router.visionFor(route.account());
+                if (vision != null) route = vision;
+            }
             ((com.fasterxml.jackson.databind.node.ObjectNode) parsed).put("model", route.model());
+            // 没有多模态模型可切时兜底：图片降级成文本，避免上游 400 毁掉整个任务
+            if (!route.multimodal()) stripImages(parsed);
             body = Json.write(parsed).getBytes(StandardCharsets.UTF_8);
             model = route.model();
         }
@@ -197,6 +204,32 @@ public class GatewayController {
                 platformLogs.record("llm_gateway", ok ? "INFO" : "ERROR", action, null, null, null, tid, ok,
                         up.statusCode(), ms, summary, errBody != null ? errBody : streamErr,
                         java.util.Map.of("provider", route.provider(), "model", model, "stream", stream, "local", route.local()));
+            }
+        }
+    }
+
+    /** 请求里是否带图片（OpenAI 多模态消息）。 */
+    static boolean hasImages(JsonNode parsed) {
+        for (JsonNode msg : parsed.path("messages")) {
+            JsonNode content = msg.path("content");
+            if (!content.isArray()) continue;
+            for (JsonNode part : content) if ("image_url".equals(part.path("type").asText())) return true;
+        }
+        return false;
+    }
+
+    /** 把消息里的图片改写成文本占位（非多模态路由用），其余内容原样保留。 */
+    static void stripImages(JsonNode parsed) {
+        for (JsonNode msg : parsed.path("messages")) {
+            JsonNode content = msg.path("content");
+            if (!content.isArray()) continue;
+            com.fasterxml.jackson.databind.node.ArrayNode arr = (com.fasterxml.jackson.databind.node.ArrayNode) content;
+            for (int i = 0; i < arr.size(); i++) {
+                if (!"image_url".equals(arr.get(i).path("type").asText())) continue;
+                var text = Json.obj();
+                text.put("type", "text");
+                text.put("text", "[图片已省略：当前模型不支持图片输入]");
+                arr.set(i, text);
             }
         }
     }

@@ -259,8 +259,6 @@ body.studio-mode .studio-body.is-maximized .manual-overlay-hidden{display:none}
 .markdown-body .md-table th{background:var(--st-raised);font-weight:600;text-align:left}
 .markdown-body .md-table td,.markdown-body .md-table th{font-size:.92em;white-space:nowrap}
 
-/* 助手消息头：「织页 · 模型」 */
-.assistant-head .assistant-model{font-weight:400;color:var(--st-faint);margin-left:-2px}
 .chat-msg-meta span{color:var(--st-faint)}
 
 /* 回答下方的「下一步」 */

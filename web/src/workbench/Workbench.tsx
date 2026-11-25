@@ -69,18 +69,18 @@ function Workbench({ id }: { id: string }) {
   const versionsQ = useVersions(id, !!app?.currentVersion);
   const versions = useMemo(() => versionsQ.data ?? [], [versionsQ.data]);
 
+  const [tab, setTab] = useState<Tab>('preview');
   const skill = app ? isSkillApp(app) : false;
   const script = app ? isScriptApp(app) : false;
   const service = app ? isServiceApp(app) : false;
   const mainTab: Tab = skill || script ? 'code' : 'preview';
-  const [tab, setTab] = useState<Tab>(mainTab);
-  // 技能包与脚本默认打开「代码」；没有云服务
+  // 技能包默认打开「代码」；没有云服务
   useEffect(() => {
-    if (skill || script) setTab('code');
-  }, [skill, script, app?.id]);
+    if (skill) setTab('code');
+  }, [skill, app?.id]);
   useEffect(() => {
-    if ((skill || script) && tab === 'cloud') setTab('code');
-  }, [skill, script, tab]);
+    if (skill && tab === 'cloud') setTab('code');
+  }, [skill, tab]);
   // 时间线 / 消息里的「在代码中打开」「查看改动」：切到代码页
   useEffect(() => {
     const openCode = () => setTab('code');
@@ -502,12 +502,12 @@ function Workbench({ id }: { id: string }) {
           {skill || script ? (
             <button
               className="studio-publish"
-              aria-label={script ? '导出源码' : '发布技能'}
+              aria-label={script ? '导出源码' : '发布到 SkillHub'}
               disabled={!ready}
               onClick={() => (script ? download('export') : setModal('skillhub'))}
             >
               <Icon name="globe" />
-              <span>{script ? '导出源码' : '发布技能'}</span>
+              <span>{script ? '导出源码' : '发布到 SkillHub'}</span>
             </button>
           ) : (
             <button className="studio-publish" disabled={!ready} onClick={() => setModal('publish')}>
@@ -777,22 +777,6 @@ function Workbench({ id }: { id: string }) {
                     </span>
                     <h3>这次没能生成出来</h3>
                     <p>可以在左侧查看原因并重试。</p>
-                  </div>
-                ) : skill || script ? (
-                  <div className="preview-empty">
-                    <span>
-                      <Icon name={skill ? 'agent' : 'code'} />
-                    </span>
-                    <h3>{skill ? '该应用为技能包' : '该应用为命令行脚本'}</h3>
-                    <p>无需网页预览，可在「代码」页查看源码或执行文件。</p>
-                  </div>
-                ) : app.phase === 'ready' && !frameSrc ? (
-                  <div className="preview-empty">
-                    <span>
-                      <Icon name="alert" />
-                    </span>
-                    <h3>暂无可用的网页预览</h3>
-                    <p>当前版本未包含可预览的前端页面，可在「代码」页查看文件。</p>
                   </div>
                 ) : (
                   <CreatingStage label={stream.phaseLabel} skill={skill} />

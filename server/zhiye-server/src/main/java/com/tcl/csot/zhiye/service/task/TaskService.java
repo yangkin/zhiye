@@ -152,7 +152,7 @@ public class TaskService {
         if (cp.isPresent() && ("generate".equals(old.type()) || "modify".equals(old.type()))) {
             ObjectNode resume = checkpointJson(cp.get(), true);
             // 上一轮是做到上限才停的：重试要接着做，不要把原指令当新任务从头做
-            if (java.util.Set.of("TOO_LARGE", "TIMEOUT", "PAUSED", "BUDGET_EXCEEDED", "PROVIDER_QUOTA").contains(old.errorCode())) resume.put("continueWork", true);
+            if (java.util.Set.of("TOO_LARGE", "TIMEOUT", "PAUSED", "BUDGET_EXCEEDED", "PROVIDER_QUOTA", "PROVIDER_RATE_LIMIT").contains(old.errorCode())) resume.put("continueWork", true);
             input.set("resume", resume);
         } else {
             base = input.hasNonNull("manualVersionId") ? input.path("manualVersionId").asText() : app.currentVersionId();

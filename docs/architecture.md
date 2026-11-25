@@ -115,7 +115,7 @@ e2e/        Playwright 端到端用例与页面巡检脚本（见 docs/testing.m
 ## 7. 云服务、数据源、技能、模板
 
 - **云服务**（`cloud-services.md`）：每个应用一个 PostgreSQL schema（最多 50 张表，`cloud/schema.sql` 声明，任务成功后自动建表补列）、对象存储前缀、Deno 云函数（`packages/fn-runtime`）、应用内 AI（扣作者的额度）。由 agent 用 `request_confirm` 申请，用户在确认卡上同意才启用。
-- **数据源**（`data-sources.md`）：工作空间登记 HTTP 接口（凭证只存服务端），每个应用最多绑定 100 个；应用通过 `zhiye.source.query` 调用，服务端代理、限制主机白名单和响应大小。支持从 API 网关导入公开契约。
+- **数据源**（`data-sources.md`）：接口只在 AGW 侧登记，织页通过「选择可调用 API」按当前用户授权添加（手工登记已关闭，403 `SOURCE_MANUAL_DISABLED`），每个应用最多绑定 100 个；应用通过 `zhiye.source.query` 调用，服务端代理、限制主机白名单和响应大小。历史手工登记和项目 Key / 签名数据源继续可用。
 - **技能**：内置技能（`packages/builtin-skills`）+ 用户自己做的技能应用（projectKind=skill）+ 公司 SkillHub 安装的技能；按消息选用，放进 agent 目录供模型读取。SkillHub 真实接口与联调事项见 `fivestar-integration.md`。
 - **模板与社区**：创造页场景模板（`web/src/lib/templates.ts`，含 9 个看板模板）；社区作品可「使用模板」复刻成自己的应用（clone 任务）。
 - **小织**：右下角帮助助手（`HelpService` + 离线 FAQ），产品知识两处同步（`HelpPrompt.java`、`helpFaq.ts`）。

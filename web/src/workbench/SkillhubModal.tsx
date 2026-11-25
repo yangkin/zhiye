@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ApiError, api, errorMessage, newIdempotencyKey } from '../api/client';
 import { qk } from '../api/queries';
@@ -92,10 +92,11 @@ export function parseSkillFrontmatter(src: string): {
   };
 }
 
-const VIS: [SkillVisibility, string, string][] = [
-  ['private', '仅本人使用', '免上架人工审批，仍须通过发布检测'],
-  ['team', '部门 / 中心', '所在部门或中心可见，审批通过后上架'],
-  ['public', '全员共享', '全公司可搜索和安装，审批通过后上架'],
+type PublishVisibility = Exclude<SkillVisibility, 'team'>;
+
+const VIS: [PublishVisibility, string, string][] = [
+  ['private', '仅个人使用', '仅自己可见，可分享链接给他人'],
+  ['public', '公开至 SkillHub', '管理员审核通过后在所选范围内可见'],
 ];
 
 interface Props {
@@ -108,13 +109,19 @@ interface Props {
 export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
   const [versionId, setVersionId] = useState(app.currentVersion?.id ?? versions[0]?.id ?? '');
   const [displayName, setDisplayName] = useState(app.name);
-  const [visibility, setVisibility] = useState<SkillVisibility>('private');
+  const [visibility, setVisibility] = useState<PublishVisibility>('private');
+  const [scope, setScope] = useState('');
   const [changelog, setChangelog] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const keyRef = useRef<{ sig: string; key: string } | null>(null);
+
+  const scopes = useQuery({ queryKey: ['skillhub', 'scopes'], queryFn: api.skillhubScopes, enabled: visibility === 'public' });
+  useEffect(() => {
+    if (visibility === 'public' && !scope && scopes.data?.length) setScope(scopes.data[scopes.data.length - 1].value);
+  }, [visibility, scope, scopes.data]);
 
   const files = useQuery({ queryKey: qk.files(versionId), queryFn: () => api.versionFiles(versionId), enabled: !!versionId });
   const skillPath = useMemo(
@@ -172,13 +179,13 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
     return list;
   }, [trimmedDisplay, displayLen, loading, skillPath, meta, descLen, skillFile.data, files.data]);
 
-  const loadError = files.error || skillFile.error;
-  const canPublish = !loading && !loadError && issues.length === 0 && !!versionId;
+  const loadError = files.error || skillFile.error || (visibility === 'public' ? scopes.error : null);
+  const canPublish = !loading && !loadError && issues.length === 0 && !!versionId && (visibility === 'private' || !!scope);
   const comingSoon = app.skillhub?.enabled === false;
 
   const publish = async () => {
     if (!canPublish || busy) return;
-    const body = { versionId, displayName: trimmedDisplay, visibility, changelog: changelog.trim() };
+    const body = { versionId, displayName: trimmedDisplay, visibility, scope: visibility === 'public' ? scope : undefined, changelog: changelog.trim() };
     const sig = JSON.stringify(body);
     if (keyRef.current?.sig !== sig) keyRef.current = { sig, key: newIdempotencyKey() };
     setBusy(true);
@@ -188,7 +195,7 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
       const res = await api.skillhubPublish(app.id, body, keyRef.current.key);
       keyRef.current = null;
       setResult(res.url);
-      toast('已发布到 SkillHub。');
+      toast(visibility === 'private' ? '已保存到 SkillHub 个人目录。' : '已提交 SkillHub 审核。');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'SKILLHUB_NOT_CONFIGURED') setInfo(err.message);
       else setError(errorMessage(err));
@@ -204,7 +211,7 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
           <Icon name="cloud" />
           <i>✦</i>
         </div>
-        <h3 className="center">{trimmedDisplay || meta?.name || app.name} 已发布</h3>
+        <h3 className="center">{trimmedDisplay || meta?.name || app.name} {visibility === 'private' ? '已保存' : '已提交审核'}</h3>
         <label className="field-label">技能地址</label>
         <div className="copy-field">
           <span>{result}</span>
@@ -329,8 +336,8 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
         }
       />
 
-      <span className="field-label">使用范围</span>
-      <div className="vis-group" role="radiogroup" aria-label="使用范围">
+      <span className="field-label">发布方式</span>
+      <div className="vis-group" role="radiogroup" aria-label="发布方式">
         {VIS.map(([v, label, desc]) => (
           <button key={v} type="button" role="radio" aria-checked={visibility === v} value={v} className={visibility === v ? 'active' : ''} onClick={() => setVisibility(v)}>
             <b>{label}</b>
@@ -338,6 +345,21 @@ export function SkillhubModal({ app, versions, onDownload, onClose }: Props) {
           </button>
         ))}
       </div>
+      {visibility === 'public' ? (
+        <div className="field block">
+          <label className="field-label" htmlFor="skill-visible-scope">SkillHub 可见范围</label>
+          <Select
+            id="skill-visible-scope"
+            ariaLabel="SkillHub 可见范围"
+            value={scope}
+            onChange={setScope}
+            disabled={scopes.isLoading || !scopes.data?.length}
+            placeholder={scopes.isLoading ? '正在获取组织范围…' : '请选择可见范围'}
+            options={(scopes.data ?? []).map((s) => ({ value: s.value, label: `${'　'.repeat(Math.max(0, s.level - 1))}${s.label}` }))}
+          />
+          <p className="muted-note">审核通过后，所选组织及其下级组织可见；根节点表示全公司。</p>
+        </div>
+      ) : null}
 
       {app.skillhub?.lastPublishedAt ? (
         <>

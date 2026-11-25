@@ -16,15 +16,19 @@ public record SkillHubProperties(
         String baseUrl,
         /** 技能包文件地址所在的服务根地址（fivestar-service 调平台文件服务取回 skillPackageUrl 后返回）；通常与 baseUrl 相同 */
         String fileBaseUrl,
+        /** TFLE 文件服务网关根地址，例如 http://网关/tfle/v1；为空时从标准 fivestar-new 地址推导 */
+        String uploadBaseUrl,
         /** SkillHub 详情页地址，{id} 会替换为技能 ID */
         String portalUrl,
         /** 平台租户（organizationId），接口路径都带它 */
         @DefaultValue("31") String organizationId,
-        /** OSS 上传用的 bucket / storageCode（预留：目前直接把包作为 multipart 传给 fivestar） */
+        /** TFLE 上传的 bucket / storageCode 覆盖值；默认从 fivestar-service 的存储配置接口获取 */
         @DefaultValue("") String bucketName,
         @DefaultValue("") String storageCode,
         /** 服务间令牌所在的环境变量名（预留） */
         @DefaultValue("ZHIYE_SKILLHUB_INTERNAL_TOKEN") String internalTokenEnv,
+        /** 分类按中心过滤（平台 queryByCenter 的 centerName）；为空时由平台按用户中心解析，失败回退 queryAll */
+        @DefaultValue("") String centerName,
         @DefaultValue("60") int timeoutSeconds) {
 
     public String internalToken() {

@@ -80,6 +80,10 @@ class KubernetesSandboxProviderTest {
         c.getEnv().forEach(v -> env.put(v.getName(), v.getValue()));
         assertEquals("http://zhiye-api.zhiye.svc:8080/llm/v1", env.get("ZHIYE_GATEWAY_URL"));
         assertEquals("tok-task_env1", env.get("ZHIYE_TASK_TOKEN"));
+        assertNotNull(env.get("ZHIYE_RUNNER_TOKEN"));
+        assertEquals(64, env.get("ZHIYE_RUNNER_TOKEN").length());
+        assertEquals("0.0.0.0", env.get("ZHIYE_RUNNER_HOST"));
+        assertEquals("8790", env.get("ZHIYE_RUNNER_PORT"));
         assertEquals("/agent", env.get("HOME"));
         assertEquals("/opt/zhiye/packages/vite-plugin-loc/index.mjs", env.get("ZHIYE_LOC_PLUGIN"));
         assertEquals("/usr/bin/chromium", env.get("ZHIYE_CHROME_PATH"));

@@ -52,6 +52,10 @@ public class VisualCritiqueService {
         if (screenshotBase64 == null || screenshotBase64.isBlank() || !upstream.hasKey()) return Optional.empty();
         try {
             LlmRoute route = router.forTask(taskId);
+            if (!route.multimodal()) {
+                route = router.visionFor(route.account()); // 任务模型不能看图：换该员工的多模态模型做评审
+                if (route == null) return Optional.empty();
+            }
             ObjectNode req = Json.obj();
             req.put("model", route.model());
             req.put("max_tokens", 300);

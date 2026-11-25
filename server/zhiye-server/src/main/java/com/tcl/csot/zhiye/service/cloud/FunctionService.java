@@ -64,13 +64,19 @@ public class FunctionService {
         this.denoSetting = deno;
     }
 
-    /** 找 deno：配置 → PATH → 常见安装位置；找不到返回 null */
+    /** 找 deno：配置 → PATH → 常见安装位置 → 仓库本地工具目录；找不到返回 null */
     String deno() {
         if (deno != null) return deno;
         List<String> c = new ArrayList<>();
         if (denoSetting != null && !denoSetting.isBlank()) c.add(denoSetting);
-        for (String dir : Optional.ofNullable(System.getenv("PATH")).orElse("").split(java.io.File.pathSeparator)) if (!dir.isBlank()) c.add(dir + "/deno");
+        boolean win = java.io.File.pathSeparator.equals(";");
+        for (String dir : Optional.ofNullable(System.getenv("PATH")).orElse("").split(java.io.File.pathSeparator)) {
+            if (dir.isBlank()) continue;
+            c.add(dir + "/deno");
+            if (win) c.add(dir + "/deno.exe");
+        }
         c.addAll(List.of("/opt/homebrew/bin/deno", "/usr/local/bin/deno", "/usr/bin/deno", System.getProperty("user.home") + "/.deno/bin/deno"));
+        if (win) c.add(props.rootPath().resolve("runtime/tools/deno/deno.exe").toString());
         for (String p : c) if (Files.isExecutable(Path.of(p))) return deno = p;
         return null;
     }

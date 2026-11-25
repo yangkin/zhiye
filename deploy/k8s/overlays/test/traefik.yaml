@@ -1,0 +1,20 @@
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: zhiye-transport
+  namespace: zhiye
+spec:
+  forwardingTimeouts:
+    dialTimeout: "10s"
+    responseHeaderTimeout: "3600s"
+    idleConnTimeout: "3600s"
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: zhiye-upload-buffering
+  namespace: zhiye
+spec:
+  buffering:
+    maxRequestBodyBytes: 104857600
+    memRequestBodyBytes: 10485760

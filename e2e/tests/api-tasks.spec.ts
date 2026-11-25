@@ -91,7 +91,10 @@ test('构建失败 → 交回修复超过轮数后任务失败，不产生版本
   const app = (globalThis as any).__todo
   await api.setFaults({ build: 'error' })
   const { task } = await api.post(`/api/apps/${app.id}/messages`, { content: '把“添加”按钮改成圆角 16px' })
+  // 本地 Runner 与开发故障接口同机，Agent 排查时可能把开关关掉；测试期间持续恢复故障条件。
+  const keepError = setInterval(() => { void api.setFaults({ build: 'error' }).catch(() => {}) }, 1000)
   const failed = await api.waitTask(task.id)
+  clearInterval(keepError)
   await api.setFaults({ build: 'none' })
   expect(failed.status).toBe('FAILED')
   const events = await api.events(task.id)
@@ -104,7 +107,11 @@ test('动态列表重绘、删除相邻元素后，可视化修改仍绑定正�
   await page.goto(app.previewUrl)
   const input = page.locator('input[type="text"], input:not([type])').first()
   const add = page.getByRole('button', { name: /添加|新增/ }).first()
-  for (const t of ['买牛奶', '写周报', '跑步']) { await input.fill(t); await add.click() }
+  for (const t of ['买牛奶', '写周报', '跑步']) {
+    await input.fill(t)
+    await add.click()
+    await expect(page.getByText(t, { exact: true })).toBeVisible()
+  }
   await expect(page.getByText('写周报')).toBeVisible()
   const h1 = page.locator('h1').first()
   const loc = await h1.getAttribute('data-loc')

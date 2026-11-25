@@ -1,8 +1,10 @@
 package com.tcl.csot.zhiye.sandbox.k8s;
 
 import com.tcl.csot.zhiye.sandbox.PathMapper;
-
+import com.tcl.csot.zhiye.sandbox.http.HttpRunnerBackend;
+import com.tcl.csot.zhiye.sandbox.http.HttpRunnerSession;
 import com.tcl.csot.zhiye.util.Ids;
+import com.tcl.csot.zhiye.util.Threads;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
 import com.tcl.csot.zhiye.sandbox.RunnerException;
 import com.tcl.csot.zhiye.sandbox.RunnerSession;
@@ -22,27 +24,32 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Kubernetes 沙箱：每个任务一个 Pod（zhiye.sandbox.provider=k8s）。
  * <ol>
  *   <li>工作进程已经在共享 RWX 卷（NAS）上准备好 workspaces/{id} 和 agents/{id}</li>
  *   <li>创建 Pod：只用 subPath 挂这两个目录；容器 sleep 到截止时间</li>
- *   <li>Pod Running 后 exec {@code sh -c 'cd /workspace && … && exec node runner'}，stdin/stdout 走 JSON 行协议</li>
- *   <li>close → 结束 exec、删除 Pod（grace 0）</li>
+ *   <li>Pod Running 后 exec {@code sh -c 'cd /workspace && … && exec node runner'} 启动 runner（HTTP 服务）</li>
+ *   <li>工作进程通过 Pod IP 直连 runner 控制端口（HTTP + SSE，见 docs/runner-protocol.md），close → 删除 Pod（grace 0）</li>
  * </ol>
  */
 @Component
 @ConditionalOnProperty(name = "zhiye.sandbox.provider", havingValue = "k8s")
 public class KubernetesSandboxProvider implements SandboxProvider {
     private static final Logger log = LoggerFactory.getLogger(KubernetesSandboxProvider.class);
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final KubernetesClient client;
     private final K8sSandboxProperties cfg;
@@ -50,7 +57,6 @@ public class KubernetesSandboxProvider implements SandboxProvider {
     /** 本实例上存活的沙箱 Pod 名（回收器会跳过它们，直到超过截止时间） */
     private final Set<String> live = ConcurrentHashMap.newKeySet();
     Duration pollInterval = Duration.ofSeconds(1);
-    Duration monitorInterval = Duration.ofSeconds(3);
 
     public KubernetesSandboxProvider(KubernetesClient client, K8sSandboxProperties cfg, ZhiyeProperties props) {
         this.client = client;
@@ -116,12 +122,15 @@ public class KubernetesSandboxProvider implements SandboxProvider {
 
     long deadlineSeconds() { return props.task().sandboxMaxHours() * 3600L + cfg.deadlineMarginSeconds(); }
 
-    Map<String, String> runnerEnv(Spec spec) {
+    Map<String, String> runnerEnv(Spec spec, String controlToken) {
         Map<String, String> env = new LinkedHashMap<>();
         String gw = cfg.gatewayUrl() != null && !cfg.gatewayUrl().isBlank() ? cfg.gatewayUrl() : spec.gatewayUrl();
         env.put("ZHIYE_GATEWAY_URL", gw);
         env.put("ZHIYE_TASK_TOKEN", spec.taskToken());
         env.put("ZHIYE_TASK_ID", spec.taskId());
+        env.put("ZHIYE_RUNNER_TOKEN", controlToken);
+        env.put("ZHIYE_RUNNER_HOST", "0.0.0.0");
+        env.put("ZHIYE_RUNNER_PORT", String.valueOf(cfg.controlPort()));
         env.put("ZHIYE_LOC_PLUGIN", cfg.locPlugin());
         env.put("ZHIYE_BRIDGE_PATH", cfg.bridgePath());
         env.put("ZHIYE_CHROME_PATH", cfg.chromePath());
@@ -162,8 +171,9 @@ public class KubernetesSandboxProvider implements SandboxProvider {
         String wsSub = subPathOf(spec.workspace());
         String agentSub = subPathOf(spec.agentDir());
         String name = SandboxPodFactory.podName(spec.taskId(), Ids.random(5));
+        String controlToken = HexFormat.of().formatHex(newToken());
         Pod pod = SandboxPodFactory.build(cfg, new SandboxPodFactory.Input(name, spec.taskId(), wsSub, agentSub,
-                spec.allowNet(), deadlineSeconds(), runnerEnv(spec)));
+                spec.allowNet(), deadlineSeconds(), runnerEnv(spec, controlToken)));
 
         PrintWriter logWriter = new PrintWriter(new OutputStreamWriter(new FileOutputStream(spec.logFile().toFile(), true), StandardCharsets.UTF_8));
         logWriter.println("[java] 创建沙箱 Pod " + cfg.namespace() + "/" + name + "（image=" + cfg.image()
@@ -173,6 +183,8 @@ public class KubernetesSandboxProvider implements SandboxProvider {
 
         PodResource res = client.pods().inNamespace(cfg.namespace()).withName(name);
         live.add(name);
+        PodHttpBackend backend = null;
+        HttpRunnerSession session = null;
         try {
             client.pods().inNamespace(cfg.namespace()).resource(pod).create();
             awaitRunning(res, name, Duration.ofSeconds(cfg.startupTimeoutSeconds()));
@@ -183,15 +195,23 @@ public class KubernetesSandboxProvider implements SandboxProvider {
             logWriter.println("[java] 沙箱 Pod 已运行，启动 runner");
             logWriter.flush();
             ExecWatch watch = startExec(res);
-            PodOps ops = new PodOps(res, name);
+            backend = new PodHttpBackend(res, name, watch, logWriter);
+            String ip = awaitPodIp(res, name);
             PathMapper mapper = new PathMapper(spec.workspace().toAbsolutePath().normalize().toString(),
                     spec.agentDir().toAbsolutePath().normalize().toString(), SandboxPodFactory.POD_WORKSPACE, SandboxPodFactory.POD_AGENT);
             var resCfg = cfg.resources();
-            return new K8sRunnerSession(spec.taskId(), new FabricExec(watch), ops, spec.onEvent(), logWriter, mapper, monitorInterval,
-                    new RunnerSession.SandboxDescriptor("k8s", cfg.namespace() + "/" + name, null, cfg.image(),
-                            resCfg == null ? null : resCfg.cpuLimit(), resCfg == null ? null : resCfg.memoryLimit()));
+            backend.descriptor = new RunnerSession.SandboxDescriptor("k8s", cfg.namespace() + "/" + name, null, cfg.image(),
+                    resCfg == null ? null : resCfg.cpuLimit(), resCfg == null ? null : resCfg.memoryLimit());
+            session = new HttpRunnerSession("http://" + ip + ":" + cfg.controlPort(), Map.of(), controlToken,
+                    backend, spec.onEvent(), logWriter, mapper);
+            session.waitReady(Duration.ofSeconds(cfg.startupTimeoutSeconds()));
+            return session;
         } catch (Exception e) {
             logWriter.println("[java] " + e.getMessage());
+            if (backend != null) logWriter.print(backend.recentStderr());
+            if (session != null) {
+                try { session.close(); } catch (Exception ignored) { }
+            }
             logWriter.close();
             deletePod(res, name);
             throw e;
@@ -206,8 +226,21 @@ public class KubernetesSandboxProvider implements SandboxProvider {
                 .exec(runnerCommand());
     }
 
+    /** Pod Running 后等 CNI 分配 IP（通常已经有）。 */
+    private String awaitPodIp(PodResource res, String name) throws Exception {
+        Instant end = Instant.now().plusSeconds(15);
+        while (true) {
+            Pod p = res.get();
+            if (p == null) throw new RunnerException("沙箱启动失败：Pod " + name + " 已被删除");
+            String ip = p.getStatus() == null ? null : p.getStatus().getPodIP();
+            if (ip != null && !ip.isBlank()) return ip;
+            if (Instant.now().isAfter(end)) throw new RunnerException("沙箱启动失败：Pod 没有分配到 IP");
+            Thread.sleep(pollInterval.toMillis());
+        }
+    }
+
     /** 在 Pod 里反复连接一个被策略拒绝的地址，连不上（连续两次）才算隔离生效；返回等待的毫秒数。 */
-    static final String ISOLATION_SCRIPT = String.join("", 
+    static final String ISOLATION_SCRIPT = String.join("",
             "const net=require('net');const [h,p]=process.argv[1].split(':');const end=Date.now()+(+process.argv[2]);",
             "const t0=Date.now();let blocked=0;const out=(m,c)=>process.stdout.write(m+'\\n',()=>process.exit(c));",
             "function once(){const s=net.connect({host:h,port:+p,timeout:700});let done=false;",
@@ -321,26 +354,88 @@ public class KubernetesSandboxProvider implements SandboxProvider {
         try { res.withGracePeriod(0).delete(); } catch (Exception e) { log.warn("删除沙箱 Pod {} 失败：{}", name, e.getMessage()); }
     }
 
-    private final class PodOps implements K8sRunnerSession.PodOps {
-        private final PodResource res;
-        private final String name;
-        PodOps(PodResource res, String name) { this.res = res; this.name = name; }
-        @Override public String failureReason() { return KubernetesSandboxProvider.failureReason(res.get()); }
-        @Override public void delete() { deletePod(res, name); }
-        @Override public String name() { return name; }
+    private static byte[] newToken() {
+        byte[] b = new byte[32];
+        RANDOM.nextBytes(b);
+        return b;
     }
 
-    private static final class FabricExec implements K8sRunnerSession.Exec {
-        private final ExecWatch w;
-        private final CompletableFuture<Integer> code = new CompletableFuture<>();
-        FabricExec(ExecWatch w) {
-            this.w = w;
-            w.exitCode().whenComplete((c, e) -> code.complete(e != null || c == null ? -1 : c));
+    /**
+     * 沙箱 Pod 上的 runner 生命周期。runner 的日志走 SSE（与 OpenSandbox 一致），
+     * exec 的 stderr 只保留最近 200 行，用于 runner 没起来 / 异常退出时的诊断。
+     */
+    private final class PodHttpBackend implements HttpRunnerBackend {
+        private final PodResource res;
+        private final String name;
+        private final ExecWatch watch;
+        private final PrintWriter logWriter;
+        private final Deque<String> stderrTail = new ArrayDeque<>(200);
+        private volatile boolean destroyed;
+        volatile RunnerSession.SandboxDescriptor descriptor;
+
+        PodHttpBackend(PodResource res, String name, ExecWatch watch, PrintWriter logWriter) {
+            this.res = res;
+            this.name = name;
+            this.watch = watch;
+            this.logWriter = logWriter;
+            Threads.start("k8s-runner-err-" + name, this::collectStderr);
+            watch.exitCode().whenComplete((code, err) -> {
+                if (destroyed) return;
+                logLine("[java] runner 进程已退出（退出码 " + (err != null || code == null ? "未知" : code) + "）");
+                logWriter.print(recentStderr());
+                logWriter.flush();
+            });
         }
-        @Override public OutputStream stdin() { return w.getInput(); }
-        @Override public InputStream stdout() { return w.getOutput(); }
-        @Override public InputStream stderr() { return w.getError(); }
-        @Override public CompletableFuture<Integer> exitCode() { return code; }
-        @Override public void close() { try { w.close(); } catch (Exception ignored) { } code.complete(-1); }
+
+        private void collectStderr() {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(watch.getError(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    synchronized (stderrTail) {
+                        if (stderrTail.size() >= 200) stderrTail.pollFirst();
+                        stderrTail.addLast(line);
+                    }
+                }
+            } catch (IOException ignored) { }
+        }
+
+        synchronized String recentStderr() {
+            synchronized (stderrTail) {
+                return stderrTail.isEmpty() ? "" : "[java] runner stderr（最近 " + stderrTail.size() + " 行）：\n"
+                        + String.join("\n", stderrTail) + "\n";
+            }
+        }
+
+        private void logLine(String s) {
+            synchronized (logWriter) { logWriter.println(s); logWriter.flush(); }
+        }
+
+        @Override
+        public RunnerSession.SandboxDescriptor descriptor() { return descriptor; }
+
+        @Override
+        public boolean alive() {
+            if (destroyed || watch.exitCode().isDone()) return false;
+            try { return failureReason(res.get()) == null; } catch (Exception e) { return false; }
+        }
+
+        @Override
+        public void awaitExit(Duration timeout) {
+            try { watch.exitCode().get(timeout.toMillis(), TimeUnit.MILLISECONDS); } catch (Exception ignored) { }
+        }
+
+        @Override
+        public void close() { destroy(); }
+
+        @Override
+        public void kill() { destroy(); }
+
+        private synchronized void destroy() {
+            if (destroyed) return;
+            destroyed = true;
+            try { watch.close(); } catch (Exception ignored) { }
+            deletePod(res, name);
+            logLine("[java] 已删除沙箱 Pod " + name);
+        }
     }
 }

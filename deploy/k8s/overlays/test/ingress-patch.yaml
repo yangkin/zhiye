@@ -4,14 +4,15 @@ metadata:
   name: zhiye
   namespace: zhiye
 spec:
+  ingressClassName: traefik
   tls:
     - hosts:
-        - zhiye-test.example.com
-        - preview.zhiye-test.example.com
-        - "*.sites.zhiye-test.example.com"
+        - zhiye.csot.tcl.com
+        - preview.zhiye.csot.tcl.com
+        - "*.zhiye.csot.tcl.com"
       secretName: zhiye-test-tls
   rules:
-    - host: zhiye-test.example.com
+    - host: zhiye.csot.tcl.com
       http:
         paths:
           - path: /llm
@@ -20,13 +21,13 @@ spec:
           - path: /
             pathType: Prefix
             backend: { service: { name: zhiye-api, port: { number: 8080 } } }
-    - host: preview.zhiye-test.example.com
+    - host: preview.zhiye.csot.tcl.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend: { service: { name: zhiye-site, port: { number: 8083 } } }
-    - host: "*.sites.zhiye-test.example.com"
+    - host: "*.zhiye.csot.tcl.com"
       http:
         paths:
           - path: /

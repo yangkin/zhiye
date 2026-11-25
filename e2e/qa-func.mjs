@@ -518,14 +518,11 @@ await check('A06', '恢复链接：新浏览器用恢复令牌找回同一工作
   assert(JSON.stringify(items).includes('QA甲应用'), '恢复后看不到应用')
   return '恢复后应用数=' + items.length
 })
-await check('A08', '数据源：连不上的地址测试时给出可读错误', async () => {
-  const src = await json('POST', '/api/sources', { key: 'qa_bad', name: 'QA坏数据源', description: 'qa', method: 'GET', url: 'http://127.0.0.1:9/x', params: [], sample: '', authType: 'none' }).catch((e) => ({ err: e.message }))
-  if (src.err) return '创建被拒：' + src.err.slice(0, 160)
-  const r = await req.fetch(BASE + `/api/sources/${src.id}/test`, { method: 'POST', data: { params: {} }, headers: { 'Idempotency-Key': crypto.randomUUID() } })
+await check('A08', '数据源：手工登记已关闭（403 SOURCE_MANUAL_DISABLED）', async () => {
+  const r = await req.fetch(BASE + '/api/sources', { method: 'POST', data: { key: 'qa_bad', name: 'QA坏数据源', description: 'qa', method: 'GET', url: 'http://127.0.0.1:9/x', params: [], sample: '', authType: 'none' }, headers: { 'Idempotency-Key': crypto.randomUUID() } })
   const t = await r.text()
-  await json('DELETE', '/api/sources/' + src.id)
-  assert(r.status() !== 500, '500: ' + t.slice(0, 160))
-  return `${r.status()} ${t.slice(0, 120)}`
+  assert(r.status() === 403 && t.includes('SOURCE_MANUAL_DISABLED'), `预期 403 SOURCE_MANUAL_DISABLED，实际 ${r.status()} ${t.slice(0, 160)}`)
+  return '403 SOURCE_MANUAL_DISABLED'
 })
 
 // ---------------- 响应式 ----------------

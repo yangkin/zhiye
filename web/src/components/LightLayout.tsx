@@ -129,7 +129,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
           <Icon name="help" />
           <span>帮助</span>
         </button>
-        <button className="profile rail-profile" onClick={onWorkspace} aria-label="工作空间与恢复链接" title={user ? user.realName : '我的工作空间 · 免登录'}>
+        <button className="profile rail-profile" onClick={onWorkspace} aria-label="我的工作空间" title={user ? user.realName : '我的工作空间 · 免登录'}>
           <span className="avatar">{user ? user.realName.slice(0, 1) : '织'}</span>
           <small>{user ? user.realName : '免登录'}</small>
         </button>
@@ -193,14 +193,14 @@ function WorkspaceModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal title="我的工作空间" onClose={onClose} wide>
+    <Modal title="我的工作空间" onClose={onClose} wide className="workspace-modal">
       {user ? (
-        <>
+        <div className="workspace-account-row">
           <p className="muted-note">
             已使用统一认证登录：{user.realName}（{user.loginName}）。你的应用与个人记忆保存在服务器上，换设备登录同一账号即可看到。
           </p>
           <button
-            className="subtle-button"
+            className="workspace-logout"
             onClick={async () => {
               await api.logout().catch(() => undefined);
               window.location.replace('/login');
@@ -208,28 +208,36 @@ function WorkspaceModal({ onClose }: { onClose: () => void }) {
           >
             退出登录
           </button>
-        </>
+        </div>
       ) : (
         <p className="muted-note">织页无需登录。工作空间与应用记忆保存在服务器上，并通过当前浏览器识别。</p>
       )}
-      <label className="field-label">恢复链接</label>
-      {isLoading ? (
-        <p className="muted-note">正在读取…</p>
-      ) : error ? (
-        <p className="inline-error">{(error as Error).message}</p>
-      ) : data ? (
-        <div className="copy-field">
-          <span>{data.recoveryUrl}</span>
-          <button
-            className="icon-button"
-            aria-label="复制恢复链接"
-            onClick={async () => toast((await copyText(data.recoveryUrl)) ? '恢复链接已复制。' : '请手动复制链接。')}
-          >
-            <Icon name="copy" />
-          </button>
-        </div>
+      {/* 恢复链接只对免登录工作空间有意义；统一认证下身份跟着账号走，换浏览器登录即恢复 */}
+      {!user ? (
+        <details className="workspace-recovery">
+          <summary>
+            恢复链接
+            <span>换浏览器或清理站点数据后，用它找回工作空间</span>
+          </summary>
+          {isLoading ? (
+            <p className="muted-note">正在读取…</p>
+          ) : error ? (
+            <p className="inline-error">{(error as Error).message}</p>
+          ) : data ? (
+            <div className="copy-field">
+              <span>{data.recoveryUrl}</span>
+              <button
+                className="icon-button"
+                aria-label="复制恢复链接"
+                onClick={async () => toast((await copyText(data.recoveryUrl ?? '')) ? '恢复链接已复制。' : '请手动复制链接。')}
+              >
+                <Icon name="copy" />
+              </button>
+            </div>
+          ) : null}
+          <p className="muted-note">在其他浏览器打开这个链接，即可回到同一个工作空间（含个人记忆）。请妥善保管，不要公开分享。</p>
+        </details>
       ) : null}
-      <p className="muted-note">在其他浏览器打开这个链接，即可回到同一个工作空间（含个人记忆）。请妥善保管，不要公开分享。</p>
 
       <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #ece7f5' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>

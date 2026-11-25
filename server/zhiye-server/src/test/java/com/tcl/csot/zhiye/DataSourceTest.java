@@ -1,8 +1,10 @@
 package com.tcl.csot.zhiye;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.util.Json;
 import com.tcl.csot.zhiye.support.Client;
+import com.tcl.csot.zhiye.support.FakeUpstreamController;
 import com.tcl.csot.zhiye.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,10 +19,22 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 数据源：登记（凭证不外泄）→ 试调用 → 绑定应用 → 预览带令牌调用 → 发布站点同源调用 → 编码指令。 */
+/** 数据源：添加（凭证不外泄）→ 试调用 → 绑定应用 → 预览带令牌调用 → 发布站点同源调用 → 编码指令。手工登记已关闭，测试走 importExternal 种入。 */
 class DataSourceTest extends IntegrationTest {
 
+    static { System.setProperty("KIMI_API_KEY", System.getenv().getOrDefault("KIMI_API_KEY", "test-key")); }
+
     @Autowired JdbcClient jdbc;
+
+    /** 期望添加失败，返回错误信息（importExternal 与 AGW 添加共用 parse 校验） */
+    private String registerError(Client c, Map<String, Object> body) {
+        try {
+            registerSource(c, body);
+        } catch (ApiException e) {
+            return e.getMessage();
+        }
+        throw new AssertionError("应该添加失败：" + body.get("key"));
+    }
 
     @Test
     void allowsOneHundredSourcesPerApp() {
@@ -62,7 +76,7 @@ class DataSourceTest extends IntegrationTest {
     @Test
     void registerBindAndQuery() {
         Client c = client();
-        JsonNode src = c.ok(c.post("/api/sources", daily("mes_daily")));
+        JsonNode src = registerSource(c, daily("mes_daily"));
         String sid = src.path("id").asText();
         assertThat(src.path("hasSecret").asBoolean()).isTrue();
         assertThat(src.toString()).doesNotContain("s3cret").doesNotContain("secret_enc").doesNotContain("v1:");
@@ -140,52 +154,130 @@ class DataSourceTest extends IntegrationTest {
     }
 
     @Test
+    void conversationSourcesPersistReachPromptAndBindOnBuild() {
+        Client c = client();
+        String sid = registerSource(c, daily("mes_conversation")).path("id").asText();
+        String marker = "CONV-SOURCE-7731";
+        String conversationId = c.ok(c.post("/api/conversations", Map.of("sourceIds", List.of(sid)))).path("id").asText();
+
+        JsonNode detail = c.ok(c.get("/api/conversations/" + conversationId));
+        assertThat(detail.path("sources").size()).isEqualTo(1);
+        assertThat(detail.path("sources").get(0).path("key").asText()).isEqualTo("mes_conversation");
+        assertThat(c.ok(c.put("/api/conversations/" + conversationId + "/sources", Map.of("sourceIds", List.of()))).path("sources").size()).isZero();
+        assertThat(c.ok(c.put("/api/conversations/" + conversationId + "/sources", Map.of("sourceIds", List.of(sid)))).path("sources").size()).isEqualTo(1);
+
+        Client.Res asked = c.send("POST", "/api/conversations/" + conversationId + "/ask",
+                Map.of("content", marker + " 这个接口能做什么"), Map.of("Accept", "text/event-stream"));
+        assertThat(asked.status()).isEqualTo(200);
+        assertThat(asked.body()).contains("event:done");
+        JsonNode upstream = FakeUpstreamController.BODIES.stream()
+                .filter(b -> b.toString().contains(marker) && b.toString().contains("先判断要交付什么"))
+                .reduce((a, b) -> b).orElseThrow();
+        String system = upstream.path("messages").get(0).path("content").asText();
+        assertThat(system).contains("本会话已连接的数据源").contains("产线日产量").contains("mes_conversation")
+                .contains("当前问答没有执行接口调用").contains("window.zhiye.source.query");
+
+        // build 不再依赖浏览器重复传 sourceIds：会话保存的连接自动绑定到应用
+        JsonNode app = c.ok(c.post("/api/conversations/" + conversationId + "/build",
+                Map.of("type", "开发网站", "mode", "快速", "model", "auto")));
+        String appId = app.path("id").asText();
+        assertThat(c.ok(c.get("/api/apps/" + appId + "/sources")).size()).isEqualTo(1);
+        String taskId = app.path("activeTask").path("id").asText("");
+        if (!taskId.isBlank()) assertThat(c.waitTask(taskId).path("status").asText()).isEqualTo("SUCCEEDED");
+
+        assertThat(client().post("/api/conversations", Map.of("sourceIds", List.of(sid))).status()).isEqualTo(400);
+        assertThat(client().put("/api/conversations/" + conversationId + "/sources", Map.of("sourceIds", List.of())).status()).isEqualTo(404);
+    }
+
+    @Test
+    void legacyAgwRootIsReadAsCompleteJsonBody() {
+        Client c = client();
+        String ws = c.ok(c.get("/api/workspace")).path("id").asText();
+        String id = "src_legacy_root";
+        jdbc.sql("delete from data_source where id = ?").param(id).update();
+        jdbc.sql("insert into data_source (id, workspace_id, key, name, method, url, params, provider) values (?, ?, ?, ?, 'POST', ?, ?::jsonb, 'agw')")
+                .params(id, ws, "legacy_root", "旧请求体", "http://127.0.0.1:" + port + "/test-source/search",
+                        "[{\"name\":\"root\",\"type\":\"string\",\"example\":\"\",\"position\":\"body\",\"required\":false,\"description\":\"\"}]").update();
+
+        JsonNode listed = null;
+        for (JsonNode item : c.ok(c.get("/api/sources"))) if (item.path("id").asText().equals(id)) listed = item;
+        assertThat(listed).isNotNull();
+        assertThat(listed.path("params").size()).isEqualTo(1);
+        assertThat(listed.path("params").get(0).path("name").asText()).isEqualTo("_body");
+        assertThat(listed.path("params").get(0).path("type").asText()).isEqualTo("json");
+
+        JsonNode echo = c.ok(c.post("/api/sources/" + id + "/test", Map.of("params", Map.of("_body", Map.of("appId", "app-1", "text", "你好")))))
+                .path("data").path("echo");
+        assertThat(echo.path("appId").asText()).isEqualTo("app-1");
+        assertThat(echo.path("text").asText()).isEqualTo("你好");
+    }
+
+    @Test
     void validationIsolationAndUpstreamErrors() {
         Client c = client();
         String base = "http://127.0.0.1:" + port + "/test-source";
+
+        // 手工登记已关闭：只能在 AGW 侧登记后通过「选择可调用 API」添加
+        var manual = c.post("/api/sources", daily("k_manual"));
+        assertThat(manual.status()).isEqualTo(403);
+        assertThat(manual.body()).contains("SOURCE_MANUAL_DISABLED");
+
         Map<String, Object> m = daily("Bad-Key");
-        assertThat(c.post("/api/sources", m).status()).isEqualTo(400);
+        assertThat(registerError(c, m)).contains("调用名");
         m = daily("k_userinfo"); m.put("url", "http://u:p@127.0.0.1/x");
-        assertThat(c.post("/api/sources", m).body()).contains("账号密码");
+        assertThat(registerError(c, m)).contains("账号密码");
         m = daily("k_ftp"); m.put("url", "ftp://127.0.0.1/x");
-        assertThat(c.post("/api/sources", m).status()).isEqualTo(400);
+        assertThat(registerError(c, m)).contains("http");
         m = daily("k_ph"); m.put("url", base + "/daily/{nope}");
-        assertThat(c.post("/api/sources", m).body()).contains("{nope}");
+        assertThat(registerError(c, m)).contains("{nope}");
         m = daily("k_nosecret"); m.remove("secret");
-        assertThat(c.post("/api/sources", m).body()).contains("凭证");
+        assertThat(registerError(c, m)).contains("凭证");
+        m = daily("k_agw_client"); m.remove("secret"); m.put("authType", "agw_client");
+        JsonNode clientSource = registerSource(c, m);
+        assertThat(clientSource.path("authType").asText()).isEqualTo("agw_client");
+        assertThat(clientSource.path("hasSecret").asBoolean()).isFalse();
+        m = daily("k_agw_user"); m.remove("secret"); m.put("authType", "agw_user");
+        JsonNode userSource = registerSource(c, m);
+        assertThat(userSource.path("authType").asText()).isEqualTo("agw_user");
+        assertThat(userSource.path("hasSecret").asBoolean()).isFalse();
         m = daily("k_hdr"); m.put("authType", "header"); m.put("authHeader", "Host");
-        assertThat(c.post("/api/sources", m).status()).isEqualTo(400);
+        assertThat(registerError(c, m)).contains("请求头");
 
         // 自定义请求头鉴权 + 修改时不传 secret 保留原凭证
         m = daily("k_header"); m.put("authType", "header"); m.put("authHeader", "X-Api-Key"); m.put("secret", "key-1");
-        String sid = c.ok(c.post("/api/sources", m)).path("id").asText();
-        assertThat(c.post("/api/sources", m).status()).isEqualTo(409); // 调用名重复
+        String sid = registerSource(c, m).path("id").asText();
+        assertThat(registerError(c, m)).contains("已经被使用"); // 调用名重复
         c.ok(c.patch("/api/sources/" + sid, Map.of("name", "改名了")));
         JsonNode t = c.ok(c.post("/api/sources/" + sid + "/test", Map.of("params", Map.of("line", "L1", "date", "2026-01-01"))));
         assertThat(t.path("data").path("apiKey").asText()).isEqualTo("key-1");
         assertThat(t.path("data").path("auth").asText()).isEqualTo("null");
 
         // POST 查询：参数按类型放进 JSON
-        String post = c.ok(c.post("/api/sources", Map.of("key", "k_post", "name", "搜索", "method", "POST", "url", base + "/search",
-                "params", List.of(Map.of("name", "q"), Map.of("name", "n", "type", "number"), Map.of("name", "all", "type", "boolean"))))).path("id").asText();
+        String post = registerSource(c, Map.of("key", "k_post", "name", "搜索", "method", "POST", "url", base + "/search",
+                "params", List.of(Map.of("name", "q"), Map.of("name", "n", "type", "number"), Map.of("name", "all", "type", "boolean")))).path("id").asText();
         JsonNode echo = c.ok(c.post("/api/sources/" + post + "/test", Map.of("params", Map.of("q", "面板", "n", "2.5", "all", true)))).path("data").path("echo");
         assertThat(echo.path("q").asText()).isEqualTo("面板");
         assertThat(echo.path("n").isNumber()).isTrue();
         assertThat(echo.path("all").asBoolean()).isTrue();
+        String raw = registerSource(c, Map.of("key", "k_raw", "name", "原始 JSON", "method", "POST", "url", base + "/search",
+                "params", List.of(Map.of("name", "_body", "type", "json", "position", "body")))).path("id").asText();
+        JsonNode rawEcho = c.ok(c.post("/api/sources/" + raw + "/test", Map.of("params", Map.of("_body", List.of("yangkai37"))))).path("data").path("echo");
+        assertThat(rawEcho.isArray()).isTrue();
+        assertThat(rawEcho.get(0).asText()).isEqualTo("yangkai37");
 
         // 上游错误：500、跳转、超大、非 JSON
-        String fail = c.ok(c.post("/api/sources", Map.of("key", "k_fail", "name", "失败", "url", base + "/fail"))).path("id").asText();
+        String fail = registerSource(c, Map.of("key", "k_fail", "name", "失败", "url", base + "/fail")).path("id").asText();
         var f = c.post("/api/sources/" + fail + "/test", Map.of());
         assertThat(f.status()).isEqualTo(502);
         assertThat(f.body()).contains("数据源返回 500").contains("boom");
-        String redir = c.ok(c.post("/api/sources", Map.of("key", "k_redir", "name", "跳转", "url", base + "/redirect"))).path("id").asText();
+        String redir = registerSource(c, Map.of("key", "k_redir", "name", "跳转", "url", base + "/redirect")).path("id").asText();
         assertThat(c.post("/api/sources/" + redir + "/test", Map.of()).body()).contains("跳转");
-        String big = c.ok(c.post("/api/sources", Map.of("key", "k_big", "name", "超大", "url", base + "/big"))).path("id").asText();
+        String big = registerSource(c, Map.of("key", "k_big", "name", "超大", "url", base + "/big")).path("id").asText();
         assertThat(c.post("/api/sources/" + big + "/test", Map.of()).body()).contains("超过 2 MB");
-        String text = c.ok(c.post("/api/sources", Map.of("key", "k_text", "name", "文本", "url", base + "/text"))).path("id").asText();
+        String text = registerSource(c, Map.of("key", "k_text", "name", "文本", "url", base + "/text")).path("id").asText();
         assertThat(c.ok(c.post("/api/sources/" + text + "/test", Map.of())).path("data").asText()).startsWith("plain ");
         // 链路本地 / 元数据地址
-        String meta = c.ok(c.post("/api/sources", Map.of("key", "k_meta", "name", "元数据", "url", "http://169.254.169.254/latest"))).path("id").asText();
+        String meta = registerSource(c, Map.of("key", "k_meta", "name", "元数据", "url", "http://169.254.169.254/latest")).path("id").asText();
         assertThat(c.post("/api/sources/" + meta + "/test", Map.of()).status()).isEqualTo(403);
 
         // 其他工作空间看不到、不能试调用、不能绑定

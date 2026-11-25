@@ -27,12 +27,15 @@ public class FakeSkillHubController {
     public static volatile String lastPath;
     public static volatile Map<String, String> lastFields;
     public static volatile byte[] lastPackage;
+    public static volatile String lastReviewVersion;
 
     public static void reset() {
         lastAuth = null;
         lastPath = null;
         lastFields = null;
         lastPackage = null;
+        lastReviewVersion = null;
+        FakeSkillHubFileController.reset();
     }
 
     @GetMapping("/self")
@@ -43,6 +46,18 @@ public class FakeSkillHubController {
     @GetMapping("/{org}/skillCategory/category/queryAll")
     public Map<String, Object> categories(@PathVariable String org) {
         return ok(List.of(Map.of("id", "c1", "categoryName", "其他", "sort", 1)));
+    }
+
+    @PostMapping("/{org}/file/getFileStorageCfgInfo")
+    public Map<String, Object> storage(@PathVariable String org) {
+        return ok(Map.of("bucketName", "skill-test", "storageCode", "local"));
+    }
+
+    @GetMapping("/{org}/aiToolbox/skills/visible-scope/options")
+    public Map<String, Object> scopes(@PathVariable String org) {
+        return ok(List.of(
+                Map.of("orgCode", "31", "orgName", "TCL华星", "level", 1, "codePath", "31", "namePath", "TCL华星"),
+                Map.of("orgCode", "3100", "orgName", "流程与IT", "level", 2, "codePath", "31_3100", "namePath", "TCL华星/流程与IT")));
     }
 
     @PostMapping("/{org}/aiToolbox/skills/market/query")
@@ -78,6 +93,12 @@ public class FakeSkillHubController {
         return download();
     }
 
+    @GetMapping("/{org}/aiToolbox/skills/12345/versions/{versionId}/package/download")
+    public ResponseEntity<byte[]> downloadPublished(@PathVariable String org, @PathVariable Long versionId) {
+        return ResponseEntity.ok().header("Content-Disposition", "attachment; filename=weekly-report.zip")
+                .contentType(MediaType.parseMediaType("application/zip")).body(lastPackage);
+    }
+
     @PostMapping("/{org}/aiToolbox/skills/add")
     public Map<String, Object> add(@PathVariable String org,
                                    @RequestParam Map<String, String> params,
@@ -100,6 +121,7 @@ public class FakeSkillHubController {
     @GetMapping("/{org}/aiToolbox/skills/starClaw/review-state")
     public Map<String, Object> reviewState(@PathVariable String org, @RequestParam Long skillId,
                                            @RequestParam(required = false) String version) {
+        lastReviewVersion = version;
         return ok(Map.of("inFlight", false, "skillId", skillId, "versionId", 678L,
                 "version", version == null ? "v1.0.0" : version, "reviewStatus", 1, "scanStatus", 2));
     }
@@ -139,7 +161,8 @@ public class FakeSkillHubController {
         lastPath = path;
         lastAuth = auth;
         lastFields = new LinkedHashMap<>(params);
-        lastPackage = file == null ? null : file.getBytes();
+        lastPackage = file == null ? FakeSkillHubFileController.PACKAGES.get(params.get("fileUrl")) : file.getBytes();
+        if (lastPackage == null) throw new IllegalArgumentException("skill package missing");
     }
 
     private static Map<String, Object> ok(Object data) {

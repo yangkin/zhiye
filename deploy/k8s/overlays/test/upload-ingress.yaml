@@ -1,0 +1,25 @@
+# 大文件上传专用路由：buffering 中间件只挂在这里，避免全站响应被缓冲导致 SSE 事件不下发。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: zhiye-upload
+  namespace: zhiye
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: "zhiye-zhiye-upload-buffering@kubernetescrd"
+    traefik.ingress.kubernetes.io/service.serverstransport: "zhiye-zhiye-transport@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - zhiye.csot.tcl.com
+      secretName: zhiye-test-tls
+  rules:
+    - host: zhiye.csot.tcl.com
+      http:
+        paths:
+          - path: /api/imports/upload
+            pathType: Exact
+            backend: { service: { name: zhiye-api, port: { number: 8080 } } }
+          - path: /api/assets
+            pathType: Exact
+            backend: { service: { name: zhiye-api, port: { number: 8080 } } }

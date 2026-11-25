@@ -7,7 +7,8 @@ import path from 'node:path'
 
 const BASE = process.env.ZHIYE_BASE_URL || 'http://127.0.0.1:8080'
 const OUT = process.argv[2] || '/tmp/zhiye-audit'
-const CHROME = process.env.ZHIYE_CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const CHROME = process.env.ZHIYE_CHROME_PATH
+  || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
 const WIDTHS = [[1440, 900], [1024, 768], [390, 844]]
 mkdirSync(OUT, { recursive: true })
 

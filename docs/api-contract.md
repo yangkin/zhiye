@@ -184,7 +184,7 @@ interface Meta {
 | DELETE | `/api/apps/{id}` | 删除应用 → 204。同时下线（站点地址随即 404），从列表、历史、汇总中消失；有进行中的任务 → 409 `APP_BUSY`（先停止任务） |
 | GET | `/api/apps/summary` | → `AppsSummary`：当前工作空间的应用数（不含未完成的导入）、已发布数、总访问量 |
 | GET | `/api/apps/{id}/stats?range=all\|today\|7d\|3d` | → `AppStats`（默认 7d）。`daily` 按天补零：today=1 天；3d/7d=含今天的最近 N 天；all=从第一天有数据或首次发布那天到今天（最多 180 天）。未发布的应用返回 0 |
-| POST | `/api/skillhub/apps/{id}/publish` | 发布 skill 包到公司 SkillHub：`{ versionId?, categoryId?, displayName?, summary?, slug?, tags?, version?, visibility?: 'private'\|'team'\|'public', changelog?, submitReview? }`（默认当前版本、private、提交审核）→ `{ skillId, skillVersion, url, versionId, publishedAt, status }`。非 skill 应用 → 400 `NOT_A_SKILL`；SKILL.md 头部 name/description 不合法 → 400；未开启 → 503 `SKILLHUB_NOT_CONFIGURED`。平台 /add 不接收更新说明，/edit 使用 `changeLog` |
+| POST | `/api/skillhub/apps/{id}/publish` | 发布 skill 包到公司 SkillHub：`{ versionId?, categoryId?, displayName?, summary?, slug?, tags?, version?, visibility?: 'private'\|'public', scope?: 'org:组织路径', changelog? }`（默认当前版本、private）。`private` 仅个人使用，不提交人工审核；`public` 必须带 `scope`，提交人工审核。旧值 `team` 兼容为根组织公开。ZIP 先通过 TFLE 上传，再以 `fileId/fileUrl` 调平台 `/add` 或 `/edit`，可见组织路径随发布保存 → `{ skillId, skillVersion, url, versionId, publishedAt, status }`。非 skill 应用 → 400 `NOT_A_SKILL`；SKILL.md 头部 name/description 不合法 → 400；未开启 → 503 `SKILLHUB_NOT_CONFIGURED`。平台 /add 不接收更新说明，/edit 使用 `changeLog` |
 | GET | `/api/skillhub/apps/{id}/publications` | → `{ id, versionId, versionNumber, skillId, skillVersion, url, visibility, status, reviewStatus, publishedAt }[]`（时间降序） |
 | POST | `/api/apps/{id}/generate` | 按当前计划执行生成 → `Task`。phase 必须是 plan 或 failed |
 | GET | `/api/apps/{id}/messages` | → `Message[]`（时间升序） |
@@ -198,6 +198,7 @@ interface Meta {
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/skillhub/categories` | → `{ id, name, description, count }[]` |
+| GET | `/api/skillhub/scopes` | 公开至 SkillHub 时可选择的组织节点 → `{ value: 'org:路径', label, kind: 'org', level, desc }[]`；根节点表示全公司 |
 | GET | `/api/skillhub/market?q=&categoryId=&page=1&limit=20` | → `{ items, total, pageNo, limit }`，市场技能含 `skillId/slug/name/summary/owner/version` |
 | GET | `/api/skillhub/market/{skillId}` | 技能详情、版本和文件列表 |
 | GET | `/api/skillhub/market/{skillId}/package?versionId=` | 下载技能 zip |
@@ -229,10 +230,12 @@ interface Meta {
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET/POST | `/api/sources` | 列出本工作空间可见的数据源（含平台登记）/ 登记：`{ key, name, description, method, url, params, sample, authType, authHeader?, secret? }` → `DataSource`（不返回凭证，只有 `hasSecret`）。`authType` 还支持 `agw`（此时 `authHeader` 为调用项目 AppKey，`secret` 为 AppSecret）。规则见 docs/data-sources.md |
-| GET | `/api/sources/agw/apis?q=&page=0&size=20` | 需平台令牌。查询 API 网关已启用且已上架的目录 → `{items,totalElements,totalPages,number,size}`；每项含公开名称、方法、路径、提供方、参数数、可导入状态和 `importedSourceId` |
-| POST | `/api/sources/agw/apis/{apiId}/import` | 需平台令牌。`{ appKey?, appSecret? }`；首次导入必填，再次导入留空保留原凭证。服务端重新读取 API 详情并幂等写入当前工作空间数据源 |
+| GET | `/api/agw/callable-apis` | 当前工作空间所有者的可调用 API 全集；返回项目、授权档位、apiId 等，不使用市场/挂载列表替代 |
+| POST | `/api/agw/apis/{apiId}/add` | Body `{ projectCode }`。服务端复核授权、读取详情并幂等添加公开调用契约，保存 `projectCode:apiId` 与 projectPublicId |
+| GET/POST | `/api/sources` | 列出本工作空间可见的数据源（含平台登记）；POST 手工登记已关闭，一律 403 `SOURCE_MANUAL_DISABLED`，新数据源只能经 `POST /api/agw/apis/{apiId}/add` 从 AGW 可调用清单添加 |
 | PATCH/DELETE | `/api/sources/{id}` | 修改（不传 `secret` 保留原凭证）/ 删除（同时解绑）；平台登记的数据源 → 403 |
+| GET/POST/PATCH/DELETE | `/api/admin/login-allowlist[/{loginName}]` | 人员管理（管理员）：登录白名单的查询、添加（支持 `loginNames` 批量与 `role: user/admin`）、启停、移除。开启 `zhiye.auth.login-allowlist-enabled` 后，仅名单内启用人员与管理员可登录，其他人登录返回 403 `PLATFORM_ACCESS_DENIED`；名单角色在登录时同步到 `app_user.role` |
+| GET | `/api/admin/employees/search?q=` | 员工目录搜索（管理员）：服务端用调用者的平台令牌代理公司 TPFM `employeeVos`（先按姓名、空则按工号），浏览器不直连公司网关 |
 | POST | `/api/sources/{id}/test` | `{ params }` → `{ data, status }`；`GET /api/sources/{id}/calls` 最近 20 次调用 |
 | GET/POST/DELETE | `/api/apps/{id}/sources[/{sourceId}]` | 应用绑定的数据源；POST `{ sourceId }` 绑定（最多 100 个，调用名不能重复）。创建应用 / 会话转应用时也可带 `sourceIds` |
 | POST | `/cloud/{appId}/source/{key}`、站点 `/__zhiye/source/{key}` | 应用运行时调用：`{ params }` → `{ data, status }`。预览带应用令牌；发布站点同源、只接受 JSON |
@@ -365,9 +368,10 @@ interface Selection {
 
 ## 会话与任务队列（2026-11-13 新增）
 
-- `POST /api/conversations` → `{id,title,createdAt,updatedAt}`；`GET /api/conversations` 列表；`GET /api/conversations/{id}` 含 messages；`DELETE` 软删。
-- `POST /api/conversations/{id}/ask` → SSE（delta/done/error），先落 user 消息，完成后落 assistant 消息。
-- `POST /api/conversations/{id}/build` → `{type?,mode?,model?,assetIds?,skillAppIds?}`，用整段对话（含 assistant 结论）创建应用，返回应用详情。
+- `POST /api/conversations`（可带 `sourceIds`）→ `{id,title,createdAt,updatedAt}`；`GET /api/conversations` 列表；`GET /api/conversations/{id}` 含 messages 和已连接的 `sources`；`DELETE` 软删。
+- `PUT /api/conversations/{id}/sources {sourceIds}` → 更新会话级数据源并返回 `sources`。数据源随会话持久化，问答时向模型提供名称、说明和参数；它不是一次性消息附件。
+- `POST /api/conversations/{id}/ask` → SSE（delta/done/error），先落 user 消息，完成后落 assistant 消息；自动带上会话已连接的数据源说明。
+- `POST /api/conversations/{id}/build` → `{type?,mode?,model?,assetIds?,skillAppIds?,sourceIds?}`，用整段对话（含 assistant 结论）创建应用，返回应用详情；自动绑定会话数据源，并合并请求里额外给的 `sourceIds`。
 - `POST /api/chat/polish {content}` → `{text}`。
 - `GET /api/apps/{appId}/queued`、`POST /api/tasks/{taskId}/queued {content}`、`DELETE /api/queued/{id}`：生成中补充消息排队，任务结束后按顺序自动执行。
 - `POST /api/apps/{id}/plan-feedback {content}`：计划阶段把补充追加到 planDoc 的「补充反馈」段。

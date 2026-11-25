@@ -36,8 +36,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 数据源：登记公司内部的查询类接口（凭证只存在服务端），应用绑定后由平台代理调用。
- * 浏览器只拿到 key 和参数定义；地址、凭证、请求头都在这里拼装。
+ * 数据源：从 AGW 添加当前用户可调用的查询接口（凭证只存在服务端），应用绑定后由平台代理调用。
+ * 手工登记已关闭（create 一律 403）；浏览器只拿到 key 和参数定义；地址、凭证、请求头都在这里拼装。
  */
 @Service
 public class DataSourceService {
@@ -49,8 +49,8 @@ public class DataSourceService {
     static final Pattern ENV = Pattern.compile("[A-Z_][A-Z0-9_]{0,63}");
     static final Pattern APP_KEY = Pattern.compile("[A-Za-z0-9._-]{1,128}");
     static final Pattern DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}([T ][0-9:.+\\-Z]{0,20})?");
-    static final Set<String> TYPES = Set.of("string", "number", "integer", "boolean", "date");
-    static final Set<String> AUTH = Set.of("none", "bearer", "header", "basic", "agw");
+    static final Set<String> TYPES = Set.of("string", "number", "integer", "boolean", "date", "json");
+    static final Set<String> AUTH = Set.of("none", "bearer", "header", "basic", "agw", "agw_key", "agw_client", "agw_user");
     static final Set<String> RESERVED_HEADERS = Set.of("host", "content-length", "connection", "content-type", "transfer-encoding", "upgrade", "expect");
     static final int MAX_PER_APP = 100;
     static final int MAX_PER_WORKSPACE = 50;
@@ -77,14 +77,16 @@ public class DataSourceService {
     private final AppRepository apps;
     private final CloudService cloud;
     private final SourceProperties props;
+    private final AgwClientTokenService agwClient;
     private final HttpClient http;
     private final SecureRandom random = new SecureRandom();
 
-    public DataSourceService(JdbcClient jdbc, AppRepository apps, CloudService cloud, SourceProperties props) {
+    public DataSourceService(JdbcClient jdbc, AppRepository apps, CloudService cloud, SourceProperties props, AgwClientTokenService agwClient) {
         this.jdbc = jdbc;
         this.apps = apps;
         this.cloud = cloud;
         this.props = props;
+        this.agwClient = agwClient;
         this.http = HttpClient.newBuilder()
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(Math.min(5, props.timeoutSeconds())))
@@ -102,14 +104,9 @@ public class DataSourceService {
         return view(requireVisible(ws, id), ws);
     }
 
+    /** 手工登记已关闭：数据源只能在 AGW 侧登记，织页通过「选择可调用 API」导入（importExternal）。 */
     public synchronized Map<String, Object> create(String ws, JsonNode body) {
-        long n = jdbc.sql("select count(*) from data_source where workspace_id = ? and deleted_at is null").param(ws).query(Long.class).single();
-        if (n >= MAX_PER_WORKSPACE) throw ApiException.validation("每个工作空间最多登记 " + MAX_PER_WORKSPACE + " 个数据源");
-        Source s = parse(body, null, ws);
-        if (keyTaken(ws, s.key(), null)) throw ApiException.conflict("SOURCE_KEY_TAKEN", "调用名「" + s.key() + "」已经被使用，请换一个");
-        String id = Ids.newId("src");
-        insert(id, ws, s);
-        return get(ws, id);
+        throw new ApiException(HttpStatus.FORBIDDEN, "SOURCE_MANUAL_DISABLED", "数据源请在 API 网关（AGW）侧登记；这里用「选择可调用 API」添加你已有权限的接口");
     }
 
     public synchronized Map<String, Object> update(String ws, String id, JsonNode body) {
@@ -299,11 +296,25 @@ public class DataSourceService {
                 throw ApiException.validation("数据源 Header 参数 " + p.name() + " 不允许使用");
             b.header(p.name(), e.getValue());
         }
-        String secret = secret(s);
+        String secret = "none".equals(s.authType()) || "agw_client".equals(s.authType()) || "agw_user".equals(s.authType()) ? "" : secret(s);
         switch (s.authType()) {
             case "bearer" -> b.header("Authorization", "Bearer " + secret);
+            case "agw_client" -> b.header("Authorization", agwClient.authorization());
+            case "agw_user" -> {
+                String loginName = workspaceLoginName(s, appId);
+                if (s.authHeader() != null && !s.authHeader().isBlank()) {
+                    b.header("Authentication", agwClient.metisAccessTokenForUser(loginName));
+                    b.header("X-Project-Id", s.authHeader());
+                } else {
+                    b.header("Authorization", agwClient.authorizationForUser(loginName));
+                }
+            }
             case "header" -> b.header(s.authHeader(), secret);
             case "basic" -> b.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8)));
+            case "agw_key" -> {
+                b.header("Authorization", "Bearer " + secret);
+                b.header("x-agw-request-id", UUID.randomUUID().toString());
+            }
             case "agw" -> {
                 String timestamp = Long.toString(System.currentTimeMillis());
                 String raw = String.join(";", s.authHeader(), secret, timestamp);
@@ -317,20 +328,25 @@ public class DataSourceService {
             default -> { }
         }
         if (post) {
-            ObjectNode json = Json.obj();
-            for (var e : values.entrySet()) {
-                if (inPath.contains(e.getKey())) continue;
-                Param p = defs.get(e.getKey());
-                String position = p.position() == null ? "body" : p.position();
-                if (!"body".equals(position)) continue;
-                switch (p.type()) {
-                    case "number" -> json.put(e.getKey(), Double.parseDouble(e.getValue()));
-                    case "integer" -> json.put(e.getKey(), Long.parseLong(e.getValue()));
-                    case "boolean" -> json.put(e.getKey(), Boolean.parseBoolean(e.getValue()));
-                    default -> json.put(e.getKey(), e.getValue());
+            if (values.containsKey("_body")) {
+                b.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(values.get("_body")));
+            } else {
+                ObjectNode json = Json.obj();
+                for (var e : values.entrySet()) {
+                    if (inPath.contains(e.getKey())) continue;
+                    Param p = defs.get(e.getKey());
+                    String position = p.position() == null ? "body" : p.position();
+                    if (!"body".equals(position)) continue;
+                    switch (p.type()) {
+                        case "number" -> json.put(e.getKey(), Double.parseDouble(e.getValue()));
+                        case "integer" -> json.put(e.getKey(), Long.parseLong(e.getValue()));
+                        case "boolean" -> json.put(e.getKey(), Boolean.parseBoolean(e.getValue()));
+                        case "json" -> json.set(e.getKey(), Json.read(e.getValue()));
+                        default -> json.put(e.getKey(), e.getValue());
+                    }
                 }
+                b.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(Json.write(json)));
             }
-            b.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(Json.write(json)));
         } else {
             b.GET();
         }
@@ -359,6 +375,19 @@ public class DataSourceService {
     }
 
     private static String coerce(Param p, JsonNode v) {
+        if ("json".equals(p.type())) {
+            try {
+                JsonNode parsed = v.isTextual() ? Json.read(v.asText()) : v;
+                if (parsed == null || parsed.isNull()) throw ApiException.validation("参数 " + p.name() + " 必须是 JSON");
+                String json = Json.write(parsed);
+                if (json.length() > 20000) throw ApiException.validation("参数 " + p.name() + " 太长（最多 20000 字）");
+                return json;
+            } catch (ApiException e) {
+                throw e;
+            } catch (Exception e) {
+                throw ApiException.validation("参数 " + p.name() + " 必须是合法 JSON");
+            }
+        }
         if (v.isContainerNode()) throw ApiException.validation("参数 " + p.name() + " 不能是对象或数组");
         String t = v.asText();
         if (t.length() > 1000) throw ApiException.validation("参数 " + p.name() + " 太长（最多 1000 字）");
@@ -455,11 +484,40 @@ public class DataSourceService {
         return sb.toString();
     }
 
-    /** 计划 / 问答：只列名称、调用名和一句说明 */
+    /** 计划 / 工作台问答：只列名称、调用名和一句说明 */
     public String summary(String appId) {
-        List<Source> list = boundSources(appId);
+        return summary(boundSources(appId), "应用已绑定的数据源（只读接口，可以直接用真实数据）");
+    }
+
+    /** 会话里已选择的数据源；已删除或无权访问的旧选择自动忽略。 */
+    public List<Source> visibleSelection(String ws, List<String> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        Map<String, Source> visibleById = new HashMap<>();
+        for (Source s : visible(ws)) visibleById.put(s.id(), s);
+        LinkedHashSet<String> unique = new LinkedHashSet<>(ids);
+        List<Source> out = new ArrayList<>();
+        for (String id : unique) {
+            Source s = visibleById.get(id);
+            if (s != null) out.add(s);
+        }
+        return List.copyOf(out);
+    }
+
+    public List<Map<String, Object>> selection(String ws, List<String> ids) {
+        return visibleSelection(ws, ids).stream().map(s -> view(s, ws)).toList();
+    }
+
+    /** 创造页会话：模型可以据此规划真实数据接入，但不能把说明当成已经执行过的查询结果。 */
+    public String conversationSummary(String ws, List<String> ids) {
+        List<Source> list = visibleSelection(ws, ids);
         if (list.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder("\n\n## 应用已绑定的数据源（只读接口，可以直接用真实数据）\n");
+        return summary(list, "本会话已连接的数据源（创建应用时会自动绑定）")
+                + "用户提到这些接口或真实数据时，按上述能力设计和回答；当前问答没有执行接口调用，不要声称已经查到实时结果。生成应用时通过 window.zhiye.source.query 调用。\n";
+    }
+
+    private static String summary(List<Source> list, String heading) {
+        if (list.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\n## ").append(heading).append('\n');
         for (Source s : list) {
             sb.append("- ").append(s.name()).append("（").append(s.key()).append("）");
             if (!s.description().isBlank()) sb.append("：").append(s.description().length() > 120 ? s.description().substring(0, 120) + "…" : s.description());
@@ -509,6 +567,16 @@ public class DataSourceService {
         for (JsonNode p : Json.read(rs.getString("params")))
             params.add(new Param(p.path("name").asText(), p.path("type").asText("string"), p.path("required").asBoolean(false),
                     p.path("description").asText(""), p.path("example").asText(""), p.path("position").asText(null)));
+        // 旧版 AGW 导入把完整请求体误存成 root(string)。读取时兼容为 _body，历史数据源无需重新添加。
+        if ("agw".equals(rs.getString("provider")) && params.size() == 1) {
+            Param p = params.get(0);
+            if ("root".equals(p.name()) && "string".equals(p.type()) && "body".equals(p.position())
+                    && !p.required() && p.description().isBlank()) {
+                String example = p.example();
+                try { Json.read(example); } catch (Exception e) { example = ""; }
+                params.set(0, new Param("_body", "json", false, "完整 JSON 请求体（填写后覆盖其他参数）", example, "body"));
+            }
+        }
         return new Source(rs.getString("id"), rs.getString("workspace_id"), rs.getString("key"), rs.getString("name"),
                 rs.getString("description"), rs.getString("method"), rs.getString("url"), params, rs.getString("sample"),
                 rs.getString("auth_type"), rs.getString("auth_header"), rs.getString("secret_enc"), rs.getString("secret_env"),
@@ -555,8 +623,12 @@ public class DataSourceService {
                 : old == null ? null : old.sample();
         if (sample != null && sample.length() > 20000) throw ApiException.validation("返回示例最多 20000 字");
         String auth = text(b, "authType", old == null ? "none" : old.authType()).trim();
-        if (!AUTH.contains(auth)) throw ApiException.validation("鉴权方式只能是 none / bearer / header / basic / agw");
-        String header = "header".equals(auth) || "agw".equals(auth) ? text(b, "authHeader", old == null ? null : old.authHeader()).trim() : null;
+        if (!AUTH.contains(auth)) throw ApiException.validation("鉴权方式不受支持");
+        String header = switch (auth) {
+            case "header", "agw" -> text(b, "authHeader", old == null ? null : old.authHeader()).trim();
+            case "agw_user" -> b.has("authHeader") ? b.get("authHeader").asText("").trim() : old == null ? null : old.authHeader();
+            default -> null;
+        };
         if ("agw".equals(auth) && (header == null || !APP_KEY.matcher(header).matches()))
             throw ApiException.validation("API 网关调用项目的 AppKey 不合法");
         if ("header".equals(auth) && header != null && (!HEADER.matcher(header).matches() || RESERVED_HEADERS.contains(header.toLowerCase(Locale.ROOT))))
@@ -569,14 +641,15 @@ public class DataSourceService {
             if ("basic".equals(auth) && !secret.contains(":")) throw ApiException.validation("Basic 鉴权的凭证格式为 用户名:密码");
             enc = encrypt(secret);
         }
-        if ("none".equals(auth)) enc = null;
+        boolean platformCredentials = "none".equals(auth) || "agw_client".equals(auth) || "agw_user".equals(auth);
+        if (platformCredentials) enc = null;
         String env = old == null ? null : old.secretEnv();
         if (ws == null) {
             env = b.hasNonNull("secretEnv") ? b.get("secretEnv").asText().trim() : null;
             if (env != null && !ENV.matcher(env).matches()) throw ApiException.validation("secretEnv 必须是环境变量名");
             enc = null;
-            if (!"none".equals(auth) && env == null) throw ApiException.validation("平台数据源需要用 secretEnv 指定凭证所在的环境变量");
-        } else if (!"none".equals(auth) && enc == null) {
+            if (!platformCredentials && env == null) throw ApiException.validation("平台数据源需要用 secretEnv 指定凭证所在的环境变量");
+        } else if (!platformCredentials && enc == null) {
             throw ApiException.validation("请填写凭证");
         }
         return new Source(old == null ? null : old.id(), ws, key, name, desc, method, url, params, sample, auth, header, enc, env, null);
@@ -638,6 +711,16 @@ public class DataSourceService {
     }
 
     // ---------------- 凭证加解密 ----------------
+
+    private String workspaceLoginName(Source s, String appId) {
+        String ws = s.workspaceId();
+        if (ws == null && appId != null)
+            ws = jdbc.sql("select workspace_id from app where id = ? and deleted_at is null").param(appId).query(String.class).optional().orElse(null);
+        if (ws == null) throw new ApiException(HttpStatus.BAD_REQUEST, "LOGIN_REQUIRED", "按用户调用 API 网关需要统一认证身份");
+        return jdbc.sql("select u.login_name from workspace w join app_user u on u.id = w.owner_user_id where w.id = ?")
+                .param(ws).query(String.class).optional()
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "LOGIN_REQUIRED", "按用户调用 API 网关需要统一认证身份"));
+    }
 
     private String secret(Source s) {
         if ("none".equals(s.authType())) return "";

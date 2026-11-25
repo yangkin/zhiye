@@ -48,6 +48,8 @@ spec:
             # 发布站点的应用内 AI（/__zhiye/ai）按作者工号走五星AI岛路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
             - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+            - name: ZHIYE_AGW_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_AGW_CLIENT_SECRET, optional: true } }
           envFrom:
             - configMapRef: { name: zhiye-config }
           resources:

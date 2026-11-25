@@ -50,6 +50,8 @@ public class SiteFilter extends OncePerRequestFilter {
     private final AppRepository apps;
     private final ZhiyeProperties props;
     private final Pattern hostPattern;
+    /** 预览域名（previewBase 的 host）：命中发布站点泛域名时也不能当成应用 slug，要走 /p 预览 */
+    private final String previewHost;
     private final PageViewRecorder pageViews;
     private final CloudService cloud;
     private final org.springframework.jdbc.core.simple.JdbcClient jdbc;
@@ -85,6 +87,12 @@ public class SiteFilter extends OncePerRequestFilter {
         this.props = props;
         String suffix = props.site().siteHostSuffix().replaceFirst(":\\d+$", "");
         this.hostPattern = Pattern.compile("^([a-z0-9][a-z0-9-]{1,62})\\." + Pattern.quote(suffix) + "(:\\d+)?$", Pattern.CASE_INSENSITIVE);
+        String pb = props.site().previewBase();
+        String ph = null;
+        if (pb != null && !pb.isBlank()) {
+            try { ph = java.net.URI.create(pb.contains("://") ? pb : "http://" + pb).getHost(); } catch (Exception ignored) { }
+        }
+        this.previewHost = ph == null ? "" : ph.toLowerCase(java.util.Locale.ROOT);
     }
 
     @Override
@@ -92,7 +100,9 @@ public class SiteFilter extends OncePerRequestFilter {
         String host = Optional.ofNullable(req.getHeader("Host")).orElse("");
         String uri = URLDecoder.decode(req.getRequestURI(), StandardCharsets.UTF_8);
         Matcher h = hostPattern.matcher(host);
-        if (h.matches()) {
+        // 预览域名（preview.zhiye…）也落在发布站点泛域名 *.zhiye… 里：不能当成 slug=preview 的应用站点
+        boolean previewDomain = !previewHost.isEmpty() && host.replaceFirst(":\\d+$", "").equalsIgnoreCase(previewHost);
+        if (h.matches() && !previewDomain) {
             String slug = h.group(1).toLowerCase();
             // 发布站点同源的平台接口：数据源代理与 SDK（页面里不放令牌）
             if (uri.startsWith("/__zhiye/")) { servePlatform(slug, uri, req, res, chain); return; }

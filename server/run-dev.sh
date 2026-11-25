@@ -58,7 +58,7 @@ if [ "${SKIP_SERVER_BUILD:-0}" != "1" ]; then
 fi
 if [ "$needs_build" = 1 ]; then
   echo "… 打包主服务"
-  (cd "$SERVER_DIR" && mvn -q -B -DskipTests package >"$LOGS/server-build.log" 2>&1) || { echo "✗ 打包失败，见 $LOGS/server-build.log"; tail -30 "$LOGS/server-build.log"; exit 1; }
+  (cd "$SERVER_DIR" && mvn -o -q -B -DskipTests package >"$LOGS/server-build.log" 2>&1) || { echo "✗ 打包失败，见 $LOGS/server-build.log"; tail -30 "$LOGS/server-build.log"; exit 1; }
 fi
 echo "✓ 主服务已打包"
 

@@ -7,7 +7,6 @@ import { setPlatformToken } from '../lib/platformToken';
 const ERROR_TEXT: Record<string, string> = {
   access_denied: '你取消了授权，或当前账号没有访问权限。',
   invalid_token: '登录凭证无效或已过期，请重新登录。',
-  expired: '登录已过期，请重新登录。没发送的输入和没保存的代码修改都还在，登录后会回到刚才的页面。',
   sso_unreachable: '暂时连不上公司统一认证服务。统一认证只能在公司内网使用，请确认已连接内网或 VPN。',
   sso_disabled: '当前环境没有开启统一登录。',
 };
@@ -80,12 +79,31 @@ export function LoginPage() {
             </p>
           </div>
 
-          {error && (
+          {error === 'platform_access_denied' ? (
+            <div className="login-denied" role="alert">
+              <h3>暂时还没有平台使用权限</h3>
+              <p>{params.get('msg') ?? '你的公司账号已通过统一认证，但还没有开通织页使用权限。按下面步骤开通后就能登录：'}</p>
+              <ol className="login-denied-steps">
+                <li>
+                  <b>公司统一账号认证</b>
+                  <span>已完成，无需单独注册密码</span>
+                </li>
+                <li>
+                  <b>联系平台管理员开通权限</b>
+                  <span>把你的工号报给管理员，由他在「管理 → 人员管理」中添加并启用</span>
+                </li>
+                <li>
+                  <b>重新登录</b>
+                  <span>开通后回到本页，点击「使用华星统一账号登录」即可进入</span>
+                </li>
+              </ol>
+            </div>
+          ) : error && error !== 'expired' ? (
             <div className="login-alert" role="alert">
               <Icon name="alert" />
               <span>{ERROR_TEXT[error] ?? `登录没有成功（${error}），请稍后重试。`}</span>
             </div>
-          )}
+          ) : null}
 
           <div className="login-actions">
             {meta.isLoading ? (
@@ -162,8 +180,11 @@ export function SsoCallbackPage() {
           return;
         }
         const body = await res.json().catch(() => null);
-        const code = body?.code === 'SSO_UNREACHABLE' ? 'sso_unreachable' : body?.code === 'AUTH_DISABLED' ? 'sso_disabled' : 'invalid_token';
-        window.location.replace(`/login?error=${code}&redirect=${encodeURIComponent(redirect)}`);
+        const code = body?.code === 'SSO_UNREACHABLE' ? 'sso_unreachable'
+          : body?.code === 'AUTH_DISABLED' ? 'sso_disabled'
+            : body?.code === 'PLATFORM_ACCESS_DENIED' ? 'platform_access_denied' : 'invalid_token';
+        const msg = code === 'platform_access_denied' && body?.message ? `&msg=${encodeURIComponent(body.message)}` : '';
+        window.location.replace(`/login?error=${code}${msg}&redirect=${encodeURIComponent(redirect)}`);
       })
       .catch(() => window.location.replace(`/login?error=sso_unreachable&redirect=${encodeURIComponent(redirect)}`));
   }, [location.search]);

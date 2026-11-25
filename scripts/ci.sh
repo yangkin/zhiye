@@ -8,6 +8,10 @@ cd "$ROOT"
 export PATH="$HOME/.nvm/versions/node/v24.14.1/bin:/opt/homebrew/bin:/opt/homebrew/opt/openjdk@21/bin:/opt/homebrew/opt/postgresql@16/bin:$PATH"
 export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@21}"
 export JAVA_TOOL_OPTIONS="-DsocksNonProxyHosts=127.0.0.1|localhost|*.localhost"
+# 测试固定使用假上游和测试密钥，不受本机 GLM / DeepSeek 配置影响
+export ZHIYE_MODEL=kimi
+export ZHIYE_LLM_KEY_ENV=KIMI_API_KEY
+export KIMI_API_KEY="${KIMI_API_KEY:-test-key}"
 
 echo "==> 1/4 Eval 基线与评分器检查"
 node evals/run-eval.mjs --check

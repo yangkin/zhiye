@@ -28,6 +28,11 @@ class TemplateTest extends IntegrationTest {
         assertThat(tpl.path("fileCount").asInt()).isPositive();
         String tplId = tpl.path("id").asText();
 
+        Client.Res duplicate = alice.post("/api/templates", Map.of("appId", appId, "name", "重复计数器"));
+        assertThat(duplicate.status()).isEqualTo(409);
+        assertThat(duplicate.code()).isEqualTo("APP_ALREADY_PUBLISHED");
+        assertThat(ids(alice.ok(alice.get("/api/templates?tab=mine"))).stream().filter(tplId::equals).count()).isEqualTo(1);
+
         // 页面快照：静态页面，不注入云服务令牌
         assertThat(tpl.path("previewUrl").asText()).endsWith("/t/" + tplId + "/");
         Client.Res page = alice.get("/t/" + tplId + "/");

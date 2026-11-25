@@ -22,7 +22,7 @@ public class DisabledSkillHubClient implements SkillHubClient {
     @Override public PackageFile packageFile(String token, long skillId, Long versionId) { throw off(); }
     @Override public List<ScopeNode> scopeOptions(String token) { throw off(); }
     @Override public Submission publish(String token, PublishInput in, byte[] zip, String zipName) { throw off(); }
-    @Override public ReviewState reviewState(String token, long skillId, long versionId) { throw off(); }
+    @Override public ReviewState reviewState(String token, long skillId, String version) { throw off(); }
     @Override public void setVisibleScope(String token, long skillId, long versionId, String visibleOrgCodePath) { throw off(); }
     @Override public void withdraw(String token, long skillId, long versionId, String submissionKey) { throw off(); }
 }

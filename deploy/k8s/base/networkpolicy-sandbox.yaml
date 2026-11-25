@@ -39,6 +39,25 @@ spec:
       ports:
         - { protocol: TCP, port: 8080 }
 ---
+# api 通过 Pod IP 直连沙箱 runner 的 HTTP 控制端口（见 docs/runner-protocol.md）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-ingress-api
+  namespace: zhiye-sandbox
+spec:
+  podSelector:
+    matchLabels: { app: zhiye-sandbox }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: zhiye }
+          podSelector:
+            matchLabels: { app: zhiye-api }
+      ports:
+        - { protocol: TCP, port: 8790 }
+---
 # 导入任务（zhiye/allow-net=1，npm install）：额外允许访问公网，但不能访问内网网段
 # （集群 Pod/Service 网段、VPC、云元数据 100.100.100.200 / 169.254.169.254 都在排除范围内）。
 # 生产有 npm 内网镜像时，把 0.0.0.0/0 换成镜像的 CIDR 并去掉 except（见 overlays/prod）。

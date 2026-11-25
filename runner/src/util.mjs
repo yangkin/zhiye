@@ -18,6 +18,23 @@ export class RunnerError extends Error {
   constructor(code, message, extra) { super(message); this.code = code; if (extra) Object.assign(this, extra) }
 }
 
+/** 模型调用错误分类：与服务端 KimiClient.codeFor 保持同一套规则。 */
+export function classifyError(msg) {
+  const m = String(msg || '')
+  // 每分钟限流（TPM/RPM）：临时限流，不是额度用完，单独错误码避免误导
+  if (/tokens?\s*per\s*minute|requests?\s*per\s*minute|\btpm\b|\brpm\b/i.test(m)) return 'PROVIDER_RATE_LIMIT'
+  // 供应商配额：上游 429 / usage limit / current_quota，和任务自身的 token 预算无关。
+  // 429 要求与配额类词同现，避免把 "1429000 tokens" 这类文本误判成配额错误
+  if (/usage limit|current_quota|rate.?limit/i.test(m)) return 'PROVIDER_QUOTA'
+  if (/\b429\b/.test(m) && /quota|limit|usage|rate|exceed/i.test(m)) return 'PROVIDER_QUOTA'
+  // 任务预算：网关用 402 + insufficient_quota 表达「本任务 token 预算已用完」
+  if (/insufficient_quota/i.test(m)) return /token|budget|预算/i.test(m) ? 'BUDGET_EXCEEDED' : 'PROVIDER_QUOTA'
+  if (/budget|预算/i.test(m)) return 'BUDGET_EXCEEDED'
+  // 其余 402（例如 DeepSeek 余额不足 Insufficient Balance）是供应商账户额度，不是任务预算
+  if (/\b402\b|insufficient balance/i.test(m)) return 'PROVIDER_QUOTA'
+  return 'MODEL_ERROR'
+}
+
 /** log 事件节流：每秒最多 5 条，多余的合并，最后补发。 */
 const LOG_LIMIT = 5
 let windowStart = 0

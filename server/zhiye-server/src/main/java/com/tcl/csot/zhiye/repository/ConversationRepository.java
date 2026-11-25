@@ -21,7 +21,7 @@ public class ConversationRepository {
     public static final String DEFAULT_TITLE = "新对话";
 
     public record ConversationRow(String id, String workspaceId, String title, Instant createdAt, Instant updatedAt,
-                                  String lastMessage) {}
+                                  String lastMessage, JsonNode sourceIds) {}
 
     public record MessageRow(String id, String conversationId, String role, String content, Instant createdAt, String thinking,
                              JsonNode assetIds) {}
@@ -32,7 +32,7 @@ public class ConversationRepository {
 
     private static ConversationRow conversation(ResultSet rs, int rowNum) throws SQLException {
         return new ConversationRow(rs.getString("id"), rs.getString("workspace_id"), rs.getString("title"),
-                Db.ts(rs, "created_at"), Db.ts(rs, "updated_at"), rs.getString("last_message"));
+                Db.ts(rs, "created_at"), Db.ts(rs, "updated_at"), rs.getString("last_message"), Json.read(rs.getString("source_ids")));
     }
 
     private static MessageRow message(ResultSet rs, int rowNum) throws SQLException {
@@ -47,11 +47,16 @@ public class ConversationRepository {
               order by m.created_at desc, m.id desc limit 1) as last_message
             """;
 
-    public ConversationRow create(String ws, String title) {
+    public ConversationRow create(String ws, String title, List<String> sourceIds) {
         String id = Ids.newId("conv");
-        jdbc.sql("insert into conversation (id, workspace_id, title) values (?, ?, ?)")
-                .params(id, ws, title).update();
+        jdbc.sql("insert into conversation (id, workspace_id, title, source_ids) values (?, ?, ?, ?::jsonb)")
+                .params(id, ws, title, Json.write(sourceIds)).update();
         return find(ws, id).orElseThrow();
+    }
+
+    public void updateSources(String conversationId, List<String> sourceIds) {
+        jdbc.sql("update conversation set source_ids = ?::jsonb, updated_at = now() where id = ?")
+                .params(Json.write(sourceIds), conversationId).update();
     }
 
     public Optional<ConversationRow> find(String ws, String id) {

@@ -184,9 +184,9 @@ class ContextHistoryTest extends IntegrationTest {
     @Test
     void promptsFixAndEstimateTokensAdaptToProjectAndLanguage() {
         var checks = Json.M.createArrayNode().add(Json.obj().put("name", "类型检查").put("ok", false).put("detail", "error TS1"));
-        assertThat(Prompts.fix(checks, 1, "vue")).contains("vue-tsc --noEmit");
+        assertThat(Prompts.fix(checks, 1, "vue")).contains("vue-tsc");
         assertThat(Prompts.fix(checks, 1, "script")).contains("脚本自查").doesNotContain("tsc --noEmit");
-        assertThat(Prompts.fix(checks, 1, "template")).contains("tsc --noEmit");
+        assertThat(Prompts.fix(checks, 1, "template")).contains("verify_app").contains("类型检查");
 
         assertThat(AskService.estimateTokens("中文密度高的长文本")).isGreaterThan(AskService.estimateTokens("english"));
         // 超过 token 预算的多轮高密度中文历史同样会被裁减

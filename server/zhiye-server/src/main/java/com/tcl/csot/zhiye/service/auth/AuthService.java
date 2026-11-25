@@ -3,6 +3,7 @@ package com.tcl.csot.zhiye.service.auth;
 import com.tcl.csot.zhiye.client.SsoClient;
 import com.tcl.csot.zhiye.config.AuthProperties;
 import com.tcl.csot.zhiye.entity.SsoUser;
+import com.tcl.csot.zhiye.exception.ApiException;
 
 import com.tcl.csot.zhiye.util.Ids;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
@@ -11,6 +12,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.ResponseCookie;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,13 +35,16 @@ public class AuthService {
     private final JdbcClient jdbc;
     private final SsoClient sso;
     private final WorkspaceService workspaces;
+    private final com.tcl.csot.zhiye.service.admin.AdminAuthService adminAuth;
 
-    public AuthService(AuthProperties props, ZhiyeProperties zhiye, JdbcClient jdbc, SsoClient sso, WorkspaceService workspaces) {
+    public AuthService(AuthProperties props, ZhiyeProperties zhiye, JdbcClient jdbc, SsoClient sso, WorkspaceService workspaces,
+                       com.tcl.csot.zhiye.service.admin.AdminAuthService adminAuth) {
         this.props = props;
         this.zhiye = zhiye;
         this.jdbc = jdbc;
         this.sso = sso;
         this.workspaces = workspaces;
+        this.adminAuth = adminAuth;
     }
 
     public boolean ssoEnabled() { return props.ssoEnabled(); }
@@ -78,9 +83,24 @@ public class AuthService {
                 });
     }
 
+    /** 登录白名单判定：配置的管理员白名单、数据库管理员、platform_login_allowlist 内启用人员均可登录 */
+    private boolean loginAllowed(String loginName) {
+        if (adminAuth.isAllowlistedLogin(loginName)) return true;
+        Boolean admin = jdbc.sql("select role = 'admin' from app_user where login_name = ?")
+                .param(loginName).query(Boolean.class).optional().orElse(false);
+        if (Boolean.TRUE.equals(admin)) return true;
+        return jdbc.sql("select enabled from platform_login_allowlist where login_name = ?")
+                .param(loginName).query(Boolean.class).optional().orElse(false);
+    }
+
     @Transactional
     public SsoUser login(String accessToken, HttpServletRequest req, HttpServletResponse res) {
         SsoClient.Profile p = sso.fetchProfile(accessToken);
+        // 人员管理：开启登录白名单后，仅名单内启用人员与平台管理员可登录，其他人直接拒绝（不建会话）
+        if (props.loginAllowlistEnabled() && !loginAllowed(p.loginName())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "PLATFORM_ACCESS_DENIED",
+                    "账号「" + p.loginName() + "」还没有平台使用权限，请联系平台管理员开通");
+        }
         String userId = jdbc.sql("""
                 insert into app_user (id, sso_user_id, login_name, real_name, email, tenant_num)
                 values (?, ?, ?, ?, ?, ?)
@@ -90,6 +110,14 @@ public class AuthService {
                 .params(Ids.newId("u"), p.ssoUserId(), p.loginName(), p.realName(), p.email(), p.tenantNum())
                 .query(String.class).single();
         SsoUser user = new SsoUser(userId, p.ssoUserId(), p.loginName(), p.realName(), p.email(), p.tenantNum());
+
+        // 名单里预授的角色同步到 app_user（支持登录前指定管理员）；配置白名单/数据库管理员不受影响
+        if (props.loginAllowlistEnabled()) {
+            jdbc.sql("""
+                    update app_user set role = (select role from platform_login_allowlist where login_name = ?)
+                    where id = ? and exists (select 1 from platform_login_allowlist where login_name = ? and enabled)
+                    """).params(p.loginName(), userId, p.loginName()).update();
+        }
 
         // 用户还没有工作空间时，认领当前浏览器的匿名工作空间（之前免登录创建的应用随之归入账号）
         boolean hasOwn = jdbc.sql("select count(*) from workspace where owner_user_id = ?").param(userId).query(Long.class).single() > 0;

@@ -11,6 +11,7 @@ import org.springframework.web.util.HtmlUtils;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -32,7 +33,23 @@ public class MockSsoController {
 
     public MockSsoController(AuthProperties auth) { this.auth = auth; }
 
-    /** 回调地址只允许配置里登记的那个（和真实网关一样，防止把令牌带去别处） */
+    /** 模拟公司 TPFM 员工目录（人员管理的员工搜索在 mock 实例里也能走通） */
+    @GetMapping("/tpfm/v2/31/employeeVos")
+    public Map<String, Object> employees(@RequestParam(required = false) String name,
+                                         @RequestParam(required = false) String accounts) {
+        String q = name != null ? name : accounts;
+        List<java.util.Map<String, String>> all = new java.util.ArrayList<>(List.of(
+                Map.of("userAccount", "yangkai37", "userName", "杨凯"),
+                Map.of("userAccount", "zhangsan01", "userName", "张三"),
+                Map.of("userAccount", "lisi02", "userName", "李四"),
+                Map.of("userAccount", "chenchong36", "userName", "陈翀")));
+        all.removeIf(e -> {
+            if (q == null || q.isBlank()) return false;
+            return !e.get("userName").contains(q) && !e.get("userAccount").contains(q);
+        });
+        return Map.of("code", 0, "data", Map.of("content", all, "totalElements", all.size()));
+    }
+
     private boolean allowed(String rc) {
         return rc != null && rc.equals(auth.sso().redirectUrl());
     }

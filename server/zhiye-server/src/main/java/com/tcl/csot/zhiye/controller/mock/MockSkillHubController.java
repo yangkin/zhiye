@@ -61,6 +61,12 @@ public class MockSkillHubController {
                 Map.of("id", "c2", "categoryName", "办公效率", "sort", 2)));
     }
 
+    @PostMapping("/skillCategory/category/queryByCenter")
+    public Map<String, Object> categoriesByCenter(@RequestHeader(value = "Authorization", required = false) String auth,
+                                                  @RequestBody Map<String, Object> body) {
+        return categories(auth);
+    }
+
     @PostMapping("/aiToolbox/skills/market/query")
     public Map<String, Object> market(@RequestHeader(value = "Authorization", required = false) String auth,
                                       @RequestBody Map<String, Object> body) {
@@ -131,8 +137,10 @@ public class MockSkillHubController {
                                    @RequestParam Map<String, String> p, @RequestPart(value = "file", required = false) MultipartFile file) throws IOException {
         account(auth);
         long id = skillIds.incrementAndGet(), versionId = versionIds.incrementAndGet();
+        byte[] pkg = file == null ? MockSkillHubFileController.packageBytes(p.get("fileUrl")) : file.getBytes();
+        if (pkg == null) throw new IllegalArgumentException("skill package missing");
         Skill s = new Skill(id, p.get("slug"), p.get("displayName"), p.get("summary"), p.get("owner"), p.get("categoryId"),
-                p.get("version"), versionId, file == null ? samplePackage() : file.getBytes(), Boolean.parseBoolean(p.get("subReview")) ? 1 : 5);
+                p.get("version"), versionId, pkg, Boolean.parseBoolean(p.get("subReview")) ? 1 : 5);
         skills.put(id, s);
         return ok(Map.of("skillId", id, "versionId", versionId, "submissionKey", "sub-" + id, "reused", false));
     }
@@ -143,9 +151,11 @@ public class MockSkillHubController {
         account(auth);
         Skill old = skill(Long.parseLong(p.get("skillId")));
         long versionId = versionIds.incrementAndGet();
+        byte[] pkg = file == null ? MockSkillHubFileController.packageBytes(p.get("fileUrl")) : file.getBytes();
+        if (pkg == null) throw new IllegalArgumentException("skill package missing");
         Skill s = new Skill(old.id(), old.slug(), p.getOrDefault("displayName", old.name()), p.getOrDefault("summary", old.summary()),
                 old.owner(), p.getOrDefault("categoryId", old.categoryId()), p.get("version"), versionId,
-                file == null ? old.pkg() : file.getBytes(), Boolean.parseBoolean(p.get("subReview")) ? 1 : 5);
+                pkg, Boolean.parseBoolean(p.get("subReview")) ? 1 : 5);
         skills.put(old.id(), s);
         return ok(Map.of("skillId", old.id(), "versionId", versionId, "submissionKey", "sub-" + versionId, "reused", false));
     }

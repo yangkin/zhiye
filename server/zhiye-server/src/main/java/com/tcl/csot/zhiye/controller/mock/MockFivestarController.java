@@ -120,23 +120,33 @@ public class MockFivestarController {
 
     // ---------------- openclaw-service ----------------
 
+    private static ResponseEntity<Map<String, Object>> envelope(String org, Object data) {
+        if (!org.equals("legacy")) return ok(data);
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("code", 200);
+        r.put("message", "success");
+        r.put("data", data);
+        r.put("timestamp", System.currentTimeMillis());
+        return ResponseEntity.ok(r);
+    }
+
     @GetMapping("/mock/openclaw/{org}/llm/models/providers")
-    public ResponseEntity<Map<String, Object>> providers(@RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<Map<String, Object>> providers(@PathVariable String org, @RequestHeader(value = "Authorization", required = false) String auth) {
         String a = account(auth);
         if (a == null) return ResponseEntity.status(401).build();
-        return ok(PROVIDERS.stream().map(p -> providerVo(p, a)).toList());
+        return envelope(org, PROVIDERS.stream().map(p -> providerVo(p, a)).toList());
     }
 
     @GetMapping("/mock/openclaw/{org}/llm/models/default")
-    public ResponseEntity<Map<String, Object>> defaultModel(@RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<Map<String, Object>> defaultModel(@PathVariable String org, @RequestHeader(value = "Authorization", required = false) String auth) {
         String a = account(auth);
         if (a == null) return ResponseEntity.status(401).build();
         Provider p = PROVIDERS.get(0);
-        return ok(Map.of("model", Map.of("provider", providerVo(p, a), "model", modelVo(p, p.models().get(0)))));
+        return envelope(org, Map.of("model", Map.of("provider", providerVo(p, a), "model", modelVo(p, p.models().get(0)))));
     }
 
     @GetMapping("/mock/openclaw/{org}/tokenCostDetail/usage")
-    public ResponseEntity<Map<String, Object>> usage(@RequestHeader(value = "Authorization", required = false) String auth) {
+    public ResponseEntity<Map<String, Object>> usage(@PathVariable String org, @RequestHeader(value = "Authorization", required = false) String auth) {
         String a = account(auth);
         if (a == null) return ResponseEntity.status(401).build();
         long u = used(a), limit = fs.mockLimitTokens();
@@ -154,22 +164,22 @@ public class MockFivestarController {
         long total = Math.max(1, byModel.getOrDefault(a, Map.of()).values().stream().mapToLong(AtomicLong::get).sum());
         v.put("shareData", byModel.getOrDefault(a, Map.of()).entrySet().stream().map(e -> Map.of("name", e.getKey(), "tokens", e.getValue().get(),
                 "pct", Math.round(e.getValue().get() * 10000.0 / total) / 100.0)).toList());
-        return ok(v);
+        return envelope(org, v);
     }
 
-    /** 拟新增的服务间接口：按工号和模型取 llm-gateway 路由（真实接口需 openclaw 团队提供，见 docs/fivestar-integration.md） */
-    @PostMapping("/mock/openclaw/internal/zhiye/llm/route")
+    /** 与 openclaw 一致的服务间接口：按工号和模型取 llm-gateway 路由，返回裸 JSON。 */
+    @PostMapping("/mock/openclaw/internal/llm/route")
     public ResponseEntity<Map<String, Object>> route(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                                      @RequestBody JsonNode body) {
         String expected = fs.internalToken();
         if (!expected.isEmpty() && !expected.equals(token)) return ResponseEntity.status(401).build();
         String a = body.path("userAccount").asText("");
-        if (!a.matches("[A-Za-z0-9._-]{1,64}")) return fail(400, "userAccount 不合法");
+        if (!a.matches("[A-Za-z0-9._-]{1,64}")) return ResponseEntity.status(422).body(Map.of("code", "llm.internal.user.account.invalid", "message", "userAccount 不合法"));
         String pid = body.path("providerId").asText(""), mid = body.path("modelId").asText("");
         Provider p = pid.isEmpty() ? PROVIDERS.get(0) : PROVIDERS.stream().filter(x -> x.id().equals(pid)).findFirst().orElse(null);
-        if (p == null) return fail(400, "供应商不存在或未启用");
+        if (p == null) return ResponseEntity.status(422).body(Map.of("code", "llm.internal.provider.id.invalid", "message", "供应商不存在或未启用"));
         String[] m = mid.isEmpty() ? p.models().get(0) : p.models().stream().filter(x -> x[1].equals(mid)).findFirst().orElse(null);
-        if (m == null) return fail(400, "模型不存在或未启用");
+        if (m == null) return ResponseEntity.status(422).body(Map.of("code", "llm.internal.model.id.invalid", "message", "模型不存在或未启用"));
         Map<String, Object> v = new LinkedHashMap<>();
         v.put("baseUrl", fs.llmGatewayBaseUrl().replace("{self}", port.selfBase()).replaceAll("/+$", "") + "/v1");
         v.put("providerModelName", "xclaw-" + a + "-" + p.name() + "/" + m[1]);
@@ -178,7 +188,31 @@ public class MockFivestarController {
         v.put("providerName", p.name());
         v.put("modelId", m[1]);
         v.put("modelName", m[2]);
-        return ok(v);
+        return ResponseEntity.ok(v);
+    }
+
+    @PostMapping("/mock/openclaw/internal/llm/models")
+    public ResponseEntity<?> availableModels(@RequestHeader(value = "X-Internal-Token", required = false) String token,
+                                             @RequestBody JsonNode body) {
+        String expected = fs.internalToken();
+        if (!expected.isEmpty() && !expected.equals(token)) return ResponseEntity.status(401).build();
+        String account = body.path("userAccount").asText("");
+        if (!account.matches("[A-Za-z0-9._-]{1,64}"))
+            return ResponseEntity.status(422).body(Map.of("code", "llm.internal.user.account.invalid", "message", "userAccount 不合法"));
+        List<Map<String, Object>> out = new ArrayList<>();
+        boolean preferred = true;
+        for (Provider p : PROVIDERS) for (String[] m : p.models()) {
+            Map<String, Object> v = new LinkedHashMap<>();
+            v.put("providerId", p.id());
+            v.put("providerName", p.name());
+            v.put("modelId", m[1]);
+            v.put("modelName", m[2]);
+            v.put("multimodal", Boolean.parseBoolean(m[3]));
+            v.put("preferred", preferred);
+            preferred = false;
+            out.add(v);
+        }
+        return ResponseEntity.ok(out);
     }
 
     // ---------------- llm-gateway ----------------

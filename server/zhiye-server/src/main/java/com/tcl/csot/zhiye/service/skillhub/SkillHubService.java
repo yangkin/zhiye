@@ -39,7 +39,7 @@ import java.util.Set;
 public class SkillHubService {
     private static final Logger log = LoggerFactory.getLogger(SkillHubService.class);
 
-    /** 发布可见范围：private 仅自己（完整组织路径）、team 本公司（根节点）、public 全公司（NULL，全租户） */
+    /** 发布方式：private 仅个人（不提交人工审核）、public 公开并提交审核；team 是旧客户端的根组织公开 */
     public static final Set<String> VISIBILITY = Set.of("private", "team", "public");
     private static final Set<String> TAGS = Set.of("周报", "会议", "文档", "表格", "数据", "可视化", "代码", "写作", "翻译", "办公");
 
@@ -193,7 +193,7 @@ public class SkillHubService {
     // ---------- 发布 ----------
 
     public record PublishRequest(String versionId, String categoryId, String displayName, String summary, String slug, List<String> tags,
-                                 String version, String visibility, String changelog, Boolean submitReview) {}
+                                 String version, String visibility, String scope, String changelog, Boolean submitReview) {}
 
     /** 可发布时的辅助信息：分类、建议版本号、当前用户信息 */
     public Map<String, Object> publishOptions(String token) {
@@ -282,21 +282,31 @@ public class SkillHubService {
         }
         List<String> tags = req != null && req.tags() != null && !req.tags().isEmpty() ? req.tags().stream().limit(5).toList() : defaultTags(app.type());
         String version = req != null && req.version() != null && !req.version().isBlank() ? req.version().trim() : nextVersion(lastVersion(app.id()));
-        boolean submit = req == null || req.submitReview() == null || req.submitReview();
         String changelog = req == null || req.changelog() == null ? "" : req.changelog().trim();
         if (changelog.length() > 2000) throw ApiException.validation("更新说明最多 2000 字");
         String visibility = req == null || req.visibility() == null || req.visibility().isBlank() ? "private" : req.visibility();
-        if (!VISIBILITY.contains(visibility)) throw ApiException.validation("可见范围只能是 private、team 或 public");
+        if (!VISIBILITY.contains(visibility)) throw ApiException.validation("发布方式只能是 private 或 public");
+        boolean submit = !"private".equals(visibility);
+        String visibleOrgCodePath = null;
+        if ("public".equals(visibility)) {
+            String scope = req.scope();
+            if (scope == null || scope.isBlank()) throw ApiException.validation("公开至 SkillHub 时需要选择可见范围");
+            visibleOrgCodePath = resolveScope(token, scope);
+            if (visibleOrgCodePath == null || visibleOrgCodePath.isBlank()) throw ApiException.validation("请选择具体的组织可见范围");
+        } else if ("team".equals(visibility)) {
+            visibleOrgCodePath = resolveScope(token, "team");
+            if (visibleOrgCodePath == null || visibleOrgCodePath.isBlank()) throw ApiException.validation("未获取到你的组织归属，暂不能公开");
+        }
 
         ByteArrayOutputStream zip = new ByteArrayOutputStream();
-        git.exportZip(app.id(), v.gitCommit(), meta.rawName(), zip);
+        // SkillHub 解析要求 SKILL.md 在 zip 根目录，不能包一层目录
+        git.exportZip(app.id(), v.gitCommit(), "", zip);
         Long platformSkillId = lastPlatformSkillId(app.id());
         SkillHubClient.Submission sub = client.publish(token, new SkillHubClient.PublishInput(categoryId, displayName, realName, slug, summary, tags,
-                version, submit, null, changelog.isEmpty() ? null : changelog, platformSkillId), zip.toByteArray(), meta.rawName() + ".zip");
+                version, submit, visibleOrgCodePath, changelog.isEmpty() ? null : changelog, platformSkillId), zip.toByteArray(), meta.rawName() + ".zip");
         long skillId = sub.skillId();
-        applyVisibility(token, skillId, sub.versionId(), visibility);
 
-        String statusText = statusText(sub.versionId() == null ? null : review(token, skillId, sub.versionId()));
+        String statusText = statusText(sub.versionId() == null ? null : review(token, skillId, version));
         String id = Ids.newId("sp");
         jdbc.sql("insert into skill_publication (id, app_id, version_id, skillhub_id, skill_version, url, visibility, slug, status, review_status, version_id_platform, submission_key, created_at) "
                         + "values (?,?,?,?,?,?,?,?,?,?,?,?,now())")
@@ -348,7 +358,7 @@ public class SkillHubService {
             String pvid = (String) r.get("platformVersionId");
             if (sid == null || pvid == null) continue;
             try {
-                SkillHubClient.ReviewState st = client.reviewState(token, Long.parseLong(sid), Long.parseLong(pvid));
+                SkillHubClient.ReviewState st = client.reviewState(token, Long.parseLong(sid), (String) r.get("skillVersion"));
                 String text = statusText(st);
                 if (text != null) {
                     r.put("reviewStatus", text);
@@ -412,37 +422,27 @@ public class SkillHubService {
         }
     }
 
-    /** 可见范围选项（组织节点）+ 当前用户的默认值 */
+    /** SkillHub 公开时可选择的组织节点；根节点表示全公司，其余节点包含其下级组织。 */
     public List<Map<String, Object>> scopeOptions(String token) {
         token = requireToken(token);
-        List<SkillHubClient.ScopeNode> nodes = client.scopeOptions(token);
         List<Map<String, Object>> out = new ArrayList<>();
-        out.add(Map.of("value", "public", "label", "全公司", "kind", "public", "desc", "所有员工都能在 SkillHub 里看到和安装"));
-        if (!nodes.isEmpty()) {
-            out.add(Map.of("value", "team", "label", "本公司 · " + label(nodes.get(0)), "kind", "company", "desc", "公司内所有员工可见"));
-            out.add(Map.of("value", "private", "label", "仅自己 · " + label(nodes.get(nodes.size() - 1)), "kind", "own", "desc", "只有你能看到和安装"));
-            for (SkillHubClient.ScopeNode n : nodes) {
-                Map<String, Object> m = new LinkedHashMap<>();
-                m.put("value", "org:" + n.codePath());
-                m.put("label", label(n));
-                m.put("kind", "org");
-                m.put("level", n.level());
-                m.put("desc", "该组织及其下级可见");
-                out.add(m);
-            }
-        } else {
-            out.add(Map.of("value", "team", "label", "本公司", "kind", "company", "desc", "公司内所有员工可见"));
-            out.add(Map.of("value", "private", "label", "仅自己", "kind", "own", "desc", "只有你能看到和安装"));
+        for (SkillHubClient.ScopeNode n : client.scopeOptions(token)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("value", "org:" + n.codePath());
+            m.put("label", label(n));
+            m.put("kind", "org");
+            m.put("level", n.level());
+            m.put("desc", "该组织及其下级可见");
+            out.add(m);
         }
         return out;
     }
 
-    /** 把前端选的可见范围翻译成 fivestar 的 visibleOrgCodePath；public → null（全租户） */
+    /** 把前端选的组织节点翻译成 fivestar 的 visibleOrgCodePath，并限制在当前用户的组织路径上。 */
     public String resolveScope(String token, String scope) {
-        if (scope == null || scope.isBlank() || "public".equals(scope)) return null;
+        if (scope == null || scope.isBlank()) return null;
         token = requireToken(token);
         List<SkillHubClient.ScopeNode> nodes = client.scopeOptions(token);
-        if ("private".equals(scope)) return nodes.isEmpty() ? null : nodes.get(nodes.size() - 1).codePath();
         if ("team".equals(scope)) return nodes.isEmpty() ? null : nodes.get(0).codePath();
         if (scope.startsWith("org:")) {
             String path = scope.substring(4);
@@ -461,33 +461,10 @@ public class SkillHubService {
         return app;
     }
 
-    private void applyVisibility(String token, long skillId, Long versionId, String visibility) {
-        if (versionId == null || "public".equals(visibility)) return;
-        String path = resolveScopeQuietly(token, visibility);
-        if (path == null) {
-            log.warn("SkillHub 技能 {} 拿不到组织路径，跳过可见范围设置", skillId);
-            return;
-        }
+    private SkillHubClient.ReviewState review(String token, long skillId, String version) {
+        if (version == null || version.isBlank()) return null;
         try {
-            client.setVisibleScope(token, skillId, versionId, path);
-        } catch (Exception e) {
-            // 可见范围设置失败不影响发布本身：默认按平台规则（提交者所在组织）可见，用户可以之后在 SkillHub 页面调整
-            log.warn("设置 SkillHub 可见范围失败 skill={} version={}：{}", skillId, versionId, e.toString());
-        }
-    }
-
-    private String resolveScopeQuietly(String token, String visibility) {
-        try {
-            return resolveScope(token, visibility);
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private SkillHubClient.ReviewState review(String token, long skillId, Long versionId) {
-        if (versionId == null) return null;
-        try {
-            return client.reviewState(token, skillId, versionId);
+            return client.reviewState(token, skillId, version);
         } catch (Exception e) {
             log.warn("查询 SkillHub 审核状态失败：{}", e.toString());
             return null;

@@ -62,7 +62,35 @@ public class TaskWorker {
     }
 
     @PreDestroy
-    public void stop() { stopped = true; signals.wakeWorker(); }
+    public void stop() {
+        stopped = true;
+        signals.wakeWorker();
+        // 优雅停机：停止领新任务后等在跑任务做完（滚动升级不再硬杀出 worker_lost）。
+        // 等待期间手动续约：Spring 关闭会先停调度器（heartbeat @Scheduled 不再执行），
+        // 不续约的话其他实例会按租约过期把任务误判成 worker_lost。
+        long waitSeconds = Math.max(1, props.task().shutdownWaitSeconds());
+        long deadline = System.currentTimeMillis() + waitSeconds * 1000L;
+        // 注意：Spring 在 ContextClosedEvent 时就拆了 logback，@PreDestroy 阶段 log.* 不可见，只能用 stdout。
+        if (!running.isEmpty()) System.out.println("优雅停机：等待 " + running.size() + " 个在跑任务完成（最多 " + waitSeconds + " 秒）" + running);
+        long lastBeat = 0;
+        while (!running.isEmpty()) {
+            long now = System.currentTimeMillis();
+            if (now >= deadline) {
+                System.out.println("优雅停机超时，仍有 " + running.size() + " 个任务未完成，退出后将被标记 worker_lost：" + running);
+                break;
+            }
+            try {
+                if (now - lastBeat > 10_000) {
+                    for (String id : running) tasks.heartbeat(id, owner, props.task().leaseSeconds());
+                    lastBeat = now;
+                }
+            } catch (Exception e) {
+                System.out.println("停机等待期间续约失败：" + e.getMessage());
+            }
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        }
+        if (running.isEmpty()) System.out.println("优雅停机：在跑任务已全部完成");
+    }
 
     private void loop() {
         while (!stopped) {

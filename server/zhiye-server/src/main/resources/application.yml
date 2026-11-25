@@ -103,8 +103,13 @@ zhiye:
   sources:
     allow-loopback: ${ZHIYE_SOURCES_ALLOW_LOOPBACK:true}
     file: ${ZHIYE_SOURCES_FILE:}
-  # API 网关：浏览已启用且已上架的 API，导入为数据源后用调用项目 AppKey/AppSecret 签名访问
   agw:
+    client:
+      client-id: ${ZHIYE_AGW_CLIENT_ID:}
+      client-secret: ${ZHIYE_AGW_CLIENT_SECRET:}
+      token-url: ${ZHIYE_AGW_CLIENT_TOKEN_URL:http://testmetis.csot.tcl.com/oauth/oauth/token}
+      base-url: ${ZHIYE_AGW_CLIENT_BASE_URL:https://apitest.csot.tcl.com/api/agw-admin}
+      scope: ${ZHIYE_AGW_CLIENT_SCOPE:}
     enabled: ${ZHIYE_AGW_ENABLED:false}
     base-url: ${ZHIYE_AGW_BASE_URL:http://testmetis.csot.tcl.com}
     public-base-url: ${ZHIYE_AGW_PUBLIC_URL:}
@@ -116,6 +121,7 @@ zhiye:
     mock: ${ZHIYE_SKILLHUB_MOCK:false}
     base-url: ${ZHIYE_SKILLHUB_URL:}
     file-base-url: ${ZHIYE_SKILLHUB_FILE_URL:}
+    upload-base-url: ${ZHIYE_SKILLHUB_UPLOAD_URL:}
     portal-url: ${ZHIYE_SKILLHUB_PORTAL:http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}}
     organization-id: ${ZHIYE_SKILLHUB_ORG:31}
     timeout-seconds: 60

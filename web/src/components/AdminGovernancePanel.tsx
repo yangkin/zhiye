@@ -23,8 +23,9 @@ import { fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { DashEmptyBox, DashPanelHead, fmtCompact, fmtNum } from './DashboardCharts';
 import { AdminKnowledgePanel } from './AdminKnowledgePanel';
+import { AdminLoginAllowlistPanel } from './AdminLoginAllowlistPanel';
 
-export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge';
+export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
 
 function OwnerBadge({
   ownerName,
@@ -166,7 +167,7 @@ export function AdminGovernancePanel({
   const normalizeGovTab = (raw: string | null): GovTab | null => {
     if (!raw) return null;
     if (raw === 'quota' || raw === 'quotas') return 'ops';
-    if (['handover', 'sites', 'feedback', 'trash', 'ops', 'knowledge'].includes(raw)) return raw as GovTab;
+    if (['handover', 'sites', 'feedback', 'trash', 'ops', 'knowledge', 'users'].includes(raw)) return raw as GovTab;
     return null;
   };
   const urlTab = normalizeGovTab(searchParams.get('tab'));
@@ -763,6 +764,14 @@ export function AdminGovernancePanel({
       value: `${kbTotalCount} 篇`,
       sub: `启用 ${kbListQ.data ? kbEnabledCount : kbTotalCount} 篇 · 文档与小织同步`,
       tone: 'violet',
+    },
+    {
+      tab: 'users',
+      icon: 'users',
+      label: '人员管理',
+      value: `${ssoUserCount} 人`,
+      sub: '已登录 · 平台登录白名单',
+      tone: 'teal',
     },
   ];
 
@@ -2555,6 +2564,13 @@ export function AdminGovernancePanel({
       {govTab === 'knowledge' ? (
         <div className="gov-stack">
           <AdminKnowledgePanel />
+        </div>
+      ) : null}
+
+      {/* 模块 7：人员管理（平台登录白名单） */}
+      {govTab === 'users' ? (
+        <div className="gov-stack">
+          <AdminLoginAllowlistPanel />
         </div>
       ) : null}
 

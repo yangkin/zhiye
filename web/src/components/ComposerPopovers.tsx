@@ -49,7 +49,15 @@ function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open: boolea
     };
     place();
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    // 页面或内部容器滚动、锚点尺寸变化时都重新定位，否则弹层会脱离按钮悬在半空
+    window.addEventListener('scroll', place, true);
+    const ro = new ResizeObserver(place);
+    if (anchor.current) ro.observe(anchor.current);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      ro.disconnect();
+    };
   }, [open, anchor, width, height]);
   return pos;
 }
@@ -95,7 +103,7 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
   const box = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState<'mine' | 'builtin' | 'album'>('mine');
+  const [tab, setTab] = useState<'mine' | 'builtin'>('mine');
   const [active, setActive] = useState(0);
   const [hubOpen, setHubOpen] = useState(false);
   const skills = useMySkills(open);
@@ -179,9 +187,6 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
         <button type="button" role="tab" aria-selected={tab === 'builtin'} className={tab === 'builtin' ? 'active' : ''} onClick={() => setTab('builtin')}>
           内置技能
         </button>
-        <button type="button" role="tab" aria-selected={tab === 'album'} className={tab === 'album' ? 'active' : ''} onClick={() => setTab('album')}>
-          技能专辑
-        </button>
       </div>
       <div className="skill-picker-count">已添加 {picked.length} 项技能</div>
       {tab === 'builtin' ? (
@@ -200,9 +205,6 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
               </li>
             ))}
         </ul>
-      ) : null}
-      {tab === 'album' ? (
-        <p className="skill-picker-empty">技能专辑（把常用技能组合在一起）还在规划中；现在可以先逐个选择我的技能。</p>
       ) : null}
       <ul className="skill-picker-list" role="listbox" aria-label="我的技能" hidden={tab !== 'mine'}>
         {skills.isLoading ? <li className="skill-picker-empty">正在读取技能…</li> : null}
@@ -251,7 +253,7 @@ export function SkillChips({ skills, onRemove }: { skills: SkillRef[]; onRemove:
       {skills.map((k) => (
         <span key={'s' + k.id} className="skill-chip">
           <Icon name="book" />
-          技能 · {k.name}
+          <span className="chip-label" title={k.name}>技能 · {k.name}</span>
           <button type="button" aria-label={`移除技能 ${k.name}`} onClick={() => onRemove(k.id)}>
             <Icon name="close" />
           </button>
@@ -261,10 +263,16 @@ export function SkillChips({ skills, onRemove }: { skills: SkillRef[]; onRemove:
   );
 }
 
-// ---------------- 模型与生成模式 ----------------
+// ---------------- 模型与额度 ----------------
 
 type ModelInfo = Meta['models'][number] & { desc?: string; cost?: number };
 const COST = ['', '便宜', '较贵', '超贵'];
+
+/** 网关模型名常带「供应商/」前缀和日期版本后缀（如 csot-sz-cloud/DeepSeek-V4-Flash-0731），界面只显示短名 */
+export function shortModelLabel(label: string) {
+  const base = label.includes('/') ? label.slice(label.lastIndexOf('/') + 1) : label;
+  return base.replace(/-\d{4}$/, '');
+}
 
 /** 可选模型：五星模式下是用户在五星AI岛配置的模型（含「五星默认」），否则是平台统一模型 */
 export function useModelList(): { fivestar: boolean; models: ModelInfo[] } {
@@ -325,8 +333,8 @@ interface ModelPopoverProps {
   className?: string;
 }
 
-/** 「Auto · 适中」按钮 + 弹层（role=dialog，aria-label=模型与生成模式）。 */
-export function ModelModeButton({ models, modes, model, mode, onModel, onMode, className = 'model-button' }: ModelPopoverProps) {
+/** 「模型」按钮 + 弹层（role=dialog，aria-label=模型）。 */
+export function ModelModeButton({ models, model, onModel, className = 'model-button' }: ModelPopoverProps) {
   const [open, setOpen] = useState(false);
   const [sub, setSub] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
@@ -340,7 +348,7 @@ export function ModelModeButton({ models, modes, model, mode, onModel, onMode, c
   const source = fivestar ? fivestarModels : models;
   const list: ModelInfo[] = source.length ? source : [{ id: 'auto', label: fivestar ? '五星默认' : 'Auto' }];
   const current = list.find((m) => m.id === model) ?? list[0];
-  const modeIdx = Math.max(0, modes.indexOf(mode));
+  const flipSub = pos.left + 280 + 312 > window.innerWidth;
   return (
     <>
       <button
@@ -355,57 +363,32 @@ export function ModelModeButton({ models, modes, model, mode, onModel, onMode, c
         }}
       >
         <span className="model-orb">✦</span>
-        {current.label}
-        <small>{mode}</small>
+        <span className="model-label" title={current.label}>{shortModelLabel(current.label)}</span>
         <Icon name="down" />
       </button>
       {open
         ? createPortal(
-            <div className="model-pop" role="dialog" aria-label="模型与生成模式" ref={box} style={pos}>
+            <div className="model-pop" role="dialog" aria-label="模型" ref={box} style={pos}>
               {list.length > 1 ? (
                 <button type="button" className="model-pop-row" aria-haspopup="menu" aria-expanded={sub} onClick={() => setSub((v) => !v)} onMouseEnter={() => setSub(true)}>
                   <span>选择模型</span>
-                  <span className="model-pop-value">
-                    {current.label} <i aria-hidden="true">›</i>
+                  <span className="model-pop-value" title={current.label}>
+                    {shortModelLabel(current.label)} <i aria-hidden="true">›</i>
                   </span>
                 </button>
               ) : (
                 // 只有一个可用模型：如实显示，不放一个点开也没得选的子菜单
                 <div className="model-pop-row is-static" title={current.desc}>
                   <span>模型</span>
-                  <span className="model-pop-value">
-                    {current.label}
+                  <span className="model-pop-value" title={current.label}>
+                    {shortModelLabel(current.label)}
                     {current.desc ? <small>{current.desc}</small> : null}
                   </span>
                 </div>
               )}
               {fivestar ? <QuotaRow /> : null}
-              <div className="model-pop-mode">
-                <div className="model-pop-mode-head">
-                  <span>生成模式</span>
-                  <b>{mode}</b>
-                </div>
-                <input
-                  type="range"
-                  aria-label="生成模式"
-                  aria-valuetext={mode}
-                  min={0}
-                  max={Math.max(0, modes.length - 1)}
-                  step={1}
-                  value={modeIdx}
-                  onChange={(e) => onMode(modes[+e.target.value] ?? mode)}
-                  onMouseEnter={() => setSub(false)}
-                />
-                <div className="model-pop-stops" aria-hidden="true">
-                  {modes.map((m) => (
-                    <span key={m} className={m === mode ? 'on' : ''}>
-                      {m}
-                    </span>
-                  ))}
-                </div>
-              </div>
               {sub && list.length > 1 ? (
-                <div className="model-pop-sub" role="menu" aria-label="选择模型">
+                <div className={`model-pop-sub ${flipSub ? 'is-flip' : ''}`} role="menu" aria-label="选择模型">
                   {list.map((m) => {
                     const cost = Math.max(0, Math.min(3, m.cost ?? 0));
                     return (
@@ -421,7 +404,7 @@ export function ModelModeButton({ models, modes, model, mode, onModel, onMode, c
                         }}
                       >
                         <span className="model-pop-name">
-                          <b>{m.label}</b>
+                          <b title={m.label}>{shortModelLabel(m.label)}</b>
                           <small>{m.desc ?? (m.id === 'auto' ? '根据需求自动选择合适的模型' : '')}</small>
                         </span>
                         {cost ? (

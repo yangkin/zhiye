@@ -30,15 +30,20 @@ RUN --mount=type=cache,target=/root/.npm cd packages/vite-plugin-loc && npm ci -
 COPY packages/app-template/package.json template-cache/package.json
 COPY deploy/docker/template-cache/package-lock.json template-cache/package-lock.json
 # esbuild / rollup / tailwind oxide 的 linux 平台二进制来自 optionalDependencies，不要加 --omit=optional
+# npm ci --ignore-scripts 后部分原生二进制没有执行位（esbuild 沙箱里 EACCES），显式补上并自检
 RUN --mount=type=cache,target=/root/.npm cd template-cache && npm ci --ignore-scripts \
+ && find node_modules -type f -path '*/bin/*' -exec chmod a+x {} + \
  && node node_modules/vite/bin/vite.js --version && node node_modules/typescript/bin/tsc --version \
+ && node_modules/@esbuild/linux-x64/bin/esbuild --version \
  && rm -rf node_modules/.cache
 
 # Vue 模板依赖：package.json 取自 packages/vue-template，锁文件在 deploy/docker/vue-template-cache/
 COPY packages/vue-template/package.json vue-template-cache/package.json
 COPY deploy/docker/vue-template-cache/package-lock.json vue-template-cache/package-lock.json
 RUN --mount=type=cache,target=/root/.npm cd vue-template-cache && npm ci --ignore-scripts \
+ && find node_modules -type f -path '*/bin/*' -exec chmod a+x {} + \
  && node node_modules/vite/bin/vite.js --version && node node_modules/vue-tsc/bin/vue-tsc.js --version \
+ && node_modules/@esbuild/linux-x64/bin/esbuild --version \
  && rm -rf node_modules/.cache
 
 # ---------- 运行镜像 ----------

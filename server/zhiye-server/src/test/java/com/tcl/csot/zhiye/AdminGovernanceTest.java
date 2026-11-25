@@ -233,7 +233,7 @@ class AdminGovernanceTest extends IntegrationTest {
 
     @Test
     void ssoAdminAllowlistEnforced() {
-        AuthProperties ssoAuth = new AuthProperties("sso", null);
+        AuthProperties ssoAuth = new AuthProperties("sso", false, null);
         AdminService guarded = new AdminService(jdbc, quota, props, ssoAuth, apps, tasks, appService, taskService, views, store, "alice,bob");
 
         SsoUser alice = new SsoUser("u_adm_1", "sso1", "alice", "爱丽丝", "a@example.com", "t1");
@@ -264,7 +264,7 @@ class AdminGovernanceTest extends IntegrationTest {
                 .hasMessageContaining("normal_emp");
 
         // 匿名模式下普通工作空间同样默认拒绝（Fail-Closed），仅显式加入工作空间白名单才放行
-        AuthProperties anonAuth = new AuthProperties("anonymous", null);
+        AuthProperties anonAuth = new AuthProperties("anonymous", false, null);
         AdminAuthService anonGuard = new AdminAuthService(jdbc, anonAuth, "", "ws_trusted_admin", "");
         assertThat(anonGuard.requireAdminActor((SsoUser) null, "ws_trusted_admin")).contains("ws_trusted_admin");
         assertThatThrownBy(() -> anonGuard.requireAdminActor((SsoUser) null, "ws_random_guest"))

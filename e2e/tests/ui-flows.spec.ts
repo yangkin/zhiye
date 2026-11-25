@@ -55,6 +55,8 @@ test('免登录创造：类型切换、空白需求不可提交、创建并执�
   // 进度来自真实任务事件
   await expect(page.getByRole('button', { name: /停止/ }).first()).toBeVisible({ timeout: 60_000 })
   await waitVersion(page, 1)
+  const scaled = page.locator('.studio-scale-pill')
+  if (await scaled.count()) await scaled.click()
   const frame = preview(page)
   await frame.getByRole('button', { name: /加一/ }).click()
   await frame.getByRole('button', { name: /加一/ }).click()

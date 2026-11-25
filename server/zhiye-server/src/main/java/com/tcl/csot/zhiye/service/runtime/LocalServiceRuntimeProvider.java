@@ -472,6 +472,12 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
 
     private static void augmentPath(Map<String, String> env) {
         String cur = env.getOrDefault("PATH", "");
+        String sep = File.pathSeparator;
+        // Windows 不用 unix 安装路径，PATH 分隔符也必须用 ;，否则整条 PATH 会粘连成一个无效目录
+        if (sep.equals(";")) {
+            if (!cur.isEmpty()) env.put("PATH", cur);
+            return;
+        }
         String extra = "/opt/homebrew/bin:/opt/homebrew/opt/openjdk@21/bin:/usr/local/bin";
         String home = System.getProperty("user.home", "");
         if (!home.isEmpty()) {
@@ -483,7 +489,7 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                 } catch (IOException ignored) {}
             }
         }
-        env.put("PATH", extra + (cur.isEmpty() ? "" : ":" + cur));
+        env.put("PATH", extra + (cur.isEmpty() ? "" : sep + cur));
     }
 
     private static void copyDir(Path src, Path dst) throws IOException {

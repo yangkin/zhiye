@@ -95,12 +95,38 @@ public class OpenclawClient {
             int i = modelRef.indexOf(':');
             body.put("providerId", modelRef.substring(0, i)).put("modelId", modelRef.substring(i + 1));
         }
-        HttpRequest req = HttpRequest.newBuilder(URI.create(base() + "/internal/zhiye/llm/route"))
+        return internalPost("/internal/llm/route", body);
+    }
+
+    /** 服务间：实际可用的个人模型（已校验网关 Provider、Key 和模型授权），返回裸 JSON 数组。 */
+    public JsonNode availableModels(String userAccount) {
+        return internalPost("/internal/llm/models", Json.obj().put("userAccount", userAccount));
+    }
+
+    private JsonNode internalPost(String path, JsonNode body) {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(base() + path))
                 .timeout(Duration.ofSeconds(props.timeoutSeconds()))
                 .header("X-Internal-Token", props.internalToken())
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(Json.write(body))).build();
-        return send(req, "取模型路由");
+        HttpResponse<String> res;
+        try {
+            res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            log.warn("内部模型接口失败：{}", e.toString());
+            throw unavailable();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw unavailable();
+        }
+        JsonNode root;
+        try { root = Json.read(res.body()); } catch (RuntimeException e) { throw unavailable(); }
+        if (res.statusCode() < 200 || res.statusCode() >= 300) {
+            String msg = root.path("message").asText("HTTP " + res.statusCode());
+            log.warn("内部模型接口失败：HTTP {} code={} message={}", res.statusCode(), root.path("code").asText(""), cut(msg));
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "FIVESTAR_ROUTE_ERROR", "五星AI岛模型路由不可用：" + cut(msg));
+        }
+        return root;
     }
 
     private JsonNode userGet(String path, String platformToken) {
@@ -134,9 +160,11 @@ public class OpenclawClient {
         }
         JsonNode root;
         try { root = Json.read(res.body()); } catch (RuntimeException e) { throw unavailable(); }
-        // metis 信封：成功 {code:"ok", data, success:true}；CommonException 走 HTTP 200 + {code, message, type}
-        boolean businessError = root.hasNonNull("type") && root.hasNonNull("message") && !root.has("success");
-        if (businessError || !root.path("success").asBoolean(false)) {
+        // metis 新旧信封：{code:"ok",data,success:true} 或 {code:200,message:"success",data}
+        String code = root.path("code").asText("");
+        boolean ok = root.path("success").asBoolean(false) || root.has("data") && (code.equals("ok") || code.equals("200"));
+        boolean businessError = root.hasNonNull("type") && root.hasNonNull("message") && !ok;
+        if (businessError || !ok) {
             String msg = root.path("message").asText("");
             if (msg.isBlank()) msg = root.path("msg").asText("未知错误");
             log.warn("{}失败：HTTP {} code={} message={}", what, s, root.path("code").asText(""), cut(msg));

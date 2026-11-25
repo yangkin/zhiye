@@ -195,7 +195,7 @@ public class SkillRefs {
     private Resolved resolveHub(String ws, String id) {
         if (installs == null) return null;
         return installs.find(ws, id).map(i -> {
-            Path dir = i.dir(props, ws);
+            Path dir = i.existingDir(props, ws);
             String md = readText(dir.resolve("SKILL.md"), 128 * 1024);
             if (md == null) return null;
             SkillMeta meta = SkillMeta.parse(md);
@@ -263,7 +263,7 @@ public class SkillRefs {
             Resolved r;
             if (SkillHubInstallService.isHubId(id)) {
                 r = installs == null ? null : installs.findAny(id).map(i -> {
-                    Path dir = SkillHubInstallService.Install.dir(props, i.workspaceId(), i.id());
+                    Path dir = i.existingDir(props, i.workspaceId());
                     String md = readText(dir.resolve("SKILL.md"), 128 * 1024);
                     if (md == null) return null;
                     SkillMeta meta = SkillMeta.parse(md);

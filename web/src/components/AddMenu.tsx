@@ -313,10 +313,10 @@ export function DataSourceMenu({
     >
       <div className="add-submenu-head">
         <b>数据源</b>
-        <p>选择后，AI 会用这个接口的真实数据来做页面；凭证由平台保管。</p>
+        <p>选择后连接到当前会话或应用，之后持续可用；AI 会用真实数据做页面，凭证由平台保管。</p>
       </div>
       {list.isLoading ? <p className="add-submenu-empty">正在读取…</p> : null}
-      {list.data && !list.data.length ? <p className="add-submenu-empty">还没有登记数据源。</p> : null}
+      {list.data && !list.data.length ? <p className="add-submenu-empty">还没有数据源，可在「管理数据源」里从 API 网关添加。</p> : null}
       {list.data?.map((s) => {
         const on = picked.includes(s.id);
         return (
@@ -347,7 +347,7 @@ export function DataSourceMenu({
       })}
       <button type="button" role="menuitem" className="add-menu-item add-menu-manage" onClick={onManage}>
         <Icon name="settings" />
-        <span>登记与管理数据源</span>
+        <span>管理数据源</span>
       </button>
     </div>
   );
@@ -360,7 +360,7 @@ export function SourceChips({ sources, onRemove }: { sources: { id: string; name
       {sources.map((s) => (
         <span key={'d' + s.id} className="skill-chip source-chip">
           <Icon name="database" />
-          数据源 · {s.name}
+          <span className="chip-label" title={s.name}>数据源 · {s.name}</span>
           <button type="button" aria-label={`移除数据源 ${s.name}`} onClick={() => onRemove(s.id)}>
             <Icon name="close" />
           </button>

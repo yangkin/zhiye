@@ -5,7 +5,7 @@ import { chromium } from '@playwright/test'
 import { execSync } from 'node:child_process'
 const BASE = process.env.ZHIYE_BASE_URL || 'http://127.0.0.1:8090'
 const sh = (sql) => execSync(`PGPASSWORD=zhiye psql -h 127.0.0.1 -p 5433 -U zhiye zhiye_test -Atc "${sql}"`).toString().trim()
-const b = await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
+const b = await chromium.launch({ executablePath: process.env.ZHIYE_CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome') })
 const page = await (await b.newContext({ locale: 'zh-CN' })).newPage()
 const login = 'qa' + Date.now() % 100000
 async function doLogin() {
@@ -28,8 +28,7 @@ console.log('2 删除会话', n)
 // 在 SPA 内跳转到应用页，会请求 /api/apps → 401
 await page.getByRole('link', { name: '应用' }).first().click()
 await page.waitForURL(/\/login\?error=expired/, { timeout: 15000 })
-const msg = await page.getByRole('alert').innerText()
-console.log('3 跳到', new URL(page.url()).pathname + new URL(page.url()).search.slice(0, 40), '提示：', msg)
+console.log('3 跳到', new URL(page.url()).pathname + new URL(page.url()).search.slice(0, 40), '（会话过期不再显示红色告警，直接给干净的登录页）')
 await doLogin()
 await page.waitForURL((u) => !u.pathname.startsWith('/login') && !u.pathname.startsWith('/access_token'), { timeout: 20000 })
 console.log('4 重新登录后回到', new URL(page.url()).pathname)

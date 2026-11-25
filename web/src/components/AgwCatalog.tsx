@@ -1,121 +1,113 @@
-import { useEffect, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
-import type { AgwApiItem, DataSourceInfo } from '../api/types';
-import { Icon } from '../lib/icons';
 import { qk } from '../api/queries';
+import type { AgwCallableApi, DataSourceInfo } from '../api/types';
+import { toast } from '../lib/store';
 
-interface Props {
-  onBack: () => void;
-  onDone: (source: DataSourceInfo) => void;
-}
+const idOf = (item: AgwCallableApi) => `${item.projectCode}:${item.apiId}`;
 
-export function AgwCatalog({ onBack, onDone }: Props) {
+export function AgwCatalog({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient();
-  const [keyword, setKeyword] = useState('');
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState<AgwApiItem | null>(null);
-  const [appKey, setAppKey] = useState('');
-  const [appSecret, setAppSecret] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const credRef = useRef<HTMLFormElement>(null);
-  const selectItem = (item: AgwApiItem | null) => {
-    setSelected(item);
-    setAppKey('');
-    setAppSecret('');
-    setError('');
-  };
-  useEffect(() => {
-    if (selected) credRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [selected]);
-  const list = useQuery({
-    queryKey: ['agw-apis', query, page],
-    queryFn: () => api.agwApis({ q: query, page, size: 20 }),
-    retry: false,
-  });
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState('');
+  const list = useQuery({ queryKey: ['agwCallableApis'], queryFn: api.agwCallableApis });
+  const sources = useQuery({ queryKey: qk.sources, queryFn: api.sources });
+  const addedIds = useMemo(() => new Set((sources.data ?? []).filter((item: DataSourceInfo) => item.provider === 'agw').map((item) => item.externalId)), [sources.data]);
+  const items = list.data ?? [];
+  const candidates = items.filter((item) => !addedIds.has(idOf(item)));
+  const selectedItems = candidates.filter((item) => selected.has(idOf(item)));
+  const allSelected = candidates.length > 0 && candidates.every((item) => selected.has(idOf(item)));
 
-  const importApi = async () => {
-    if (!selected || busy) return;
-    setBusy(true);
-    setError('');
+  const addOne = async (item: AgwCallableApi) => {
+    const id = idOf(item);
+    setBusy(id);
     try {
-      const source = await api.importAgwApi(selected.id, { appKey, appSecret });
+      await api.agwAddApi(item.apiId, item.projectCode);
       await qc.invalidateQueries({ queryKey: qk.sources });
-      await qc.invalidateQueries({ queryKey: ['agw-apis'] });
-      setAppSecret('');
-      onDone(source);
-    } catch (err) {
-      setError(errorMessage(err));
+      setSelected((old) => new Set([...old].filter((x) => x !== id)));
+      toast(`已添加 API「${item.apiName}」。`);
+    } catch (error) {
+      toast(errorMessage(error), 'error');
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   };
 
+  const addBatch = async () => {
+    if (!selectedItems.length) return;
+    setBusy('batch');
+    const failed: string[] = [];
+    for (const item of selectedItems) {
+      try {
+        await api.agwAddApi(item.apiId, item.projectCode);
+        setSelected((old) => new Set([...old].filter((x) => x !== idOf(item))));
+      } catch (error) {
+        failed.push(item.apiName);
+      }
+    }
+    await qc.invalidateQueries({ queryKey: qk.sources });
+    setBusy('');
+    if (failed.length) toast(`有 ${failed.length} 个添加失败：${failed.join('、')}`, 'error');
+    else toast(`已批量添加 ${selectedItems.length} 个 API。`);
+  };
+
+  const toggleAll = (checked: boolean) => {
+    setSelected(checked ? new Set(candidates.map(idOf)) : new Set());
+  };
+
   return (
-    <div className="agw-catalog">
-      <p className="source-intro">这里只列出当前账号可见、已启用且已上架的 API。登录令牌仅用于读取目录；应用调用时使用你填写的调用项目凭证。</p>
-      <form className="agw-catalog-tools" onSubmit={(e) => { e.preventDefault(); setPage(0); setQuery(keyword.trim()); }}>
-        <label className="skillhub-market-search">
-          <Icon name="search" />
-          <input aria-label="搜索 API 网关接口" placeholder="搜索 API 名称、编码或描述" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+    <div className="source-list">
+      <p className="source-intro">这里只显示当前账号在消费项目中实际可调用的 API。勾选后可批量添加；已添加的会保留在这里并标记状态。</p>
+      <div className="source-list-head agw-toolbar">
+        <label className="agw-check">
+          <input type="checkbox" checked={allSelected} disabled={!candidates.length || !!busy} onChange={(e) => toggleAll(e.target.checked)} />
+          全选未添加（{candidates.length}）
         </label>
-        <button className="primary-button" type="submit">搜索</button>
-      </form>
-      {list.isLoading ? <p className="muted-note">正在读取 API 网关目录…</p> : null}
-      {list.error ? <p className="inline-error" role="alert">{errorMessage(list.error)}</p> : null}
-      {!list.isLoading && !list.error && !list.data?.items.length ? <p className="source-empty">没有找到符合条件的 API</p> : null}
-      <ul className="agw-api-list">
-        {list.data?.items.map((item) => (
-          <li key={item.id} className="source-row">
-            <span className="source-row-icon"><Icon name="database" /></span>
-            <span className="source-row-main">
-              <b>{item.name}{item.importedSourceId ? <em className="source-badge">已导入</em> : null}</b>
-              <small><code>{item.method} {item.path}</code></small>
-              <small>{item.appName || item.appCode || '未标提供方'}{item.dataSourceName ? ` · ${item.dataSourceName}` : ''} · {item.paramCount} 个参数</small>
-              {item.description ? <p>{item.description}</p> : null}
-              {!item.supported ? <p className="inline-error">{item.unsupportedReason}</p> : null}
-            </span>
-            <span className="source-row-actions">
-              <button type="button" className="subtle-button" disabled={!item.supported} onClick={() => selectItem(item)}>
-                {item.importedSourceId ? '更新' : '导入'}
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
-      <div className="skillhub-market-footer">
-        <span>共 {list.data?.totalElements ?? 0} 个 API</span>
-        <div>
-          <button type="button" className="icon-button" aria-label="上一页" disabled={page <= 0} onClick={() => setPage((p) => p - 1)}>‹</button>
-          <span>{page + 1} / {Math.max(1, list.data?.totalPages ?? 1)}</span>
-          <button type="button" className="icon-button" aria-label="下一页" disabled={page + 1 >= (list.data?.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}>›</button>
+        <div className="source-list-buttons">
+          <button type="button" className="primary-button" disabled={!selectedItems.length || !!busy} onClick={() => void addBatch()}>
+            {busy === 'batch' ? '批量添加中…' : `添加所选（${selectedItems.length}）`}
+          </button>
+          <button type="button" className="subtle-button" onClick={onDone}>返回列表</button>
         </div>
       </div>
-      {selected ? (
-        <form ref={credRef} className="agw-credential" onSubmit={(e) => { e.preventDefault(); void importApi(); }}>
-          <h3>导入「{selected.name}」</h3>
-          <p>填写已获得该 API 授权的<b>调用项目</b>凭证，不是提供方应用编码。</p>
-          <label>
-            <span className="field-label">调用项目 AppKey</span>
-            <input autoFocus className="field mono" required={!selected.importedSourceId} value={appKey} placeholder={selected.importedSourceId ? '留空保留原 AppKey' : '项目 AppKey'} onChange={(e) => setAppKey(e.target.value)} />
-          </label>
-          <label>
-            <span className="field-label">AppSecret</span>
-            <input className="field mono" type="password" autoComplete="new-password" required={!selected.importedSourceId} value={appSecret} placeholder={selected.importedSourceId ? '留空保留原 AppSecret' : '项目 AppSecret'} onChange={(e) => setAppSecret(e.target.value)} />
-          </label>
-          <small className="muted-note">AppSecret 加密保存在服务端，不会返回浏览器或写入生成的应用。</small>
-          {error ? <p className="inline-error" role="alert">{error}</p> : null}
-          <div className="source-actions">
-            <button type="button" className="subtle-button" onClick={() => selectItem(null)}>取消</button>
-            <button type="submit" className="primary-button" disabled={busy}>{busy ? '正在导入…' : selected.importedSourceId ? '更新数据源' : '导入并试调用'}</button>
-          </div>
-        </form>
-      ) : null}
-      <div className="source-actions">
-        <button type="button" className="subtle-button" onClick={onBack}>返回数据源</button>
-      </div>
+      {list.isLoading ? <p className="muted-note">正在读取当前用户可调用 API…</p> : null}
+      {list.error ? <p className="inline-error">{errorMessage(list.error)}</p> : null}
+      {sources.error ? <p className="inline-error">{errorMessage(sources.error)}</p> : null}
+      {list.data && !list.data.length ? <p className="muted-note">当前账号没有有效的 API 调用授权。</p> : null}
+      <ul>
+        {items.map((item) => {
+          const id = idOf(item);
+          const added = addedIds.has(id);
+          return (
+            <li key={id} className={`source-row agw-row ${added ? 'is-added' : ''}`}>
+              <label className="agw-check" aria-label={added ? `${item.apiName} 已添加` : `选择 ${item.apiName}`}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(id)}
+                  disabled={added || !!busy}
+                  onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) next.add(id);
+                    else next.delete(id);
+                    setSelected(next);
+                  }}
+                />
+              </label>
+              <span className="source-row-main">
+                <b>{item.apiName}{added ? <em className="source-badge">已添加</em> : null}</b>
+                <small><code>{item.apiCode}</code> · {item.apiMethod} · {item.projectName}</small>
+                <p>{item.grantTier === 'person' ? '到人授权' : '项目授权'} · {item.matchedBy}</p>
+              </span>
+              <span className="source-row-actions">
+                <button type="button" className="subtle-button" disabled={added || !!busy} onClick={() => void addOne(item)}>
+                  {busy === id ? '添加中…' : added ? '已添加' : '添加'}
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

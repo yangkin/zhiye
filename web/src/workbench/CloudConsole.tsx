@@ -140,12 +140,6 @@ export function AccessForm({
           <textarea rows={compact ? 2 : 3} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="zhangsan&#10;lisi" />
         </label>
       ) : null}
-      {level !== 'public' && !compact ? (
-        <label className="cc-field">
-          <span>管理员（除你以外；数据权限里的「管理员」指这些人）</span>
-          <textarea rows={2} value={admins} onChange={(e) => setAdmins(e.target.value)} placeholder="wangwu" />
-        </label>
-      ) : null}
       {mismatch && !compact ? (
         <p className="cc-warn" role="alert">
           <Icon name="alert" />

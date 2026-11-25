@@ -21,6 +21,7 @@ zhiye:
     enabled: true
     mock: true
     base-url: "{self}/mock/fivestar-service"
+    upload-base-url: "{self}/mock/tfile/v1"
     file-base-url: "{self}/mock/fivestar-service"
     portal-url: "http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}"
     organization-id: "31"

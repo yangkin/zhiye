@@ -87,10 +87,14 @@ public class TemplateService {
         return jdbc.sql(SELECT + " where t.id = :id").param("ws", ws).param("id", id).query(TemplateService::map).optional();
     }
 
-    /** 发布到灵感社区：快照当前版本的文件树和页面 */
+    /** 发布到灵感社区：快照当前版本的文件树和页面；同一个来源应用只允许发布一个作品。 */
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public Map<String, Object> create(String ws, String appId, String name, String description, String author) throws Exception {
         AppRow app = apps.find(ws, appId).orElseThrow(() -> ApiException.notFound("应用"));
         if (app.currentVersionId() == null) throw ApiException.validation("应用还没有生成内容，不能发布到社区");
+        jdbc.sql("select pg_advisory_xact_lock(hashtext(?))").param("template-publish:" + app.id()).query(Object.class).single();
+        boolean published = jdbc.sql("select exists(select 1 from template where source_app_id = ?)").param(app.id()).query(Boolean.class).single();
+        if (published) throw ApiException.conflict("APP_ALREADY_PUBLISHED", "这个应用已经发布到灵感社区，请到「我发布的」中查看，不要重复发布");
         VersionRow v = versions.find(app.currentVersionId()).orElseThrow();
         String n = clip(name == null || name.isBlank() ? app.name() : name.trim(), 40);
         String d = clip(description == null ? "" : description.trim(), 200);

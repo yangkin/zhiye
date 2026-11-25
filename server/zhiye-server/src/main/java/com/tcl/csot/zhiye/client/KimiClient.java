@@ -70,6 +70,7 @@ public class KimiClient {
                     String detail = text.length() > 300 ? text.substring(0, 300) + "…" : text;
                     String code = codeFor(res.statusCode(), text);
                     if ("PROVIDER_QUOTA".equals(code)) throw new LlmException(code, QuotaText.exhausted(router.fivestar(), text));
+                    if ("PROVIDER_RATE_LIMIT".equals(code)) throw new LlmException(code, QuotaText.rateLimited());
                     throw new LlmException(code, "模型服务返回错误（HTTP " + res.statusCode() + "）：" + detail);
                 }
                 JsonNode n = Json.read(text);
@@ -103,6 +104,8 @@ public class KimiClient {
     /** 与 runner/src/agent.mjs 的 classifyError 保持同一套判断。织页不设任务级上限，额度类错误都来自上游（五星AI岛 / 供应商）。 */
     public static String codeFor(int status, String body) {
         String t = body == null ? "" : body.toLowerCase(java.util.Locale.ROOT);
+        // 每分钟限流（TPM/RPM）：临时限流，不是额度用完，与 runner classifyError 一致
+        if (java.util.regex.Pattern.compile("per minute|\\btpm\\b|\\brpm\\b").matcher(t).find()) return "PROVIDER_RATE_LIMIT";
         boolean quotaWord = t.contains("quota") || t.contains("usage limit") || t.contains("current_quota")
                 || t.contains("rate limit") || t.contains("rate_limit") || t.contains("exceed");
         if (t.contains("usage limit") || t.contains("current_quota") || t.contains("rate limit")) return "PROVIDER_QUOTA";

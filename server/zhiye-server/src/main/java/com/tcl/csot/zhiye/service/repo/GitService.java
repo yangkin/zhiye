@@ -274,9 +274,11 @@ public class GitService {
         try (Repository r = openBare(appId); TreeWalk tw = new TreeWalk(r); ZipOutputStream zip = new ZipOutputStream(out)) {
             tw.addTree(parse(r, commit).getTree());
             tw.setRecursive(true);
+            // rootName 为空时文件直接放在 zip 根（SkillHub 发布要求 SKILL.md 在根目录）
+            String prefix = (rootName == null || rootName.isEmpty()) ? "" : rootName + "/";
             while (tw.next()) {
                 if (tw.getFileMode(0).getObjectType() != Constants.OBJ_BLOB) continue;
-                zip.putNextEntry(new ZipEntry(rootName + "/" + tw.getPathString()));
+                zip.putNextEntry(new ZipEntry(prefix + tw.getPathString()));
                 r.open(tw.getObjectId(0)).copyTo(zip);
                 zip.closeEntry();
             }

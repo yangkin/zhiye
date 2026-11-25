@@ -70,7 +70,21 @@ public class HttpSkillHubClient implements SkillHubClient {
 
     @Override
     public List<Category> categories(String token) {
-        JsonNode d = get(token, "/" + org() + CATEGORIES);
+        // 平台市场页用 queryByCenter（业务域分类，与 SkillHub 门户一致）；空 centerName 由平台按用户中心解析。
+        // 老环境没有该接口、拒绝空 centerName 或返回空时回退 queryAll，保证分类可用。
+        try {
+            JsonNode d = post(token, "/" + org() + "/skillCategory/category/queryByCenter",
+                    Json.obj().put("centerName", props.centerName()));
+            List<Category> out = parseCategories(d);
+            if (!out.isEmpty()) return out;
+            log.warn("SkillHub queryByCenter 返回空分类，回退 queryAll");
+        } catch (Exception e) {
+            log.warn("SkillHub queryByCenter 失败，回退 queryAll：{}", e.getMessage());
+        }
+        return parseCategories(get(token, "/" + org() + CATEGORIES));
+    }
+
+    private static List<Category> parseCategories(JsonNode d) {
         List<Category> out = new ArrayList<>();
         if (d != null && d.isArray()) for (JsonNode n : d) out.add(new Category(text(n, "id", "categoryId"), text(n, "name", "categoryName"), text(n, "description"), num(n, "skillCount")));
         return out;
@@ -193,6 +207,7 @@ public class HttpSkillHubClient implements SkillHubClient {
 
     @Override
     public Submission publish(String token, PublishInput in, byte[] zip, String zipName) {
+        UploadedPackage uploaded = uploadPackage(token, zip, zipName);
         String path = in.skillId() == null ? "/" + org() + SKILLS + "/add" : "/" + org() + SKILLS + "/edit";
         String boundary = "----zhiye-" + Ids.random(16);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -205,12 +220,11 @@ public class HttpSkillHubClient implements SkillHubClient {
             if (in.tags() != null) for (String t : in.tags()) field(body, boundary, "tags", t);
             field(body, boundary, "version", in.version());
             field(body, boundary, "subReview", Boolean.toString(in.submitReview()));
-            // 服务端必填参数：直接传 zip 时可为空串（service 优先用 file，fileUrl 只作记录）
-            field(body, boundary, "fileId", "");
-            field(body, boundary, "fileUrl", "");
+            field(body, boundary, "fileId", uploaded.fileId());
+            field(body, boundary, "fileUrl", uploaded.fileUrl());
+            if (in.visibleOrgCodePath() != null) field(body, boundary, "visibleOrgCodePath", in.visibleOrgCodePath());
             if (in.skillId() != null && in.skillId() > 0) {
                 field(body, boundary, "skillId", String.valueOf(in.skillId()));
-                // /edit 必填：与 fivestar-front 一致，传技能元数据 JSON 串
                 var draft = Json.obj()
                         .put("displayName", in.displayName() == null ? "" : in.displayName())
                         .put("summary", in.summary() == null ? "" : in.summary())
@@ -221,9 +235,7 @@ public class HttpSkillHubClient implements SkillHubClient {
                 field(body, boundary, "draftJson", Json.write(draft));
             }
             if (in.skillId() != null && in.changeLog() != null && !in.changeLog().isBlank()) field(body, boundary, "changeLog", in.changeLog());
-            body.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + safe(zipName) + "\"\r\nContent-Type: application/zip\r\n\r\n").getBytes(StandardCharsets.UTF_8));
-            body.write(zip);
-            body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            body.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
             HttpRequest req = HttpRequest.newBuilder(URI.create(base() + path + "?includeReviewResult=true"))
                     .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
                     .header("Authorization", "Bearer " + token(token))
@@ -238,9 +250,63 @@ public class HttpSkillHubClient implements SkillHubClient {
         }
     }
 
+    private record UploadedPackage(String fileId, String fileUrl) {}
+
+    private UploadedPackage uploadPackage(String token, byte[] zip, String zipName) {
+        if (zip == null || zip.length == 0) throw new ApiException(HttpStatus.BAD_REQUEST, "SKILL_PACKAGE_EMPTY", "技能包为空，不能发布");
+        if (zip.length > MAX_PACKAGE) throw new ApiException(HttpStatus.BAD_REQUEST, "SKILL_TOO_LARGE", "技能包超过 50MB，不能发布");
+        JsonNode cfg = post(token, "/" + org() + "/file/getFileStorageCfgInfo", null);
+        String bucket = props.bucketName().isBlank() ? text(cfg, "bucketName") : props.bucketName();
+        String storage = props.storageCode().isBlank() ? text(cfg, "storageCode") : props.storageCode();
+        if (bucket == null || bucket.isBlank() || storage == null || storage.isBlank())
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UPLOAD_ERROR", "SkillHub 文件存储配置不完整");
+
+        HttpRequest uuidReq = HttpRequest.newBuilder(URI.create(uploadBase() + "/" + org() + "/files/uuid"))
+                .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
+                .header("Authorization", "Bearer " + token(token)).POST(HttpRequest.BodyPublishers.noBody()).build();
+        String fileId = rawValue(sendRaw(uuidReq, "申请技能包上传标识"), "content", "data", "uuid");
+        if (fileId == null || fileId.isBlank())
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UPLOAD_ERROR", "文件服务没有返回上传标识");
+
+        String boundary = "----zhiye-upload-" + Ids.random(16);
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        try {
+            field(body, boundary, "bucketName", bucket);
+            field(body, boundary, "storageCode", storage);
+            field(body, boundary, "attachmentUUID", fileId);
+            field(body, boundary, "relativePath", "");
+            field(body, boundary, "packageName", zipName.replaceAll("\\.zip$", ""));
+            field(body, boundary, "fileName", zipName);
+            body.write(("--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"" + safe(zipName) + "\"\r\nContent-Type: application/zip\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+            body.write(zip);
+            body.write(("\r\n--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            HttpRequest uploadReq = HttpRequest.newBuilder(URI.create(uploadBase() + "/" + org() + "/files/attachment/multipart"))
+                    .timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
+                    .header("Authorization", "Bearer " + token(token))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray())).build();
+            String fileUrl = rawValue(sendRaw(uploadReq, "上传技能包"), "content", "data", "url", "fileUrl");
+            if (fileUrl == null || fileUrl.isBlank())
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UPLOAD_ERROR", "文件服务没有返回技能包地址");
+            return new UploadedPackage(fileId, fileUrl);
+        } catch (ApiException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UPLOAD_ERROR", "技能包上传失败：" + e.getMessage());
+        }
+    }
+
+    private String uploadBase() {
+        if (props.uploadBaseUrl() != null && !props.uploadBaseUrl().isBlank())
+            return url(props.uploadBaseUrl(), "zhiye.skillhub.upload-base-url");
+        String base = base();
+        if (base.endsWith("/fivestar-new")) return base.substring(0, base.length() - "/fivestar-new".length()) + "/tfle/v1";
+        throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SKILLHUB_NOT_CONFIGURED", "SkillHub 文件上传地址没有配置（zhiye.skillhub.upload-base-url）");
+    }
+
     @Override
-    public ReviewState reviewState(String token, long skillId, long versionId) {
-        JsonNode d = get(token, "/" + org() + SKILLS + "/starClaw/review-state?skillId=" + skillId + "&version=" + URLEncoder.encode(String.valueOf(versionId), StandardCharsets.UTF_8));
+    public ReviewState reviewState(String token, long skillId, String version) {
+        JsonNode d = get(token, "/" + org() + SKILLS + "/starClaw/review-state?skillId=" + skillId + "&version=" + URLEncoder.encode(version, StandardCharsets.UTF_8));
         if (d == null || !d.isObject()) return null;
         return new ReviewState(d.path("inFlight").asBoolean(false), num(d, "skillId"), num(d, "versionId"), text(d, "version"),
                 num(d, "reviewStatus") == null ? null : num(d, "reviewStatus").intValue(), num(d, "scanStatus") == null ? null : num(d, "scanStatus").intValue());
@@ -264,8 +330,42 @@ public class HttpSkillHubClient implements SkillHubClient {
     private JsonNode post(String token, String path, JsonNode body) {
         HttpRequest req = HttpRequest.newBuilder(URI.create(base() + path)).timeout(Duration.ofSeconds(Math.max(1, props.timeoutSeconds())))
                 .header("Authorization", "Bearer " + token(token)).header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(Json.write(body))).build();
+                .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(Json.write(body))).build();
         return send(req, "查询 SkillHub");
+    }
+
+    private String sendRaw(HttpRequest req, String what) {
+        try {
+            HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (res.statusCode() == 401 || res.statusCode() == 403)
+                throw new ApiException(HttpStatus.UNAUTHORIZED, "PLATFORM_TOKEN_INVALID", "平台登录已失效，请重新登录");
+            if (res.statusCode() < 200 || res.statusCode() >= 300) {
+                log.warn("{}失败：HTTP {} body={}", what, res.statusCode(), cut(res.body()));
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UPLOAD_ERROR", what + "失败（HTTP " + res.statusCode() + "）");
+            }
+            return res.body() == null ? "" : res.body().trim();
+        } catch (java.io.IOException e) {
+            log.warn("{}失败：{}", what, e.toString());
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UNAVAILABLE", "SkillHub 文件服务暂时无法访问，请稍后再试");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SKILLHUB_UNAVAILABLE", "SkillHub 文件服务暂时无法访问，请稍后再试");
+        }
+    }
+
+    private static String rawValue(String body, String... keys) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            JsonNode n = Json.read(body);
+            if (n.isTextual()) return n.asText();
+            if (n.isObject()) {
+                String value = text(n, keys);
+                if (value != null) return value;
+            }
+            return null;
+        } catch (RuntimeException ignored) {
+            return body;
+        }
     }
 
     /** fivestar-service 返回 metis Result{code:"ok", data, success:true}；CommonException 走 HTTP 200 + {code, message, type}（HTTP 状态不可靠）；401/403 表示平台令牌失效 */

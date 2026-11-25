@@ -112,7 +112,7 @@ public class AskService {
             - 手动微调：完全手工，不经过 AI（支持改文字、样式、属性及列表单项，改完点「应用」保存为新版本）；也可以在「代码」页直接改源码保存（预览槽位独立更新，不破坏线上已发布版本）。
             - 单体/全栈托管：单应用硬上限 **1C 1G**（`1000 mCPU / 1024 MB`），默认闲置 **2 天（2880 分钟）**自动缩容休眠并按需秒级唤醒；工作台「服务托管」面板支持环境变量密文托管、独立 PG Schema、`/data` 卷、启停休眠、实时日志与 Dockerfile 预览。
             - 云服务：点「共享云服务」启用独立 PostgreSQL 数据表（`cloud/schema.sql`）、6 种表级权限预设与状态流转（`cloud/policies.json`，含 `function_write` 仅云函数可写）、文件存储（单文件 ≤ 10 MB、最多 200 文件）、Deno 云函数（`functions/*.ts`）和应用内 AI（`window.zhiye.ai.chat`）。
-            - 数据源：在「＋」→「数据源」绑定已登记的公司只读接口，通过 `window.zhiye.source.query` 安全代理查询。
+            - 数据源：在「＋」→「数据源」绑定已从 AGW 添加的公司只读接口，通过 `window.zhiye.source.query` 安全代理查询。
             ## 版本与发布
             - 每次成功生成或修改都会存一个新版本，可以预览、收藏、写备注、回到某个版本（新建一个版本，原记录都保留），也可以在回复上的「查看改动」里看这次改了什么。
             - 「发布」把当前版本放到可分享的网址（可选内网公开 / 员工登录 / 指定人员）；编辑与恢复旧版本仅更新预览，点「发布」后线上才正式切流生效。
@@ -212,11 +212,11 @@ public class AskService {
 
     private byte[] body(String ws, String content, List<String> skillAppIds, String appId,
                         java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets) {
-        return body(router.forWorkspace(ws, com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO), ws, content, skillAppIds, appId, history, type, assets);
+        return body(router.forWorkspace(ws, com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO), ws, content, skillAppIds, appId, history, type, assets, "");
     }
 
     private byte[] body(com.tcl.csot.zhiye.service.llm.LlmRoute route, String ws, String content, List<String> skillAppIds, String appId,
-                        java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets) {
+                        java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext) {
         String c = validate(content);
         boolean conversation = appId == null || appId.isBlank();
         ObjectNode body = Json.obj();
@@ -225,7 +225,7 @@ public class AskService {
         body.put("max_tokens", conversation ? CONVERSATION_MAX_TOKENS : MAX_TOKENS);
         body.put("reasoning_effort", conversation ? "medium" : "low");
         body.putObject("stream_options").put("include_usage", true);
-        body.set("messages", baseMessages(ws, c, skillAppIds, appId, history, type, assets));
+        body.set("messages", baseMessages(ws, c, skillAppIds, appId, history, type, assets, sourceContext));
         return Json.write(body).getBytes(StandardCharsets.UTF_8);
     }
 
@@ -325,10 +325,10 @@ public class AskService {
 
     /** system（产品知识 + 技能/应用上下文）+ 归一化多轮历史 + 本轮问题 */
     private ArrayNode baseMessages(String ws, String content, List<String> skillAppIds, String appId,
-                                   java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets) {
+                                   java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext) {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
-        String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId);
+        String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
         if (conversation && type != null && !type.isBlank()) {
             if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type)) {
                 context += "\n\n【重要约束】用户在创造页已明确选择「全栈应用」（React + Node.js Express 前后端一体，支持独立后端 API、/data 持久化存储与独立 PostgreSQL Schema）。"
@@ -465,6 +465,12 @@ public class AskService {
     public void answer(String ws, String content, List<String> skillAppIds, String appId,
                        java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets,
                        java.util.function.Consumer<Reply> done, Sink sink) {
+        answer(ws, content, skillAppIds, appId, history, type, assets, "", done, sink);
+    }
+
+    public void answer(String ws, String content, List<String> skillAppIds, String appId,
+                       java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext,
+                       java.util.function.Consumer<Reply> done, Sink sink) {
         boolean hasApp = appId != null && !appId.isBlank();
         boolean builtins = !skillRefs.builtinCatalog().isEmpty();
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
@@ -479,11 +485,11 @@ public class AskService {
             return;
         }
         if (!hasApp && !builtins) {
-            run(route, body(route, ws, content, skillAppIds, appId, history, type, assets), done, sink);
+            run(route, body(route, ws, content, skillAppIds, appId, history, type, assets, sourceContext), done, sink);
             return;
         }
         String c = validate(content);
-        ArrayNode msgs = baseMessages(ws, c, skillAppIds, appId, history, type, assets);
+        ArrayNode msgs = baseMessages(ws, c, skillAppIds, appId, history, type, assets, sourceContext);
         StringBuilder thinking = new StringBuilder();
         String commit = hasApp ? currentCommit(appId) : null;
         StringBuilder answer = new StringBuilder();

@@ -50,7 +50,16 @@ public class SkillHubInstallService {
         public Path dir(ZhiyeProperties props, String ws) { return dir(props, ws, id); }
 
         public static Path dir(ZhiyeProperties props, String ws, String id) {
-            return props.rootPath().resolve("agents/skillhub").resolve(ws).resolve(id).resolve("files");
+            // 安装文件必须放共享运行时目录：K8s 下 rootPath 是容器本地 /opt/zhiye，重启即丢（技能会「看不到」）
+            return props.runtimePath().resolve("agents/skillhub").resolve(ws).resolve(id).resolve("files");
+        }
+
+        /** 读取用：新路径没有 SKILL.md 时回退旧的 rootPath 安装目录（本地开发的历史安装） */
+        public Path existingDir(ZhiyeProperties props, String ws) {
+            Path dir = dir(props, ws);
+            if (Files.isRegularFile(dir.resolve("SKILL.md"))) return dir;
+            Path legacy = props.rootPath().resolve("agents/skillhub").resolve(ws).resolve(id).resolve("files");
+            return Files.isRegularFile(legacy.resolve("SKILL.md")) ? legacy : dir;
         }
     }
 
@@ -101,7 +110,7 @@ public class SkillHubInstallService {
         List<Install> out = new ArrayList<>();
         for (String id : ids) {
             Install i = byId.get(id);
-            if (i != null && Files.isRegularFile(i.dir(props, ws).resolve("SKILL.md"))) out.add(i);
+            if (i != null && Files.isRegularFile(i.existingDir(props, ws).resolve("SKILL.md"))) out.add(i);
         }
         return out;
     }
@@ -299,7 +308,7 @@ public class SkillHubInstallService {
             String id = (String) m.get("id");
             if (id == null) continue;
             find(ws, id).ifPresent(inst -> {
-                Path md = inst.dir(props, ws).resolve("SKILL.md");
+                Path md = inst.existingDir(props, ws).resolve("SKILL.md");
                 try {
                     if (Files.isRegularFile(md)) {
                         String t = Files.readString(md, StandardCharsets.UTF_8).lines().filter(l -> l.startsWith("# ")).map(l -> l.substring(2).trim()).findFirst().orElse(null);

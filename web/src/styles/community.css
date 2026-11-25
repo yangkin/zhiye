@@ -17,6 +17,9 @@
 .work-cover-empty span { font-size: 12px; color: #8a76a8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .work-badge { position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; background: #7c5ce0e6; color: #fff; font-size:12px; box-shadow: 0 2px 6px #4a2f8a33; }
 .work-badge .icon { width: 11px; height: 11px; }
+.work-featured-badge { position: absolute; right: 8px; top: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid #ecd79b; border-radius: 6px; background: #fff6d9f2; color: #7b570c; font-size: 12px; box-shadow: 0 2px 6px #6d4b1426; }
+.work-featured-badge .icon, .work-featured-inline .icon { width: 11px; height: 11px; }
+.work-featured-inline { display: inline-flex; align-items: center; gap: 4px; vertical-align: 3px; margin-left: 8px; padding: 2px 8px; border: 1px solid #ecd79b; border-radius: 6px; background: #fff6d9; color: #7b570c; font-size: 11px; font-weight: 500; letter-spacing: 0; }
 .work-card-info { padding: 10px 2px 0; }
 .work-card-title { display: block; width: 100%; padding: 0; text-align: left; font-size: 13px; font-weight: 500; color: #3d3350; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-card-title:hover { color: #7553c6; }

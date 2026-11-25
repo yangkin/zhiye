@@ -16,6 +16,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ConversationDocTest extends IntegrationTest {
     @Autowired JdbcClient jdbc;
 
+    /** 记忆提炼等附加调用也会进 BODIES，按会话系统提示词找回真正的问答请求 */
+    private static JsonNode latestAskBody() {
+        var it = FakeUpstreamController.BODIES.descendingIterator();
+        while (it.hasNext()) {
+            JsonNode b = it.next();
+            if (b.toString().contains("先判断要交付什么")) return b;
+        }
+        throw new AssertionError("没有找到会话问答的上游请求");
+    }
+
     static { System.setProperty("KIMI_API_KEY", System.getenv().getOrDefault("KIMI_API_KEY", "test-key")); }
 
     @Test
@@ -27,7 +37,7 @@ class ConversationDocTest extends IntegrationTest {
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.body()).contains("event:thinking").contains("用户要的是一份文档").contains("event:done");
 
-        JsonNode up = FakeUpstreamController.lastBody;
+        JsonNode up = latestAskBody();
         String system = up.path("messages").get(0).path("content").asText();
         assertThat(system).contains("先判断要交付什么").contains("不要输出 [[next]]").contains("[[file:文件名.md]]").contains("用户在创造页选的类型：技术文档");
         assertThat(up.path("max_tokens").asInt()).isEqualTo(16000);
@@ -42,7 +52,7 @@ class ConversationDocTest extends IntegrationTest {
 
         // 下一轮：带文件的回答整段进历史（超过普通消息的 2000 字上限也不截断）
         c.send("POST", "/api/conversations/" + id + "/ask", Map.of("content", "第二节再展开"), Map.of("Accept", "text/event-stream"));
-        String history = FakeUpstreamController.lastBody.path("messages").toString();
+        String history = latestAskBody().path("messages").toString();
         assertThat(history).contains("[[/file]]");
 
         // 右侧文件面板：文件块存成版本，同名再写一次是 V2，列表只给最新版本

@@ -1960,7 +1960,7 @@
 .skill-issues span{color:var(--st-muted);font-size:11.5px}
 .skill-check-pass{margin:2px 0 0;font-size:12px;color:#059669;background:#ecfdf5;border:1px solid #d1fae5;border-radius:8px;padding:6px 10px}
 .skill-missing{color:var(--st-danger);font-style:normal}
-.vis-group{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.vis-group{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
 .vis-group button{display:flex;flex-direction:column;gap:3px;text-align:left;padding:10px 12px;border:1px solid var(--st-line);border-radius:10px;color:var(--st-ink)}
 .vis-group button b{font-size:12px}.vis-group button small{font-size:12px;color:var(--st-muted);line-height:1.5}
 .vis-group button.active{border-color:var(--st-accent-line);background:var(--st-accent-soft);color:var(--st-accent-ink)}
@@ -2173,7 +2173,7 @@ input::placeholder,textarea::placeholder,
 
 /* ===== 技能标签 ===== */
 .attachments .skill-chip{background:#efeafc;border-color:#d3c6f5;color:#5a3fbf}
-.chat-attachments{margin:0 0 8px;display:flex;flex-wrap:wrap;gap:6px}
+.chat-attachments{margin:0 0 8px;display:flex;flex-wrap:wrap;gap:6px;max-height:104px;overflow-y:auto}
 .chat-attachments>span{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 6px 4px 8px;border:1px solid var(--st-line-strong);border-radius:7px;background:var(--st-panel);color:var(--st-ink-2);max-width:100%}
 .chat-attachments>span>button{display:flex;color:var(--st-muted);padding:0}
 .chat-attachments .icon{width:12px;height:12px}
@@ -2243,6 +2243,10 @@ fieldset.ze-edit-body:disabled{opacity:.6}
 .skill-picker-more{display:block;width:100%;text-align:left;margin-top:4px;padding:9px 8px;border-top:1px solid #f0edf5;font-size:12px;color:#5a3fbf;border-radius:0 0 8px 8px}
 .skill-picker-more:hover{background:#f7f4fe}
 .skillhub-market .modal-body{display:flex;flex-direction:column;gap:12px}
+/* 市场弹框高度按内容自适应：modal-wide 的 85dvh 固定高是给 iframe 预览的，技能列表内容少时下方会留大片空白。
+   选择器要带 .modal 提高优先级，否则会被 responsive.css 里后加载的 .modal-wide{height:86dvh} 覆盖 */
+.modal.skillhub-market{height:auto;max-height:86dvh}
+.skillhub-market .modal-body{flex:0 1 auto;padding-bottom:23px}
 .skillhub-market-tools{display:flex;align-items:center;gap:8px}
 .skillhub-market-search{display:flex;align-items:center;gap:8px;flex:1;min-width:160px;height:36px;padding:0 10px;border:1px solid #e6e2ee;border-radius:9px}
 .skillhub-market-search .icon{width:15px;height:15px;color:#6c667d}
@@ -2283,19 +2287,15 @@ a.skill-chip{text-decoration:none}
 .conv-app-info small{font-size:11px;color:#a08fb8}
 .conv-app-card>.icon{width:14px;height:14px;color:#bda9da;flex:none}
 
-/* ===== 模型与生成模式弹层 ===== */
+/* ===== 模型与额度弹层 ===== */
 .model-pop{width:280px;padding:6px}
-.model-pop-row{display:flex;align-items:center;justify-content:space-between;width:100%;padding:10px;border-radius:9px;font-size:13px;color:#33313f}
+.model-pop-row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:10px;border-radius:9px;font-size:13px;color:#33313f}
+.model-pop-row>span:first-child{flex:none}
 .model-pop-row:hover,.model-pop-row[aria-expanded="true"]{background:#f4f1fa}
-.model-pop-value{color:#625d70;font-size:12px}
+.model-pop-value{color:#625d70;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .model-pop-value i{font-style:normal;margin-left:4px;color:#a6a1b2}
-.model-pop-mode{padding:10px 10px 8px;border-top:1px solid #f0edf5;margin-top:2px}
-.model-pop-mode-head{display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px}
-.model-pop-mode-head b{font-weight:500;color:#5a3fbf}
-.model-pop-mode input[type=range]{width:100%;accent-color:#6f52d4}
-.model-pop-stops{display:flex;justify-content:space-between;font-size:12px;color:#a6a1b2;margin-top:2px}
-.model-pop-stops .on{color:#5a3fbf;font-weight:500}
 .model-pop-sub{position:absolute;left:calc(100% + 6px);top:0;width:300px;background:#fff;border:1px solid #efecf5;border-radius:14px;box-shadow:0 14px 44px #2a1d4a26;padding:6px}
+.model-pop-sub.is-flip{left:auto;right:calc(100% + 6px)}
 .model-pop-sub>button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;text-align:left}
 .model-pop-sub>button:hover{background:#f4f1fa}
 .model-pop-sub>button.on{background:#f7f4fe}
@@ -2313,6 +2313,12 @@ a.skill-chip{text-decoration:none}
 .add-menu-item.picked>.icon:last-child{color:#6f52d4}
 .add-menu-manage{border-top:1px solid #f0edf5;border-radius:0 0 9px 9px;margin-top:4px;color:#6a5aa0}
 .attachments .source-chip{background:#e9f5f1;border-color:#bfe3d6;color:#23735a}
+.source-context{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0;padding:7px 8px;border:1px solid #dcebe5;border-radius:8px;background:#f5faf8}
+.source-context-label{display:inline-flex;align-items:center;gap:5px;margin-right:2px;color:#476a5d;font-size:11px;white-space:nowrap}
+.source-context-label small{color:#71837b;font-size:11px}
+.source-context .skill-chip{padding:4px 6px 4px 8px;border:1px solid #cfe3da;border-radius:6px;background:#fff;color:#376553;font-size:11px}
+.source-context .skill-chip>button{display:flex;padding:0 0 0 3px;color:#668176}
+.source-context .icon{width:12px;height:12px}
 .source-modal{width:min(720px,100%)}
 .source-intro{font-size:12px;line-height:1.8;color:#6f6a7d;background:#f8f6fc;border:1px solid #eee9f6;border-radius:10px;padding:10px 12px}
 .source-intro b{color:#4a3b78;font-weight:600}
@@ -2320,15 +2326,6 @@ a.skill-chip{text-decoration:none}
 .source-list-head .primary-button{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:8px 12px}
 .source-list-buttons{display:flex;align-items:center;gap:8px}
 .source-list-buttons .subtle-button{font-size:12px;padding:8px 12px}
-.agw-catalog{display:flex;flex-direction:column;gap:12px}
-.agw-catalog-tools{display:flex;align-items:center;gap:8px}
-.agw-catalog-tools .skillhub-market-search{flex:1}
-.agw-api-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:390px;overflow:auto}
-.agw-credential{display:flex;flex-direction:column;gap:10px;border:1px solid #e6deef;border-radius:12px;padding:14px;background:#fcfaff}
-.agw-credential h3{margin:0;color:#1f1c29;font-size:14px}
-.agw-credential p{margin:0;color:#5e586e;font-size:12px;line-height:1.6}
-.agw-credential label{display:flex;flex-direction:column;gap:5px}
-.agw-credential .field{height:38px;padding:0 11px;border:1px solid #e6deef;border-radius:9px;background:#fff;color:#1f1c29;font-size:12px}
 .source-list ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
 .source-row{display:flex;gap:12px;align-items:flex-start;border:1px solid #eeeaf4;border-radius:12px;padding:12px}
 .source-row-icon{width:32px;height:32px;border-radius:9px;background:#e9f5f1;color:#23735a;display:inline-flex;align-items:center;justify-content:center;flex:none}
@@ -2341,6 +2338,11 @@ a.skill-chip{text-decoration:none}
 .source-row-actions{display:flex;gap:4px;align-items:center;flex:none}
 .source-row-actions .subtle-button{font-size:12px;padding:6px 10px}
 .source-badge{font-style:normal;font-size:12px;font-weight:500;color:#23735a;background:#e9f5f1;border-radius:5px;padding:1px 6px}
+.agw-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#5e586e;cursor:pointer;flex:none;padding-top:2px}
+.agw-check input{width:14px;height:14px;accent-color:#6f52d4;margin:0;cursor:pointer}
+.agw-check:has(input:disabled){cursor:default;color:#a49eb3}
+.agw-row{align-items:center}
+.agw-row.is-added{background:#faf9fc}
 .source-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:28px 12px;color:#8f8c9c;font-size:12px;text-align:center}
 .source-empty .icon{width:26px;height:26px;color:#b9b2cc}
 .source-empty b{color:#4a4558;font-size:13px}
@@ -2378,16 +2380,18 @@ a.skill-chip{text-decoration:none}
 .studio-mode .source-row,.studio-mode .source-params,.studio-mode .source-result{border-color:var(--st-line)}
 .studio-mode .source-row-main b,.studio-mode .source-empty b{color:var(--st-ink)}
 .studio-mode .source-row-main p,.studio-mode .source-result pre{color:var(--st-ink-2)}
-.source-form input.field,.source-form textarea.field,.source-test input.field{border:1px solid #e6deef;background:#fcfaff;border-radius:9px;color:#2f2c3b;outline:none}
+.source-form input.field,.source-form textarea.field,.source-test input.field,.source-test textarea.field{border:1px solid #e6deef;background:#fcfaff;border-radius:9px;color:#2f2c3b;outline:none}
 .source-form input.field,.source-test input.field{height:38px;padding:0 11px}
+.source-test textarea.source-json-input{min-height:110px;padding:10px 11px;resize:vertical;line-height:1.6}
 .source-form .source-param input.field{height:32px;padding:0 8px}
 .source-form .field:focus,.source-test .field:focus{border-color:#b9a3ea;box-shadow:0 0 0 3px #8b6ae31a}
 .source-form select.field{border-radius:9px}
-.studio-mode .source-form input.field,.studio-mode .source-form textarea.field,.studio-mode .source-test input.field{background:var(--st-bg);border-color:var(--st-line-strong);color:var(--st-ink)}
+.studio-mode .source-form input.field,.studio-mode .source-form textarea.field,.studio-mode .source-test input.field,.studio-mode .source-test textarea.field{background:var(--st-bg);border-color:var(--st-line-strong);color:var(--st-ink)}
 /* 只有一个模型时不可点 */
 .model-pop-row.is-static{cursor:default;align-items:flex-start}
 .model-pop-row.is-static:hover{background:none}
-.model-pop-row.is-static .model-pop-value{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.model-pop-row.is-static .model-pop-value{display:flex;flex-direction:column;align-items:flex-end;gap:2px;max-width:78%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.model-pop-row.is-static .model-pop-value small{white-space:normal;overflow-wrap:anywhere}
 .model-pop-row.is-static small{font-size:11px;color:#a49eb3;font-weight:400}
 .skill-button.cloud-chip .icon{width:13px;height:13px}
 .skill-button.cloud-chip.on{border-color:#d9ccf3;background:#f6f1ff;color:#6b45c4}
@@ -2418,6 +2422,49 @@ a.skill-chip{text-decoration:none}
 .modal-body>h3.center{color:#1f1c29}
 .muted-note,.modal .muted-note,.login-copy{color:#6c667d}
 .notice-box{background:#f6f4fa;border-color:#ece8f4;color:#5e586e}
+
+/* 我的工作空间 */
+.workspace-modal{width:min(520px,calc(100vw - 32px))}
+/* 高度按内容自适应（modal-wide 固定高是给 iframe 预览的）；选择器带 .modal 防止被 responsive.css 覆盖 */
+.modal.workspace-modal{height:auto;max-height:86dvh}
+.workspace-modal .modal-body{flex:0 1 auto}
+.workspace-account-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.workspace-account-row .muted-note{flex:1;margin:0}
+.workspace-logout{flex:none;padding:5px 12px;font-size:12px;line-height:1.6;border:1px solid #e6e2ee;border-radius:8px;background:#fff;color:#b42318;cursor:pointer;white-space:nowrap}
+.workspace-logout:hover{background:#fef3f2;border-color:#f1d3cf}
+.workspace-recovery{margin-top:10px;border:1px solid #ece7f5;border-radius:10px;padding:8px 12px;background:#faf9fc}
+.workspace-recovery>summary{cursor:pointer;font-size:12px;color:#5e586e;font-weight:500;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.workspace-recovery>summary::-webkit-details-marker{display:none}
+.workspace-recovery>summary>span{font-weight:400;color:#8a849a;font-size:11px}
+.workspace-recovery[open]>summary{margin-bottom:8px}
+.workspace-recovery .muted-note{margin:8px 0 0}
+.workspace-modal .modal-body{padding:8px 24px 24px}
+.workspace-account-card{display:flex;align-items:center;gap:12px;padding:16px;border:1px solid #e8e4f0;border-radius:12px;background:#f8f7fb}
+.workspace-account-avatar{width:48px;height:48px;flex:none;font-size:20px;font-weight:600;color:#fff;background:linear-gradient(135deg,#9678d1,#7953dc)}
+.workspace-account-main{min-width:0;display:flex;flex-direction:column;gap:4px}
+.workspace-account-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.workspace-account-name strong{font-size:16px;font-weight:600;color:#1f1c29}
+.workspace-account-name>span{padding:2px 8px;border-radius:4px;background:#ebe5f7;color:#6844cb;font-size:11px;white-space:nowrap}
+.workspace-account-main small{font-size:12px;color:#6c667d;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-account-note{margin:12px 0 0;font-size:12px;line-height:1.8;color:#6c667d}
+.workspace-recovery{margin-top:20px;padding:16px;border:1px solid #e8e4f0;border-radius:12px;background:#fff}
+.workspace-section-title{display:flex;align-items:flex-start;gap:12px}
+.workspace-section-icon{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;border-radius:8px;background:#f0ebf9;color:#7953dc}
+.workspace-section-icon .icon{width:16px;height:16px}
+.workspace-section-title h3{margin:0;font-size:14px;line-height:20px;font-weight:600;color:#1f1c29}
+.workspace-section-title p{margin:4px 0 0;font-size:12px;line-height:1.6;color:#6c667d}
+.workspace-copy-field{margin-top:16px;min-height:44px;padding:4px 4px 4px 12px;border-color:#dfdbe8;border-radius:8px;background:#f8f7fb}
+.workspace-copy-field>span{min-width:0;font-size:12px;color:#3d3a48}
+.workspace-copy-field .subtle-button{display:inline-flex;align-items:center;gap:4px;flex:none;padding:8px 12px;border-color:#dfdbe8;background:#fff;color:#5e586e;font-size:12px;white-space:nowrap}
+.workspace-copy-field .subtle-button:hover{background:#f0ebf9;color:#6844cb}
+.workspace-copy-field .icon{width:14px;height:14px}
+.workspace-recovery-status{margin:16px 0 0;font-size:12px;color:#6c667d}
+.workspace-security-note{display:flex;align-items:center;gap:4px;margin:12px 0 0;font-size:11px;line-height:1.6;color:#6c667d}
+.workspace-security-note .icon{width:12px;height:12px;flex:none}
+.workspace-account-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:20px;padding-top:16px;border-top:1px solid #eeedf3}
+.workspace-account-footer>span{font-size:12px;color:#6c667d}
+.workspace-logout-button{padding:8px 12px;border:1px solid #efdde2;border-radius:8px;background:#fff;color:#b93a4f;font-size:12px;white-space:nowrap}
+.workspace-logout-button:hover{background:#fdf1f3}
 
 /* 会话页：失败可原样重试，回答中可停止 */
 .msg-retry{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -2466,6 +2513,8 @@ a.skill-chip{text-decoration:none}
 .model-quota.is-out .model-quota-head b{color:#b2414f}
 .code-head-right small{font-size:11px}
 .model-button,.model-button *{white-space:nowrap}.model-button{flex:none}
+.model-button .model-label{max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.skill-chip .chip-label{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .confirm-input{width:100%;margin-top:12px;padding:10px 12px;border:1px solid #e2dcea;border-radius:9px;font:inherit;font-size:13px;color:#1f1c29;background:#fff;outline:none}.confirm-input:focus{border-color:#8b62be;box-shadow:0 0 0 3px #8b62be22}
 
 /* 计划阶段 AI 对话与计划修订状态 */
@@ -2481,3 +2530,40 @@ a.skill-chip{text-decoration:none}
 .plan-updated-badge{background:#e7f7ef!important;color:#177a4d!important;border:1px solid #bfe8d4}
 .plan-jump-btn{height:28px;padding:0 10px;border-radius:8px;background:#f2edfc;color:#5b3db5;font-size:12px;font-weight:500;white-space:nowrap}
 .plan-jump-btn:hover{background:#e7ddfa}
+
+/* 人员管理（登录白名单）：过滤工具栏、添加弹窗、角色标记 */
+.access-toolbar{display:flex;align-items:center;gap:12px;margin:12px 0 14px}
+.access-filter{flex:1;max-width:420px}
+.access-filter-input,.access-search-input{height:36px;font-size:12px;padding:0 12px;color:#1f1c29;border:1px solid #e3e6eb;border-radius:9px;background:#fff}
+/* 输入框聚焦只把边框稍微加深，不用紫色 */
+.field:focus-visible,.field input:focus-visible{outline:none;box-shadow:none;border-color:#b49ce8}
+.access-filter-input:focus-visible,.access-search-input:focus-visible{border-color:#9aa3af;outline:none;box-shadow:none}
+.access-role.is-admin{color:#5a3fbf;border-color:#d3c6f5;background:#f4effe}
+.access-add-modal .modal-body{display:flex;flex-direction:column;gap:10px}
+.access-add-tabs{display:flex;gap:8px}
+.access-add-tabs>button{flex:1;padding:8px;border-radius:9px;background:#f6f3fb;color:#6f6885;font-size:12px;cursor:pointer}
+.access-add-tabs>button.active{background:#ece5fb;color:#5b3fc0;font-weight:600}
+.access-results{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:4px}
+.access-result{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;border:1px solid #efecf5;cursor:pointer;font-size:12px}
+.access-result.on{border-color:#c9b6f0;background:#f7f3fe}
+.access-result-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.access-result code{color:#6c667d;font-size:12px}
+.access-result input{accent-color:#6f52d4;width:14px;height:14px}
+.access-selected{font-size:12px;color:#5e586e;line-height:1.8;overflow-wrap:anywhere}
+.access-add-count{flex:1;font-size:12px;color:#6c667d;text-align:left}
+.access-role-row{display:flex;align-items:center;gap:8px;font-size:12px;color:#5e586e;border-top:1px solid #f0edf5;padding-top:12px}
+.access-role-row>button{padding:6px 14px;border-radius:8px;background:#f6f3fb;color:#6f6885;font-size:12px;cursor:pointer}
+.access-role-row>button.active{background:#ece5fb;color:#5b3fc0;font-weight:600}
+.access-paste{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.8;width:100%}
+.access-raw-add{align-self:flex-start;font-size:12px}
+
+/* 无平台权限的友好引导（分步提示，代替生硬的 403 错误文案） */
+.login-denied{margin:18px 0;padding:18px 20px;border:1px solid #e8e2f3;border-radius:14px;background:#faf8fd}
+.login-denied h3{margin:0 0 6px;font-size:15px;color:#1f1c29;font-weight:600}
+.login-denied>p{margin:0 0 12px;font-size:12px;color:#5e586e;line-height:1.8}
+.login-denied-steps{list-style:none;margin:0;padding:0;counter-reset:step;display:flex;flex-direction:column;gap:12px}
+.login-denied-steps>li{position:relative;padding-left:34px;counter-increment:step}
+.login-denied-steps>li::before{content:counter(step);position:absolute;left:0;top:1px;width:22px;height:22px;border-radius:50%;background:#ede8f8;color:#5a3fbf;font-size:12px;font-weight:600;display:grid;place-items:center}
+.login-denied-steps>li:first-child::before{background:#e5f3e8;color:#2f7a3d}
+.login-denied-steps b{display:block;font-size:13px;color:#241f31;font-weight:600}
+.login-denied-steps span{display:block;margin-top:2px;font-size:12px;color:#6c667d;line-height:1.7}

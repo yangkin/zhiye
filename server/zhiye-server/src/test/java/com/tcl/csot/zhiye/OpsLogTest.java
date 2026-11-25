@@ -44,13 +44,13 @@ class OpsLogTest extends IntegrationTest {
                 .param(taskId).update();
         jdbc.sql("insert into app_fn_log (app_id, name, ok, duration_ms, error, logs, caller) values (?, 'syncData', false, 65, 'TypeError: boom', 'Authorization: Bearer secret-fn-token-123456', 'u1')")
                 .param(appId).update();
-        JsonNode ds = owner.ok(owner.post("/api/sources", Map.of(
+        JsonNode ds = registerSource(owner, Map.of(
                 "key", "ops_log_src",
                 "name", "日志测试数据源",
                 "method", "GET",
                 "url", "http://127.0.0.1:" + port + "/api/meta",
                 "authType", "none"
-        )));
+        ));
         jdbc.sql("insert into data_source_call (source_id, app_id, origin, status, ok, duration_ms, error) values (?, ?, 'preview', 502, false, 1200, 'upstream timeout sk-secretkey9876543210abcd')")
                 .params(ds.path("id").asText(), appId).update();
 
@@ -153,7 +153,15 @@ class OpsLogTest extends IntegrationTest {
 
         // 沙箱生命周期日志：真实任务自动落库、本人工作空间可见、跨空间 403 隔离
         assertThat(other.get("/api/logs/sandboxes?workspaceId=" + ownerWs).status()).isEqualTo(403);
-        JsonNode ownerSbx = owner.ok(owner.get("/api/logs/sandboxes?q=" + taskId));
+        JsonNode ownerSbx = null;
+        long sandboxDeadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        while (System.nanoTime() < sandboxDeadline) {
+            ownerSbx = owner.ok(owner.get("/api/logs/sandboxes?q=" + taskId));
+            if (ownerSbx.path("total").asLong() >= 1
+                    && "destroyed".equals(ownerSbx.path("items").get(0).path("state").asText())) break;
+            Thread.sleep(100);
+        }
+        assertThat(ownerSbx).isNotNull();
         assertThat(ownerSbx.path("total").asLong()).isGreaterThanOrEqualTo(1);
         assertThat(ownerSbx.path("items").get(0).path("taskId").asText()).isEqualTo(taskId);
         assertThat(ownerSbx.path("items").get(0).path("state").asText()).isEqualTo("destroyed");

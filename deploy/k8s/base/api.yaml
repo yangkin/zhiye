@@ -17,8 +17,8 @@ spec:
       labels: { app: zhiye-api }
     spec:
       serviceAccountName: zhiye-api
-      # 任务工作进程优雅退出：等运行中的任务释放（租约过期的任务会被其他实例标记为 worker_lost）
-      terminationGracePeriodSeconds: 60
+      # 任务工作进程优雅退出：停止领新任务后等在跑任务完成（TaskWorker.shutdownWaitSeconds 默认 600 秒 + 余量）
+      terminationGracePeriodSeconds: 660
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -32,6 +32,11 @@ spec:
         - name: api
           image: zhiye-server:dev
           imagePullPolicy: IfNotPresent
+          # 先给 endpoint 摘除留传播时间，再进入 Spring 优雅停机（等在跑任务完成）
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           ports:
             - { name: http, containerPort: 8080 }
           env:
@@ -58,6 +63,8 @@ spec:
             # 五星AI岛开启时按工号取 llm-gateway 路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
             - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+            - name: ZHIYE_AGW_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_AGW_CLIENT_SECRET, optional: true } }
           envFrom:
             - configMapRef: { name: zhiye-config }
           resources:

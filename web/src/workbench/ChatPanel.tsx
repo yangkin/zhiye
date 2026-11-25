@@ -11,7 +11,7 @@ import { copyText, fmtDate, fmtTime, shortDay } from '../lib/format';
 import { toast, useChat } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { AssetChips, type ChatAsset } from '../components/AssetChips';
-import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, mentionAt, useModelList, useMySkills } from '../components/ComposerPopovers';
+import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, mentionAt, useMySkills } from '../components/ComposerPopovers';
 import { styleFor } from '../components/Thumbnail';
 import { isQuestion, quickRoute } from '../pages/CreatePage';
 import { PlanCard } from './PlanCard';
@@ -93,7 +93,6 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   });
   const convMessages = appConv.data?.messages ?? [];
   const meta = useMeta().data;
-  const { models: modelList, fivestar: fivestarModels } = useModelList();
   const draft = useChat((s) => s.draft);
   const setDraft = useChat((s) => s.setDraft);
   const ctx = useChat((s) => s.elementContext);
@@ -507,7 +506,6 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   );
   const phase = app.phase;
   const task = stream.task;
-  const modelLabel = modelList.find((x) => x.id === app.model)?.label ?? (fivestarModels ? '五星默认' : 'Auto');
   const lastAssistant = list.reduce((acc, m, i) => (m.role === 'assistant' ? i : m.role === 'user' ? -1 : acc), -1);
   // 成功结束的修改任务：进度收成「已处理 N 个任务 · 耗时」一行，挂在它的回复上方（回复自带回退/查看改动/复制/时间），不再在底部重复一张卡片
   const streamSucceeded = (stream.status ?? task?.status) === 'SUCCEEDED';
@@ -551,7 +549,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 </span>
                 <div className="assistant-content">
                   <b className="assistant-head">
-                    织页 <span className="assistant-model">· {modelLabel}</span> <small>{fmtTime(m.createdAt)}</small>
+                    织页 <small>{fmtTime(m.createdAt)}</small>
                   </b>
                   <Markdown text={splitNext(m.content).body} />
                   <div className="msg-actions assistant-actions">
@@ -646,7 +644,6 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               cloudEnabled={phase === 'ready' ? cloudEnabled : null}
               onEnableCloud={phase === 'ready' ? onEnableCloud : undefined}
               onRestoreVersion={onRestoreVersion}
-              modelLabel={modelLabel}
               steps={mergedTaskId && m.role === 'assistant' && m.taskId === mergedTaskId && (stream.timeline.length > 0 || stream.tools.length > 0) ? <Timeline stream={stream} finished summaryOnly /> : null}
               next={idx === lastAssistant && !asking && !runningTaskId && (phase === 'ready' || phase === 'plan') ? (s) => void send(s) : undefined}
             />
@@ -661,7 +658,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               </span>
               <div className="assistant-content">
                 <b className="assistant-head">
-                  织页 <span className="assistant-model">· {modelLabel}</span>
+                  织页
                 </b>
                 {!asking.a && !asking.planUpdating ? (
                   <p className="asking-thinking" role="status">
@@ -764,10 +761,15 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 </button>
               </div>
             ) : null}
-            {chatAssets.length || chatSkills.length || boundSources.length ? (
+            {boundSources.length ? (
+              <div className="source-context" aria-label="当前应用的数据源">
+                <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>预览和发布持续可用</small></span>
+                <SourceChips sources={boundSources} onRemove={(id) => void changeSource('unbind', id, boundSources.find((s) => s.id === id)?.name ?? '')} />
+              </div>
+            ) : null}
+            {chatAssets.length || chatSkills.length ? (
               <div className="attachments chat-attachments">
                 <SkillChips skills={chatSkills} onRemove={(id) => saveSkills(chatSkills.filter((x) => x.id !== id))} />
-                <SourceChips sources={boundSources} onRemove={(id) => void changeSource('unbind', id, boundSources.find((s) => s.id === id)?.name ?? '')} />
                 {chatAssets.map((a) => (
                   <span key={a.id}>
                     <Icon name="file" />
@@ -1126,14 +1128,12 @@ function MessageItem({
   cloudEnabled,
   onEnableCloud,
   onRestoreVersion,
-  modelLabel = 'Auto',
   next,
   steps,
 }: {
   m: Message;
   /** 刚结束的任务的折叠进度行，显示在回复正文前 */
   steps?: ReactNode;
-  modelLabel?: string;
   /** 只有最后一条回答显示「下一步」；点一下当作下一句话发出 */
   next?: (s: string) => void;
   canEdit: boolean;
@@ -1186,7 +1186,7 @@ function MessageItem({
       </span>
       <div className="assistant-content">
         <b className="assistant-head">
-          织页 <span className="assistant-model">· {modelLabel}</span> <small>{fmtTime(m.createdAt)}</small>
+          织页 <small>{fmtTime(m.createdAt)}</small>
           {versionNumber ? (
             <span className="tiny-badge current" title={version?.title ? `V${versionNumber} · ${version.title}` : `V${versionNumber}`}>
               V{versionNumber}

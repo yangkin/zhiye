@@ -26,4 +26,9 @@ public final class QuotaText {
         String at = resetAt(body);
         return "你在五星AI岛的本周模型额度已用完" + (at == null ? "" : "，" + at + " 重置") + "。";
     }
+
+    /** 每分钟限流（TPM/RPM）：临时限制，明确告诉用户不是额度用完 */
+    public static String rateLimited() {
+        return "模型触发每分钟调用限流，请稍后重试（这是瞬时限制，不是额度用完）。";
+    }
 }

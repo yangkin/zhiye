@@ -1229,6 +1229,10 @@ public class TaskExecutor {
     }
 
     private TaskContext.Fail modelFailure(TaskContext ctx, String code, String detail) {
+        // 每分钟限流（TPM/RPM）：临时限流，进度已留检查点，稍后重试接着做
+        if ("PROVIDER_RATE_LIMIT".equals(code)) {
+            return new TaskContext.Fail("PROVIDER_RATE_LIMIT", QuotaText.rateLimited() + "已做的部分都保留着，点「重试」会接着做。");
+        }
         // 额度用完（五星AI岛个人额度或供应商配额）：进度已留检查点，额度恢复后重试会接着做
         if ("PROVIDER_QUOTA".equals(code) || "BUDGET_EXCEEDED".equals(code)) {
             String msg = detail != null && detail.startsWith("你在五星AI岛") ? detail : QuotaText.exhausted(router.fivestar(), detail);

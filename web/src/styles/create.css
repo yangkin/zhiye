@@ -163,7 +163,7 @@
 .template-search { display: inline-flex; align-items: center; gap: 7px; height: 34px; width: 240px; padding: 0 10px; border-radius: 10px; border: 1px solid #e7e2f2; background: #fff; color: #6b637c; flex: none; transition: border-color .15s, box-shadow .15s; }
 .template-search:focus-within { border-color: #b79ee8; box-shadow: 0 0 0 3px #7953dc14; }
 .template-search .icon { width: 14px; height: 14px; color: #9a90ad; flex: none; }
-.template-search input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 12.5px; color: #2a2238; }
+.template-search input { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 12.5px; color: #2a2238; outline: none; box-shadow: none; }
 .template-search input::placeholder { color: #9f96b0; }
 .template-search-clear { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; color: #8b819d; }
 .template-search-clear:hover { background: #f1edf8; color: #3b2f52; }

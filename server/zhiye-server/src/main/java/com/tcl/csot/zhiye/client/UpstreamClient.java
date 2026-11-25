@@ -57,7 +57,7 @@ public class UpstreamClient {
 
     /** 本地统一上游的路由 */
     public LlmRoute localRoute() {
-        return new LlmRoute(baseUrl(), apiKey(), props.llm().model(), props.llm().provider(), Map.of(), null, props.llm().model(), true);
+        return new LlmRoute(baseUrl(), apiKey(), props.llm().model(), props.llm().provider(), Map.of(), null, props.llm().model(), true, true);
     }
 
     /** 模型是否可用：五星模式下密钥按人下发，这里只看本地密钥 */

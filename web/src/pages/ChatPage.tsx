@@ -86,6 +86,7 @@ export function ChatPage() {
   const [sources, setSources] = useState<SkillRef[]>(initial?.sources ?? []);
   const [asking, setAsking] = useState(false);
   const [building, setBuilding] = useState(false);
+  const [sourceSaving, setSourceSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [actionError, setActionError] = useState('');
   const [filesOpen, setFilesOpen] = useState(false);
@@ -106,7 +107,7 @@ export function ChatPage() {
 
   const models = meta?.models?.length ? meta.models : [{ id: 'auto', label: 'Auto' }];
   const modes: Mode[] = meta?.modes?.length ? meta.modes : ['快速', '适中', '深度'];
-  const busy = asking || building;
+  const busy = asking || building || sourceSaving;
 
   useEffect(() => {
     if (!data) return;
@@ -122,6 +123,7 @@ export function ChatPage() {
       if (data.mode) setMode(data.mode);
       if (data.assets) setAttachments(data.assets);
     }
+    setSources(data.sources ?? []);
   }, [data, initial]);
 
   useEffect(() => {
@@ -160,8 +162,24 @@ export function ChatPage() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: asking ? 'auto' : 'smooth' });
   }, [messages, asking]);
 
-  const startBuild = async () => {
+  const changeSources = async (next: SkillRef[]) => {
+    if (sourceSaving) return;
+    setSourceSaving(true);
+    try {
+      const result = await api.updateConversationSources(id, next.map((s) => s.id));
+      const saved = result.sources;
+      setSources(saved);
+      qc.setQueryData(['conversation', id], (old: typeof data) => old ? { ...old, sources: saved } : old);
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setSourceSaving(false);
+    }
+  };
+
+  const startBuild = async (selection?: { skills: SkillRef[] }) => {
     if (!id || action.current) return;
+    const buildSkills = selection?.skills ?? skills;
     if (active) {
       setActionError(`「${active.appName}」正在生成中，完成后再开始新的生成。`);
       return;
@@ -175,8 +193,7 @@ export function ChatPage() {
         mode,
         model,
         ...(attachments.length ? { assetIds: attachments.map((a) => a.id) } : {}),
-        ...(skills.length ? { skillAppIds: skills.map((s) => s.id) } : {}),
-        ...(sources.length ? { sourceIds: sources.map((s) => s.id) } : {}),
+        ...(buildSkills.length ? { skillAppIds: buildSkills.map((s) => s.id) } : {}),
       });
       qc.setQueryData(['app', app.id], app);
       void qc.invalidateQueries({ queryKey: ['apps'] });
@@ -210,7 +227,7 @@ export function ChatPage() {
 
   const send = async (override?: string, again?: { skills: SkillRef[]; assets: Asset[]; replace: string[] }) => {
     const content = (override ?? prompt).trim();
-    if (!id || !content || action.current) return;
+    if (!id || !content || action.current || sourceSaving) return;
     // 重试：去掉失败的那一问一答，用原来的文字、技能、附件重新发
     if (again) setMessages((list) => list.filter((m) => !again.replace.includes(m.id)));
     action.current = 'ask';
@@ -277,10 +294,11 @@ export function ChatPage() {
         setOpenFile({ name: last.name, body: last.body });
         setFilesOpen(true);
       }
+      if (!again) setSkills([]);
       if (wantsBuild) {
         action.current = null;
         setAsking(false);
-        await startBuild();
+        await startBuild({ skills: selectedSkills });
       }
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
@@ -530,10 +548,15 @@ export function ChatPage() {
                 }
               }}
             />
-            {attachments.length || skills.length || sources.length ? (
+            {sources.length ? (
+              <div className="source-context" aria-label="本会话的应用数据源">
+                <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>创建后持续可用</small></span>
+                <SourceChips sources={sources} onRemove={(sid) => void changeSources(sources.filter((s) => s.id !== sid))} />
+              </div>
+            ) : null}
+            {attachments.length || skills.length ? (
               <div className="attachments">
                 <SkillChips skills={skills} onRemove={(skillId) => setSkills((list) => list.filter((s) => s.id !== skillId))} />
-                <SourceChips sources={sources} onRemove={(sid) => setSources((list) => list.filter((s) => s.id !== sid))} />
                 {attachments.map((asset) => (
                   <span key={asset.id}>
                     <Icon name="file" /> {asset.name}
@@ -553,7 +576,7 @@ export function ChatPage() {
                   attachedCount={attachments.length}
                   onAttach={(asset) => setAttachments((list) => (list.length < 5 && !list.some((a) => a.id === asset.id) ? [...list, asset] : list))}
                   pickedSourceIds={sources.map((s) => s.id)}
-                  onPickSource={(s) => setSources((list) => (list.some((x) => x.id === s.id) ? list : [...list, { id: s.id, name: s.name }]))}
+                  onPickSource={(s) => void changeSources(sources.some((x) => x.id === s.id) ? sources : [...sources, { id: s.id, name: s.name }])}
                 />
                 <ModelModeButton models={models} modes={modes} model={model} mode={mode} onModel={setModel} onMode={setMode} />
                 <button ref={skillBtn} type="button" className="skill-button" aria-label="选择技能" aria-expanded={picker !== null} onClick={() => setPicker(picker ? null : { via: 'button' })}>

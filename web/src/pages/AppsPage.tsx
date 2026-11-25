@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, errorMessage, type AppListQuery } from '../api/client';
 import { qk } from '../api/queries';
-import { APP_TYPES, hasNoPreview, isScriptApp, isServiceApp, isSkillApp, type AppSummary, type AppType } from '../api/types';
+import { APP_TYPES, isServiceApp, isSkillApp, type AppSummary, type AppType } from '../api/types';
 import { Icon, kindIcon } from '../lib/icons';
 import { fmtTime, shortDay } from '../lib/format';
 import { toast } from '../lib/store';
@@ -30,12 +30,7 @@ export function statusLabel(a: AppSummary) {
 
 export function openAppPreview(a: AppSummary) {
   const url = a.siteUrl ?? a.previewUrl;
-  if (!url) {
-    if (isSkillApp(a)) return toast('技能包无需网页预览，请进入应用在「代码」页查看。');
-    if (isScriptApp(a)) return toast('命令行脚本无需网页预览，请进入应用在「代码」页查看。');
-    if (a.phase === 'plan' || a.phase === 'planning') return toast('需求计划尚未确认，确认并生成后即可预览。');
-    return toast('应用生成完成后即可打开预览。');
-  }
+  if (!url) return toast('应用生成完成后即可打开预览。');
   window.open(url, '_blank', 'noopener');
 }
 
@@ -465,7 +460,7 @@ function CardMenu({ app, open, onOpenChange, onRename, onStats, onPreview, onHis
     onOpenChange(false);
     fn();
   };
-  const canPreview = !hasNoPreview(app) && !!(app.siteUrl || app.previewUrl);
+  const canPreview = !!(app.siteUrl || app.previewUrl);
   return (
     <div className="card-menu-wrap" ref={wrap}>
       <button ref={btn} className="icon-button" aria-label={`${app.name}更多操作`} aria-haspopup="menu" aria-expanded={open} onClick={() => onOpenChange(!open)}>

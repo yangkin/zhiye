@@ -185,12 +185,12 @@ export function CreatePage() {
   const submit = async (overridePrompt?: string) => {
     const prompt = (overridePrompt ?? f.prompt).trim();
     if (!prompt) return toast('先写下你的应用想法吧。', 'error');
-    if (submitting || active) return;
-    // 默认就走对话：聊完再写，或者边聊边写（生成中补充会排队）
+    if (submitting) return;
+    // 先进入会话；普通问答不受其他应用生成任务影响，真正开始生成时再检查任务限制
     setSubmitting(true);
     setError('');
     try {
-      const conv = await api.createConversation();
+      const conv = await api.createConversation(f.sources.map((s) => s.id));
       const state = {
         initialMessage: prompt,
         ...(typeChosen ? { type: f.type } : {}),
@@ -392,10 +392,15 @@ export function CreatePage() {
             }
           }}
         />
-        {f.attachments.length || f.skills.length || f.sources.length ? (
+        {f.sources.length ? (
+          <div className="source-context" aria-label="新应用的数据源">
+            <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>创建后持续可用</small></span>
+            <SourceChips sources={f.sources} onRemove={(id) => f.set({ sources: f.sources.filter((x) => x.id !== id) })} />
+          </div>
+        ) : null}
+        {f.attachments.length || f.skills.length ? (
           <div className="attachments">
             <SkillChips skills={f.skills} onRemove={(id) => f.set({ skills: f.skills.filter((x) => x.id !== id) })} />
-            <SourceChips sources={f.sources} onRemove={(id) => f.set({ sources: f.sources.filter((x) => x.id !== id) })} />
             {f.attachments.map((a) => (
               <span key={a.id}>
                 <Icon name="file" />
@@ -455,7 +460,7 @@ export function CreatePage() {
 
       {active ? (
         <p className="busy-note create-error" role="status">
-          「{active.appName}」正在生成中，完成后再创建
+          「{active.appName}」正在生成中，仍可继续聊天；再建应用需等它完成
           <button type="button" className="limit-link" onClick={() => navigate('/apps/' + active.appId)}>
             去查看
           </button>

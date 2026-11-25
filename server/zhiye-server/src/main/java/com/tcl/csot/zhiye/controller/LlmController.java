@@ -27,10 +27,15 @@ import java.util.Map;
 public class LlmController {
     private final FivestarProperties fs;
     private final OpenclawClient openclaw;
+    private final LlmRouter router;
+    private final com.tcl.csot.zhiye.util.CurrentPrincipal principal;
 
-    public LlmController(FivestarProperties fs, OpenclawClient openclaw) {
+    public LlmController(FivestarProperties fs, OpenclawClient openclaw, LlmRouter router,
+                         com.tcl.csot.zhiye.util.CurrentPrincipal principal) {
         this.fs = fs;
         this.openclaw = openclaw;
+        this.router = router;
+        this.principal = principal;
     }
 
     @GetMapping("/models")
@@ -44,25 +49,23 @@ public class LlmController {
             out.put("defaultId", LlmRouter.AUTO);
             return out;
         }
-        String token = PlatformToken.of(req);
-        JsonNode providers = openclaw.providers(token);
-        JsonNode def = openclaw.defaultModel(token);
-        String defaultId = null, defaultLabel = null;
-        JsonNode dm = def == null ? null : def.path("model");
-        if (dm != null && dm.path("provider").hasNonNull("id") && dm.path("model").hasNonNull("modelId")) {
-            defaultId = dm.path("provider").path("id").asText() + ":" + dm.path("model").path("modelId").asText();
-            defaultLabel = dm.path("model").path("modelName").asText(dm.path("model").path("modelId").asText());
-        }
-        list.add(model(LlmRouter.AUTO, "五星默认", defaultLabel == null ? "跟随五星AI岛里设置的默认模型" : "跟随五星AI岛默认模型：" + defaultLabel, null, false));
-        for (JsonNode p : providers) {
-            if (!p.path("enabled").asBoolean(true)) continue;
-            for (JsonNode m : p.path("models")) {
-                if (!m.path("enabled").asBoolean(true) || !m.hasNonNull("modelId")) continue;
-                String id = p.path("id").asText() + ":" + m.path("modelId").asText();
-                list.add(model(id, m.path("modelName").asText(m.path("modelId").asText()),
-                        p.path("providerName").asText(""), p.path("providerName").asText(null), m.path("isMultimodal").asBoolean(false)));
+        if (PlatformToken.of(req) == null)
+            throw new com.tcl.csot.zhiye.exception.ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "PLATFORM_TOKEN_MISSING", "请先用公司统一账号登录");
+        String account = router.accountOf(principal.workspaceId());
+        if (account == null)
+            throw new com.tcl.csot.zhiye.exception.ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "LOGIN_REQUIRED", "使用模型需要先用公司统一账号登录");
+        JsonNode available = openclaw.availableModels(account);
+        String defaultId = LlmRouter.AUTO, defaultLabel = null;
+        for (JsonNode m : available) {
+            String id = m.path("providerId").asText() + ":" + m.path("modelId").asText();
+            if (m.path("preferred").asBoolean(false)) {
+                defaultId = id;
+                defaultLabel = m.path("modelName").asText(m.path("modelId").asText());
             }
+            list.add(model(id, m.path("modelName").asText(m.path("modelId").asText()),
+                    m.path("providerName").asText(""), m.path("providerName").asText(null), m.path("multimodal").asBoolean(false)));
         }
+        list.add(0, model(LlmRouter.AUTO, "五星默认", defaultLabel == null ? "使用当前账号的首选可用模型" : "跟随五星AI岛默认模型：" + defaultLabel, null, false));
         out.put("source", "fivestar");
         out.put("models", list);
         out.put("defaultId", defaultId);

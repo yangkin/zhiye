@@ -134,7 +134,7 @@ public class SkillHubController {
             List<String> tags = b.has("tags") && b.get("tags").isArray() ? com.tcl.csot.zhiye.util.Json.M.convertValue(b.get("tags"), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}) : null;
             pr = new SkillHubService.PublishRequest(b.path("versionId").asText(null), b.path("categoryId").asText(null), b.path("displayName").asText(null),
                     b.path("summary").asText(null), b.path("slug").asText(null), tags, b.path("version").asText(null), b.path("visibility").asText(null),
-                    b.path("changelog").asText(null), b.has("submitReview") ? b.path("submitReview").asBoolean() : null);
+                    b.path("scope").asText(null), b.path("changelog").asText(null), b.has("submitReview") ? b.path("submitReview").asBoolean() : null);
         }
         try {
             return service.publish(ws(), id, token(req), pr);

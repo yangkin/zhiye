@@ -2692,16 +2692,22 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 治理状态脉冲条（6 格单行交互概览） */
+/* 治理状态脉冲条（7 格单行交互概览；收窄时 4 列 → 2 列 → 1 列，不留孤卡） */
 .gov-pulse-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1440px) {
   .gov-pulse-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .gov-pulse-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -2714,13 +2720,16 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  min-width: 0;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   cursor: pointer;
 }
 
 .gov-pulse-card:hover {
   border-color: #cbd5e1;
   background: #fafbfc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(31, 28, 41, 0.07);
 }
 
 .gov-pulse-card.active {
@@ -3833,6 +3842,8 @@
   font-size: 13px;
   line-height: 1;
   flex: none;
+  /* 全局规则 button>span{pointer-events:none} 会让 × 点不到，这里恢复 */
+  pointer-events: auto;
 }
 
 .owner-picker-clear:hover {
@@ -4005,9 +4016,6 @@
 @media (max-width: 1180px) {
   .dash-exec-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .gov-pulse-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .gov-handover-grid {
     grid-template-columns: 1fr;

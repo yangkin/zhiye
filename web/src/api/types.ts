@@ -379,7 +379,7 @@ export interface AuthInfo {
 export interface Workspace {
   id: string;
   createdAt: string;
-  recoveryUrl: string;
+  recoveryUrl: string | null;
 }
 
 export interface FileEntry {
@@ -560,6 +560,13 @@ export interface AppStats {
 
 // ---- SkillHub ----
 export type SkillVisibility = 'private' | 'team' | 'public';
+export interface SkillHubScope {
+  value: string;
+  label: string;
+  kind: 'org';
+  level: number;
+  desc: string;
+}
 export interface SkillhubPublication {
   id?: string;
   versionId: string;
@@ -627,14 +634,42 @@ export interface ConversationDetail extends ConversationSummary {
 /** 数据源参数定义 */
 export interface DataSourceParam {
   name: string;
-  type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'date' | 'json';
   required: boolean;
   description: string;
   example: string;
   position?: 'query' | 'path' | 'header' | 'body' | null;
 }
 
+export interface AgwCallableApi {
+  projectCode: string;
+  projectName: string;
+  projectPublicId: string;
+  projectRole: string | null;
+  apiId: string;
+  apiName: string;
+  apiCode: string;
+  apiMethod: 'GET' | 'POST';
+  apiPubUrl: string;
+  grantTier: 'project' | 'person';
+  matchedBy: string;
+}
+
+/** 人员管理：平台登录白名单条目 */
+export interface LoginAllowlistItem {
+  loginName: string;
+  realName: string;
+  note: string;
+  /** user=普通用户，admin=管理员（登录时同步到 app_user.role） */
+  role: 'user' | 'admin';
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 登记的数据源（凭证永远不会返回，只有 hasSecret） */
+
 export interface DataSourceInfo {
   id: string;
   key: string;
@@ -644,7 +679,7 @@ export interface DataSourceInfo {
   url: string;
   params: DataSourceParam[];
   sample: string | null;
-  authType: 'none' | 'bearer' | 'header' | 'basic' | 'agw';
+  authType: 'none' | 'bearer' | 'header' | 'basic' | 'agw' | 'agw_key' | 'agw_client' | 'agw_user';
   authHeader: string | null;
   hasSecret: boolean;
   /** 平台登记（全员可用，只读） */
@@ -718,6 +753,8 @@ export interface TemplateItem {
   viewCount: number;
   likeCount: number;
   liked: boolean;
+  featured: boolean;
+  pinnedOrder: number;
   createdAt: string;
 }
 

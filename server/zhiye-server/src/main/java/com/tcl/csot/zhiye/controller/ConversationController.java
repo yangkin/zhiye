@@ -61,6 +61,11 @@ public class ConversationController {
         return Map.of("ok", true);
     }
 
+    @PutMapping("/{id}/sources")
+    public Map<String, Object> updateSources(@PathVariable String id, @RequestBody(required = false) JsonNode body) {
+        return Map.of("sources", conversations.updateSources(principal.workspaceId(), id, body == null ? List.of() : list(body, "sourceIds")));
+    }
+
     /** 右侧「文件」面板：AI 在这段会话里写出的文件（每个名称的最新版本） */
     @GetMapping("/{id}/files")
     public List<Map<String, Object>> files(@PathVariable String id) {
@@ -97,7 +102,7 @@ public class ConversationController {
         long[] lastStopPollAt = { 0L };
         Threads.start("conv-ask", () -> {
             try {
-                ask.answer(ws, p.content(), p.skillAppIds(), null, p.history(), p.type(), p.assets(),
+                ask.answer(ws, p.content(), p.skillAppIds(), null, p.history(), p.type(), p.assets(), p.sourceContext(),
                         (reply) -> {
                             if (run.stop().get() || remoteStopped(id, startedAt)) {
                                 run.stop().set(true);

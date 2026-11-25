@@ -2,6 +2,7 @@ import { clearPlatformToken, getPlatformToken } from '../lib/platformToken';
 import type {
   AdminFeedbackStatus,
   AdminOverview,
+  AgwCallableApi,
   ClusterOverviewResponse,
   TemplateItem,
   TemplateDetail,
@@ -15,6 +16,7 @@ import type {
   SkillVisibility,
   SkillhubPublication,
   SkillHubCategory,
+  SkillHubScope,
   SkillHubInstall,
   SkillHubMarket,
   AppStats,
@@ -83,6 +85,7 @@ interface RequestOptions {
   idempotencyKey?: string;
   signal?: AbortSignal;
   text?: boolean;
+  headers?: Record<string, string>;
 }
 
 const FALLBACK_MESSAGES: Record<number, string> = {
@@ -97,7 +100,7 @@ const FALLBACK_MESSAGES: Record<number, string> = {
 
 /**
  * 登录失效的统一处理（只有 sso 模式会出现这两种 401）：
- * - UNAUTHORIZED：织页会话过期 → 整页跳登录页（整页才会重新读 /api/meta，缓存里的用户信息作废），带「登录已过期」提示；
+ * - UNAUTHORIZED：织页会话过期 → 整页跳登录页（整页才会重新读 /api/meta，缓存里的用户信息作废），登录页保持干净、不再显示红色告警；
  * - PLATFORM_TOKEN_INVALID：织页会话还在、平台令牌过期 → 直接重走统一认证换新令牌。
  * 草稿都在 localStorage，重新登录回来还在。同时有多个请求 401 时只跳一次；登录页本身不跳，不会循环。
  */
@@ -128,7 +131,7 @@ function onAuthExpired(code: string) {
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const method = opts.method ?? 'GET';
-  const headers: Record<string, string> = { Accept: opts.text ? 'text/plain' : 'application/json' };
+  const headers: Record<string, string> = { Accept: opts.text ? 'text/plain' : 'application/json', ...opts.headers };
   let body: BodyInit | undefined;
   if (opts.form) {
     body = opts.form;
@@ -321,7 +324,7 @@ export const api = {
     onDelta: (text: string) => void,
     signal?: AbortSignal,
   ) => askStream(`/api/conversations/${enc(id)}/ask`, input, onDelta, signal),
-  createConversation: () => request<ConversationSummary>('/api/conversations', { method: 'POST', body: {} }),
+  createConversation: (sourceIds: string[] = []) => request<ConversationSummary>('/api/conversations', { method: 'POST', body: { sourceIds } }),
   conversations: () => request<ConversationSummary[]>('/api/conversations'),
   conversation: (id: string) => request<ConversationDetail>(`/api/conversations/${enc(id)}`),
   deleteConversation: (id: string) => request<{ ok: boolean }>(`/api/conversations/${enc(id)}`, { method: 'DELETE' }),
@@ -348,6 +351,8 @@ export const api = {
   llmQuota: () => request<LlmQuota>('/api/llm/quota'),
 
   // 数据源
+  agwCallableApis: () => request<AgwCallableApi[]>('/api/agw/callable-apis'),
+  agwAddApi: (apiId: string, projectCode: string) => request<DataSourceInfo>(`/api/agw/apis/${enc(apiId)}/add`, { method: 'POST', body: { projectCode } }),
   sources: () => request<DataSourceInfo[]>('/api/sources'),
   agwApis: (input: { q?: string; page?: number; size?: number } = {}) =>
     request<AgwApiPage>('/api/sources/agw/apis' + qs(input)),
@@ -555,9 +560,10 @@ export const api = {
   // SkillHub
   skillhubPublish: (
     appId: string,
-    input: { versionId: string; displayName?: string; visibility: SkillVisibility; changelog: string },
+    input: { versionId: string; displayName?: string; visibility: Exclude<SkillVisibility, 'team'>; scope?: string; changelog: string },
     idempotencyKey?: string,
   ) => request<SkillhubPublication>(`/api/skillhub/apps/${enc(appId)}/publish`, { method: 'POST', body: input, idempotencyKey }),
+  skillhubScopes: () => request<SkillHubScope[]>('/api/skillhub/scopes'),
   skillhubPublications: (appId: string) => request<SkillhubPublication[]>(`/api/skillhub/apps/${enc(appId)}/publications`),
   skillhubCategories: () => request<SkillHubCategory[]>('/api/skillhub/categories'),
   skillhubMarket: (input: { q?: string; categoryId?: string; page?: number; limit?: number } = {}) =>
@@ -710,6 +716,17 @@ export const api = {
       method: 'POST',
       body: {},
     }),
+  // ---- 人员管理（平台登录白名单） ----
+  adminLoginAllowlist: () => request<import('./types').LoginAllowlistItem[]>('/api/admin/login-allowlist'),
+  adminLoginAllowlistAdd: (body: { loginName?: string; loginNames?: string[]; realName?: string; note?: string; role?: 'user' | 'admin' }) =>
+    request<{ ok: boolean; added: number; failed: string[] }>('/api/admin/login-allowlist', { method: 'POST', body }),
+  adminLoginAllowlistUpdate: (loginName: string, body: { enabled?: boolean; note?: string; realName?: string; role?: 'user' | 'admin' }) =>
+    request<{ ok: boolean }>(`/api/admin/login-allowlist/${enc(loginName)}`, { method: 'PATCH', body }),
+  adminLoginAllowlistDelete: (loginName: string) =>
+    request<{ ok: boolean }>(`/api/admin/login-allowlist/${enc(loginName)}`, { method: 'DELETE' }),
+  // 员工目录搜索由服务端代理（浏览器直连公司网关会被 CORS / 混合内容拦截）
+  adminEmployeeSearch: (q: string) =>
+    request<{ loginName: string; realName: string }[]>(`/api/admin/employees/search?q=${encodeURIComponent(q)}`),
   // ---- 动态帮助知识库管理（实时同步帮助文档与小织机器人） ----
   adminHelpKnowledgeList: () =>
     request<{ items: import('./types').HelpKnowledgeArticle[] }>('/api/admin/help-knowledge'),

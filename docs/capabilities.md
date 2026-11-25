@@ -24,7 +24,7 @@
 | 做不到的需求 | 替代做法 |
 |---|---|
 | 原生 App、小程序、桌面客户端、扫码从外网访问 | 网页应用，公司内网电脑或手机浏览器打开 |
-| 直连生产数据库，或往 MES / ERP / SAP 写数据 | 管理员登记只读查询接口作为「数据源」；没有接口先用 Excel / CSV 导入 |
+| 直连生产数据库，或往 MES / ERP / SAP 写数据 | 接口在 AGW 侧登记后，通过「数据源 → 选择可调用 API」添加并只读使用；没有接口先用 Excel / CSV 导入 |
 | 自建后端、消息队列、定时任务、长时间后台程序 | 页面 + 云数据库 + 云函数（单次 10 秒、128 MB、返回 1 MB）；批处理做成「命令行脚本」项目 |
 | 支付、短信、邮件群发、开放给外部用户 | 不做；内部用状态提醒、待办列表 |
 | 实时多人协同、音视频、直播、3D、语音识别 | 不做；协作改成「提交 → 审批」 |
@@ -49,8 +49,8 @@
 | 「思考过程」的逐字增量只推给同实例的连接 | 多副本时，连到别的实例的页面按 500ms 落库批次看到思考内容 | 可接受；需要时用 PostgreSQL LISTEN/NOTIFY 或 Redis 转发 |
 | 没有沙箱预热池 | 每个任务冷启动沙箱，取决于 OpenSandbox 调度与镜像拉取 | 节点预拉镜像；以后可做预热池 |
 | NAS 上构建 | 大量小文件的导入项目 `npm install` 慢 | 导入任务把依赖放到沙箱临时目录 |
-| 五星AI岛按工号取路由的接口还没有 | 外网用模拟接口跑通；内网需要 openclaw 新增 `/internal/zhiye/llm/route` | 见 `fivestar-integration.md` 第三节 |
-| 统一认证、五星AI岛、SkillHub、星claw 都只能在内网联调 | 外网全部用模拟接口；内网要按清单逐项验证 | `fivestar-integration.md` 联调清单 |
+| llm-gateway 的项目来源标记尚未由对方日志确认 | 个人额度和真实扣减已验证；需确认 `X-Project-Id: zhiye` 的统计归属 | 见 `fivestar-integration.md` 第三节 |
+| SkillHub 发布后的文件与安全检测 | 已定位并修复直传 ZIP 未持久化的问题，改为 TFLE 两步上传；个人/公开审核参数、组织范围和包再下载已有回归测试，真实环境复验见联调记录 | `fivestar-integration.md` 联调清单 |
 | Vue 项目只支持对话修改 | 没有可视化编辑 | 有需要再给 Vue 模板接编辑桥 |
 | `zhiye-common`、`zhiye-api` 两个模块目前为空 | 只是按五星AI岛的模块划分预留 | 有对外契约或共享 DTO 时再放进去 |
 
@@ -58,9 +58,9 @@
 
 **P0：上内网前**
 
-1. 内网联调：统一认证（真实网关、回调地址登记）、五星AI岛模型和额度、llm-gateway 个人路由、额度用完的 429 文案；SkillHub 真实市场 / 安装 / 发布审核、API 网关目录导入与授权调用也按 `fivestar-integration.md` 和 `data-sources.md` 逐项验证。上述功能代码与本地 Mock 已完成，待真实环境验收。
-2. openclaw 提供 `/internal/zhiye/llm/route`（服务间令牌，按工号 + 模型返回网关地址、模型名、虚拟密钥），并确认 llm-gateway 的个人身份与项目来源请求头语义。
-3. 生产配置：`ZHIYE_CLOUD_SECRET`、`ZHIYE_SSO_REDIRECT_URL`、站点域名与证书、OpenSandbox 地址和 PVC、Ingress 的 SSE 超时（≥ 10 分钟，关闭缓冲）。独立集群部署时，外部服务地址必须走可跨集群访问的平台网关 / Ingress，不能填对方集群的 `*.svc` 地址。
+1. 剩余内网验收：额度耗尽的 429 与恢复续做、应用内 AI 的作者额度归属、SkillHub 安全扫描与人工审核、真实业务数据源调用。SSO、模型路由、真实问答、生成 / 修改 / 发布和技能安装使用已通过。
+2. 由 openclaw / llm-gateway 团队确认网关日志里的 `X-Project-Id: zhiye` 来源统计；`/internal/llm/route` 和个人额度扣减已实测。
+3. 集群配置：`ZHIYE_CLOUD_SECRET`、正式 SSO 回调、站点通配符域名与证书、自建 k8s 沙箱和 PVC、Traefik 的 SSE 超时与请求体限制。外部服务走可跨集群访问的平台网关 / Ingress，不能填对方集群的 `*.svc` 地址。
 
 **P1：功能补齐**
 

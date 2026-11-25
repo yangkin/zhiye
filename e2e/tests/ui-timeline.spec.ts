@@ -68,6 +68,7 @@ test('技能生成：输入框保留、待办推进、步骤可展开、完成�
   await expect(page.locator('.tl-thinking')).toHaveCount(0)
   const summary = page.locator('.tl-summary').first()
   await expect(summary).toBeVisible()
+  await summary.locator('.tl-summary-head').click()
   await expect(summary).toContainText(/(创建|编辑) \d+ 个文件/)
   await expect(summary).toContainText(/\+\d+\s*行/)
 

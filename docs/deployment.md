@@ -55,7 +55,7 @@ docker build -f deploy/docker/server.Dockerfile --build-arg JAR_SOURCE=prebuilt 
 kubectl apply -k deploy/k8s/overlays/test    # 测试环境；生产用 overlays/prod
 ```
 
-`base/` 里是命名空间、ConfigMap（`zhiye-config`）、Secret 模板（`secret.example.yaml`）、api / site Deployment（各 2 副本）、Ingress（ingress-nginx，SSE 已关闭缓冲、读超时 3600 秒）、NetworkPolicy。把 overlays 里的 `<...>` 换成真实值；OpenSandbox、NAS、节点池、kind 本地验证、回滚步骤见 `deploy/k8s/README.md`。
+`base/` 里是命名空间、ConfigMap（`zhiye-config`）、Secret 模板（`secret.example.yaml`）、api / site Deployment、Ingress 和 NetworkPolicy。测试 overlay 已按公司 RKE2 集群配置 Traefik（SSE 读超时 3600 秒、请求体 100 MiB）、自建 k8s 沙箱与真实域名；TLS Secret、NAS 和密钥仍需按环境准备。通用 OpenSandbox、节点池、kind 本地验证与回滚步骤见 `deploy/k8s/README.md`。
 
 **多副本是支持的**：任务按数据库租约领取，进度事件从数据库推送，停止、确认卡、补充要求都能跨实例送达（`docs/architecture.md` 第 5 节）。
 
@@ -75,19 +75,21 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 | `ZHIYE_TASK_CONCURRENCY` | 4 | 每个实例同时执行的任务数 |
 | `ZHIYE_TASK_MAX_MINUTES` | 60 | 一段运行（两次「继续」之间）的防卡死时限 |
 | `ZHIYE_TASK_CONTINUE_WAIT_MINUTES` | 30 | 「要继续吗？」等多久没回应就暂停 |
+| `ZHIYE_TASK_SHUTDOWN_WAIT_SECONDS` | 600 | 优雅停机：收到 SIGTERM 后停止领新任务，等在跑任务做完的最长时间（期间手动续约租约，防止被误判 worker_lost）；K8s 的 `terminationGracePeriodSeconds` 必须大于它 |
 | `ZHIYE_SANDBOX_MAX_HOURS` | 8 | 沙箱存活上限（覆盖多次继续） |
 | `ZHIYE_SANDBOX_PROVIDER` | `opensandbox` | `opensandbox` / `k8s`（回滚）/ `local`（site 固定 local） |
 | `ZHIYE_OPENSANDBOX_*`、`ZHIYE_RUNNER_IMAGE`、`ZHIYE_SANDBOX_PVC`、`ZHIYE_SANDBOX_CPU_*`、`ZHIYE_SANDBOX_MEMORY_*` | 见 ConfigMap | 沙箱 |
 | `ZHIYE_GATEWAY_URL` | `http://zhiye-api.zhiye.svc:8080/llm/v1` | 沙箱访问织页模型网关的集群内地址 |
 | `KIMI_API_KEY`* / `DEEPSEEK_API_KEY`* + `ZHIYE_LLM_*` | — | 本地统一上游（不开五星AI岛时） |
 | `ZHIYE_AUTH_MODE` | `anonymous` | `sso` 开启统一登录 |
+| `ZHIYE_AUTH_LOGIN_ALLOWLIST_ENABLED` | `true`（base 配置） | 人员管理：sso 下开启登录白名单，仅「管理 → 人员管理」中启用的人员与管理员可登录，其他账号登录返回 403 `PLATFORM_ACCESS_DENIED`；本地开发/测试默认关闭 |
 | `ZHIYE_SSO_GATEWAY_URL`、`ZHIYE_SSO_CLIENT_ID`、`ZHIYE_SSO_REDIRECT_URL`、`ZHIYE_SSO_SECURE_COOKIE` | 测试网关 / `SSO-METIS` / — / `true` | 统一认证；回调地址要在网关登记，形如 `https://织页域名/access_token` |
 | `ZHIYE_FIVESTAR_ENABLED`、`ZHIYE_FIVESTAR_ORG`、`ZHIYE_OPENCLAW_BASE_URL`、`ZHIYE_LLM_GATEWAY_URL` | `false` / 31 / — / — | 五星AI岛模型、额度、llm-gateway 路由（需要 sso） |
 | `ZHIYE_FIVESTAR_PROJECT_ID` | `zhiye` | 发往 llm-gateway 的来源项目标识 |
 | `ZHIYE_OPENCLAW_INTERNAL_TOKEN`* | — | 调 openclaw 内部接口的服务令牌（api 和 site 都要） |
-| `ZHIYE_SKILLHUB_ENABLED`、`ZHIYE_SKILLHUB_URL`、`ZHIYE_SKILLHUB_FILE_URL`、`ZHIYE_SKILLHUB_PORTAL`、`ZHIYE_SKILLHUB_ORG` | `false` / — / — / 测试详情页 / 31 | 公司 SkillHub 浏览、安装和发布 |
+| `ZHIYE_SKILLHUB_ENABLED`、`ZHIYE_SKILLHUB_URL`、`ZHIYE_SKILLHUB_FILE_URL`、`ZHIYE_SKILLHUB_UPLOAD_URL`、`ZHIYE_SKILLHUB_PORTAL`、`ZHIYE_SKILLHUB_ORG` | `false` / — / — / — / 测试详情页 / 31 | 公司 SkillHub 浏览、安装和发布；上传地址为 `http://网关/tfle/v1`，发布前先把 ZIP 传到文件服务 |
 | `ZHIYE_SOURCES_ALLOWED_HOSTS` | 空 | 数据源代理允许访问的主机（逗号分隔，支持 `*.域名`） |
-| `ZHIYE_AGW_ENABLED`、`ZHIYE_AGW_BASE_URL`、`ZHIYE_AGW_PUBLIC_URL`、`ZHIYE_AGW_TENANT_ID` | `false` / 测试网关 / 同 base / `31` | API 网关目录导入与签名调用；目录需要 SSO，业务调用凭证由各工作空间导入时填写 |
+| `ZHIYE_AGW_CLIENT_ID`、`ZHIYE_AGW_CLIENT_SECRET`*、`ZHIYE_AGW_CLIENT_TOKEN_URL`、`ZHIYE_AGW_CLIENT_BASE_URL` | 见 ConfigMap | 手动数据源的 `agw_client` 鉴权：客户端模式取 Metis Token，再换 AGW JWT；Secret 只注入 api 和 site |
 
 独立集群部署时，上述外部服务地址必须使用织页集群可访问的平台网关 / Ingress，不能填对方集群的 `*.svc` 地址。后台模型调用只向 openclaw 传工号并换取个人虚拟密钥，平台 accessToken 不进沙箱或 llm-gateway；完整身份链路和待确认请求头见 `docs/fivestar-integration.md`。
 
@@ -99,7 +101,7 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 
 1. 数据库：RDS PostgreSQL 16 可达，账号有建 schema 权限（每个应用的云数据库是一个 schema）；首次启动 Flyway 自动迁移到最新版本（日志里 `now at version vNN`）。
 2. 密钥：`ZHIYE_CLOUD_SECRET`、数据库密码、对象存储、OpenSandbox、（开五星时）`ZHIYE_OPENCLAW_INTERNAL_TOKEN` 都在 Secret 里；模型密钥只给 api。
-3. 域名：工作台、预览、发布站点三个域名（站点用通配符证书）；`ZHIYE_PUBLIC_BASE_URL`、`ZHIYE_PREVIEW_BASE`、`ZHIYE_SITE_HOST_SUFFIX` 一致。
+3. 域名：工作台、预览、发布站点三个域名（站点用通配符证书）；`ZHIYE_PUBLIC_BASE_URL`、`ZHIYE_PREVIEW_BASE`、`ZHIYE_SITE_HOST_SUFFIX` 一致。证书 SAN 必须覆盖工作台、预览及 `*.zhiye.csot.tcl.com` 这类发布站点泛域名；只有 `*.csot.tcl.com` 时不能覆盖多级子域名，浏览器会报 `ERR_CERT_COMMON_NAME_INVALID`。
 4. Ingress：SSE 不缓冲、读超时 ≥ 10 分钟、请求体 ≥ 61 MB（导入）。
 5. 沙箱：OpenSandbox 能创建沙箱、PVC 能挂进去、沙箱能访问 `ZHIYE_GATEWAY_URL`、出网默认拒绝（`deploy/k8s/README.md` 第 9 节逐项验证）。
 6. 登录：开 sso 时回调地址已登记；登录 → 回到原页面；会话过期后被引导重新登录（草稿保留）。

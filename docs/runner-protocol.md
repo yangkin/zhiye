@@ -4,9 +4,10 @@ runner 是 `zhiye/runner/` 下的 Node 程序，每个任务启动一个进程�
 
 ## 1. 启动
 
-runner 是 HTTP 服务（`runner/src/control-server.mjs`），每个任务一个进程。两种启动方式，协议完全相同：
+runner 是 HTTP 服务（`runner/src/control-server.mjs`），每个任务一个进程。三种启动方式，协议完全相同：
 
 - **生产（`zhiye.sandbox.provider=opensandbox`）**：runner 镜像以 `/opt/zhiye/bin/start-runner.sh` 作为 OpenSandbox 沙箱的 entrypoint 启动，监听 `0.0.0.0:8790`；工作进程通过平台 Ingress Gateway 访问沙箱入口（入口地址由 OpenSandbox 返回）。
+- **K8s 回滚（`zhiye.sandbox.provider=k8s`）**：沙箱 Pod 容器 sleep 占住，工作进程 exec 启动 runner（监听 `0.0.0.0:8790`，`zhiye.sandbox.k8s.control-port`），再通过 Pod IP 直连控制端口；NetworkPolicy `sandbox-ingress-api` 只放行 `zhiye-api` 访问该端口。
 - **本地开发（`zhiye.sandbox.provider=local`）**：Java 在任务工作区里启动 `node runner/src/main.mjs`，只监听 `127.0.0.1:<随机端口>`。可选 `sandbox-exec` 包一层（配置 `zhiye.sandbox.seatbelt=false` 可关掉，便于调试）：
 
 ```bash

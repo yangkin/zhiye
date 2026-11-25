@@ -31,6 +31,8 @@ public record ZhiyeProperties(
                        @DefaultValue("localhost:8083") String siteHostSuffix) {}
 
     public record Task(@DefaultValue("4") int concurrency,
+                       /** 优雅停机：停止领新任务后，等在跑任务完成的最长时间（秒）；超时仍退出并标记 worker_lost */
+                       @DefaultValue("600") int shutdownWaitSeconds,
                        /** 一段运行的时限（只为防止执行环境卡死）；每次「继续」后重新计时 */
                        @DefaultValue("60") int maxDurationMinutes,
                        /** 步数检查点：每做这么多步暂停一下，问用户要不要继续（不是上限） */

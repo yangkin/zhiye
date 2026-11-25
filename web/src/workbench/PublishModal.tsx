@@ -138,11 +138,11 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
         <h3 className="center">{app.name}</h3>
         <div className="publish-detail">
           <span>
-            线上版本
+            <span className="publish-detail-label">线上版本</span>
             <b>{v ? `V${v.number} · ${v.title}` : '已发布'}</b>
           </span>
           <span>
-            实际生效访问范围
+            <span className="publish-detail-label">实际生效访问范围</span>
             <b>{formatEffectiveAccess(effectiveAccess.level, effectiveAccess.membersCount)}</b>
           </span>
         </div>
@@ -194,11 +194,11 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
       <h3 className="center">{app.name}</h3>
       <div className="publish-detail">
         <span>
-          即将发布的版本
+          <span className="publish-detail-label">即将发布的版本</span>
           <b>{v ? `V${v.number} · ${v.title}` : '还没有版本'}</b>
         </span>
         <span>
-          当前线上
+          <span className="publish-detail-label">当前线上</span>
           <b>{app.siteUrl ? app.siteUrl : '尚未发布'}</b>
         </span>
       </div>

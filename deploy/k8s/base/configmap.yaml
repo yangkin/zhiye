@@ -25,12 +25,17 @@ data:
   ZHIYE_SANDBOX_MAX_HOURS: "8"
   # 登录：anonymous / sso（平台统一认证，见 docs/sso.md）
   ZHIYE_AUTH_MODE: anonymous
+  # 人员管理：sso 模式下开启登录白名单，只有「管理 → 人员管理」里的人员和管理员可登录
+  ZHIYE_AUTH_LOGIN_ALLOWLIST_ENABLED: "true"
   ZHIYE_SSO_GATEWAY_URL: http://testmetis.csot.tcl.com
   ZHIYE_SSO_REDIRECT_URL: https://zhiye.example.com/access_token
   # 平台首任管理员 SSO 登录名白名单（逗号分隔；上线后可在「管理 -> 角色权限」中动态授予其他员工）
   ZHIYE_ADMIN_ALLOW_LOGIN_NAMES: "admin"
   # 数据源代理允许访问的内网目标域名（逗号分隔，支持 *.csot.tcl.com）
   ZHIYE_SOURCES_ALLOWED_HOSTS: ""
+  ZHIYE_AGW_CLIENT_ID: SSO-METIS
+  ZHIYE_AGW_CLIENT_TOKEN_URL: http://testmetis.csot.tcl.com/oauth/oauth/token
+  ZHIYE_AGW_CLIENT_BASE_URL: https://apitest.csot.tcl.com/api/agw-admin
   # 五星AI岛：模型列表 / 默认模型 / 个人额度 / llm-gateway 路由（需要 sso，见 docs/fivestar-integration.md）
   ZHIYE_FIVESTAR_ENABLED: "false"
   ZHIYE_FIVESTAR_ORG: "31"
@@ -41,6 +46,7 @@ data:
   ZHIYE_SKILLHUB_ENABLED: "false"
   ZHIYE_SKILLHUB_URL: http://testmetis.csot.tcl.com/fivestar-new
   ZHIYE_SKILLHUB_FILE_URL: http://testmetis.csot.tcl.com/fivestar-new
+  ZHIYE_SKILLHUB_UPLOAD_URL: http://testmetis.csot.tcl.com/tfle/v1
   ZHIYE_SKILLHUB_PORTAL: "http://testmetis.csot.tcl.com/fivestar-front/skillsHub?type=detail&id={id}"
   ZHIYE_SKILLHUB_ORG: "31"
   ZHIYE_AGW_ENABLED: "false"

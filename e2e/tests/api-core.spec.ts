@@ -1,6 +1,6 @@
 // 接口级端到端：创造 → 生成 → 修改 → 版本 → 发布 闭环（真实 Kimi）
 import { test, expect, request as pwRequest } from '@playwright/test'
-import { Api, rgbOf, SITE_PORT } from './helpers'
+import { Api, rgbOf, SITE_PORT, siteGet } from './helpers'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -247,8 +247,8 @@ test('数据统计：发布站点的访问计 PV，预览和资源不计；汇�
   expect(summary0.total).toBeGreaterThan(0)
   expect(summary0.published).toBeGreaterThan(0)
   const visitor = await playwright.request.newContext()
-  for (let i = 0; i < 3; i++) expect((await visitor.get(s.siteUrl)).ok()).toBeTruthy()
-  await visitor.get(app.previewUrl)
+  for (let i = 0; i < 3; i++) expect((await siteGet(visitor, s.siteUrl)).ok()).toBeTruthy()
+  await siteGet(visitor, app.previewUrl)
   await expect.poll(async () => (await api.get(`/api/apps/${app.id}/stats?range=7d`)).todayPv, { timeout: 15_000 }).toBe(before.todayPv + 3)
   // 预览不计：再等一个写入周期，数值不变
   await new Promise((r) => setTimeout(r, 2500))
@@ -266,11 +266,11 @@ test('数据统计：发布站点的访问计 PV，预览和资源不计；汇�
   const g = await api.generate(tmp.id)
   expect(g.status, JSON.stringify(g.error)).toBe('SUCCEEDED')
   const pub = await api.post(`/api/apps/${tmp.id}/publish`, {})
-  expect((await visitor.get(pub.siteUrl)).ok()).toBeTruthy()
+  expect((await siteGet(visitor, pub.siteUrl)).ok()).toBeTruthy()
   const total1 = (await api.get('/api/apps/summary')).total
   const del = await api.req.delete(`/api/apps/${tmp.id}`)
   expect(del.status()).toBe(204)
-  expect((await visitor.get(pub.siteUrl)).status()).toBe(404)
+  expect((await siteGet(visitor, pub.siteUrl)).status()).toBe(404)
   expect((await api.get('/api/apps')).map((a: any) => a.id)).not.toContain(tmp.id)
   expect((await api.get(`/api/history?appId=${tmp.id}`))).toEqual([])
   expect((await api.get('/api/apps/summary')).total).toBe(total1 - 1)

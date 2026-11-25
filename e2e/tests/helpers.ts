@@ -95,6 +95,12 @@ export const SITE_ORIGIN = process.env.ZHIYE_SITE_ORIGIN || 'http://127.0.0.1:80
 /** 站点网关端口：跟 ZHIYE_SITE_ORIGIN 走，kind 里端口转发到别的端口时用例不用改 */
 export const SITE_PORT = new URL(SITE_ORIGIN).port || (SITE_ORIGIN.startsWith('https:') ? '443' : '80')
 
+/** Windows 的 Node 不一定解析 *.localhost；API 请求改连站点端口并保留原始 Host。 */
+export function siteGet(req: APIRequestContext, rawUrl: string) {
+  const target = new URL(rawUrl)
+  return req.get(SITE_ORIGIN + target.pathname + target.search, { headers: { Host: target.host } })
+}
+
 /** 在页面里把任意 CSS 颜色（含 oklch）换算成 [r, g, b]，用于比较色相 */
 export async function rgbOf(locator: import('@playwright/test').Locator): Promise<[number, number, number]> {
   return locator.evaluate((el) => {

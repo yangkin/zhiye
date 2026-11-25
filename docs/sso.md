@@ -64,7 +64,7 @@ zhiye:
 
 ## 真实环境验证状态
 
-已验证平台测试网关的 `/oauth/csot/login` 返回 302，并跳转到公司测试 SSO；完整「网关登录 → 织页回调 → 查询用户」仍需在登记织页回调地址后，用有效测试账号走一遍。用户信息字段按 metis 脚手架的 `UserSelfVo`（`id`、`loginName`、`realName`、`email`、`tenantNum`）解析，同时兼容 `{code, data}` 包装。
+已在本机用测试账号验证完整「网关登录 → 织页回调 → 查询用户」链路：平台测试网关 `/oauth/csot/login` 返回 302，公司测试 SSO 登录后可回调 `http://127.0.0.1:8080/access_token`，织页能取得 `yangkai37` 身份并识别管理员。用户信息字段按 metis 脚手架的 `UserSelfVo`（`id`、`loginName`、`realName`、`email`、`tenantNum`）解析，同时兼容 `{code, data}` 包装。
 
 ## 应用级登录（发布站点）
 
