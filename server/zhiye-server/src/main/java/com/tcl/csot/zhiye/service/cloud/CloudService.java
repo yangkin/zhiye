@@ -43,6 +43,9 @@ public class CloudService {
     private com.tcl.csot.zhiye.service.ops.PlatformLogService platformLogs;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.springframework.transaction.support.TransactionTemplate txTemplate;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private com.tcl.csot.zhiye.service.connector.AutomationTriggerService automationTriggers;
 
     public CloudService(JdbcClient jdbc, ObjectStore store, AppRepository apps, VersionRepository versions, GitService git) {
         this.jdbc = jdbc;
@@ -788,7 +791,9 @@ public class CloudService {
         }
         List<Map<String, Object>> rows = jdbc.sql("insert into " + qt(c, table) + " (" + cols + ") values (" + marks + ") returning *")
                 .params(params.toArray()).query((rs, i) -> rowToMap(rs)).list();
-        return rows.get(0);
+        Map<String, Object> inserted = rows.get(0);
+        if (automationTriggers != null) automationTriggers.onCloudRowEvent(c.appId(), table, "db_insert", inserted);
+        return inserted;
     }
 
     /** 值和列类型对不上（数字列写文字、日期格式错）、非空约束等（SQLState 22 / 23）：转成中文说明；其他数据库错误返回 null */
@@ -848,7 +853,9 @@ public class CloudService {
         List<Map<String, Object>> rows = jdbc.sql("update " + qt(c, table) + " set " + set + " where id = ? returning *")
                 .params(params.toArray()).query((rs, i) -> rowToMap(rs)).list();
         if (rows.isEmpty()) throw ApiException.notFound("这条记录");
-        return rows.get(0);
+        Map<String, Object> updated = rows.get(0);
+        if (automationTriggers != null) automationTriggers.onCloudRowEvent(c.appId(), table, "db_update", updated);
+        return updated;
     }
 
     public void delete(Cloud c, String table, long id, CloudPolicy.Who who) {

@@ -58,6 +58,21 @@ const ctx = {
   },
   source: { query: async (name: string, params?: Record<string, Json>) => (await call('/source', { name, params: params ?? {} })).data },
   ai: { chat: async (req: Json) => (await call('/ai', typeof req === 'string' ? { messages: [{ role: 'user', content: req }] } : req)).content },
+  feishu: {
+    sendCard: (opts: { connectorId?: string; title: string; content: string; templateColor?: string; fields?: { label: string; value: string }[]; buttons?: Json[] }) =>
+      call('/feishu/send-card', opts ?? {}),
+  },
+  bitable: {
+    list: (connectorId?: string, opts?: Record<string, Json>) =>
+      call('/bitable/list', { connectorId: connectorId ?? '', ...(opts ?? {}) }),
+    create: (connectorId: string, fields: Record<string, Json>, opts?: Record<string, Json>) =>
+      call('/bitable/create', { connectorId, fields, ...(opts ?? {}) }),
+    update: (connectorId: string, recordId: string, fields: Record<string, Json>, opts?: Record<string, Json>) =>
+      call('/bitable/update', { connectorId, recordId, fields, ...(opts ?? {}) }),
+  },
+  org: {
+    searchEmployees: async (q: string) => (await call('/org/employees', { q: q ?? '' })).employees ?? [],
+  },
   log,
 };
 

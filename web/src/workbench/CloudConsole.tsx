@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { Select } from '../components/Select';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { confirmDialog } from '../components/ConfirmDialog';
+import { CloudTriggersTab } from './CloudTriggersTab';
 
 const SYSTEM = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at', 'updated_by'];
 const SYSTEM_LABEL: Record<string, string> = { id: 'ID', created_by_name: '提交人', created_at: '创建时间', updated_at: '更新时间' };
@@ -174,11 +175,12 @@ function BlockedReport({ tables, sso, onBlocked }: { tables: string[]; sso: bool
   return null;
 }
 
-type Section = 'db' | 'files' | 'functions' | 'access';
+type Section = 'db' | 'files' | 'functions' | 'triggers' | 'access';
 const NAV: [Section, string, IconName][] = [
   ['db', '数据库', 'database'],
   ['files', '文件存储', 'folder'],
   ['functions', '云函数', 'code'],
+  ['triggers', '自动化触发器', 'spark'],
   ['access', '访问与登录', 'lock'],
 ];
 
@@ -237,6 +239,8 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
           <FilesView appId={appId} />
         ) : section === 'functions' ? (
           <FunctionsView appId={appId} />
+        ) : section === 'triggers' ? (
+          <CloudTriggersTab appId={appId} tableNames={tables.map((t) => t.name)} />
         ) : (
           <div className="cc-section">
             <h3>谁能打开这个应用</h3>
