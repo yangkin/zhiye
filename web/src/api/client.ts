@@ -752,6 +752,84 @@ export const api = {
     request<{ ok: boolean }>(`/api/workspace/memories/${enc(id)}`, { method: 'DELETE' }),
   workspaceMemoryClearAll: () =>
     request<{ ok: boolean; deleted: number }>('/api/workspace/memories', { method: 'DELETE' }),
+  // ---- Harness V2：检查点时间旅行 & 独立 QA 验收报告 ----
+  listCheckpoints: (appId: string) =>
+    request<Array<{
+      id: string;
+      appId: string;
+      taskId: string | null;
+      versionId: string | null;
+      stage: string;
+      title: string;
+      gitCommit: string;
+      hasSchema: boolean;
+      qaPassed: boolean | null;
+      qaScore: number | null;
+      qaReport: {
+        passed?: boolean;
+        score?: number;
+        summary?: string;
+        checklist?: Array<{ item: string; passed: boolean; evidence?: string }>;
+        defects?: Array<{ severity: string; area: string; repro?: string; expected?: string; actual?: string }>;
+      } | null;
+      createdAt: string;
+    }>>(`/api/apps/${enc(appId)}/checkpoints`),
+  restoreCheckpoint: (appId: string, checkpointId: string) =>
+    request<{ ok: boolean; versionId: string; versionNumber: number; title: string; restoredFrom: string }>(
+      `/api/apps/${enc(appId)}/checkpoints/${enc(checkpointId)}/restore`,
+      { method: 'POST', body: {} },
+    ),
+  // ---- Harness V2：企业受控 MCP 注册中心 ----
+  adminMcpList: () =>
+    request<{
+      servers: Array<{
+        id: string;
+        serverKey: string;
+        name: string;
+        description: string;
+        transport: 'http' | 'mock';
+        endpointUrl: string;
+        authHeader: string;
+        hasSecret: boolean;
+        tools: Array<{ name: string; description?: string }>;
+        enabled: boolean;
+        builtin: boolean;
+        createdBy: string | null;
+        createdAt: string;
+        updatedAt: string;
+      }>;
+      audits: Array<{
+        id: number;
+        serverKey: string;
+        toolName: string;
+        taskId: string | null;
+        appId: string | null;
+        ok: boolean;
+        durationMs: number;
+        error: string | null;
+        createdAt: string;
+      }>;
+    }>('/api/admin/mcp-servers'),
+  adminMcpCreate: (body: {
+    serverKey: string;
+    name: string;
+    description?: string;
+    transport: 'http' | 'mock';
+    endpointUrl: string;
+    authHeader?: string;
+    secret?: string;
+    tools?: Array<{ name: string; description?: string }>;
+    enabled?: boolean;
+  }) => request<Record<string, unknown>>('/api/admin/mcp-servers', { method: 'POST', body }),
+  adminMcpUpdate: (id: string, body: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/admin/mcp-servers/${enc(id)}`, { method: 'PUT', body }),
+  adminMcpDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/mcp-servers/${enc(id)}`, { method: 'DELETE' }),
+  adminMcpTest: (serverKey: string, body: { tool?: string; arguments?: Record<string, unknown> } = {}) =>
+    request<{ ok: boolean; serverKey: string; tool: string; durationMs: number; content: string }>(
+      `/api/admin/mcp-servers/${enc(serverKey)}/test`,
+      { method: 'POST', body },
+    ),
 };
 
 export const errorMessage = (error: unknown, fallback = '操作未完成，请重试。') =>

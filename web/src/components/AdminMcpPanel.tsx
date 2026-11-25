@@ -1,0 +1,278 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, errorMessage } from '../api/client';
+import { Icon } from '../lib/icons';
+import { toast } from '../lib/store';
+import { Modal } from './Modal';
+import { confirmDialog } from './ConfirmDialog';
+
+/** 平台级企业受控 MCP 注册中心面板（嵌入管理页「配额与运行」视图）。 */
+export function AdminMcpPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['admin-mcp-servers'], queryFn: api.adminMcpList, staleTime: 15_000 });
+  const [addOpen, setAddOpen] = useState(false);
+  const [testingKey, setTestingKey] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<{ serverKey: string; tool: string; durationMs: number; content: string } | null>(null);
+
+  const [serverKey, setServerKey] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [transport, setTransport] = useState<'http' | 'mock'>('http');
+  const [endpointUrl, setEndpointUrl] = useState('');
+  const [authHeader, setAuthHeader] = useState('Authorization');
+  const [secret, setSecret] = useState('');
+  const [toolsText, setToolsText] = useState('search_docs: 检索公司文档或接口规范');
+  const [saving, setSaving] = useState(false);
+
+  const servers = q.data?.servers ?? [];
+  const audits = q.data?.audits ?? [];
+  const refresh = () => qc.invalidateQueries({ queryKey: ['admin-mcp-servers'] });
+
+  const parseTools = (raw: string) =>
+    raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const idx = l.indexOf(':');
+        return idx > 0
+          ? { name: l.slice(0, idx).trim(), description: l.slice(idx + 1).trim() }
+          : { name: l, description: '' };
+      });
+
+  const handleCreate = async () => {
+    setSaving(true);
+    try {
+      await api.adminMcpCreate({
+        serverKey: serverKey.trim(),
+        name: name.trim(),
+        description: description.trim(),
+        transport,
+        endpointUrl: transport === 'mock' ? `mock://${serverKey.trim()}` : endpointUrl.trim(),
+        authHeader: authHeader.trim() || 'Authorization',
+        secret: secret.trim() || undefined,
+        tools: parseTools(toolsText),
+        enabled: true,
+      });
+      await refresh();
+      setAddOpen(false);
+      setServerKey('');
+      setName('');
+      setDescription('');
+      setEndpointUrl('');
+      setSecret('');
+      toast('已登记企业 MCP 服务，编码智能体在下次任务即可通过 mcp_list / mcp_call 调用。');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle = async (id: string, curEnabled: boolean) => {
+    try {
+      await api.adminMcpUpdate(id, { enabled: !curEnabled });
+      await refresh();
+      toast(!curEnabled ? '已启用该 MCP 服务。' : '已停用该 MCP 服务。');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    }
+  };
+
+  const handleDelete = async (id: string, label: string) => {
+    const ok = await confirmDialog({
+      title: `删除 MCP 服务「${label}」？`,
+      message: '删除后沙箱中的编码智能体将无法再调用该服务。',
+      confirmLabel: '确认删除',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.adminMcpDelete(id);
+      await refresh();
+      toast('已删除 MCP 服务。');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    }
+  };
+
+  const handleTest = async (srvKey: string, firstTool?: string) => {
+    setTestingKey(srvKey);
+    try {
+      const res = await api.adminMcpTest(srvKey, { tool: firstTool || 'search_specs', arguments: { q: '8D 良率' } });
+      setTestResult(res);
+      await refresh();
+      toast(`MCP 试调用成功（${res.durationMs}ms）。`);
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setTestingKey(null);
+    }
+  };
+
+  return (
+    <div className="dash-panel" aria-label="企业受控 MCP 注册中心">
+      <div className="dash-panel-head">
+        <div>
+          <h3>企业受控 MCP 注册中心（{servers.filter((s) => s.enabled).length} / {servers.length} 启用）</h3>
+          <p className="muted-note">
+            统一托管公司内部 MCP 服务（文档、接口契约、GitLab 等）；认证凭据 AES-256-GCM 加密落库永不进沙箱，所有调用经服务端代理并写入审计日志。
+          </p>
+        </div>
+        <button type="button" className="primary-button dash-compact-btn" onClick={() => setAddOpen(true)}>
+          <Icon name="plus" /> 登记 MCP 服务
+        </button>
+      </div>
+
+      {q.isLoading ? <p className="muted-note">正在读取 MCP 服务清单…</p> : null}
+      {servers.length > 0 ? (
+        <div className="dash-table-wrap">
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th scope="col">服务名称 / 标识</th>
+                <th scope="col">传输协议 / 地址</th>
+                <th scope="col">开放工具</th>
+                <th scope="col">状态</th>
+                <th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {servers.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <b>{s.name}</b>
+                    <div>
+                      <code>{s.serverKey}</code>
+                      {s.builtin ? <span className="dash-pill" style={{ marginLeft: 6 }}>内置仿真</span> : null}
+                    </div>
+                  </td>
+                  <td>
+                    <span className="dash-pill cloud">{s.transport.toUpperCase()}</span>
+                    <div className="dash-muted" style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.endpointUrl || '—'}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {(s.tools ?? []).map((t) => (
+                        <code key={t.name} title={t.description || t.name}>{t.name}</code>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`dash-pill ${s.enabled ? 'ok' : ''}`}>{s.enabled ? '已启用' : '已停用'}</span>
+                  </td>
+                  <td className="dash-nowrap">
+                    <div className="dash-action-row">
+                      <button
+                        type="button"
+                        className="dash-link"
+                        disabled={!s.enabled || testingKey === s.serverKey}
+                        onClick={() => void handleTest(s.serverKey, s.tools?.[0]?.name)}
+                      >
+                        {testingKey === s.serverKey ? '测试中…' : '试调用'}
+                      </button>
+                      <button type="button" className="dash-link" onClick={() => void handleToggle(s.id, s.enabled)}>
+                        {s.enabled ? '停用' : '启用'}
+                      </button>
+                      {!s.builtin ? (
+                        <button type="button" className="dash-link danger" onClick={() => void handleDelete(s.id, s.name)}>
+                          删除
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {testResult ? (
+        <div className="notice-box" style={{ marginTop: 12 }}>
+          <b>试调用结果 · {testResult.serverKey}/{testResult.tool}（{testResult.durationMs}ms）</b>
+          <pre style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 180, overflow: 'auto' }}>{testResult.content}</pre>
+        </div>
+      ) : null}
+
+      {audits.length > 0 ? (
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#6b6380' }}>
+            最近 MCP 调用审计（{audits.length} 条）
+          </summary>
+          <div className="dash-table-wrap" style={{ marginTop: 8 }}>
+            <table className="dash-table">
+              <thead>
+                <tr>
+                  <th scope="col">时间</th>
+                  <th scope="col">服务 / 工具</th>
+                  <th scope="col">任务 / 应用</th>
+                  <th scope="col">结果 / 耗时</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audits.slice(0, 12).map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.createdAt.replace('T', ' ').slice(0, 19)}</td>
+                    <td><code>{a.serverKey}</code> / <code>{a.toolName}</code></td>
+                    <td><code>{a.taskId || '—'}</code></td>
+                    <td>
+                      <span className={`dash-pill ${a.ok ? 'ok' : 'bad'}`}>{a.ok ? '成功' : '失败'}</span> {a.durationMs}ms
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      ) : null}
+
+      {addOpen ? (
+        <Modal
+          title="登记企业 MCP 服务"
+          onClose={() => setAddOpen(false)}
+          footer={
+            <>
+              <button type="button" className="subtle-button" onClick={() => setAddOpen(false)}>取消</button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={saving || !serverKey.trim() || !name.trim() || (transport === 'http' && !endpointUrl.trim())}
+                onClick={() => void handleCreate()}
+              >
+                {saving ? '保存中…' : '保存并启用'}
+              </button>
+            </>
+          }
+        >
+          <label className="field-label">服务标识（英文小写）</label>
+          <input className="text-input" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
+          <label className="field-label" style={{ marginTop: 10 }}>显示名称</label>
+          <input className="text-input" placeholder="如 华星 GitLab 研发知识 MCP" value={name} onChange={(e) => setName(e.target.value)} />
+          <label className="field-label" style={{ marginTop: 10 }}>传输协议</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <button type="button" className={transport === 'http' ? 'primary-button' : 'subtle-button'} onClick={() => setTransport('http')}>HTTP JSON-RPC（生产）</button>
+            <button type="button" className={transport === 'mock' ? 'primary-button' : 'subtle-button'} onClick={() => setTransport('mock')}>Mock（本地仿真）</button>
+          </div>
+          {transport === 'http' ? (
+            <>
+              <label className="field-label">服务地址（Endpoint URL）</label>
+              <input className="text-input" placeholder="https://mcp.internal.example/rpc" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
+              <label className="field-label" style={{ marginTop: 10 }}>鉴权请求头 / 密钥（可选，AES-256-GCM 加密存储）</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input className="text-input" style={{ width: 150 }} value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
+                <input className="text-input" type="password" placeholder="Bearer xxx" value={secret} onChange={(e) => setSecret(e.target.value)} />
+              </div>
+            </>
+          ) : null}
+          <label className="field-label" style={{ marginTop: 10 }}>服务说明</label>
+          <input className="text-input" placeholder="告诉编码智能体何时调用此 MCP" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <label className="field-label" style={{ marginTop: 10 }}>开放工具列表（每行格式：工具名: 说明）</label>
+          <textarea className="text-input" rows={3} value={toolsText} onChange={(e) => setToolsText(e.target.value)} />
+        </Modal>
+      ) : null}
+    </div>
+  );
+}

@@ -439,3 +439,15 @@ body.studio-mode{background:var(--st-bg);color:var(--st-ink)}
 .publish-share-info b{font-size:13px;color:#1f1a2d}
 .publish-share-info p{margin:0;font-size:11.5px;color:#6d6480;line-height:1.45}
 .publish-share-info .subtle-button{align-self:flex-start;margin-top:2px;height:30px;padding:0 11px;font-size:12px}
+
+/* Harness V2：检查点时间旅行 & QA 验收抽屉 */
+.sheet-mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0 20px 12px;padding:4px;border-radius:10px;background:var(--st-accent-softer);border:1px solid var(--st-accent-line)}
+.sheet-mode-tabs>button{height:30px;border-radius:7px;font-size:12px;color:var(--st-muted);font-weight:500;cursor:pointer}
+.sheet-mode-tabs>button.active{background:var(--st-raised);color:var(--st-accent-ink);box-shadow:0 1px 4px var(--st-shadow)}
+.cp-card .tiny-badge.qa-warn{background:rgba(220,63,89,.14);color:#d93855}
+.cp-qa-summary{margin-top:6px;padding:8px 10px;border-radius:8px;background:var(--st-bg);border:1px solid var(--st-line);font-size:11.5px;color:var(--st-ink-2)}
+.cp-qa-summary>p{margin:0 0 4px;line-height:1.5}
+.cp-qa-detail{margin-top:6px;display:grid;gap:4px;padding-top:6px;border-top:1px dashed var(--st-line)}
+.cp-qa-item{display:flex;flex-direction:column;gap:1px;font-size:11px}
+.cp-qa-item small{color:var(--st-faint);font-size:10.5px}
+.cp-qa-defect{font-size:11px;color:#d93855}

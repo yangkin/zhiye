@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { createPortal } from 'react-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, errorMessage } from '../api/client';
 import { useInvalidateApp } from '../api/queries';
 import type { Version } from '../api/types';
@@ -291,7 +291,7 @@ export function RestoreModal({
   );
 }
 
-/** 工作台里的版本历史抽屉（原型 history-sheet）。 */
+/** 工作台里的版本历史与检查点时间旅行抽屉（原型 history-sheet）。 */
 export function VersionSheet({
   appName,
   versions,
@@ -309,52 +309,175 @@ export function VersionSheet({
   onPreview: (v: Version) => void;
   onRestore: (v: Version) => void;
 }) {
+  const [sheetTab, setSheetTab] = useState<'versions' | 'checkpoints'>('versions');
   const [q, setQ] = useState('');
+  const [restoringCp, setRestoringCp] = useState<string | null>(null);
+  const [expandedCp, setExpandedCp] = useState<string | null>(null);
+  const invalidate = useInvalidateApp();
+  const qc = useQueryClient();
+  const cpQ = useQuery({
+    queryKey: ['checkpoints', appId],
+    queryFn: () => api.listCheckpoints(appId),
+    staleTime: 10_000,
+  });
+  const checkpoints = cpQ.data ?? [];
   useEscape(onClose);
   const sheet = useRef<HTMLElement>(null);
   useDialogFocus(sheet);
   const rows = versions.filter((v) => !q.trim() || v.title.toLowerCase().includes(q.trim().toLowerCase()) || `v${v.number}` === q.trim().toLowerCase() || (v.note ?? '').toLowerCase().includes(q.trim().toLowerCase()));
+  const stageLabel = (stage: string) =>
+    stage === 'pre_task' ? '任务前快照' : stage === 'restore' ? '回退快照' : '任务完成快照';
+
+  const handleRestoreCheckpoint = async (cpId: string, title: string) => {
+    setRestoringCp(cpId);
+    try {
+      const r = await api.restoreCheckpoint(appId, cpId);
+      invalidate(appId);
+      void qc.invalidateQueries({ queryKey: ['checkpoints', appId] });
+      toast(`已时间旅行回退到「${title}」（保存为 V${r.versionNumber}）。`);
+      onClose();
+    } catch (err) {
+      toast(errorMessage(err), 'error');
+    } finally {
+      setRestoringCp(null);
+    }
+  };
+
   return createPortal(
     <div className="sheet-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <section ref={sheet} className="history-sheet" role="dialog" aria-modal="true" aria-label="版本历史">
+      <section ref={sheet} className="history-sheet" role="dialog" aria-modal="true" aria-label="版本历史与检查点">
         <header>
           <div>
-            <h2>版本历史</h2>
+            <h2>版本与检查点</h2>
             <p>
-              {appName} · {versions.length} 个版本
+              {appName} · {versions.length} 个版本 · {checkpoints.length} 个检查点
             </p>
           </div>
           <button className="icon-button" aria-label="关闭版本历史" onClick={onClose}>
             <Icon name="close" />
           </button>
         </header>
-        <label className="search-field">
-          <Icon name="search" />
-          <input placeholder="输入标题搜索" aria-label="搜索当前应用版本" value={q} onChange={(e) => setQ(e.target.value)} />
-        </label>
-        <div className="sheet-versions">
-          {loading ? <p className="muted-note">正在读取版本…</p> : null}
-          {rows.map((v) => (
-            <VersionRow
-              key={v.id}
-              appId={appId}
-              appName={appName}
-              version={v}
-              compact
-              onPreview={() => onPreview(v)}
-              onRestore={() => onRestore(v)}
-            />
-          ))}
-          {!loading && !rows.length ? (
-            <div className="empty-state">
-              <h3>没有匹配的版本</h3>
-              <p>{versions.length ? '换一个关键词试试。' : '应用生成后，每一次修改都会留下版本。'}</p>
-            </div>
-          ) : null}
+        <div className="sheet-mode-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sheetTab === 'versions'}
+            className={sheetTab === 'versions' ? 'active' : ''}
+            onClick={() => setSheetTab('versions')}
+          >
+            历史版本 ({versions.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sheetTab === 'checkpoints'}
+            className={sheetTab === 'checkpoints' ? 'active' : ''}
+            onClick={() => setSheetTab('checkpoints')}
+          >
+            检查点 &amp; QA ({checkpoints.length})
+          </button>
         </div>
+        {sheetTab === 'versions' ? (
+          <>
+            <label className="search-field">
+              <Icon name="search" />
+              <input placeholder="输入标题搜索" aria-label="搜索当前应用版本" value={q} onChange={(e) => setQ(e.target.value)} />
+            </label>
+            <div className="sheet-versions">
+              {loading ? <p className="muted-note">正在读取版本…</p> : null}
+              {rows.map((v) => (
+                <VersionRow
+                  key={v.id}
+                  appId={appId}
+                  appName={appName}
+                  version={v}
+                  compact
+                  onPreview={() => onPreview(v)}
+                  onRestore={() => onRestore(v)}
+                />
+              ))}
+              {!loading && !rows.length ? (
+                <div className="empty-state">
+                  <h3>没有匹配的版本</h3>
+                  <p>{versions.length ? '换一个关键词试试。' : '应用生成后，每一次修改都会留下版本。'}</p>
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="sheet-versions">
+            {cpQ.isLoading ? <p className="muted-note">正在读取检查点…</p> : null}
+            {checkpoints.map((cp) => {
+              const open = expandedCp === cp.id;
+              return (
+                <article key={cp.id} className="version-row compact cp-card">
+                  <div className="version-main">
+                    <div className="version-top">
+                      <span className="tiny-badge current">{stageLabel(cp.stage)}</span>
+                      {cp.hasSchema ? <span className="tiny-badge">含 Schema</span> : null}
+                      {cp.qaScore !== null ? (
+                        <span className={`tiny-badge ${cp.qaPassed ? 'online' : 'qa-warn'}`}>
+                          QA {cp.qaScore}分 · {cp.qaPassed ? '通过' : '有缺陷'}
+                        </span>
+                      ) : null}
+                    </div>
+                    <h3>{cp.title}</h3>
+                    <div className="version-author">
+                      <code>{cp.gitCommit.slice(0, 7)}</code>
+                      <span>·</span>
+                      <span>{fmtDate(cp.createdAt)} {fmtTime(cp.createdAt)}</span>
+                    </div>
+                    {cp.qaReport?.summary ? (
+                      <div className="cp-qa-summary">
+                        <p>{cp.qaReport.summary}</p>
+                        {(cp.qaReport.checklist?.length || cp.qaReport.defects?.length) ? (
+                          <button type="button" className="text-button" onClick={() => setExpandedCp(open ? null : cp.id)}>
+                            {open ? '收起 QA 详情' : '查看 QA 实测清单'}
+                          </button>
+                        ) : null}
+                        {open ? (
+                          <div className="cp-qa-detail">
+                            {cp.qaReport.checklist?.map((it, idx) => (
+                              <div key={idx} className="cp-qa-item">
+                                <span>{it.passed ? '✓' : '✗'} {it.item}</span>
+                                {it.evidence ? <small>{it.evidence}</small> : null}
+                              </div>
+                            ))}
+                            {cp.qaReport.defects?.map((d, idx) => (
+                              <div key={'d' + idx} className="cp-qa-defect">
+                                <b>[{d.severity}] {d.area}</b>：{d.actual || d.repro}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="version-actions">
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={restoringCp === cp.id}
+                      onClick={() => void handleRestoreCheckpoint(cp.id, cp.title)}
+                    >
+                      <Icon name="history" />
+                      <span>{restoringCp === cp.id ? '回退中…' : '回退'}</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {!cpQ.isLoading && !checkpoints.length ? (
+              <div className="empty-state">
+                <h3>暂无检查点</h3>
+                <p>从 Harness V2 起，每次生成与修改前后都会自动保存代码与 Schema 检查点及独立 QA 验收报告。</p>
+              </div>
+            ) : null}
+          </div>
+        )}
         <div className="sheet-note">
           <Icon name="history" />
-          每一个版本，都是创作的一部分。
+          检查点支持代码与 Schema 一键时间旅行回退，绝不丢失历史记录。
         </div>
       </section>
     </div>,

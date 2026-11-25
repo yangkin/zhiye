@@ -215,6 +215,14 @@ export function toolSummary(cwd, name, args = {}, { created } = {}) {
     case 'screenshot': return `截图自查 · ${args.device === 'wide' ? '宽屏 1920' : '桌面'}${args.route ? ' ' + String(args.route).slice(0, 40) : ''}`
     case 'find_files': return `查找文件${args.pattern ? ' · ' + String(args.pattern).slice(0, 32) : args.dir ? ' · ' + String(args.dir).slice(0, 32) : ''}`
     case 'grep_files': return `搜索代码 · ${String(args.query || '').slice(0, 32)}`
+    case 'typecheck_diagnostics': return '增量类型与语法诊断'
+    case 'code_symbols': return args.action === 'references' ? `追踪符号引用 · ${String(args.symbol || '').slice(0, 28)}` : `解析代码语义大纲${args.dir ? ' · ' + String(args.dir).slice(0, 24) : ''}`
+    case 'inspect_source': return `探测数据源结构${args.key ? ' · ' + String(args.key).slice(0, 24) : ''}`
+    case 'browser_test': return `浏览器交互自测（${Array.isArray(args.steps) ? args.steps.length : 0} 步${args.device === 'wide' ? ' · 宽屏' : ''}）`
+    case 'test_endpoint': return `实测后端接口（${Array.isArray(args.requests) ? args.requests.length : 0} 步）`
+    case 'install_package': return `安装白名单依赖 · ${String(args.packageName || '').slice(0, 32)}`
+    case 'mcp_list': return '查看企业 MCP 工具清单'
+    case 'mcp_call': return `调用企业 MCP · ${String(args.server || '')}/${String(args.tool || '')}`.slice(0, 48)
     case 'verify_app': return '工程自检（构建与冒烟）'
     case 'service_runtime_inspect': return `检查运行态${args.section && args.section !== 'all' ? ' · ' + args.section : ''}`
     default: return `调用工具 ${name}`

@@ -24,6 +24,7 @@ import { toast } from '../lib/store';
 import { DashEmptyBox, DashPanelHead, fmtCompact, fmtNum } from './DashboardCharts';
 import { AdminKnowledgePanel } from './AdminKnowledgePanel';
 import { AdminLoginAllowlistPanel } from './AdminLoginAllowlistPanel';
+import { AdminMcpPanel } from './AdminMcpPanel';
 
 export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
 
@@ -2395,6 +2396,8 @@ export function AdminGovernancePanel({
               </>
             )}
           </div>
+
+          <AdminMcpPanel />
 
           <div className="dash-panel">
             <DashPanelHead

@@ -12,6 +12,11 @@ import { createGuardExtension } from './guard.mjs'
 import { CLOUD_USAGE, systemPrompt } from './prompts.mjs'
 import { createConfirmExtension, createScreenshotExtension, createTodoExtension, snapshotBefore, stepDetail, toolSummary, ThinkingStream } from './steps.mjs'
 import { createSearchExtension, createServiceInspectExtension, createVerifyExtension } from './tools.mjs'
+import { createBrowserTestExtension } from './browser-test.mjs'
+import { createEndpointTestExtension } from './endpoint-test.mjs'
+import { createCodeIntelExtension } from './code-intel.mjs'
+import { createPackageInstallExtension } from './package-installer.mjs'
+import { createMcpBridgeExtension } from './mcp-bridge.mjs'
 
 export { toolSummary }
 import { emitEvent, log, RunnerError, classifyError } from './util.mjs'
@@ -125,14 +130,23 @@ export class Agent {
     })
     const withShot = ['template', 'vue', 'static', 'vite'].includes(this.projectKind)
     const isService = this.projectKind === 'service'
+    const withBrowser = withShot || isService
+    const withPkg = ['template', 'vue', 'vite', 'service'].includes(this.projectKind)
     const extensionFactories = [
       { name: 'zhiye-guard', factory: createGuardExtension({ cwd, projectKind: this.projectKind, agentDir, log }) },
       { name: 'zhiye-todo', factory: createTodoExtension({ cwd, onTodo: (items) => this.onTodo(items) }) },
       { name: 'zhiye-confirm', factory: createConfirmExtension({ emit: emitEvent, waiters: this.confirmWaiters, projectKind: this.projectKind, onAccepted: () => '云服务用法：\n' + CLOUD_USAGE }) },
       { name: 'zhiye-search', factory: createSearchExtension({ cwd }) },
+      { name: 'zhiye-code-intel', factory: createCodeIntelExtension({ cwd, projectKind: this.projectKind, agentDir, env }) },
+      { name: 'zhiye-mcp', factory: createMcpBridgeExtension({ agentDir, env }) },
       { name: 'zhiye-verify', factory: createVerifyExtension({ cwd, projectKind: this.projectKind, env }) },
+      ...(withBrowser ? [{ name: 'zhiye-browser-test', factory: createBrowserTestExtension({ cwd, projectKind: this.projectKind, env }) }] : []),
       ...(withShot ? [{ name: 'zhiye-screenshot', factory: createScreenshotExtension({ cwd, projectKind: this.projectKind }) }] : []),
-      ...(isService ? [{ name: 'zhiye-service-inspect', factory: createServiceInspectExtension({ agentDir }) }] : []),
+      ...(withPkg ? [{ name: 'zhiye-pkg-install', factory: createPackageInstallExtension({ cwd, projectKind: this.projectKind, env }) }] : []),
+      ...(isService ? [
+        { name: 'zhiye-endpoint-test', factory: createEndpointTestExtension({ cwd, projectKind: this.projectKind, env }) },
+        { name: 'zhiye-service-inspect', factory: createServiceInspectExtension({ agentDir }) },
+      ] : []),
     ]
     const allowedExtPaths = new Set(extensionFactories.map((e) => `<inline:${e.name}>`))
     const resourceLoader = new DefaultResourceLoader({
@@ -175,10 +189,13 @@ export class Agent {
       modelRuntime,
       resourceLoader,
       tools: [
-        'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files', 'verify_app',
+        'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files',
+        'typecheck_diagnostics', 'code_symbols', 'inspect_source', 'mcp_list', 'mcp_call', 'verify_app',
         ...(this.projectKind === 'skill' ? [] : ['request_confirm']),
+        ...(withBrowser ? ['browser_test'] : []),
         ...(withShot ? ['screenshot'] : []),
-        ...(isService ? ['service_runtime_inspect'] : []),
+        ...(withPkg ? ['install_package'] : []),
+        ...(isService ? ['test_endpoint', 'service_runtime_inspect'] : []),
       ],
       sessionManager,
       settingsManager,

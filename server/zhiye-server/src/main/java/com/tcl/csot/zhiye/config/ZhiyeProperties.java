@@ -42,12 +42,15 @@ public record ZhiyeProperties(
                        /** 沙箱（k8s Pod / OpenSandbox）的最长存活时间：一个任务可以多次「继续」，这里只兜底防止资源泄漏 */
                        @DefaultValue("8") int sandboxMaxHours,
                        @DefaultValue("3") int verifyFixRounds,
+                       @DefaultValue("true") boolean qaGateEnabled,
+                       @DefaultValue("2") int qaMaxRounds,
+                       @DefaultValue("12") int qaMaxTurns,
                        @DefaultValue("30") int leaseSeconds,
                        // 不设任务级 token 上限：单次任务由时长和步数上限兜底，额度由五星AI岛按人控制
                        @DefaultValue("500") long pollMillis) {}
 
     public record Workspace(@DefaultValue("50") int dailyTaskLimit,
-                            @DefaultValue("1") int maxConcurrentTasks,
+                            @DefaultValue("3") int maxConcurrentTasks,
                             /** 每人最多应用数（已删除的不算） */
                             @DefaultValue("10") int maxApps,
                             @DefaultValue("zhiye_ws") String cookieName,

@@ -307,6 +307,14 @@ export function checkToolCall(toolName, input, { cwd, projectKind = 'template', 
     case 'grep_files':
     case 'verify_app':
     case 'service_runtime_inspect':
+    case 'browser_test':
+    case 'test_endpoint':
+    case 'typecheck_diagnostics':
+    case 'code_symbols':
+    case 'inspect_source':
+    case 'install_package':
+    case 'mcp_list':
+    case 'mcp_call':
       return null
     default:
       return `不允许使用工具 ${toolName}`

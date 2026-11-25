@@ -65,7 +65,7 @@ zhiye:
     lease-seconds: 30
   workspace:
     daily-task-limit: 200
-    max-concurrent-tasks: 1
+    max-concurrent-tasks: ${ZHIYE_WORKSPACE_MAX_CONCURRENT:3}
     max-apps: 10
   sandbox:
     provider: local
