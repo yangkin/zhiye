@@ -76,7 +76,7 @@ function detectLaunchSpec(cwd) {
     if (!existsSync(path.join(base, 'pom.xml')) && !existsSync(path.join(base, 'build.gradle')) && !existsSync(path.join(base, 'build.gradle.kts')) && !existsSync(path.join(base, 'app.jar'))) continue
     const jar = findBuiltJavaJar(base)
     if (jar) {
-      return { cmd: 'java', args: ['-jar', jar, '--server.port=__PORT__'], cwd: base, label: `java -jar ${path.relative(cwd, jar)}`, timeoutMs: 45_000 }
+      return { cmd: 'java', args: ['-jar', jar, '--server.port=__PORT__', '--server.address=127.0.0.1'], cwd: base, label: `java -jar ${path.relative(cwd, jar)}`, timeoutMs: 45_000 }
     }
   }
   // 2. Node.js 入口（不限于固定 server/index.mjs，兼容任意子目录）
@@ -212,6 +212,7 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
       ...env,
       PORT: String(port),
       SERVER_PORT: String(port),
+      SERVER_ADDRESS: '127.0.0.1',
       HOST: '127.0.0.1',
       DATA_DIR: dataDir,
       NODE_ENV: 'test',

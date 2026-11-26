@@ -31,7 +31,7 @@ export const HELP: HelpItem[] = [
     a: [
       '• 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（默认 React + 可选云服务，明确要求 Vue 时自动用 Vue 3；纯命令行数据处理需求生成 Python/Node 脚本）。',
       '• 开发网站：多角色、带状态流转的内部业务系统，或官网、活动页这类重视觉站点。',
-      '• 全栈应用：前后端一体应用（React 前端 + Node.js Express 后端 API + /data 持久化存储与可选独立 PostgreSQL Schema），生成后由平台直接托管运行。',
+      '• 全栈应用：前后端一体或前后端分离应用（支持 Vue 3 + Java Spring Boot、React + Node.js Express、Python FastAPI/Flask、Go 等多技术栈，内置 /data 持久化存储与可选独立 PostgreSQL Schema），对话直接生成并由平台托管运行。',
       '• 开发skill：生成给 AI 用的技能包（SKILL.md、参考资料和脚本），直接生成、不用确认计划，可一键发布到 SkillHub。',
       '• 技术文档：方案、手册、设计文档这类文字材料会在会话里直接写成 Markdown 文件并支持下载 Word（.docx）；明确说要「文档网站」时才做成网页。',
       '在对话里描述需求时，织页也会按你要的成品自己判断形态；点选「全栈应用」则会全程锁定前后端一体方案。',

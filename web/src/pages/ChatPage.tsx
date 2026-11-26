@@ -360,7 +360,7 @@ export function ChatPage() {
               padding: '2px 10px',
               whiteSpace: 'nowrap',
             }}
-            title="已锁定前后端一体全栈应用模式（React + Express + 独立托管）"
+            title="已锁定全栈应用模式（支持 Vue + Java Spring Boot / React + Express / Python / Go 独立托管）"
           >
             <Icon name="cloud" />
             全栈应用模式

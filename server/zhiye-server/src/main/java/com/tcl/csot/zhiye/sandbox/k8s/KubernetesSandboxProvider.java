@@ -73,6 +73,7 @@ public class KubernetesSandboxProvider implements SandboxProvider {
     private void ensureTemplateCacheStub() {
         stub("template-cache", cfg.templateNodeModules());
         stub("vue-template-cache", cfg.vueTemplateNodeModules());
+        stub("fullstack-template-cache", "/opt/zhiye/fullstack-template-cache/node_modules");
     }
 
     private void stub(String dir, String imagePath) {
@@ -156,8 +157,15 @@ public class KubernetesSandboxProvider implements SandboxProvider {
     String[] runnerCommand() {
         String script = "cd " + SandboxPodFactory.POD_WORKSPACE
                 + " && if [ -L node_modules ]; then T=\"$ZHIYE_TEMPLATE_NODE_MODULES\";"
-                + " case \"$(readlink node_modules)\" in */vue-template-cache/node_modules) T=\"$ZHIYE_VUE_TEMPLATE_NODE_MODULES\";; esac;"
+                + " case \"$(readlink node_modules)\" in */vue-template-cache/node_modules) T=\"$ZHIYE_VUE_TEMPLATE_NODE_MODULES\";;"
+                + " */fullstack-template-cache/node_modules) T=\"${ZHIYE_FULLSTACK_TEMPLATE_NODE_MODULES:-/opt/zhiye/fullstack-template-cache/node_modules}\";; esac;"
                 + " if [ \"$(readlink node_modules)\" != \"$T\" ]; then ln -sfn \"$T\" node_modules; fi; fi"
+                + " && if [ -L frontend/node_modules ]; then FT=\"$ZHIYE_VUE_TEMPLATE_NODE_MODULES\";"
+                + " if [ \"$(readlink frontend/node_modules)\" != \"$FT\" ]; then ln -sfn \"$FT\" frontend/node_modules; fi;"
+                + " elif [ ! -e frontend/node_modules ] && [ -f frontend/package.json ] && grep -q '\"vue\"' frontend/package.json 2>/dev/null; then"
+                + " if [ -d \"$ZHIYE_VUE_TEMPLATE_NODE_MODULES\" ]; then ln -sfn \"$ZHIYE_VUE_TEMPLATE_NODE_MODULES\" frontend/node_modules; fi; fi"
+                + " && if [ -d \"${ZHIYE_M2_REPO:-/opt/zhiye/m2/repository}\" ] && [ ! -e \"${HOME:-/agent}/.m2/repository\" ]; then"
+                + " mkdir -p \"${HOME:-/agent}/.m2\" && ln -sfn \"${ZHIYE_M2_REPO:-/opt/zhiye/m2/repository}\" \"${HOME:-/agent}/.m2/repository\"; fi"
                 + " && exec node " + cfg.runnerScript();
         return new String[]{"sh", "-c", script};
     }

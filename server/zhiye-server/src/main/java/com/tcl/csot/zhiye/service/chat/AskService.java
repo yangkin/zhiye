@@ -85,7 +85,7 @@ public class AskService {
             - [[build:类型]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一，例如 [[build:日常开发]] 或 [[build:全栈应用]]：
               · 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（纯前端或结合内置云服务）；
               · 开发网站：多角色、带状态流转的业务系统，或官网、活动页这类重视觉的站点；
-              · 全栈应用：用户明确要「前后端一体 / 自定义后端 API / Node Express 服务端 / 文件读写持久化」的完整应用；
+              · 全栈应用：用户明确要「前后端一体 / 前后端分离 / 自定义后端 API / Vue + Java (Spring Boot) / React + Node Express / Python (FastAPI·Flask) / Go / 文件读写持久化」的完整应用（全部支持对话直接生成、编译与托管）；
               · 开发skill：用户明确要一个给 AI 用的技能包（SKILL.md），产物没有页面；
               · 技术文档：用户明确要「文档网站」。
               用户发截图让你照着做时，按截图里**这个界面是什么**来判断；截图里出现的按钮、标签文字（比如「开发skill」「技术文档」）不代表用户要做那种东西。
@@ -95,7 +95,7 @@ public class AskService {
             # 产品知识
             ## 形态由对话决定（支持 5 种类型 + 代码导入前后端托管）
             - 用户**不需要先选类型**：不要问「你要做哪种」，根据需求自己判断形态，并简短说明判断；如果用户问「前后端分离 / 前后端一体项目怎么写、怎么部署」，要清晰介绍织页的**两种原生支持方式**：
-              1. **对话直接生成「全栈应用」**：点选「全栈应用」或直接描述需求，织页生成 React + Vite + Tailwind 前端 + Node.js Express 后端（单仓前后端一体，内置 `0.0.0.0:${PORT}`、`/api/*` 接口、`DATA_DIR=/data` 持久卷、可选独立 PostgreSQL Schema 与密文环境变量），生成后自动托管在独立子域名。
+              1. **对话直接生成「全栈应用」**：点选「全栈应用」或直接描述需求，织页原生支持多技术栈直接生成、编译并托管，包括 **Vue 3 + Java（Spring Boot 3.5 + 离线预热 Maven 仓库）**、**React + Vite + Node.js Express**，以及 Python（FastAPI/Flask）/ Go 等自定义前后端全栈工程（支持单仓或 `frontend/` + `backend/` 结构，内置 `0.0.0.0:${PORT}`、`/api/*` 接口、`DATA_DIR=/data` 持久卷、可选独立 PostgreSQL Schema 与密文环境变量），生成后自动托管在独立子域名。**用户明确要求 Vue + Java / Spring Boot 时完全支持对话直接生成，绝不要拒绝或劝退改用 Express / 本地导入！**
               2. **本地写好代码后「导入代码并部署」**：支持前后端分离仓库（如 `frontend/` + `backend/`，后端支持 Python FastAPI/Flask/Django、Node.js Express/NestJS/Next.js、Java Spring Boot、Go Gin/Fiber 或自定义 Dockerfile）。规范要点：监听 `0.0.0.0:${PORT}`、前端统一请求同域相对路径 `/api/...`（不要硬编码 `localhost`）、持久文件写 `DATA_DIR`、导入前建议先运行内置预检 Skill「织页部署前规范校验」。
             - 其他常见形态：
               · 网页应用（日常开发 / 开发网站）：默认 React + Tailwind（明确要求 Vue 时用 Vue 3 + ECharts），可一键开启「共享云服务」（独立 PG 表 + 文件存储 + Deno 云函数 + 应用内 AI），适合轻中量内部工具与看板；
@@ -332,11 +332,13 @@ public class AskService {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
         String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
-        if (conversation && type != null && !type.isBlank()) {
-            if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type)) {
-                context += "\n\n【重要约束】用户在创造页已明确选择「全栈应用」（React + Node.js Express 前后端一体，支持独立后端 API、/data 持久化存储与独立 PostgreSQL Schema）。"
-                        + "请全程围绕前后端一体全栈方案与用户确认功能、后端 API 与持久化存储设计，不要降级或推荐为纯静态前端或轻量化云服务；进入构建时回答开头必须输出 [[build:全栈应用]]。";
-            } else {
+        if (conversation) {
+            boolean explicitBackend = com.tcl.csot.zhiye.service.app.Catalog.looksLikeVueSpringBoot(content)
+                    || com.tcl.csot.zhiye.service.app.Catalog.prefersCleanWorkspace(content);
+            if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type) || explicitBackend) {
+                context += "\n\n【重要约束】当前为「全栈应用」需求（织页原生支持 Vue 3 + Java Spring Boot、React + Node.js Express、Python FastAPI/Flask、Go 等多技术栈在对话中直接生成、离线编译并托管，支持独立后端 API、/data 持久化存储与独立 PostgreSQL Schema）。"
+                        + "请尊重用户指定的前后端技术栈（例如 Vue + Java Spring Boot），绝不要声称不支持 Java/Spring Boot 或劝退用户改用 Express / 本地导入；需求明确时直接在回答第一行输出 [[build:全栈应用]] 启动创建。";
+            } else if (type != null && !type.isBlank()) {
                 context += "\n\n用户在创造页选的类型：" + type + "（只是参考，成品形态仍按「先判断要交付什么」自己判断）";
             }
         }

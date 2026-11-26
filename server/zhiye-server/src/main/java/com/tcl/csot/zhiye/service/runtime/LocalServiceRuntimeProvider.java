@@ -126,10 +126,26 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                             copyDir(fdir.resolve("dist"), stageStatic);
                             emitStage(spec.appId(), "frontend", "[zhiye] 复用已存在的 " + spec.frontendDir() + "/dist", buildLog);
                         } else {
-                            String npmCmd = props.npmRegistry().isBlank()
-                                    ? "(npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && npm run build"
-                                    : "npm config set registry " + shellQuote(props.npmRegistry())
-                                      + " && (npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && npm run build";
+                            // 优先复用预热 vue-template-cache 依赖，零联网秒级构建 Vue 前端
+                            Path vueCacheNm = zhiyeProps.runtimePath().resolve("vue-template-cache/node_modules");
+                            Path vueCachePkg = zhiyeProps.runtimePath().resolve("vue-template-cache/package.json");
+                            Path fNm = fdir.resolve("node_modules");
+                            boolean linkedVueCache = false;
+                            try {
+                                if (!Files.exists(fNm, LinkOption.NOFOLLOW_LINKS)
+                                        && Files.isDirectory(vueCacheNm) && Files.isRegularFile(vueCachePkg)
+                                        && Arrays.equals(Files.readAllBytes(fdir.resolve("package.json")), Files.readAllBytes(vueCachePkg))) {
+                                    Files.createSymbolicLink(fNm, vueCacheNm);
+                                    linkedVueCache = true;
+                                    emitStage(spec.appId(), "frontend", "[zhiye] 命中预热 Vue 模板依赖缓存（免重装 node_modules）", buildLog);
+                                }
+                            } catch (Exception ignored) {}
+                            String npmCmd = linkedVueCache
+                                    ? "npm run build"
+                                    : (props.npmRegistry().isBlank()
+                                        ? "(npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && npm run build"
+                                        : "npm config set registry " + shellQuote(props.npmRegistry())
+                                          + " && (npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && npm run build");
                             runBuildCmd(spec.appId(), fdir, npmCmd, spec.envVars(), buildLog);
                             Path dist = Files.isDirectory(fdir.resolve("dist")) ? fdir.resolve("dist")
                                     : Files.isDirectory(fdir.resolve("build")) ? fdir.resolve("build") : fdir;
@@ -163,6 +179,13 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                         emitStage(spec.appId(), "cache", "[zhiye] 复用活体工作区已验证前端构建产物 dist/", buildLog);
                     } catch (Exception ignored) {}
                 }
+            }
+
+            if ("java".equals(spec.runtime()) && Files.isRegularFile(stageStatic.resolve("index.html"))
+                    && Files.isRegularFile(bdirStage.resolve("pom.xml"))) {
+                Path javaStatic = bdirStage.resolve("src/main/resources/static");
+                GitService.deleteRecursively(javaStatic);
+                copyDir(stageStatic, javaStatic);
             }
 
             String buildCmd = resolveLocalBuildCmd(spec, base, bdirStage);
@@ -599,8 +622,24 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
             if (install.isBlank() || rawBuild.contains("npm install") || rawBuild.contains("npm ci")) return rawBuild;
             return install + " && " + rawBuild;
         }
-        if ("java".equals(spec.runtime()) && rawBuild.contains("mvn ") && Files.isRegularFile(bdir.resolve("mvnw"))) {
-            return rawBuild.replaceFirst("^mvn\\b", "chmod +x mvnw && ./mvnw");
+        if ("java".equals(spec.runtime()) && rawBuild.contains("mvn ")) {
+            String cmd = Files.isRegularFile(bdir.resolve("mvnw"))
+                    ? rawBuild.replaceFirst("^mvn\\b", "chmod +x mvnw && ./mvnw")
+                    : rawBuild;
+            if (!cmd.contains(" -o ") && !cmd.contains("--offline")) {
+                String tailFlag = "";
+                String envM2 = System.getenv("ZHIYE_M2_REPO");
+                Path runtimeM2 = zhiyeProps.runtimePath().resolve("m2-repo");
+                Path m2 = (envM2 != null && !envM2.isBlank() && Files.isDirectory(Path.of(envM2.trim())))
+                        ? Path.of(envM2.trim())
+                        : Files.isDirectory(runtimeM2) ? runtimeM2 : null;
+                if (m2 != null) {
+                    tailFlag = " -Dmaven.repo.local.tail=" + shellQuote(m2.toAbsolutePath().toString());
+                }
+                String offline = cmd.replaceFirst("\\bmvn\\b", "mvn -o -Daether.syncContext.named.factory=noop" + tailFlag);
+                return "(" + offline + ") || (" + cmd + ")";
+            }
+            return cmd;
         }
         return rawBuild;
     }
@@ -693,18 +732,26 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
     private static void augmentPath(Map<String, String> env) {
         String cur = env.getOrDefault("PATH", "");
         String sep = File.pathSeparator;
+        String javaHomeProp = System.getProperty("java.home", "");
+        if (!javaHomeProp.isEmpty()) {
+            env.putIfAbsent("JAVA_HOME", javaHomeProp);
+        }
         if (sep.equals(";")) {
             if (!cur.isEmpty()) env.put("PATH", cur);
             return;
         }
-        String extra = "/opt/homebrew/bin:/opt/homebrew/opt/openjdk@21/bin:/usr/local/bin";
+        StringBuilder extra = new StringBuilder();
+        if (!javaHomeProp.isEmpty() && Files.isDirectory(Path.of(javaHomeProp, "bin"))) {
+            extra.append(Path.of(javaHomeProp, "bin")).append(":");
+        }
+        extra.append("/opt/homebrew/bin:/opt/homebrew/opt/openjdk@21/bin:/usr/local/bin");
         String home = System.getProperty("user.home", "");
         if (!home.isEmpty()) {
             Path nvm = Path.of(home, ".nvm", "versions", "node");
             if (Files.isDirectory(nvm)) {
                 try (var stream = Files.list(nvm)) {
                     Optional<Path> latest = stream.filter(Files::isDirectory).sorted(Comparator.reverseOrder()).findFirst();
-                    if (latest.isPresent()) extra = latest.get().resolve("bin") + ":" + extra;
+                    if (latest.isPresent()) extra.insert(0, latest.get().resolve("bin") + ":");
                 } catch (IOException ignored) {}
             }
         }
@@ -717,7 +764,7 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes attrs) throws IOException {
                 String name = dir.getFileName() == null ? "" : dir.getFileName().toString();
-                if (!dir.equals(src) && (".git".equals(name) || ".zhiye".equals(name) || "node_modules".equals(name))) {
+                if (!dir.equals(src) && (".git".equals(name) || ".zhiye".equals(name) || "node_modules".equals(name) || "target".equals(name))) {
                     return FileVisitResult.SKIP_SUBTREE;
                 }
                 Files.createDirectories(dst.resolve(src.relativize(dir).toString()));

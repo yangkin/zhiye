@@ -39,4 +39,12 @@ class InferTypeTest {
         var plain = List.of(msg("user", "帮我做个东西"), msg("assistant", "[[build]]\n好的"));
         assertThat(ConversationService.inferType(plain, "技术文档")).isEqualTo("技术文档");
     }
+
+    @Test
+    void vueSpringBootInfersFullstack() {
+        var messages = List.of(
+                msg("user", "用 Vue 3 + Java Spring Boot 开发一个晶圆良率异常处置看板"),
+                msg("assistant", "好的，可以立即开始。"));
+        assertThat(ConversationService.inferType(messages, "开发网站")).isEqualTo("全栈应用");
+    }
 }

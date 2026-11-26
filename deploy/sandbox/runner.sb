@@ -48,6 +48,8 @@
   (subpath (param "WORKSPACE"))
   (subpath (param "AGENT_DIR"))
   (subpath (param "NODE_DIR"))
+  (subpath (param "JAVA_HOME_DIR"))
+  (subpath (param "MAVEN_REPO"))
   (subpath (string-append (param "ZHIYE_ROOT") "/runner"))
   (subpath (string-append (param "ZHIYE_ROOT") "/packages"))
   (subpath (string-append (param "ZHIYE_ROOT") "/runtime/template-cache"))

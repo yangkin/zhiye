@@ -588,7 +588,12 @@ async function verifyService(cwd, env) {
         mkdirSync(staticTarget, { recursive: true })
         cpSync(path.join(frontSubDir, 'dist'), staticTarget, { recursive: true })
       }
-      const r = await run('mvn', ['-B', '-o', '-DskipTests', 'package'], { cwd: javaDir, env: bEnv, timeoutMs: 180_000 })
+      const mvnArgs = ['-B', '-o', '-DskipTests', '-Daether.syncContext.named.factory=noop']
+      if (bEnv.ZHIYE_M2_REPO) {
+        mvnArgs.push(`-Dmaven.repo.local=${bEnv.ZHIYE_M2_REPO}`, `-Dmaven.repo.local.tail=${bEnv.ZHIYE_M2_REPO}`)
+      }
+      mvnArgs.push('package')
+      const r = await run('mvn', mvnArgs, { cwd: javaDir, env: bEnv, timeoutMs: 180_000 })
       if (r.timedOut) return { ok: false, detail: 'Maven 构建超时' }
       if (r.code !== 0) {
         const errs = String(r.out || '').split(/\r?\n/).filter((l) => l.includes('[ERROR]')).slice(0, 15).join('\n')

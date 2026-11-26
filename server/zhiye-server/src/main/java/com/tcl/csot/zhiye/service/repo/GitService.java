@@ -32,7 +32,7 @@ public class GitService {
     public record FileEntry(String path, long size) {}
 
     private static final String MAIN = "refs/heads/main";
-    private static final Set<String> TEMPLATE_SKIP = Set.of("node_modules", "dist", ".zhiye", ".git", ".DS_Store");
+    private static final Set<String> TEMPLATE_SKIP = Set.of("node_modules", "dist", "target", ".zhiye", ".git", ".DS_Store");
 
     private final ZhiyeProperties props;
 

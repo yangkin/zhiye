@@ -92,7 +92,13 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
         }
       }
       if (existsSync(path.join(base, 'pom.xml'))) {
-        const r = await run('mvn', ['-B', '-o', 'test-compile'], { cwd: base, env: buildEnv(env), timeoutMs: 90_000 })
+        const bEnv = buildEnv(env)
+        const mvnArgs = ['-B', '-o', '-Daether.syncContext.named.factory=noop']
+        if (bEnv.ZHIYE_M2_REPO) {
+          mvnArgs.push(`-Dmaven.repo.local=${bEnv.ZHIYE_M2_REPO}`, `-Dmaven.repo.local.tail=${bEnv.ZHIYE_M2_REPO}`)
+        }
+        mvnArgs.push('test-compile')
+        const r = await run('mvn', mvnArgs, { cwd: base, env: bEnv, timeoutMs: 90_000 })
         if (r.code !== 0) {
           const errLines = String(r.out || '').split(/\r?\n/).filter((l) => l.startsWith('[ERROR]'))
           let matched = 0

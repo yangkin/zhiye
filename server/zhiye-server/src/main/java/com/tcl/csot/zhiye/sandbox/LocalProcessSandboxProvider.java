@@ -57,6 +57,8 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
         Files.createDirectories(spec.logFile().getParent());
 
         String controlToken = HexFormat.of().formatHex(newToken());
+        Path javaHome = resolveJavaHome();
+        Path mavenRepo = resolveMavenRepo(root);
         List<String> cmd = new ArrayList<>();
         if (props.sandbox().seatbelt()) {
             Path profile = props.resolveFromRoot(props.sandbox().seatbeltProfile());
@@ -66,6 +68,8 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
                         "-D", "AGENT_DIR=" + spec.agentDir().toRealPath(),
                         "-D", "ZHIYE_ROOT=" + root.toRealPath(),
                         "-D", "NODE_DIR=" + realOrSelf(nodeDir.getParent()),
+                        "-D", "JAVA_HOME_DIR=" + (javaHome != null ? realOrSelf(javaHome) : "/nonexistent-java"),
+                        "-D", "MAVEN_REPO=" + (mavenRepo != null ? realOrSelf(mavenRepo) : "/nonexistent-m2"),
                         "-D", "ALLOW_NET=" + (spec.allowNet() ? "1" : "0")));
             } else {
                 log.warn("Seatbelt 配置 {} 不存在（或没有 sandbox-exec），runner 将不在沙箱中运行", profile);
@@ -86,13 +90,41 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
         env.put("ZHIYE_BRIDGE_PATH", root.resolve("packages/editor-bridge/bridge.js").toString());
         env.put("ZHIYE_CHROME_PATH", props.sandbox().chromePath());
         env.put("ZHIYE_TASK_ID", spec.taskId());
-        env.put("HOME", spec.agentDir().toString());
-        // Windows 的 PATH 分隔符是 ;，且 npm.cmd 等依赖系统 PATH；mac 上保持最小集
+        String agentHome = realOrSelf(spec.agentDir());
+        env.put("HOME", agentHome);
+        if (javaHome != null) {
+            env.put("JAVA_HOME", realOrSelf(javaHome));
+            // macOS JVM 默认从 passwd 读取 user.home 而忽略 $HOME，显式绑定到隔离的 agentDir，既免触发 Seatbelt 拒绝 ~/.m2/settings.xml，也不暴露宿主机凭证
+            env.put("JAVA_TOOL_OPTIONS", "-Duser.home=" + agentHome + " -DsocksNonProxyHosts=localhost|127.*|*.local|*.localhost");
+        }
+        if (mavenRepo != null) {
+            String m2 = realOrSelf(mavenRepo);
+            env.put("ZHIYE_M2_REPO", m2);
+            // 离线模式免写锁读取预热本地仓库（tail 仓库忽略宿主机 _remote.repositories 镜像标记），避免 Seatbelt 只读约束下报错
+            env.put("MAVEN_OPTS", "-Duser.home=" + agentHome + " -Dmaven.repo.local=" + m2 + " -Dmaven.repo.local.tail=" + m2 + " -Daether.syncContext.named.factory=noop -DsocksNonProxyHosts=localhost|127.*|*.local|*.localhost");
+            // 同步 ~/.m2/repository 只读软链，确保直接运行 mvn -o 也能命中离线仓库
+            try {
+                Path agentM2 = spec.agentDir().resolve(".m2");
+                Files.createDirectories(agentM2);
+                Path link = agentM2.resolve("repository");
+                if (!Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    Files.createSymbolicLink(link, Path.of(m2));
+                }
+            } catch (Exception ignored) {}
+        }
+        // Windows 的 PATH 分隔符是 ;，且 npm.cmd 等依赖系统 PATH；mac/linux 包含 node、JDK 与常见工具目录（mvn/go/python3）
         if (File.pathSeparator.equals(";")) {
             String sysPath = System.getenv("PATH");
-            env.put("PATH", nodeDir + ";" + (sysPath == null ? "" : sysPath));
+            String javaPart = javaHome != null ? javaHome.resolve("bin") + ";" : "";
+            env.put("PATH", javaPart + nodeDir + ";" + (sysPath == null ? "" : sysPath));
         } else {
-            env.put("PATH", nodeDir + ":/usr/bin:/bin");
+            List<String> pathParts = new ArrayList<>();
+            if (javaHome != null) pathParts.add(realOrSelf(javaHome.resolve("bin")));
+            pathParts.add(nodeDir.toString());
+            for (String extra : List.of("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin")) {
+                if (Files.isDirectory(Path.of(extra)) && !pathParts.contains(extra)) pathParts.add(extra);
+            }
+            env.put("PATH", String.join(":", pathParts));
         }
         env.put("LANG", "en_US.UTF-8");
         if (spec.allowNet()) {
@@ -179,6 +211,46 @@ public class LocalProcessSandboxProvider implements SandboxProvider {
 
     private static String realOrSelf(Path p) {
         try { return p.toRealPath().toString(); } catch (Exception e) { return p.toString(); }
+    }
+
+    /** 探测本机 JDK 目录，确保沙箱内 java / javac / mvn 可用。 */
+    private static Path resolveJavaHome() {
+        List<String> candidates = new ArrayList<>();
+        String envHome = System.getenv("JAVA_HOME");
+        if (envHome != null && !envHome.isBlank()) candidates.add(envHome.trim());
+        String propHome = System.getProperty("java.home");
+        if (propHome != null && !propHome.isBlank()) candidates.add(propHome.trim());
+        candidates.addAll(List.of(
+                "/opt/homebrew/opt/openjdk@21",
+                "/opt/homebrew/opt/openjdk@17",
+                "/opt/homebrew/opt/openjdk",
+                "/usr/lib/jvm/java-21-openjdk-amd64",
+                "/usr/lib/jvm/java-21-openjdk-arm64",
+                "/usr/lib/jvm/java-17-openjdk-amd64",
+                "/usr/lib/jvm/default-java"));
+        for (String c : candidates) {
+            Path p = Path.of(c);
+            if (Files.isExecutable(p.resolve("bin/java")) || Files.isExecutable(p.resolve("bin/java.exe"))) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /** 探测已预热的离线 Maven 本地仓库，供沙箱内 mvn -o 零联网编译 Spring Boot 项目。 */
+    private static Path resolveMavenRepo(Path root) {
+        String envRepo = System.getenv("ZHIYE_M2_REPO");
+        if (envRepo != null && !envRepo.isBlank() && Files.isDirectory(Path.of(envRepo.trim()))) {
+            return Path.of(envRepo.trim());
+        }
+        Path runtimeM2 = root.resolve("runtime/m2-repo");
+        if (Files.isDirectory(runtimeM2)) return runtimeM2;
+        String userHome = System.getProperty("user.home", "");
+        if (!userHome.isBlank()) {
+            Path homeM2 = Path.of(userHome, ".m2", "repository");
+            if (Files.isDirectory(homeM2)) return homeM2;
+        }
+        return null;
     }
 
     /** 本机 runner 进程的生命周期。 */

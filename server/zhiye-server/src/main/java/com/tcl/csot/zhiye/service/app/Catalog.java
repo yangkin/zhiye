@@ -54,7 +54,7 @@ public final class Catalog {
     }
 
     private static final java.util.regex.Pattern SPRING_BOOT_HINT = java.util.regex.Pattern.compile(
-            "(spring\\s*boot|springboot|java\\s*[+＋&与和]\\s*vue|vue\\s*[+＋&与和]\\s*java|java后端|spring\\s*mvc)",
+            "(spring\\s*boot|springboot|java\\s*(?:\\d+\\s*)?[+＋&与和/]\\s*vue(?:\\s*3)?|vue(?:\\s*3)?\\s*[+＋&与和/]\\s*java|java\\s*后端|spring\\s*mvc)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private static final java.util.regex.Pattern CUSTOM_STACK_HINT = java.util.regex.Pattern.compile(

@@ -314,9 +314,9 @@ export function createConfirmExtension({ emit, waiters, projectKind = 'template'
       description: '需要用户拍板时调用：1) kind=cloud 为纯前端应用启用共享云服务（数据库与文件存储，全栈 service 项目不要调 cloud）；2) kind=choice 遇到影响实现方向或业务规则的关键歧义时，给用户 2～4 个清晰选项快速选择（第一项放你的推荐方案）。普通细节请自行合理决策，不要频繁打断用户。',
       parameters: Type.Object({
         kind: Type.Union(CONFIRM_KINDS.map((k) => Type.Literal(k)), { description: '操作类型：cloud = 启用云服务；choice = 向用户确认关键方案/规则选择' }),
-        title: Type.Optional(Type.String({ description: '仅 choice 时填写：确认卡标题（例如「审批驳回后如何流转？」），不超过 40 字' })),
-        reason: Type.String({ description: '一句话说明为什么需要确认（显示给用户），不超过 120 字' }),
-        options: Type.Optional(Type.Array(Type.String({ description: '单个选项文字，不超过 40 字' }), { description: '仅 choice 时必填：2～4 个清晰选项，第一项为推荐方案' })),
+        title: Type.Optional(Type.String({ description: '仅 choice 时填写：确认卡标题（例如「审批驳回后如何流转？」），不超过 60 字' })),
+        reason: Type.String({ description: '简要说明为什么需要确认（显示给用户），不超过 220 字' }),
+        options: Type.Optional(Type.Array(Type.String({ description: '单个选项文字，不超过 100 字' }), { description: '仅 choice 时必填：2～4 个清晰完整选项，第一项为推荐方案' })),
       }),
       async execute(toolCallId, params, signal) {
         const kind = params?.kind
@@ -324,12 +324,12 @@ export function createConfirmExtension({ emit, waiters, projectKind = 'template'
         if (kind === 'cloud' && projectKind === 'service') {
           return { content: [{ type: 'text', text: '全栈/单体应用不需要启用静态站点云服务（请直接使用 DATA_DIR 或服务托管面板的独立 PostgreSQL DATABASE_URL）。' }], details: { state: 'declined' } }
         }
-        const reason = String(params?.reason || '').trim().slice(0, 120)
-        const title = String(params?.title || '').trim().slice(0, 40)
+        const reason = String(params?.reason || '').trim().slice(0, 240)
+        const title = String(params?.title || '').trim().slice(0, 80)
         let options = []
         if (kind === 'choice') {
           options = (Array.isArray(params?.options) ? params.options : [])
-            .map((o) => String(o ?? '').trim().slice(0, 40))
+            .map((o) => String(o ?? '').trim().slice(0, 120))
             .filter(Boolean)
             .slice(0, 4)
           if (options.length < 2) throw new Error('kind=choice 至少需要提供 2 个有效选项（options）')

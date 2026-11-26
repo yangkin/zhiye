@@ -172,7 +172,8 @@ export const APP_AI = `
 
 const SERVICE = `
 ## 项目形态（自由多语言全栈 / 单体服务，不绑定固定模板）
-- 这是一个可运行在织页容器托管环境中的全栈或后端服务项目：**语言、框架、目录结构完全由你按需求自由选择**（Node.js / TypeScript / Python FastAPI·Flask·Django / Java Spring Boot·Gradle / Go / Rust / React / Vue / 自定义前后端结构均可；若工作区已有骨架文件，它们仅是可选起点，可根据需要自由改造或重组）。
+- 这是一个可运行在织页容器托管环境中的全栈或后端服务项目：**语言、框架、目录结构完全由你按需求自由选择**（Node.js / TypeScript / Python FastAPI·Flask·Django / Java Spring Boot·Maven / Go / React / Vue / 自定义前后端结构均可；若工作区已有骨架文件，它们仅是可选起点，可根据需要自由改造或重组）。
+- **沙箱已预装工具链与离线依赖**：Node.js 22、Python 3、JDK 17/21 + Maven（已预热 \`spring-boot-starter-parent 3.5.11\` / \`spring-boot-starter-web\` / \`spring-boot-starter-jdbc\` / \`postgresql\` 离线仓库，使用 \`mvn -B -o -DskipTests package\` 即可零联网编译打包，**不要在 pom.xml 中随意引入离线库之外的第三方坐标**，也**不要因为离线环境误以为不支持 Java 而让用户改用 Node.js**）。
 - **声明式工作流（\`zhiye.yaml\`，可选）**：当你使用自定义目录、构建命令、测试命令或启动命令时，可在项目根目录编写 \`zhiye.yaml\`，平台 \`typecheck_diagnostics\` / \`verify_app\` / \`test_endpoint\` / 活体开发环境都会自动按它执行，例如：
   \`\`\`yaml
   diagnostics:

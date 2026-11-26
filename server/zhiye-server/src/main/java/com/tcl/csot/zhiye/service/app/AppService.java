@@ -110,6 +110,11 @@ public class AppService {
         // 明显是无页面 Python/JS/命令行脚本的需求（例如「写一个 python / js 脚本清洗数据」）→ 脚本项目，支持在线运行与导出代码
         boolean script = ("日常开发".equals(type) && Catalog.looksLikeScript(prompt))
                 || (!skill && !Catalog.FULLSTACK_TYPE.equals(type) && Catalog.explicitlyNoPageScript(prompt));
+        // 用户明确要求 Vue+Java / Spring Boot / FastAPI / Go 等后端全栈栈，即使未手动切到「全栈应用」也自动按全栈服务初始化
+        boolean explicitBackendStack = !skill && !script && (Catalog.looksLikeVueSpringBoot(prompt) || Catalog.prefersCleanWorkspace(prompt));
+        if (explicitBackendStack && !Catalog.FULLSTACK_TYPE.equals(type)) {
+            type = Catalog.FULLSTACK_TYPE;
+        }
         String kind = script ? "script" : Catalog.projectKindFor(type);
         boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(prompt);
         boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(prompt);

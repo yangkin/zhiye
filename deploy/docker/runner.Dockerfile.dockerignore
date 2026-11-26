@@ -8,6 +8,8 @@
 !packages/editor-bridge/**
 !packages/app-template/**
 !packages/vue-template/**
+!packages/fullstack-template/**
+!packages/vue-springboot-template/**
 !packages/skill-template/**
 !packages/static-template/**
 !packages/script-template/**
@@ -15,4 +17,5 @@
 !deploy/docker/vue-template-cache/**
 !deploy/docker/start-runner.sh
 **/node_modules
+**/target
 **/.DS_Store

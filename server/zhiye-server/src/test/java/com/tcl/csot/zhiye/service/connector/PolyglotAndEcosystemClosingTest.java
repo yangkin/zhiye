@@ -117,6 +117,9 @@ class PolyglotAndEcosystemClosingTest {
     void vueSpringBootTemplateIsDetectedCleanly() throws Exception {
         assertTrue(Catalog.looksLikeVueSpringBoot("用 Vue + Spring Boot 做一个产线备件审批系统"));
         assertTrue(Catalog.looksLikeVueSpringBoot("SpringBoot + Vue3 全栈设备台账"));
+        assertTrue(Catalog.looksLikeVueSpringBoot("用 Vue 3 + Java 做一个订单管理系统"));
+        assertTrue(Catalog.looksLikeVueSpringBoot("Vue + Java 做一个工单平台"));
+        assertFalse(Catalog.prefersCleanWorkspace("用 Vue 3 + Java 做一个订单管理系统"));
         assertFalse(Catalog.looksLikeVueSpringBoot("做一个 React + Node 看板"));
 
         Path tpl = props.rootPath().resolve("packages/vue-springboot-template");
