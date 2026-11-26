@@ -1,6 +1,6 @@
 // 受控依赖安装工具（install_package）：
 // 仅允许安装白名单内的成熟安全依赖，npm 强制 --ignore-scripts 杜绝供应链脚本执行，支持企业内网镜像源配置。
-import { existsSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { Type } from 'typebox'
 import { run, log } from './util.mjs'
@@ -55,7 +55,18 @@ export async function installPackage(cwd, { packageName, ecosystem = 'npm', dev 
   if (!v.ok) return { ok: false, text: `拒绝安装：${v.reason}` }
 
   if (eco === 'npm') {
-    if (!existsSync(path.join(cwd, 'package.json'))) return { ok: false, text: '当前目录没有 package.json，无法安装 npm 依赖。' }
+    const pkgPath = path.join(cwd, 'package.json')
+    if (!existsSync(pkgPath)) return { ok: false, text: '当前目录没有 package.json，无法安装 npm 依赖。' }
+    const nmPath = path.join(cwd, 'node_modules')
+    if (existsSync(path.join(nmPath, v.name, 'package.json'))) {
+      return { ok: true, text: `✓ 依赖 ${v.name} 已预装在 node_modules 中，可直接导入使用（无需重复安装）。` }
+    }
+    let savedSymlinkTarget = null
+    try {
+      if (lstatSync(nmPath).isSymbolicLink()) savedSymlinkTarget = readlinkSync(nmPath)
+    } catch {}
+    const savedPkgJson = readFileSync(pkgPath, 'utf8')
+
     const args = ['install', '--no-audit', '--no-fund', '--ignore-scripts']
     if (dev) args.push('-D')
     if (env.ZHIYE_NPM_REGISTRY) args.push(`--registry=${env.ZHIYE_NPM_REGISTRY}`)
@@ -63,7 +74,22 @@ export async function installPackage(cwd, { packageName, ecosystem = 'npm', dev 
     const r = await run('npm', args, { cwd, env, timeoutMs: 90_000 })
     log(`install_package npm ${v.spec} code=${r.code}`)
     if (r.code !== 0) {
-      return { ok: false, text: `安装 ${v.spec} 失败（退出码 ${r.code}，若当前为离线沙箱环境请优先复用已预装依赖）：\n${(r.out || '').slice(-1200)}` }
+      // 关键保护：离线沙箱下 npm install 失败时会误删共享 node_modules 符号链接，必须自动恢复避免整个工作区构建瘫痪
+      if (savedSymlinkTarget) {
+        try {
+          if (existsSync(nmPath)) {
+            const st = lstatSync(nmPath)
+            if (!st.isSymbolicLink()) rmSync(nmPath, { recursive: true, force: true })
+          }
+          if (!existsSync(nmPath)) symlinkSync(savedSymlinkTarget, nmPath)
+        } catch (e) {
+          log(`restore node_modules symlink failed: ${e.message}`)
+        }
+      }
+      try {
+        writeFileSync(pkgPath, savedPkgJson, 'utf8')
+      } catch {}
+      return { ok: false, text: `安装 ${v.spec} 失败（退出码 ${r.code}；已自动恢复原有预装 node_modules，请直接复用已预装依赖）：\n${(r.out || '').slice(-1200)}` }
     }
     return { ok: true, text: `✓ 已安全安装 npm 依赖 ${v.spec}（已禁用 install scripts）` }
   }

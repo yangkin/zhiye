@@ -258,3 +258,31 @@ test('toolSummary formats all Harness V2 tools cleanly', () => {
   }
   assert.notEqual(checkToolCall('evil_unregistered_tool', {}, { cwd: '/tmp', projectKind: 'template', agentDir: '/tmp' }), null)
 })
+
+test('install_package detects preinstalled packages and restores node_modules symlink on failure', async () => {
+  const { installPackage } = await import('../src/package-installer.mjs')
+  const { symlinkSync, lstatSync, readlinkSync } = await import('node:fs')
+  const root = mkdtempSync(path.join(os.tmpdir(), 'zhiye-pkg-sym-'))
+  const cacheNm = path.join(root, 'cache-nm')
+  const ws = path.join(root, 'ws')
+  try {
+    mkdirSync(path.join(cacheNm, 'pg'), { recursive: true })
+    writeFileSync(path.join(cacheNm, 'pg', 'package.json'), '{"name":"pg","version":"8.13.1"}')
+    mkdirSync(ws, { recursive: true })
+    writeFileSync(path.join(ws, 'package.json'), '{"name":"demo","dependencies":{}}')
+    symlinkSync(cacheNm, path.join(ws, 'node_modules'))
+
+    // 1. Preinstalled package returns ok without touching symlink
+    const hit = await installPackage(ws, { packageName: 'pg' })
+    assert.equal(hit.ok, true)
+    assert.equal(lstatSync(path.join(ws, 'node_modules')).isSymbolicLink(), true)
+
+    // 2. Failed offline install against invalid registry MUST restore symlink & package.json
+    const fail = await installPackage(ws, { packageName: 'echarts' }, { ...process.env, ZHIYE_NPM_REGISTRY: 'http://127.0.0.1:9' })
+    assert.equal(fail.ok, false)
+    assert.equal(lstatSync(path.join(ws, 'node_modules')).isSymbolicLink(), true)
+    assert.equal(readlinkSync(path.join(ws, 'node_modules')), cacheNm)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
