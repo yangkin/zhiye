@@ -12,6 +12,7 @@ import './styles/app.css';
 import './styles/create.css';
 import './styles/timeline.css';
 import './styles/community.css';
+import './styles/ecosystem.css';
 import './styles/dashboard.css';
 import './styles/logs.css';
 import './styles/analytics.css';

@@ -2,6 +2,7 @@ import { lazy } from 'react';
 
 const loaders = {
   apps: () => import('../pages/AppsPage').then((m) => ({ default: m.AppsPage })),
+  ecosystem: () => import('../pages/EcosystemPage').then((m) => ({ default: m.EcosystemPage })),
   chat: () => import('../pages/ChatPage').then((m) => ({ default: m.ChatPage })),
   history: () => import('../pages/HistoryPage').then((m) => ({ default: m.HistoryPage })),
   community: () => import('../pages/CommunityPage').then((m) => ({ default: m.CommunityPage })),
@@ -15,6 +16,7 @@ const loaders = {
 export type PreloadableRoute = keyof typeof loaders;
 
 export const AppsPage = lazy(loaders.apps);
+export const EcosystemPage = lazy(loaders.ecosystem);
 export const ChatPage = lazy(loaders.chat);
 export const HistoryPage = lazy(loaders.history);
 export const CommunityPage = lazy(loaders.community);

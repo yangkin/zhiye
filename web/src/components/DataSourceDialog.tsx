@@ -135,7 +135,7 @@ function SourceList({ onAddApi, onEdit, onTest }: { onAddApi: () => void; onEdit
 
 const emptyParam = (): DataSourceParam => ({ name: '', type: 'string', required: false, description: '', example: '' });
 
-function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone: (s: DataSourceInfo | null) => void }) {
+export function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone: (s: DataSourceInfo | null) => void }) {
   const qc = useQueryClient();
   const [f, setF] = useState<DataSourceInput>(() => ({
     key: source?.key ?? '',
@@ -322,7 +322,7 @@ function SourceForm({ source, onDone }: { source: DataSourceInfo | null; onDone:
   );
 }
 
-function SourceTest({ source, onBack }: { source: DataSourceInfo; onBack: () => void }) {
+export function SourceTest({ source, onBack }: { source: DataSourceInfo; onBack: () => void }) {
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(source.params.map((p) => [p.name, p.example ?? ''])));
   const [busy, setBusy] = useState(false);
