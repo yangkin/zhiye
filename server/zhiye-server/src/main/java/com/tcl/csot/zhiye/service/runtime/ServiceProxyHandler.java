@@ -67,12 +67,14 @@ public class ServiceProxyHandler {
                         SsoUser user, boolean isAdmin, boolean previewMode) throws IOException {
         String cleanPath = (targetPath == null || targetPath.isEmpty()) ? "/" : (targetPath.startsWith("/") ? targetPath : "/" + targetPath);
 
+        String previewToken = previewMode && req.getAttribute("zhiye.preview.token") instanceof String s ? s : null;
+
         // 前后端一体（本地模式）：非 /api 请求优先匹配对应槽位（预览 vs 线上）已构建的静态资源
         if (provider instanceof LocalServiceRuntimeProvider local
                 && ("GET".equalsIgnoreCase(req.getMethod()) || "HEAD".equalsIgnoreCase(req.getMethod()))
                 && !cleanPath.startsWith("/api/") && !cleanPath.equals("/api")) {
             Path staticDir = local.staticDir(app.id(), previewMode);
-            if (Files.isDirectory(staticDir) && tryServeStatic(staticDir, cleanPath, res, "HEAD".equalsIgnoreCase(req.getMethod()))) {
+            if (Files.isDirectory(staticDir) && tryServeStatic(staticDir, cleanPath, res, "HEAD".equalsIgnoreCase(req.getMethod()), previewToken)) {
                 manager.recordAccess(app.id());
                 return res.getContentType();
             }
@@ -176,15 +178,21 @@ public class ServiceProxyHandler {
                 res.setStatus(200);
                 res.setContentType("text/html; charset=utf-8");
                 res.setHeader("Cache-Control", "no-cache");
-                Files.copy(index, res.getOutputStream());
+                writeHtmlWithPreviewShim(Files.readAllBytes(index), previewToken, res);
                 return "text/html; charset=utf-8";
             }
         }
+
+        String upContentType = up.headers().firstValue("content-type").orElse("");
+        boolean injectHtmlShim = previewToken != null && !"HEAD".equals(method)
+                && upContentType.toLowerCase(Locale.ROOT).contains("text/html")
+                && up.headers().firstValue("content-encoding").isEmpty();
 
         res.setStatus(up.statusCode());
         for (var entry : up.headers().map().entrySet()) {
             String lower = entry.getKey().toLowerCase(Locale.ROOT);
             if (HOP_BY_HOP.contains(lower)) continue;
+            if (injectHtmlShim && "content-length".equals(lower)) continue;
             // 工作台预览模式：剥离 X-Frame-Options，且禁止用户应用向平台主域写入 Set-Cookie
             if (previewMode && ("x-frame-options".equals(lower) || "set-cookie".equals(lower))) continue;
             for (String v : entry.getValue()) {
@@ -197,21 +205,50 @@ public class ServiceProxyHandler {
             }
         }
         try (InputStream in = up.body()) {
-            if (!"HEAD".equals(method)) in.transferTo(res.getOutputStream());
+            if (!"HEAD".equals(method)) {
+                if (injectHtmlShim) {
+                    writeHtmlWithPreviewShim(in.readAllBytes(), previewToken, res);
+                } else {
+                    in.transferTo(res.getOutputStream());
+                }
+            }
         }
         return up.headers().firstValue("content-type").orElse(null);
     }
 
-    private boolean tryServeStatic(Path staticDir, String cleanPath, HttpServletResponse res, boolean head) throws IOException {
+    private boolean tryServeStatic(Path staticDir, String cleanPath, HttpServletResponse res, boolean head, String previewToken) throws IOException {
         String rel = cleanPath.replaceFirst("^/+", "");
         if (rel.contains("..")) return false;
         Path target = rel.isEmpty() || rel.endsWith("/") ? staticDir.resolve(rel + "index.html") : staticDir.resolve(rel);
         if (!target.normalize().startsWith(staticDir.normalize()) || !Files.isRegularFile(target)) return false;
+        String ct = ContentTypes.of(target.getFileName().toString());
         res.setStatus(200);
-        res.setContentType(ContentTypes.of(target.getFileName().toString()));
+        res.setContentType(ct);
         res.setHeader("X-Content-Type-Options", "nosniff");
-        if (!head) Files.copy(target, res.getOutputStream());
+        if (!head) {
+            if (previewToken != null && ct.toLowerCase(Locale.ROOT).contains("text/html")) {
+                writeHtmlWithPreviewShim(Files.readAllBytes(target), previewToken, res);
+            } else {
+                Files.copy(target, res.getOutputStream());
+            }
+        }
         return true;
+    }
+
+    /** 预览模式 HTML 注入轻量 fetch/XHR 令牌头补丁，彻底避免跨端口/子域 iframe 在 Chrome 下因 SameSite Cookie 被拦导致白屏或 API 404。 */
+    private static void writeHtmlWithPreviewShim(byte[] raw, String previewToken, HttpServletResponse res) throws IOException {
+        if (previewToken == null || previewToken.isBlank()) {
+            res.getOutputStream().write(raw);
+            return;
+        }
+        String html = new String(raw, StandardCharsets.UTF_8);
+        String safeTok = previewToken.replace("\\", "\\\\").replace("\"", "\\\"").replace("<", "");
+        String shim = "<script>(function(t){try{var f=window.fetch;if(f){window.fetch=function(u,o){o=Object.assign({},o);var h=new Headers(o.headers||{});if(!h.has('X-Zhiye-Preview'))h.set('X-Zhiye-Preview',t);o.headers=h;return f.call(this,u,o);};}var X=XMLHttpRequest.prototype.open,S=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(){this.__zp=1;return X.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){if(this.__zp)try{this.setRequestHeader('X-Zhiye-Preview',t);}catch(e){}return S.apply(this,arguments);};}catch(e){}})(\"" + safeTok + "\");</script>";
+        int idx = html.toLowerCase(Locale.ROOT).indexOf("</head>");
+        String out = idx >= 0 ? html.substring(0, idx) + shim + html.substring(idx) : shim + html;
+        byte[] bytes = out.getBytes(StandardCharsets.UTF_8);
+        res.setContentLength(bytes.length);
+        res.getOutputStream().write(bytes);
     }
 
     private static void writeError(HttpServletResponse res, int status, String title, String detail) throws IOException {

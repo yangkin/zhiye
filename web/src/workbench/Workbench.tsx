@@ -752,7 +752,7 @@ function Workbench({ id }: { id: string }) {
                   {service ? (
                     <button
                       type="button"
-                      className="studio-route-picker"
+                      className="studio-route-picker is-service"
                       title="点击复制单体服务访问地址"
                       onClick={async () => {
                         const url = app.siteUrl || frameSrc;

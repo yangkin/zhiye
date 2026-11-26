@@ -224,15 +224,40 @@ public class SiteFilter extends OncePerRequestFilter {
         if (qToken != null && serviceCrypto.verifyPreviewToken(appId, qToken)) {
             String sameSite = req.isSecure() ? "SameSite=None; Secure" : "SameSite=Lax";
             res.addHeader("Set-Cookie", "zhiye_svc_preview=" + qToken + "; Path=/; HttpOnly; " + sameSite);
+            req.setAttribute("zhiye.preview.token", qToken);
+            return true;
+        }
+        String hdrToken = req.getHeader("X-Zhiye-Preview");
+        if (hdrToken != null && !hdrToken.isBlank() && serviceCrypto.verifyPreviewToken(appId, hdrToken.trim())) {
+            req.setAttribute("zhiye.preview.token", hdrToken.trim());
             return true;
         }
         jakarta.servlet.http.Cookie[] cookies = req.getCookies();
         if (cookies != null) {
             for (jakarta.servlet.http.Cookie c : cookies) {
                 if ("zhiye_svc_preview".equals(c.getName()) && serviceCrypto.verifyPreviewToken(appId, c.getValue())) {
+                    req.setAttribute("zhiye.preview.token", c.getValue());
                     return true;
                 }
             }
+        }
+        // HTTP 本地开发下（localhost:8080 嵌入 *.localhost:8083 iframe），Chrome 可能拦截 SameSite=Lax 子资源 Cookie；
+        // 校验同源 Referer 中的已签名 _zhiye_preview 令牌，确保 iframe 内 JS/CSS/API 100% 正常加载
+        String referer = req.getHeader("Referer");
+        if (referer != null && !referer.isBlank()) {
+            try {
+                java.net.URI refUri = java.net.URI.create(referer);
+                String reqHost = Optional.ofNullable(req.getHeader("Host")).orElse("").toLowerCase(java.util.Locale.ROOT);
+                String refHost = (refUri.getHost() == null ? "" : refUri.getHost().toLowerCase(java.util.Locale.ROOT))
+                        + (refUri.getPort() > 0 ? ":" + refUri.getPort() : "");
+                if (!reqHost.isEmpty() && reqHost.equals(refHost)) {
+                    String refToken = queryParam(refUri.getRawQuery(), "_zhiye_preview");
+                    if (refToken != null && serviceCrypto.verifyPreviewToken(appId, refToken)) {
+                        req.setAttribute("zhiye.preview.token", refToken);
+                        return true;
+                    }
+                }
+            } catch (Exception ignored) {}
         }
         return false;
     }

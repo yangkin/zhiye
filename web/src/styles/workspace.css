@@ -161,6 +161,7 @@ body.is-resizing-h iframe,body.is-resizing-v iframe{pointer-events:none!importan
 .studio-tool-button:hover{background:var(--st-active);color:var(--st-ink-2)}
 .studio-route-bar{height:40px;max-width:440px;min-width:190px;flex:1;display:flex;align-items:center;border:1px solid var(--st-line);background:var(--st-raised);border-radius:10px;padding:0 5px;gap:5px;margin:auto;overflow:hidden}
 .studio-route-picker{flex:1;height:35px;display:flex;align-items:center;justify-content:center;color:var(--st-ink);font-size:13.5px;padding:0 22px 0 8px;position:relative;min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-route-picker.is-service{display:block;line-height:35px;text-align:center;padding:0 10px;font-size:12.5px}
 .studio-route-picker>.icon{position:absolute;right:6px;width:12px;height:12px;color:var(--st-muted)}
 .studio-dialog-modify{display:inline-flex;align-items:center;gap:7px;color:var(--st-muted);font-size:13px;padding:8px 3px;min-width:99px;justify-content:end;white-space:nowrap}
 .studio-dialog-modify>.icon{width:18px;height:18px}

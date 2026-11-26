@@ -388,7 +388,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
               onClick={() => void runAction('promote', () => api.servicePromotePreview(app.id), '预览槽位已 0 重建零停机晋升上线！')}
             >
               <Icon name="arrow" />
-              {busy === 'promote' ? '晋升中…' : '0重建晋升'}
+              {busy === 'promote' ? '晋升中…' : '零重建晋升'}
             </button>
           ) : null}
           <button
@@ -1014,7 +1014,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                 </div>
                 <div className={`svc-terminal-body ${wrapLogs ? 'is-wrap' : 'is-nowrap'}`}>
                   {sseLines.length === 0 ? (
-                    <div className="svc-terminal-empty">已连接实时部署事件流，点击「重新部署」或「0重建晋升」即可实时观看蓝绿切流过程。</div>
+                    <div className="svc-terminal-empty">已连接实时部署事件流，点击「重新部署」或「零重建晋升」即可实时观看蓝绿切流过程。</div>
                   ) : (
                     sseLines.map((ev, idx) => (
                       <div key={idx} className={`svc-log-line is-${ev.type === 'error' ? 'err' : ev.type === 'done' || ev.type === 'stage' ? 'sys' : 'info'}`}>

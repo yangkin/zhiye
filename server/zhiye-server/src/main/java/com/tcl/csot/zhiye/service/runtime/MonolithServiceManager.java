@@ -264,14 +264,33 @@ public class MonolithServiceManager {
         int initIdle = props.allowNeverSleep()
                 ? Math.max(0, props.defaultIdleSleepMinutes())
                 : Math.max(props.minIdleSleepMinutes(), props.defaultIdleSleepMinutes());
-        jdbc.sql("insert into app_service (app_id, runtime, framework, frontend_dir, backend_dir, build_cmd, start_cmd, port, health_path, memory_mb, cpu_millicores, idle_sleep_min, status, desired_version_id) "
-                        + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        boolean autoPg = needsManagedPostgres(app.id(), ver.gitCommit());
+        jdbc.sql("insert into app_service (app_id, runtime, framework, frontend_dir, backend_dir, build_cmd, start_cmd, port, health_path, memory_mb, cpu_millicores, idle_sleep_min, pg_enabled, status, desired_version_id) "
+                        + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
                 .params(app.id(), detected.runtime(), detected.framework(), detected.frontendDir(), detected.backendDir(),
                         detected.buildCmd(), detected.startCmd(), detected.port(), detected.healthPath(),
-                        initMem, initCpu, initIdle, "building", ver.id())
+                        initMem, initCpu, initIdle, autoPg, "building", ver.id())
                 .update();
         jdbc.sql("update app set framework = ?, updated_at = now() where id = ?")
                 .params(detected.framework(), app.id()).update();
+    }
+
+    /** 自动检测全栈项目是否使用 PostgreSQL（pg/psycopg/spring-postgresql/DATABASE_URL），是则自动开通托管 PG Schema。 */
+    private boolean needsManagedPostgres(String appId, String commit) {
+        for (String p : List.of("package.json", "backend/package.json", "requirements.txt", "backend/requirements.txt",
+                "pom.xml", "backend/pom.xml", "go.mod", "server/index.mjs", "server/index.js", "server/db.mjs")) {
+            try {
+                Optional<byte[]> raw = git.readFile(appId, commit, p);
+                if (raw.isEmpty()) continue;
+                String txt = new String(raw.get(), StandardCharsets.UTF_8);
+                if (p.endsWith("package.json") && txt.contains("\"pg\"")) return true;
+                if (p.endsWith("requirements.txt") && (txt.contains("psycopg") || txt.contains("asyncpg"))) return true;
+                if (p.endsWith("pom.xml") && txt.contains("postgresql")) return true;
+                if (p.endsWith("go.mod") && (txt.contains("pgx") || txt.contains("lib/pq"))) return true;
+                if (txt.contains("DATABASE_URL") || txt.contains("JDBC_DATABASE_URL")) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 
     private void clearPreviewSlotLocked(AppRow app) {

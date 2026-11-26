@@ -255,21 +255,21 @@ export function AdminFeishuConnectorPanel() {
         </div>
       ) : (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--bg-subtle, #f8fafc)', border: '1px solid var(--line, #e2e8f0)', fontSize: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+            <div style={{ minWidth: 0, padding: '10px 12px', borderRadius: 8, background: 'var(--bg-subtle, #f8fafc)', border: '1px solid var(--line, #e2e8f0)', fontSize: 12 }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>飞书事件订阅 Webhook（支持 url_verification 握手）</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{eventsUrl}</code>
-                <button type="button" className="svc-pill-toggle" onClick={async () => toast((await copyText(eventsUrl)) ? '已复制事件订阅地址。' : '请手动复制。')}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <code style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{eventsUrl}</code>
+                <button type="button" className="svc-pill-toggle" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={async () => toast((await copyText(eventsUrl)) ? '已复制事件订阅地址。' : '请手动复制。')}>
                   复制
                 </button>
               </div>
             </div>
-            <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--bg-subtle, #f8fafc)', border: '1px solid var(--line, #e2e8f0)', fontSize: 12 }}>
+            <div style={{ minWidth: 0, padding: '10px 12px', borderRadius: 8, background: 'var(--bg-subtle, #f8fafc)', border: '1px solid var(--line, #e2e8f0)', fontSize: 12 }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>飞书交互卡片按钮回调地址（批准上线 / 驳回）</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-                <code style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{cardUrl}</code>
-                <button type="button" className="svc-pill-toggle" onClick={async () => toast((await copyText(cardUrl)) ? '已复制卡片回调地址。' : '请手动复制。')}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <code style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cardUrl}</code>
+                <button type="button" className="svc-pill-toggle" style={{ whiteSpace: 'nowrap', flexShrink: 0 }} onClick={async () => toast((await copyText(cardUrl)) ? '已复制卡片回调地址。' : '请手动复制。')}>
                   复制
                 </button>
               </div>
