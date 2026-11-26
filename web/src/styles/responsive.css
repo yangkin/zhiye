@@ -411,8 +411,12 @@
   background: var(--st-accent-softer);
 }
 
-/* 1280px–1420px 分栏工作台下收紧预览工具栏间距，避免右侧「手动微调」按钮被裁切 */
+/* 1280px–1420px 分栏工作台下收紧预览工具栏间距，避免右侧「手动微调」按钮被裁切；同时给左侧输入框留出更充裕的操作宽度 */
 @media (max-width: 1420px) {
+  .studio-body:not(.preview-collapsed) > .chat-panel .chat-composer {
+    margin: 0 12px 14px;
+    padding: 10px 12px;
+  }
   .studio-preview-tools {
     gap: 8px;
     padding: 0 10px;

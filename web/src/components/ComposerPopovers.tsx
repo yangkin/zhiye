@@ -37,18 +37,27 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
   return { start: before.length - m[2].length - 1, query: m[2] };
 }
 
-export function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open: boolean, width: number, height: number) {
+export function useAnchoredPosition(
+  anchor: RefObject<HTMLElement | null>,
+  open: boolean,
+  width: number,
+  height: number,
+  popover?: RefObject<HTMLElement | null>,
+) {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const below = r.bottom + 8 + height <= window.innerHeight - 8;
-      const rawTop = below ? r.bottom + 8 : r.top - height - 8;
+      const popRect = popover?.current?.getBoundingClientRect();
+      const w = popRect?.width || width;
+      const h = popRect?.height || height;
+      const below = r.bottom + 8 + h <= window.innerHeight - 8;
+      const rawTop = below ? r.bottom + 8 : r.top - h - 8;
       setPos({
-        left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
-        top: Math.max(8, Math.min(rawTop, window.innerHeight - height - 8)),
+        left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)),
+        top: Math.max(8, Math.min(rawTop, window.innerHeight - h - 8)),
       });
     };
     place();
@@ -56,12 +65,13 @@ export function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open:
     window.addEventListener('scroll', place, true);
     const ro = new ResizeObserver(place);
     if (anchor.current) ro.observe(anchor.current);
+    if (popover?.current) ro.observe(popover.current);
     return () => {
       window.removeEventListener('resize', place);
       window.removeEventListener('scroll', place, true);
       ro.disconnect();
     };
-  }, [open, anchor, width, height]);
+  }, [open, anchor, width, height, popover]);
   return pos;
 }
 
@@ -121,7 +131,7 @@ export function SkillPicker({ open, anchor, picked, mentionQuery, onPick, onClos
   const builtin = meta?.builtinSkills ?? [];
   const query = (mentionQuery ?? q).trim().toLowerCase();
   const list = useMemo(() => (skills.data ?? []).filter((s) => !query || s.name.toLowerCase().includes(query)), [skills.data, query]);
-  const pos = useAnchoredPosition(anchor, open, 320, 340);
+  const pos = useAnchoredPosition(anchor, open, 320, 340, box);
   useOutside(open && !hubOpen, [box, anchor], onClose);
 
   useEffect(() => {
@@ -358,16 +368,17 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
   const [sub, setSub] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  const pos = useAnchoredPosition(btn, open, 280, 170);
+  const { fivestar, models: fivestarModels } = useModelList();
+  const pos = useAnchoredPosition(btn, open, 280, fivestar ? 156 : 56, box);
   useOutside(open, [box, btn], () => {
     setOpen(false);
     setSub(false);
   });
-  const { fivestar, models: fivestarModels } = useModelList();
   const source = fivestar ? fivestarModels : models;
   const list: ModelInfo[] = source.length ? source : [{ id: 'auto', label: fivestar ? '五星默认' : 'Auto' }];
   const current = list.find((m) => m.id === model) ?? list[0];
   const flipSub = pos.left + 280 + 312 > window.innerWidth;
+  const openUp = pos.top > window.innerHeight * 0.45;
   return (
     <>
       <button
@@ -376,6 +387,7 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
         className={className}
         aria-haspopup="dialog"
         aria-expanded={open}
+        title={current.label}
         onClick={() => {
           setOpen((v) => !v);
           setSub(false);
@@ -408,7 +420,7 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
               )}
               {fivestar ? <QuotaRow /> : null}
               {sub && list.length > 1 ? (
-                <div className={`model-pop-sub ${flipSub ? 'is-flip' : ''}`} role="menu" aria-label="选择模型">
+                <div className={`model-pop-sub${flipSub ? ' is-flip' : ''}${openUp ? ' is-up' : ''}`} role="menu" aria-label="选择模型">
                   {list.map((m) => {
                     const cost = Math.max(0, Math.min(3, m.cost ?? 0));
                     return (
@@ -422,6 +434,7 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
                           if (m.billingType === 'PAID') toast('该模型会计入你在五星AI岛的个人额度，超出本周额度会暂停使用');
                           onModel(m.id);
                           setSub(false);
+                          setOpen(false);
                         }}
                       >
                         <span className="model-pop-name">

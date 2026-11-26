@@ -2310,8 +2310,9 @@ a.skill-chip{text-decoration:none}
 .model-pop-row:hover,.model-pop-row[aria-expanded="true"]{background:#f4f1fa}
 .model-pop-value{color:#625d70;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .model-pop-value i{font-style:normal;margin-left:4px;color:#a6a1b2}
-.model-pop-sub{position:absolute;left:calc(100% + 6px);top:0;width:300px;background:#fff;border:1px solid #efecf5;border-radius:14px;box-shadow:0 14px 44px #2a1d4a26;padding:6px}
+.model-pop-sub{position:absolute;left:calc(100% + 6px);top:0;width:300px;max-height:min(360px,calc(100dvh - 32px));overflow-y:auto;background:#fff;border:1px solid #efecf5;border-radius:14px;box-shadow:0 14px 44px #2a1d4a26;padding:6px}
 .model-pop-sub.is-flip{left:auto;right:calc(100% + 6px)}
+.model-pop-sub.is-up{top:auto;bottom:0}
 .model-pop-sub>button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;text-align:left}
 .model-pop-sub>button:hover{background:#f4f1fa}
 .model-pop-sub>button.on{background:#f7f4fe}
@@ -2413,12 +2414,9 @@ a.skill-chip{text-decoration:none}
 .skill-button.cloud-chip .icon{width:13px;height:13px}
 .skill-button.cloud-chip.on{border-color:#d9ccf3;background:#f6f1ff;color:#6b45c4}
 .skill-button.cloud-chip.queued{border-style:dashed;border-color:#d9ccf3;color:#8a6fc9}
-/* 工作台左栏很窄：操作行不换行；放不下时「共享云服务」只留图标（title 里有完整说明） */
-.studio-main .chat-composer{container-type:inline-size}
-.studio-main .chat-composer .model-button-inline,.studio-main .chat-composer .model-button-inline *{white-space:nowrap}
-@container (max-width:400px){.skill-button.cloud-chip{padding:0 8px}.skill-button.cloud-chip .chip-label{display:none}}
-@container (max-width:320px){.studio-main .chat-composer .skill-button{padding:0 7px;margin-left:2px}.studio-main .chat-composer .model-button-inline{padding-left:2px;padding-right:2px}}
-@container (max-width:290px){.studio-main .chat-composer .skill-button .chip-label{display:none}}
+.skill-button.cloud-chip .chip-label-short{display:none}
+/* 工作台左栏输入框按容器宽度自适应（详细规则见下方工作台底部工具栏） */
+.studio-main .chat-composer{container-type:inline-size;max-width:100%;box-sizing:border-box}
 
 /* 错误边界：只替换出错的那一块 */
 .boundary-error{margin:32px auto;max-width:460px}
@@ -2552,6 +2550,36 @@ a.skill-chip{text-decoration:none}
 .model-button,.model-button *{white-space:nowrap}.model-button{flex:none}
 .model-button .model-label{max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .skill-chip .chip-label{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 工作台分栏输入框工具栏：宽态（预览收起）单行排布；窄态（右侧预览展开挤压左栏）自动切换为双层结构，模型独享上层不截断，技能/生态/云服务与发送停止按钮稳固留在框内绝不溢出 */
+.studio-main .chat-composer .composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px;width:100%;min-width:0}
+.studio-main .chat-composer .composer-tools{display:flex;align-items:center;gap:4px;flex:1 1 0;min-width:0;max-width:100%}
+.studio-main .chat-composer .composer-tools-primary{flex:0 1 auto;min-width:0;max-width:100%}
+.studio-main .chat-composer .composer-tools-chips{flex:1 1 auto;min-width:0;flex-wrap:wrap}
+.studio-main .chat-composer .composer-actions{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto}
+.studio-main .chat-composer .composer-actions .send-button{margin-left:0;width:30px;height:30px;min-width:30px;flex:none}
+.studio-main .chat-composer .model-button-inline{flex:0 1 auto;min-width:0;max-width:100%;padding:0 7px;overflow:hidden}
+.studio-main .chat-composer .model-button-inline .model-orb,
+.studio-main .chat-composer .model-button-inline>.icon{flex:none}
+.studio-main .chat-composer .model-button-inline .model-label{flex:0 1 auto;min-width:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:480px){
+  .studio-main .chat-composer .workbench-composer-bottom{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:center;column-gap:6px;row-gap:7px}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-primary{grid-column:1 / -1;grid-row:1;width:100%;padding-bottom:6px;border-bottom:1px solid color-mix(in srgb,var(--st-line,#e8e4f2) 70%,transparent)}
+  .studio-main .chat-composer .workbench-composer-bottom .model-button-inline{max-width:calc(100% - 34px);padding:0 6px}
+  .studio-main .chat-composer .workbench-composer-bottom .model-button-inline .model-label{max-width:100%}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-chips{grid-column:1;grid-row:2;flex-wrap:wrap;gap:4px}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-chips .skill-button{height:28px;min-height:28px;padding:0 8px;font-size:11.5px;gap:4px}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-full{display:none}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-short{display:inline}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-actions{grid-column:2;grid-row:2;margin-left:0;align-self:end}
+}
+@container (max-width:260px){
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip{padding:0 7px}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-short{display:none}
+}
+@container (max-width:220px){
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button{padding:0 7px}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button .chip-label{display:none}
+}
 .confirm-input{width:100%;margin-top:12px;padding:10px 12px;border:1px solid #e2dcea;border-radius:9px;font:inherit;font-size:13px;color:#1f1c29;background:#fff;outline:none}.confirm-input:focus{border-color:#8b62be;box-shadow:0 0 0 3px #8b62be22}
 
 /* 计划阶段 AI 对话与计划修订状态 */

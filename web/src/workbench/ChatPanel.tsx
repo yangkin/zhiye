@@ -859,135 +859,142 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 </button>
               </p>
             ) : null}
-            <div className="composer-tools">
-              <AddMenuButton
-                variant="workbench"
-                buttonClassName="icon-button"
-                placement="top"
-                attachedCount={chatAssets.length}
-                onAttach={(asset) => {
-                  const cur = useChat.getState().assets;
-                  if (cur.length < 5 && !cur.some((a) => a.id === asset.id)) useChat.getState().setAssets([...cur, asset]);
-                }}
-                pickedSourceIds={boundSources.map((s) => s.id)}
-                onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
-              />
-              <ModelModeButton
-                models={meta?.models ?? []}
-                modes={meta?.modes ?? []}
-                model={app.model ?? 'auto'}
-                mode={app.mode}
-                className="model-button model-button-inline"
-                onModel={(m) => void patchModel({ model: m })}
-                onMode={(m) => void patchModel({ mode: m })}
-              />
-              <button
-                ref={skillBtn}
-                type="button"
-                className="skill-button"
-                aria-label="选择技能"
-                title="技能"
-                aria-expanded={picker !== null}
-                onClick={() => setPicker(picker ? null : { via: 'button' })}
-              >
-                <Icon name="book" />
-                <span className="chip-label">技能</span>
-              </button>
-              {!skill ? (
-                <button
-                  ref={ecoBtn}
-                  type="button"
-                  className={`skill-button${ecosystems.length ? ' on' : ''}`}
-                  aria-label="选择企业生态能力"
-                  aria-expanded={ecoOpen}
-                  title="一键勾选飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
-                  onClick={() => setEcoOpen((v) => !v)}
-                >
-                  <Icon name="globe" />
-                  <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
-                </button>
-              ) : null}
-              <EcosystemPickerModal
-                open={ecoOpen}
-                anchor={ecoBtn}
-                onClose={() => setEcoOpen(false)}
-                selected={ecosystems}
-                onToggle={toggleEco}
-                pickedSourceIds={boundSources.map((s) => s.id)}
-                onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
-              />
-              <SkillPicker
-                open={picker !== null}
-                anchor={picker?.via === 'mention' ? input : skillBtn}
-                picked={chatSkills}
-                mentionQuery={picker?.via === 'mention' ? picker.query : null}
-                onClose={() => setPicker(null)}
-                onPick={(sk) => {
-                  const chat = useChat.getState();
-                  if (picker?.via === 'mention') {
-                    const end = picker.start + 1 + picker.query.length;
-                    chat.setDraft(chat.draft.slice(0, picker.start) + chat.draft.slice(end));
-                    const at = picker.start;
-                    setTimeout(() => {
-                      input.current?.focus();
-                      input.current?.setSelectionRange(at, at);
-                    }, 0);
-                  }
-                  saveSkills([...chat.skills, sk]);
-                  setPicker(null);
-                }}
-              />
-              {skill || app.projectKind === 'service' ? null : (
-                <button
-                  type="button"
-                  className={`skill-button cloud-chip${cloudEnabled ? ' on' : cloudQueued ? ' queued' : ''}`}
-                  aria-label={cloudEnabled ? '查看云服务' : cloudQueued ? '云服务排队启用中' : '共享云服务'}
-                  title={
-                    cloudEnabled
-                      ? '这个应用已启用云服务，点击查看数据表'
-                      : cloudQueued
-                        ? '当前任务完成后启用；在「待发送消息」里撤回就不会启用'
-                        : '让 AI 设计表结构并启用云服务（会先请你确认）'
-                  }
-                  onClick={() => (cloudEnabled ? onOpenCloud?.() : cloudQueued ? setQueueOpen(true) : onEnableCloud?.())}
-                >
-                  <Icon name="cloud" />
-                  <span className="chip-label">{cloudEnabled ? '云服务已启用' : cloudQueued ? '云服务排队中' : '共享云服务'}</span>
-                </button>
-              )}
-              {runningTaskId && draft.trim() ? (
-                <button className="send-button" aria-label="加入待发送队列" title="当前任务完成后自动执行" disabled={sending} onClick={() => void send()}>
-                  <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
-                </button>
-              ) : null}
-              {runningTaskId ? (
-                <button
-                  className="send-button stop-button"
-                  aria-label="停止当前任务"
-                  title="停止当前任务（输入的内容会保留）"
-                  disabled={stopping}
-                  onClick={async () => {
-                    setStopping(true);
-                    try {
-                      await api.cancelTask(runningTaskId);
-                    } catch (err) {
-                      toast(errorMessage(err), 'error');
-                    } finally {
-                      setStopping(false);
-                    }
+            <div className="composer-bottom workbench-composer-bottom">
+              <div className="composer-tools composer-tools-primary">
+                <AddMenuButton
+                  variant="workbench"
+                  buttonClassName="icon-button"
+                  placement="top"
+                  attachedCount={chatAssets.length}
+                  onAttach={(asset) => {
+                    const cur = useChat.getState().assets;
+                    if (cur.length < 5 && !cur.some((a) => a.id === asset.id)) useChat.getState().setAssets([...cur, asset]);
                   }}
+                  pickedSourceIds={boundSources.map((s) => s.id)}
+                  onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+                />
+                <ModelModeButton
+                  models={meta?.models ?? []}
+                  modes={meta?.modes ?? []}
+                  model={app.model ?? 'auto'}
+                  mode={app.mode}
+                  className="model-button model-button-inline"
+                  onModel={(m) => void patchModel({ model: m })}
+                  onMode={(m) => void patchModel({ mode: m })}
+                />
+              </div>
+              <div className="composer-tools composer-tools-chips">
+                <button
+                  ref={skillBtn}
+                  type="button"
+                  className="skill-button"
+                  aria-label="选择技能"
+                  title="技能"
+                  aria-expanded={picker !== null}
+                  onClick={() => setPicker(picker ? null : { via: 'button' })}
                 >
-                  <i className="stop-glyph" aria-hidden="true" />
+                  <Icon name="book" />
+                  <span className="chip-label">技能</span>
                 </button>
-              ) : otherBusy ? (
-                <button className="send-button" aria-label="提交修改需求" disabled title={`「${otherBusy.name}」正在进行修改，完成后再发送`}>
-                  <Icon name="send" />
-                </button>
-              ) : (
-                <button className="send-button" aria-label="提交修改需求" disabled={!draft.trim() || sending} onClick={() => void send()}>
-                  <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
-                </button>
-              )}
+                {!skill ? (
+                  <button
+                    ref={ecoBtn}
+                    type="button"
+                    className={`skill-button${ecosystems.length ? ' on' : ''}`}
+                    aria-label="选择企业生态能力"
+                    aria-expanded={ecoOpen}
+                    title="一键勾选飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
+                    onClick={() => setEcoOpen((v) => !v)}
+                  >
+                    <Icon name="globe" />
+                    <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
+                  </button>
+                ) : null}
+                <EcosystemPickerModal
+                  open={ecoOpen}
+                  anchor={ecoBtn}
+                  onClose={() => setEcoOpen(false)}
+                  selected={ecosystems}
+                  onToggle={toggleEco}
+                  pickedSourceIds={boundSources.map((s) => s.id)}
+                  onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+                />
+                <SkillPicker
+                  open={picker !== null}
+                  anchor={picker?.via === 'mention' ? input : skillBtn}
+                  picked={chatSkills}
+                  mentionQuery={picker?.via === 'mention' ? picker.query : null}
+                  onClose={() => setPicker(null)}
+                  onPick={(sk) => {
+                    const chat = useChat.getState();
+                    if (picker?.via === 'mention') {
+                      const end = picker.start + 1 + picker.query.length;
+                      chat.setDraft(chat.draft.slice(0, picker.start) + chat.draft.slice(end));
+                      const at = picker.start;
+                      setTimeout(() => {
+                        input.current?.focus();
+                        input.current?.setSelectionRange(at, at);
+                      }, 0);
+                    }
+                    saveSkills([...chat.skills, sk]);
+                    setPicker(null);
+                  }}
+                />
+                {skill || app.projectKind === 'service' ? null : (
+                  <button
+                    type="button"
+                    className={`skill-button cloud-chip${cloudEnabled ? ' on' : cloudQueued ? ' queued' : ''}`}
+                    aria-label={cloudEnabled ? '查看云服务' : cloudQueued ? '云服务排队启用中' : '共享云服务'}
+                    title={
+                      cloudEnabled
+                        ? '这个应用已启用云服务，点击查看数据表'
+                        : cloudQueued
+                          ? '当前任务完成后启用；在「待发送消息」里撤回就不会启用'
+                          : '让 AI 设计表结构并启用云服务（会先请你确认）'
+                    }
+                    onClick={() => (cloudEnabled ? onOpenCloud?.() : cloudQueued ? setQueueOpen(true) : onEnableCloud?.())}
+                  >
+                    <Icon name="cloud" />
+                    <span className="chip-label chip-label-full">{cloudEnabled ? '云服务已启用' : cloudQueued ? '云服务排队中' : '共享云服务'}</span>
+                    <span className="chip-label chip-label-short">{cloudQueued ? '排队中' : '云服务'}</span>
+                  </button>
+                )}
+              </div>
+              <div className="composer-actions">
+                {runningTaskId && draft.trim() ? (
+                  <button className="send-button" aria-label="加入待发送队列" title="当前任务完成后自动执行" disabled={sending} onClick={() => void send()}>
+                    <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
+                  </button>
+                ) : null}
+                {runningTaskId ? (
+                  <button
+                    className="send-button stop-button"
+                    aria-label="停止当前任务"
+                    title="停止当前任务（输入的内容会保留）"
+                    disabled={stopping}
+                    onClick={async () => {
+                      setStopping(true);
+                      try {
+                        await api.cancelTask(runningTaskId);
+                      } catch (err) {
+                        toast(errorMessage(err), 'error');
+                      } finally {
+                        setStopping(false);
+                      }
+                    }}
+                  >
+                    <i className="stop-glyph" aria-hidden="true" />
+                  </button>
+                ) : otherBusy ? (
+                  <button className="send-button" aria-label="提交修改需求" disabled title={`「${otherBusy.name}」正在进行修改，完成后再发送`}>
+                    <Icon name="send" />
+                  </button>
+                ) : (
+                  <button className="send-button" aria-label="提交修改需求" disabled={!draft.trim() || sending} onClick={() => void send()}>
+                    <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
+                  </button>
+                )}
+              </div>
             </div>
           </>
         ) : phase === 'plan' ? (
@@ -1029,25 +1036,27 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   </button>
                 ) : null}
               </div>
-              {sending ? (
-                <button
-                  type="button"
-                  className="send-button stop-button"
-                  aria-label="停止回复"
-                  title="停止当前回复"
-                  onClick={async () => {
-                    askAbortRef.current?.abort();
-                    await api.stopPlanChat(app.id).catch(() => undefined);
-                    await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
-                  }}
-                >
-                  <i className="stop-glyph" aria-hidden="true" />
-                </button>
-              ) : (
-                <button className="send-button" aria-label="发送消息" title="发送" disabled={!draft.trim()} onClick={() => void send()}>
-                  <Icon name="send" />
-                </button>
-              )}
+              <div className="composer-actions">
+                {sending ? (
+                  <button
+                    type="button"
+                    className="send-button stop-button"
+                    aria-label="停止回复"
+                    title="停止当前回复"
+                    onClick={async () => {
+                      askAbortRef.current?.abort();
+                      await api.stopPlanChat(app.id).catch(() => undefined);
+                      await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+                    }}
+                  >
+                    <i className="stop-glyph" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <button className="send-button" aria-label="发送消息" title="发送" disabled={!draft.trim()} onClick={() => void send()}>
+                    <Icon name="send" />
+                  </button>
+                )}
+              </div>
             </div>
           </>
         ) : phase === 'failed' ? (
