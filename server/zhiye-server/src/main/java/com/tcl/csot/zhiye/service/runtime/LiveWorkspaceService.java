@@ -485,14 +485,46 @@ public class LiveWorkspaceService {
                 }
                 if (cache != null && Files.isDirectory(cache)) Files.createSymbolicLink(link, cache);
             }
-            // Vue + Spring Boot / 前后端分目录项目：自动软链 frontend/node_modules
-            Path frontDir = dir.resolve("frontend");
-            Path frontLink = frontDir.resolve("node_modules");
-            if (app.isService() && Files.isRegularFile(frontDir.resolve("package.json")) && !Files.exists(frontLink, LinkOption.NOFOLLOW_LINKS)) {
-                Path vueCache = props.runtimePath().resolve("vue-template-cache/node_modules");
-                if (Files.isDirectory(vueCache)) Files.createSymbolicLink(frontLink, vueCache);
+            // 动态扫描前后端分目录项目（frontend/、web/、client/、ui/），按 package.json 实际框架软链本地预热缓存
+            for (String sub : List.of("frontend", "web", "client", "ui")) {
+                Path frontDir = dir.resolve(sub);
+                Path pkg = frontDir.resolve("package.json");
+                Path frontLink = frontDir.resolve("node_modules");
+                if (app.isService() && Files.isRegularFile(pkg) && !Files.exists(frontLink, LinkOption.NOFOLLOW_LINKS)) {
+                    String rawPkg = Files.readString(pkg, StandardCharsets.UTF_8);
+                    Path targetCache = rawPkg.contains("\"vue\"")
+                            ? props.runtimePath().resolve("vue-template-cache/node_modules")
+                            : props.runtimePath().resolve("template-cache/node_modules");
+                    if (Files.isDirectory(targetCache)) Files.createSymbolicLink(frontLink, targetCache);
+                }
             }
         } catch (Exception ignored) {}
+    }
+
+    private String readZhiyeYamlDevCommand(Path dir) {
+        for (String name : List.of("zhiye.yaml", "zhiye.yml", ".zhiye.yaml")) {
+            Path f = dir.resolve(name);
+            if (!Files.isRegularFile(f)) continue;
+            try {
+                List<String> lines = Files.readAllLines(f, StandardCharsets.UTF_8);
+                boolean inDev = false;
+                for (String raw : lines) {
+                    String trimmed = raw.trim();
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+                    int indent = raw.indexOf(trimmed);
+                    if (indent == 0) {
+                        inDev = trimmed.startsWith("dev:");
+                        if (inDev && trimmed.length() > 4) {
+                            String inline = trimmed.substring(4).trim().replaceAll("^['\"]|['\"]$", "");
+                            if (!inline.isEmpty()) return inline;
+                        }
+                    } else if (inDev && trimmed.startsWith("command:")) {
+                        return trimmed.substring("command:".length()).trim().replaceAll("^['\"]|['\"]$", "");
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     private LiveProc spawnDevProcess(AppRow app, Path dir) throws Exception {
@@ -500,24 +532,40 @@ public class LiveWorkspaceService {
         if ("skill".equals(kind) || "script".equals(kind) || "static".equals(kind)) return null;
 
         int port = freePort();
-        ProcessBuilder pb;
-        String mode;
+        ProcessBuilder pb = null;
+        String mode = null;
         Path workDir = dir;
-        if ("service".equals(kind) && Files.isRegularFile(dir.resolve("server/index.mjs"))) {
+
+        // 0. 优先读取项目自声明的 zhiye.yaml dev.command（通过安全校验）
+        String customDev = readZhiyeYamlDevCommand(dir);
+        if (customDev != null && !customDev.isBlank()
+                && !FORBIDDEN_CMD.matcher(customDev).find()
+                && !ENV_FILE_ACCESS.matcher(customDev).find()
+                && !EXTERNAL_URL.matcher(customDev).find()) {
+            pb = new ProcessBuilder("sh", "-c", customDev.replace("${PORT}", String.valueOf(port)));
+            mode = "zhiye-yaml-dev";
+        }
+
+        // 1. 动态探测项目真实开发入口（不写死模板名或子目录名）
+        if (pb == null && "service".equals(kind) && Files.isRegularFile(dir.resolve("server/index.mjs"))) {
             pb = new ProcessBuilder(props.nodeBinary(), "server/index.mjs");
             mode = "fullstack-node";
-        } else if (Files.isRegularFile(dir.resolve("node_modules/vite/bin/vite.js"))) {
+        } else if (pb == null && Files.isRegularFile(dir.resolve("node_modules/vite/bin/vite.js"))) {
             pb = new ProcessBuilder(props.nodeBinary(), "node_modules/vite/bin/vite.js",
                     "--host", "127.0.0.1", "--port", String.valueOf(port), "--strictPort");
             mode = "vite-hmr";
-        } else if (Files.isRegularFile(dir.resolve("frontend/node_modules/vite/bin/vite.js"))) {
-            pb = new ProcessBuilder(props.nodeBinary(), "node_modules/vite/bin/vite.js",
-                    "--host", "127.0.0.1", "--port", String.valueOf(port), "--strictPort");
-            workDir = dir.resolve("frontend");
-            mode = "vite-hmr-frontend";
-        } else {
-            return null;
+        } else if (pb == null) {
+            for (String sub : List.of("frontend", "web", "client", "ui")) {
+                if (Files.isRegularFile(dir.resolve(sub).resolve("node_modules/vite/bin/vite.js"))) {
+                    pb = new ProcessBuilder(props.nodeBinary(), "node_modules/vite/bin/vite.js",
+                            "--host", "127.0.0.1", "--port", String.valueOf(port), "--strictPort");
+                    workDir = dir.resolve(sub);
+                    mode = "vite-hmr-" + sub;
+                    break;
+                }
+            }
         }
+        if (pb == null) return null;
         pb.directory(workDir.toFile());
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();

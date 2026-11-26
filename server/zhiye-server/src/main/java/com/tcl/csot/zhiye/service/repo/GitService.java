@@ -55,6 +55,34 @@ public class GitService {
     /** 新建仓库，初始提交 = packages/app-template 的拷贝（不是一个版本）。 */
     public CommitResult initFromTemplate(String appId) throws Exception { return initFromTemplate(appId, "app-template"); }
 
+    /** 新建干净的自由架构工作区（不预塞任何固定框架模板文件，由编码智能体按需求自由选择技术栈与目录结构）。 */
+    public CommitResult initCleanWorkspace(String appId, String title) throws Exception {
+        initEmpty(appId);
+        Path tmp = Files.createTempDirectory("zhiye-clean-ws");
+        try {
+            Files.writeString(tmp.resolve(".gitignore"),
+                    "node_modules/\ndist/\nbuild/\ntarget/\n__pycache__/\n.venv/\n.data/\n.zhiye/\n.env\n.env.*\n.DS_Store\n",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String heading = (title == null || title.isBlank()) ? "Workspace" : title.trim();
+            Files.writeString(tmp.resolve("README.md"),
+                    "# " + heading + "\n\n由织页自由工程工作区初始化，可按需求自由选择技术栈、目录结构与 `zhiye.yaml` 工作流。\n",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            try (Git g = Git.init().setDirectory(tmp.toFile()).setInitialBranch("main").call()) {
+                g.add().addFilepattern(".").call();
+                g.commit().setAuthor(ident()).setCommitter(ident()).setMessage("初始化自由工作区").setSign(false).call();
+                var results = g.push().setRemote(repoPath(appId).toAbsolutePath().toString())
+                        .setRefSpecs(new RefSpec("+refs/heads/main:refs/heads/main")).call();
+                for (var r : results)
+                    for (var u : r.getRemoteUpdates())
+                        if (u.getStatus() != org.eclipse.jgit.transport.RemoteRefUpdate.Status.OK && u.getStatus() != org.eclipse.jgit.transport.RemoteRefUpdate.Status.UP_TO_DATE)
+                            throw new IllegalStateException("初始化自由工作区失败：" + u.getStatus());
+            }
+            return head(appId).orElseThrow();
+        } finally {
+            try { deleteRecursively(tmp); } catch (IOException e) { log.warn("清理临时目录失败：{}", tmp, e); }
+        }
+    }
+
     /** templateName：packages/ 下的模板目录（app-template / skill-template） */
     public CommitResult initFromTemplate(String appId, String templateName) throws Exception {
         initEmpty(appId);

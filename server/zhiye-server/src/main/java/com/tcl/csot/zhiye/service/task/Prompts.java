@@ -47,16 +47,18 @@ public final class Prompts {
 
     static String generateService(AppRow app, List<String> assetPaths) {
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
-        boolean vueSpring = (app.framework() != null && app.framework().toLowerCase().contains("spring"))
-                || Catalog.looksLikeVueSpringBoot(app.prompt());
+        boolean cleanWs = Catalog.prefersCleanWorkspace(app.prompt());
+        boolean vueSpring = !cleanWs && ((app.framework() != null && app.framework().toLowerCase().contains("spring"))
+                || Catalog.looksLikeVueSpringBoot(app.prompt()));
         StringBuilder sb = new StringBuilder();
-        if (vueSpring) {
-            sb.append("请在当前全栈项目骨架（前端 `frontend/` Vue 3 + Vite + TypeScript + Tailwind，后端 `backend/` Spring Boot 3.5 + Java 17 Maven）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
-            sb.append("## 应用类型与指引\n").append(Catalog.VUE_SPRINGBOOT_HINT).append("\n\n");
+        if (cleanWs) {
+            sb.append("当前是一个干净的自由全栈工作区（未预塞固定模板）。请直接根据用户需求自主选择最合适的技术栈、目录结构与架构并完整实现。\n\n");
+        } else if (vueSpring) {
+            sb.append("当前工作区预置了 Vue 3 + Spring Boot 加速骨架（仅作为可选起点；如需求需要可自由调整目录结构与实现方式）。请实现下面这个全栈应用：\n\n");
         } else {
-            sb.append("请在当前全栈项目骨架（前端 `src/` React 19 + Vite + TypeScript + Tailwind，后端 `server/index.mjs` Express）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
-            sb.append("## 应用类型与指引\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+            sb.append("当前工作区预置了前后端一体加速骨架（仅作为可选起点；如果用户指定了其他技术栈或架构，请自由调整目录、实现对应技术栈并通过 `zhiye.yaml` 声明工作流）。请实现下面这个应用：\n\n");
         }
+        sb.append("## 平台运行态契约（不绑定模板）\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
         sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
         if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
         sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
@@ -66,59 +68,29 @@ public final class Prompts {
             for (String p : assetPaths) sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
             sb.append('\n');
         }
-        sb.append(vueSpring ? """
-                ## Vue + Spring Boot 全栈交付要求
-                - **同时实现前后端**：前端在 `frontend/src/`（Vue 3 `<script setup lang="ts">` + Tailwind），后端在 `backend/src/main/java/com/zhiye/app/`（Spring Boot `@RestController`）；不要把业务数据只写死在前端，必须通过真实 `/api/...` 接口持久化
-                - **离线构建约束**：`backend/pom.xml` 已预装 `spring-boot-starter-web`、`spring-boot-starter-jdbc`、`postgresql`（本地 `.m2` 已预热），**不要往 `pom.xml` 添加离线仓库不存在的冷门依赖**；数据默认用 `DATA_DIR` 原子 JSON 文件持久化并在 `JDBC_DATABASE_URL` 存在时切换 PostgreSQL；飞书/多维表格/员工目录直接注入内置 `ConnectorClient` 调用
-                - **自检闭环**：改完核心代码后调用 `typecheck_diagnostics`（自动跑 `mvn -B -o test-compile` + `vue-tsc`），收尾前务必调用 `verify_app`（自动构建 Vue 前端、Maven 打包 Spring Boot JAR、启动服务并验证 `/api/health` 200 与页面冒烟）及 `test_endpoint` 实测核心 CRUD 接口
-                """ : """
-                ## 全栈交付要求
-                - **同时实现前后端**：前端在 `src/`，后端在 `server/`（入口 `server/index.mjs`）；不要把业务数据只写死在前端内存或 localStorage 里，必须通过真实 `/api/...` 接口读写持久化数据
-                - **接口与持久化规范**：前端统一请求相对路径 `/api/...`（禁止硬编码 `localhost`）；后端监听 `0.0.0.0:${PORT || 8080}`，保留 `GET /api/health` 返回 200 JSON，数据写入 `process.env.DATA_DIR || '.data'`（原子落盘 `tmp -> rename`）并在检测到 `DATABASE_URL` 时支持 PostgreSQL，静态托管 `dist/` 与 SPA 回退
-                - **桌面宽屏与交互**：界面中文、面向桌面端全宽流式布局（`w-full`），表单/筛选交互真实联动后端接口并给出明确加载与错误提示；需要参考全栈最佳实践时可用 `read` 查看内置技能 `fullstack-app`
-                - 若需求存在关键业务歧义，可调用 `request_confirm`（`kind: "choice"`）让用户快速拍板；普通实现细节自行合理决策
-                - 简要维护 `docs/PROJECT_NOTES.md`（≤40 行，记录后端 API 清单、数据存储结构、前端核心模块与关键约定），供后续迭代直接复用
-                - 收尾总结之前，务必调用 `verify_app` 自检（自动验证类型检查、前端构建、后端临时起服与 `/api/health` 探活及页面冒烟），全部通过后再总结
+        sb.append("""
+                ## 工程交付原则（自主决策架构与流程）
+                - **先看工作区再决策**：先用 `find_files` 确认当前目录内容，按实际业务复杂度自主划分模块、API 契约与持久化方案（不要把业务数据只写死在前端内存里）。
+                - **自定义工作流（可选 `zhiye.yaml`）**：若使用非默认技术栈或自定义目录/构建/测试命令，在根目录写一份 `zhiye.yaml` 声明 `diagnostics` / `build` / `test` / `verify` / `start`（含 `health`）与 `dev`，`verify_app`、`test_endpoint`、活体开发环境与生产部署都会按你的声明自动执行。
+                - **离线构建意识**：沙箱内无外网，优先使用环境已安装的工具链与预热缓存（如本地 `.m2` 已有 Spring Boot 3.5 Web/JDBC/PG 依赖；Node 白名单依赖可用 `install_package`），避免引入离线不可用的冷门三方包。
+                - **按需验证闭环**：改完核心代码后结合实际情况使用 `typecheck_diagnostics`、`test_endpoint`（实测核心接口）与 `verify_app`（编译、构建、起服探活）确保端到端可用后再交付。
                 """);
         sb.append(com.tcl.csot.zhiye.constants.Capabilities.GENERATE);
         sb.append(GENERATE_SUMMARY);
         return sb.toString();
     }
 
-    /** 完成总结的骨架（对齐 meoo）：结论前置、按文件说明、能力清单、怎么验证；检查结果由系统根据校验填写 */
+    /** 完成总结指引：按实际交付内容简洁说明，不强制套用固定空模板 */
     static final String GENERATE_SUMMARY = """
-            - 最后用 Markdown 按下面的结构收尾（不要输出 diff，不要用 emoji；没有内容的小节整段省略）：
-              第一行：一句话结论，例如「设备点检记录已经写好并跑通了。」
-              ### 已完成
-              - `src/...` —— 这个文件做了什么（每个关键文件一行，最多 6 行）
-              ### 能力清单
-              - 做了什么 + 具体规则，逐条写（例如「编号不能重复，保存时校验」），最多 6 条
-              ### 怎么验证
-              1. 可以照着点的操作步骤，2～4 步
-              ### 需要注意
-              - 例如：数据只存在当前浏览器里，换电脑或清缓存就没了
-              ### 当前模拟的内容
-              - 例如：设备清单是示例数据，尚未接入真实系统
-              ### 后续可完善
-              - 1～3 条
-            - 不要写「检查结果」小节，系统会根据校验结果补上
+            - 收尾用简洁清晰的中文 Markdown 说明结论、核心改动/架构与验证方式（不要贴大段 diff，不要写「检查结果」小节，系统会自动附上校验结果）。
             - 最后单独一行输出：[[next]] 建议一 | 建议二 | 建议三
-              （2～3 个用户最可能的下一句话，用用户的口吻，每个不超过 14 个字，例如「接上云端数据」「增加导出 Excel」；
-              必须是这个应用接下来真正值得做的事，不要写「继续修改」这种空话）
+              （2～3 个用户最可能接着做的具体下一步，每个不超过 14 个字）
             """;
 
-    /** 修改后的总结：比生成轻，只说改了什么和怎么看 */
+    /** 修改后的总结：简洁说明改动与验证点 */
     static final String MODIFY_SUMMARY = """
-            - 最后用 Markdown 按下面的结构收尾（不要输出 diff，不要用 emoji；没有内容的小节整段省略）：
-              第一行：一句话结论，说清这次改了什么
-              ### 改了什么
-              - `src/...` —— 改动说明（每个文件一行）
-              ### 怎么验证
-              1. 操作步骤，1～3 步
-              ### 需要注意
-              - 有影响其他功能或数据的地方才写
-            - 不要写「检查结果」小节，系统会根据校验结果补上
-            - 最后单独一行输出：[[next]] 建议一 | 建议二（2～3 个用户最可能的下一句话，每个不超过 14 个字）
+            - 收尾用简洁中文说明这次改了什么、怎么验证（如有风险或影响点顺带提醒；不要写「检查结果」小节）。
+            - 最后单独一行输出：[[next]] 建议一 | 建议二（2～3 个具体的下一步建议，每个不超过 14 个字）
             """;
 
     static String generateSkill(AppRow app, List<String> assetPaths) {

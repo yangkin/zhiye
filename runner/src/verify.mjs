@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { run, emitLog, flushLogs, summarize, log, RunnerError } from './util.mjs'
 import { smokeTest } from './smoke.mjs'
 import { checkSkillMd, checkReferences, checkScripts, checkSecurityAndCleanliness } from './skill.mjs'
+import { discoverWorkspaceLayout, loadProjectWorkflow } from './workflow.mjs'
+import { checkBash } from './guard.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 export const PREVIEW_DIR = '.zhiye/dist-preview'
@@ -503,15 +505,63 @@ export async function serviceLiveSmoke(cwd, env = process.env) {
   }
 }
 
+async function runCustomStep(cwd, stepDef, bEnv) {
+  const stepCwd = stepDef.cwd ? path.resolve(cwd, stepDef.cwd) : path.resolve(cwd)
+  const rel = path.relative(path.resolve(cwd), stepCwd)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { ok: false, detail: `zhiye.yaml 步骤工作目录越界：${stepDef.cwd}` }
+  }
+  const blocked = checkBash(stepCwd, stepDef.command, { projectKind: 'service' })
+  if (blocked) return { ok: false, detail: `安全守卫拦截 zhiye.yaml 命令「${stepDef.command}」：${blocked}` }
+  emitLog(`$ ${stepDef.command}`)
+  const r = await run('sh', ['-c', stepDef.command], { cwd: stepCwd, env: bEnv, timeoutMs: stepDef.timeoutMs || 180_000, onLine: emitLog })
+  if (r.timedOut) return { ok: false, detail: `命令执行超时：${stepDef.command}` }
+  if (r.code !== 0) return { ok: false, detail: String(r.out || `命令退出码 ${r.code}`).trim().slice(-1500) }
+  return { ok: true, detail: `${stepDef.command} 通过` }
+}
+
 async function verifyService(cwd, env) {
   const checks = []
   const bEnv = buildEnv(env)
-  // 1. 检测是否为 Java/Spring Boot 或 Go 多语言全栈项目（含前后端分目录 frontend/ + backend/）
-  const javaDir = existsSync(path.join(cwd, 'backend', 'pom.xml')) ? path.join(cwd, 'backend')
-    : existsSync(path.join(cwd, 'pom.xml')) ? cwd : null
-  const goDir = !javaDir && existsSync(path.join(cwd, 'backend', 'go.mod')) ? path.join(cwd, 'backend')
-    : !javaDir && existsSync(path.join(cwd, 'go.mod')) ? cwd : null
-  const frontSubDir = existsSync(path.join(cwd, 'frontend', 'package.json')) ? path.join(cwd, 'frontend') : null
+  const layout = discoverWorkspaceLayout(cwd)
+  const wf = layout.workflow
+
+  // 0. 项目声明式工作流（zhiye.yaml）优先：完全按项目自己定义的 build / test / verify / start 执行，不写死任何框架
+  const declaredSteps = [...(wf?.build || []), ...(wf?.test || []), ...(wf?.verify || [])]
+  if (declaredSteps.length > 0 || wf?.start) {
+    for (const s of declaredSteps) {
+      const prevOk = checks.every((c) => c.ok)
+      checks.push(prevOk
+        ? await step(s.name, () => runCustomStep(cwd, s, bEnv))
+        : { name: s.name, ok: false, skipped: true, detail: SKIPPED })
+    }
+    if (wf?.start || layout.backend) {
+      const prevOk = checks.every((c) => c.ok)
+      const healthPath = wf?.start?.health || '/api/health'
+      checks.push(prevOk
+        ? await step('服务启动与探活', async () => {
+            const { startTempServiceServer } = await import('./endpoint-test.mjs')
+            let srv
+            try {
+              srv = await startTempServiceServer(cwd, bEnv, { healthPath, startupTimeoutMs: wf?.start?.timeoutMs || 30_000 })
+              return { ok: true, detail: `服务 (${srv.label}) 启动正常，${srv.healthPath || healthPath} 返回 ${srv.readyStatus || 200}` }
+            } catch (e) {
+              return { ok: false, detail: String(e?.message || e) }
+            } finally {
+              if (srv) await srv.close()
+            }
+          })
+        : { name: '服务启动与探活', ok: false, skipped: true, detail: SKIPPED })
+    }
+    return { checks, editable: false, noDist: true }
+  }
+
+  // 1. 零配置动态结构发现：按真实目录（任意 frontend/web/client + 任意 Java/Go/Python/Rust/Node 后端）动态组合校验
+  const frontSubDir = layout.frontendDir ? path.join(cwd, layout.frontendDir) : null
+  const javaDir = layout.backend?.runtime === 'java-maven' ? (layout.backend.dir ? path.join(cwd, layout.backend.dir) : cwd) : null
+  const gradleDir = layout.backend?.runtime === 'java-gradle' ? (layout.backend.dir ? path.join(cwd, layout.backend.dir) : cwd) : null
+  const goDir = layout.backend?.runtime === 'go' ? (layout.backend.dir ? path.join(cwd, layout.backend.dir) : cwd) : null
+  const pyDir = layout.backend?.runtime === 'python' ? (layout.backend.dir ? path.join(cwd, layout.backend.dir) : cwd) : null
 
   if (frontSubDir) {
     const vueTsc = path.join(frontSubDir, 'node_modules', 'vue-tsc', 'bin', 'vue-tsc.js')
@@ -564,6 +614,32 @@ async function verifyService(cwd, env) {
     return { checks, editable: false, noDist: true }
   }
 
+  if (gradleDir) {
+    checks.push(await step('Gradle 离线编译打包', async () => {
+      const cmd = existsSync(path.join(gradleDir, 'gradlew')) ? './gradlew' : 'gradle'
+      const r = await run(cmd, ['--offline', 'build', '-x', 'test'], { cwd: gradleDir, env: bEnv, timeoutMs: 180_000 })
+      if (r.timedOut) return { ok: false, detail: 'Gradle 构建超时' }
+      if (r.code !== 0) return { ok: false, detail: String(r.out || `gradle exit=${r.code}`).slice(-1500) }
+      return { ok: true, detail: `${cmd} build 构建通过` }
+    }))
+    const prevOk = checks.every((c) => c.ok)
+    checks.push(prevOk
+      ? await step('Java 服务启动与探活', async () => {
+          const { startTempServiceServer } = await import('./endpoint-test.mjs')
+          let srv
+          try {
+            srv = await startTempServiceServer(cwd, bEnv, { healthPath: '/api/health', startupTimeoutMs: 45_000 })
+            return { ok: true, detail: `Java 服务 (${srv.label}) 启动正常，/api/health 返回 200` }
+          } catch (e) {
+            return { ok: false, detail: String(e?.message || e) }
+          } finally {
+            if (srv) await srv.close()
+          }
+        })
+      : { name: 'Java 服务启动与探活', ok: false, skipped: true, detail: SKIPPED })
+    return { checks, editable: false, noDist: true }
+  }
+
   if (goDir) {
     checks.push(await step('Go 编译构建', async () => {
       const r = await run('go', ['build', '-o', 'app', '.'], { cwd: goDir, env: bEnv, timeoutMs: 120_000 })
@@ -589,7 +665,27 @@ async function verifyService(cwd, env) {
     return { checks, editable: false, noDist: true }
   }
 
-  // 默认：Node.js / Python 全栈服务校验
+  if (pyDir) {
+    checks.push(await step('Python 语法检查', () => checkScripts(cwd, env)))
+    const prevOk = checks.every((c) => c.ok)
+    checks.push(prevOk
+      ? await step('Python 服务启动与探活', async () => {
+          const { startTempServiceServer } = await import('./endpoint-test.mjs')
+          let srv
+          try {
+            srv = await startTempServiceServer(cwd, bEnv, { healthPath: '/api/health', startupTimeoutMs: 20_000 })
+            return { ok: true, detail: `Python 服务 (${srv.label}) 启动正常，/api/health 返回 ${srv.readyStatus || 200}` }
+          } catch (e) {
+            return { ok: false, detail: String(e?.message || e) }
+          } finally {
+            if (srv) await srv.close()
+          }
+        })
+      : { name: 'Python 服务启动与探活', ok: false, skipped: true, detail: SKIPPED })
+    return { checks, editable: false, noDist: true }
+  }
+
+  // 默认：Node.js 全栈服务校验（支持根目录或任意后端子目录）
   checks.push(await step('脚本语法', () => checkScripts(cwd, env)))
   const tscBin = path.join(cwd, 'node_modules', 'typescript', 'bin', 'tsc')
   if (existsSync(path.join(cwd, 'tsconfig.json')) && existsSync(tscBin)) {
@@ -637,6 +733,20 @@ export async function verify(cwd, { projectKind } = {}, env = process.env) {
     r = await verifyService(cwd, env)
   }
   else throw new RunnerError('BAD_REQUEST', `未知的项目类型：${kind}`)
+  // 非 service 项目如果也在 zhiye.yaml 中声明了自定义 verify/test 步骤，同样追加执行（不写死校验流）
+  if (kind !== 'service') {
+    const wf = loadProjectWorkflow(cwd)
+    const extraSteps = [...(wf?.test || []), ...(wf?.verify || [])]
+    if (extraSteps.length) {
+      const bEnv = buildEnv(env)
+      for (const s of extraSteps) {
+        const prevOk = r.checks.every((c) => c.ok)
+        r.checks.push(prevOk
+          ? await step(s.name, () => runCustomStep(cwd, s, bEnv))
+          : { name: s.name, ok: false, skipped: true, detail: SKIPPED })
+      }
+    }
+  }
   // 报错里的绝对路径换成相对工作区的路径，便于 agent 阅读
   const strip = (d) => [cwd, realCwd(cwd)].reduce((acc, p) => acc.split(p + '/').join(''), String(d || ''))
   const checks = r.checks.map(({ name, ok, detail, skipped, durationMs, screenshot }) => ({

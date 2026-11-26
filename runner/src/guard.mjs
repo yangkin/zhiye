@@ -11,7 +11,7 @@ const TEMPLATE_DIRS = ['src', 'public', 'skill', 'docs']
 const CLOUD_SCHEMA = (rel) => rel === 'cloud/schema.sql' || rel === 'cloud/policies.json' || (rel.startsWith('cloud/') && rel.endsWith('.sql'))
 // 云函数：functions/{name}.ts（单层，由平台的函数运行服务执行），以及类型定义和 tsconfig
 const FUNCTIONS = (rel) => /^functions\/[a-z][a-z0-9_-]{0,47}\.ts$/.test(rel) || rel === 'functions/tsconfig.json' || rel === 'functions/zhiye-fn.d.ts'
-const TEMPLATE_WRITABLE = (rel) => rel === 'index.html' || TEMPLATE_DIRS.some((d) => rel === d || rel.startsWith(d + '/')) || CLOUD_SCHEMA(rel) || FUNCTIONS(rel)
+const TEMPLATE_WRITABLE = (rel) => rel === 'index.html' || rel === 'zhiye.yaml' || rel === 'zhiye.yml' || TEMPLATE_DIRS.some((d) => rel === d || rel.startsWith(d + '/')) || CLOUD_SCHEMA(rel) || FUNCTIONS(rel)
 
 function isInside(root, p) {
   const rel = path.relative(root, p)
@@ -134,7 +134,10 @@ export function splitCommands(cmd) {
 }
 
 const NET_CMDS = new Set(['curl', 'wget', 'nc', 'ncat', 'netcat', 'ssh', 'scp', 'sftp', 'rsync', 'ftp', 'telnet', 'aria2c', 'httpie', 'http', 'https'])
-const PKG_MANAGERS = new Set(['pnpm', 'yarn', 'bun', 'bunx', 'pip', 'pip3', 'pipx', 'brew', 'apt', 'apt-get', 'yum', 'dnf', 'apk', 'gem', 'cargo', 'go', 'deno', 'corepack', 'volta', 'nvm'])
+const PKG_MANAGERS = new Set(['pnpm', 'yarn', 'bun', 'bunx', 'pip', 'pip3', 'pipx', 'brew', 'apt', 'apt-get', 'yum', 'dnf', 'apk', 'gem', 'corepack', 'volta', 'nvm'])
+const GO_ALLOWED = new Set(['build', 'test', 'vet', 'fmt', 'version', 'env', 'list', 'doc', 'run'])
+const CARGO_ALLOWED = new Set(['check', 'build', 'test', 'clippy', 'fmt', 'version', '-V', '--version'])
+const DENO_ALLOWED = new Set(['check', 'test', 'fmt', 'lint', 'eval', 'version', '-V', '--version'])
 const PRIV_CMDS = new Set(['sudo', 'su', 'doas', 'chown', 'chroot', 'launchctl', 'systemctl', 'osascript', 'open'])
 const SERVER_CMDS = new Set(['serve', 'http-server', 'live-server', 'nodemon', 'pm2', 'forever', 'nohup', 'screen', 'tmux', 'webpack-dev-server', 'next', 'nuxt'])
 const GIT_READONLY = new Set(['status', 'diff', 'log', 'show', 'ls-files', 'grep', 'blame', 'rev-parse', 'branch', 'describe', 'shortlog', 'cat-file', 'ls-tree'])
@@ -217,6 +220,15 @@ export function checkBash(cwd, command, opts = {}) {
     if (PRIV_CMDS.has(name)) return `不允许执行 ${name}`
     if (NET_CMDS.has(name)) return `不允许联网：${name}（沙箱内没有外网，也不需要下载任何东西）`
     if (PKG_MANAGERS.has(name)) return `不允许安装依赖或使用 ${name}：请只使用已安装的依赖`
+    if (name === 'go') {
+      if (!sub || !GO_ALLOWED.has(sub)) return `不允许执行 go ${sub ?? ''}：沙箱内仅开放离线编译/测试命令（build/test/vet/fmt/run）`.trim()
+    }
+    if (name === 'cargo') {
+      if (!sub || !CARGO_ALLOWED.has(sub)) return `不允许执行 cargo ${sub ?? ''}：沙箱内仅开放离线编译/测试命令（check/build/test/clippy/fmt）`.trim()
+    }
+    if (name === 'deno') {
+      if (!sub || !DENO_ALLOWED.has(sub)) return `不允许执行 deno ${sub ?? ''}：沙箱内仅开放离线检查/测试命令（check/test/fmt/lint）`.trim()
+    }
     if (SERVER_CMDS.has(name)) return `不允许启动长期运行的服务：${name}`
     if (name === 'git') {
       const gsub = args.filter((a) => !a.startsWith('-'))[0]
@@ -237,8 +249,14 @@ export function checkBash(cwd, command, opts = {}) {
       if (npxFlags.some((a) => a === '-y' || a === '--yes' || a === '-p' || a.startsWith('--package') || a === '-c' || a === '--call')) return '不允许用 npx 下载软件包'
       if (!bin) return 'npx 缺少命令'
       if (!/^[A-Za-z0-9_.@/-]+$/.test(bin) || bin.includes('@') && !bin.startsWith('@')) return `不允许用 npx 下载软件包：${bin}`
-      const local = path.join(cwd, 'node_modules', '.bin', path.basename(bin))
-      if (!existsSync(local)) return `不允许用 npx 下载软件包：${bin} 没有安装在项目里`
+      const binBase = path.basename(bin)
+      const localCandidates = [
+        path.join(cwd, 'node_modules', '.bin', binBase),
+        path.join(cwd, 'frontend', 'node_modules', '.bin', binBase),
+        path.join(cwd, 'web', 'node_modules', '.bin', binBase),
+        path.join(cwd, 'client', 'node_modules', '.bin', binBase),
+      ]
+      if (!localCandidates.some((p) => existsSync(p))) return `不允许用 npx 下载软件包：${bin} 没有安装在项目里`
       const rest = args.slice(args.indexOf(bin) + 1)
       const r2 = checkViteLike(path.basename(bin), rest)
       if (r2) return r2
