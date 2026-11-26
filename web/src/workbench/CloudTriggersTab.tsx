@@ -160,26 +160,26 @@ export function CloudTriggersTab({
 
       {/* 新建触发器表单 */}
       <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', background: 'var(--bg-subtle, #f8fafc)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: isService ? '1.4fr 1fr 1.2fr' : '1.4fr 1fr 1.2fr 1fr', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
           <input
             type="text"
             placeholder="规则名称（如：异常工单飞书告警）"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}
+            style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}
           />
-          <select value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'db_insert' | 'db_update' | 'webhook')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}>
+          <select value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'db_insert' | 'db_update' | 'webhook')} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}>
             {!isService ? <option value="db_insert">有新记录提交时</option> : null}
             {!isService ? <option value="db_update">记录状态更新时</option> : null}
             <option value="cron">按定时周期触发</option>
             <option value="webhook">外部系统 Webhook 触发</option>
           </select>
           {kind === 'cron' ? (
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, minWidth: 0 }}>
               <select
                 value={cronPreset}
                 onChange={(e) => setCronPreset(e.target.value)}
-                style={{ flex: 1, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}
+                style={{ flex: 1, minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}
               >
                 {CRON_PRESETS.map((p) => (
                   <option key={p.expr} value={p.expr}>{p.label}</option>
@@ -191,17 +191,17 @@ export function CloudTriggersTab({
                   value={customCron}
                   onChange={(e) => setCustomCron(e.target.value)}
                   placeholder="0 9 * * *"
-                  style={{ width: 110, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}
+                  style={{ width: 100, flexShrink: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontFamily: 'var(--font-mono, monospace)', fontSize: 12, boxSizing: 'border-box' }}
                 />
               ) : null}
             </div>
           ) : kind === 'db_insert' || kind === 'db_update' ? (
-            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
+            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
           ) : (
-            <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>自动签发 HMAC 签名密钥</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center', minWidth: 0 }}>自动签发 HMAC 签名密钥</span>
           )}
           {!isService ? (
-            <select value={actionType} onChange={(e) => setActionType(e.target.value as 'feishu_card' | 'cloud_function')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}>
+            <select value={actionType} onChange={(e) => setActionType(e.target.value as 'feishu_card' | 'cloud_function')} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}>
               <option value="feishu_card">推送飞书交互卡片</option>
               <option value="cloud_function">执行云函数</option>
             </select>
@@ -209,8 +209,8 @@ export function CloudTriggersTab({
         </div>
 
         {isService || actionType === 'feishu_card' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.5fr auto', gap: 8, alignItems: 'center' }}>
-            <select value={effectiveConnectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, alignItems: 'center' }}>
+            <select value={effectiveConnectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12, boxSizing: 'border-box' }}>
               {connectors.length === 0 ? <option value="">请先在「生态」页添加飞书机器人</option> : null}
               {connectors.map((c) => (
                 <option key={String(c.id)} value={String(c.id)}>
@@ -218,20 +218,25 @@ export function CloudTriggersTab({
                 </option>
               ))}
             </select>
-            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
-            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="正文支持 {{event}} / {{table}} / {{payload}}" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
-            <button type="button" className="primary-button" disabled={!!busy || !name.trim()} onClick={() => void handleAdd()}>
-              <Icon name="plus" /> 添加
-            </button>
+            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
+            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="正文支持 {{event}} / {{table}} / {{payload}}" style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
-            <button type="button" className="primary-button" disabled={!!busy || !name.trim() || !functionName.trim()} onClick={() => void handleAdd()}>
-              <Icon name="plus" /> 添加
-            </button>
+            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
           </div>
         )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={!!busy || !name.trim() || (!isService && actionType === 'cloud_function' && !functionName.trim())}
+            onClick={() => void handleAdd()}
+          >
+            <Icon name="plus" /> 添加规则
+          </button>
+        </div>
 
         {newSecret ? (
           <div style={{ fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#ecfdf5', color: '#065f46' }}>

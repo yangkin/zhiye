@@ -2692,14 +2692,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 治理与日志顶部状态脉冲卡（7 格桌面单行自适应；每张带语义色条、图标徽章与角晕光感） */
+/* 治理与日志顶部状态脉冲卡（宽屏 8 格单行，常规屏 4×2 对齐，避免出现尾行孤卡） */
 .gov-pulse-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   gap: 10px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1580px) {
   .gov-pulse-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }

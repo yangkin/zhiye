@@ -2504,7 +2504,7 @@ a.skill-chip{text-decoration:none}
 .studio-dialog-modify:hover,.studio-dialog-modify.active,.studio-dialog-modify[aria-pressed="true"],.studio-edit-toggle:hover,.studio-edit-toggle.active,.studio-edit-toggle[aria-pressed="true"]{background:var(--st-accent-soft);border-color:var(--st-accent-line);color:var(--st-accent-ink)}
 
 /* 封面标题用应用名：最多两行，窄一点给右侧示意图留位置 */
-.thumbnail .thumb-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:52%;word-break:break-all}
+.thumbnail .thumb-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:44%;position:relative;z-index:2;word-break:break-all}
 .thumb-todo .thumb-title{max-width:100%}
 /* 统一登录不可用时，按钮文字仍要看得清 */
 .login-sso-button[disabled]{background:#f2effa;color:#8c82a6;border:1px solid #e4def2}
