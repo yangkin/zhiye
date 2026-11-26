@@ -16,22 +16,106 @@ import { Pagination, useClientPagination } from '../components/Pagination';
 import { confirmDialog } from '../components/ConfirmDialog';
 
 type Filter = '全部记录' | '会话记录' | '已收藏' | '线上版本' | '最近删除';
+type DatePreset = 'all' | 'today' | '7d' | '30d' | 'custom';
+
+function localYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function presetDates(preset: DatePreset): { startDate: string; endDate: string } {
+  if (preset === 'all' || preset === 'custom') return { startDate: '', endDate: '' };
+  const now = new Date();
+  const end = localYmd(now);
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (preset === '7d') start.setDate(start.getDate() - 6);
+  else if (preset === '30d') start.setDate(start.getDate() - 29);
+  return { startDate: localYmd(start), endDate: end };
+}
+
+function inDateRange(iso: string | undefined | null, startDate: string, endDate: string): boolean {
+  if (!startDate && !endDate) return true;
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const ymd = localYmd(d);
+  if (startDate && ymd < startDate) return false;
+  if (endDate && ymd > endDate) return false;
+  return true;
+}
 
 export function HistoryPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const appId = params.get('appId') ?? '';
+  const initialStart = params.get('startDate') ?? '';
+  const initialEnd = params.get('endDate') ?? '';
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('全部记录');
+  const [datePreset, setDatePreset] = useState<DatePreset>(initialStart || initialEnd ? 'custom' : 'all');
+  const [customStart, setCustomStart] = useState(initialStart);
+  const [customEnd, setCustomEnd] = useState(initialEnd);
   const [preview, setPreview] = useState<HistoryRow | null>(null);
   const [restore, setRestore] = useState<HistoryRow | null>(null);
   const q = useDebounced(query.trim());
   const { data: apps } = useApps({ sort: 'updated' });
 
+  const { startDate, endDate } = useMemo(() => {
+    if (datePreset === 'custom') {
+      // 如果用户先改了结束日期早于开始日期，自动矫正顺序避免后端报 400
+      if (customStart && customEnd && customStart > customEnd) {
+        return { startDate: customEnd, endDate: customStart };
+      }
+      return { startDate: customStart, endDate: customEnd };
+    }
+    return presetDates(datePreset);
+  }, [datePreset, customStart, customEnd]);
+
+  const syncDateUrl = (s: string, e: string) => {
+    const next = new URLSearchParams(params);
+    if (s) next.set('startDate', s);
+    else next.delete('startDate');
+    if (e) next.set('endDate', e);
+    else next.delete('endDate');
+    setParams(next, { replace: true });
+  };
+
+  const applyDatePreset = (nextPreset: DatePreset) => {
+    setDatePreset(nextPreset);
+    if (nextPreset === 'all') {
+      setCustomStart('');
+      setCustomEnd('');
+      syncDateUrl('', '');
+    } else if (nextPreset === 'custom') {
+      const fallback = presetDates('7d');
+      const s = customStart || fallback.startDate;
+      const e = customEnd || fallback.endDate;
+      setCustomStart(s);
+      setCustomEnd(e);
+      syncDateUrl(s, e);
+    } else {
+      const r = presetDates(nextPreset);
+      syncDateUrl(r.startDate, r.endDate);
+    }
+  };
+
+  const clearDateFilter = () => {
+    setDatePreset('all');
+    setCustomStart('');
+    setCustomEnd('');
+    syncDateUrl('', '');
+  };
+
+  const hasDateFilter = Boolean(startDate || endDate);
+
   const hq: HistoryQuery = {
     q: q || undefined,
     appId: appId || undefined,
     filter: filter === '已收藏' ? 'favorite' : filter === '线上版本' ? 'published' : 'all',
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
   };
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: qk.history(hq),
@@ -40,7 +124,7 @@ export function HistoryPage() {
   });
   const { data: total } = useQuery({ queryKey: qk.history({ filter: 'all' }), queryFn: () => api.history({ filter: 'all' }) });
   const rows = data ?? [];
-  const pager = useClientPagination(rows, 15, `${filter}|${appId}|${q}`);
+  const pager = useClientPagination(rows, 15, `${filter}|${appId}|${q}|${startDate}|${endDate}`);
 
   const grouped = useMemo(() => {
     const out: { day: string; date: string; rows: HistoryRow[] }[] = [];
@@ -85,6 +169,55 @@ export function HistoryPage() {
               </button>
             ) : null}
           </label>
+          <Select
+            ariaLabel="按日期筛选"
+            value={datePreset}
+            onChange={(v) => applyDatePreset(v as DatePreset)}
+            options={[
+              { value: 'all', label: '全部日期' },
+              { value: 'today', label: '今天' },
+              { value: '7d', label: '近 7 天' },
+              { value: '30d', label: '近 30 天' },
+              { value: 'custom', label: '自定义日期' },
+            ]}
+          />
+          {datePreset === 'custom' ? (
+            <div className="history-date-range" role="group" aria-label="自定义日期区间">
+              <input
+                type="date"
+                aria-label="开始日期"
+                value={customStart}
+                max={customEnd || undefined}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCustomStart(v);
+                  syncDateUrl(v, customEnd);
+                }}
+              />
+              <span className="history-date-sep" aria-hidden="true">至</span>
+              <input
+                type="date"
+                aria-label="结束日期"
+                value={customEnd}
+                min={customStart || undefined}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setCustomEnd(v);
+                  syncDateUrl(customStart, v);
+                }}
+              />
+              {hasDateFilter ? (
+                <button type="button" className="history-date-clear" aria-label="清空日期筛选" onClick={clearDateFilter}>
+                  <Icon name="close" />
+                </button>
+              ) : null}
+            </div>
+          ) : hasDateFilter ? (
+            <button type="button" className="history-date-chip" title="点击清除日期筛选" onClick={clearDateFilter}>
+              <span>{startDate === endDate ? startDate : `${startDate.slice(5)} ~ ${endDate.slice(5)}`}</span>
+              <Icon name="close" />
+            </button>
+          ) : null}
           {filter === '会话记录' || filter === '最近删除' ? null : <Select
             ariaLabel="筛选应用"
             value={appId}
@@ -102,8 +235,8 @@ export function HistoryPage() {
           />}
         </div>
       </div>
-      {filter === '最近删除' ? <TrashList query={q} /> : null}
-      {filter === '会话记录' ? <ConversationList query={q} /> : null}
+      {filter === '最近删除' ? <TrashList query={q} startDate={startDate} endDate={endDate} /> : null}
+      {filter === '会话记录' ? <ConversationList query={q} startDate={startDate} endDate={endDate} /> : null}
       <div className="history-list" hidden={filter === '最近删除' || filter === '会话记录'}>
         {isLoading ? (
           <LoadingState label="正在读取版本记录…" />
@@ -204,7 +337,7 @@ function HistoryStats() {
   );
 }
 
-function TrashList({ query }: { query: string }) {
+function TrashList({ query, startDate, endDate }: { query: string; startDate: string; endDate: string }) {
   const qc = useQueryClient();
   const isAdmin = Boolean(useMeta().data?.auth?.admin);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -212,9 +345,13 @@ function TrashList({ query }: { query: string }) {
 
   const filtered = useMemo(() => {
     const k = query.toLowerCase();
-    return (data ?? []).filter((a) => !k || a.name.toLowerCase().includes(k) || a.type.toLowerCase().includes(k));
-  }, [data, query]);
-  const pager = useClientPagination(filtered, 15, query);
+    return (data ?? []).filter((a) => {
+      if (k && !a.name.toLowerCase().includes(k) && !a.type.toLowerCase().includes(k)) return false;
+      const deletedAt = (a as unknown as { deletedAt?: string }).deletedAt ?? a.updatedAt;
+      return inDateRange(deletedAt, startDate, endDate);
+    });
+  }, [data, query, startDate, endDate]);
+  const pager = useClientPagination(filtered, 15, `${query}|${startDate}|${endDate}`);
 
   if (isLoading) return <LoadingState label="正在读取回收站…" />;
   if (error) return <ErrorState message={errorMessage(error)} />;
@@ -318,15 +455,18 @@ const snippet = (text = '') =>
     .slice(0, 120);
 
 /** 创造页的会话：没建应用的也在这里，点开回到会话继续 */
-function ConversationList({ query }: { query: string }) {
+function ConversationList({ query, startDate, endDate }: { query: string; startDate: string; endDate: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['conversations'], queryFn: () => convApi.conversations() });
   const rows = useMemo(() => {
     const k = query.toLowerCase();
-    return (data ?? []).filter((c) => !k || c.title.toLowerCase().includes(k) || (c.lastMessage ?? '').toLowerCase().includes(k));
-  }, [data, query]);
-  const pager = useClientPagination(rows, 15, query);
+    return (data ?? []).filter((c) => {
+      if (k && !c.title.toLowerCase().includes(k) && !(c.lastMessage ?? '').toLowerCase().includes(k)) return false;
+      return inDateRange(c.updatedAt, startDate, endDate);
+    });
+  }, [data, query, startDate, endDate]);
+  const pager = useClientPagination(rows, 15, `${query}|${startDate}|${endDate}`);
   const groups = useMemo(() => {
     const out: { day: string; date: string; rows: ConversationSummary[] }[] = [];
     for (const c of pager.pageItems) {

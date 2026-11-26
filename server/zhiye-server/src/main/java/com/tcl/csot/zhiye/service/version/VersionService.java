@@ -120,6 +120,10 @@ public class VersionService {
     }
 
     public List<Map<String, Object>> history(String ws, String q, String appId, String filter) {
+        return history(ws, q, appId, filter, null, null);
+    }
+
+    public List<Map<String, Object>> history(String ws, String q, String appId, String filter, String startDate, String endDate) {
         StringBuilder sql = new StringBuilder("""
                 select v.*, a.name as app_name, a.type as app_type from version v join app a on a.id = v.app_id
                 where a.workspace_id = :ws and a.deleted_at is null and a.visible
@@ -133,6 +137,20 @@ public class VersionService {
         if (appId != null && !appId.isBlank()) { sql.append(" and a.id = :appId"); p.put("appId", appId); }
         if ("favorite".equals(filter)) sql.append(" and v.favorite");
         if ("published".equals(filter)) sql.append(" and a.published_version_id = v.id");
+        java.time.LocalDate start = parseHistoryDate(startDate, "开始日期");
+        java.time.LocalDate end = parseHistoryDate(endDate, "结束日期");
+        if (start != null && end != null && start.isAfter(end)) {
+            throw ApiException.validation("开始日期不能晚于结束日期");
+        }
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        if (start != null) {
+            sql.append(" and v.created_at >= :startTs");
+            p.put("startTs", java.sql.Timestamp.from(start.atStartOfDay(zone).toInstant()));
+        }
+        if (end != null) {
+            sql.append(" and v.created_at < :endTs");
+            p.put("endTs", java.sql.Timestamp.from(end.plusDays(1).atStartOfDay(zone).toInstant()));
+        }
         sql.append(" order by v.created_at desc, v.number desc");
         List<Map<String, Object>> rows = new ArrayList<>();
         Map<String, AppRow> appCache = new HashMap<>();
@@ -145,6 +163,15 @@ public class VersionService {
             return row;
         }).list().forEach(rows::add);
         return rows;
+    }
+
+    private static java.time.LocalDate parseHistoryDate(String raw, String label) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return java.time.LocalDate.parse(raw.trim());
+        } catch (Exception e) {
+            throw ApiException.validation(label + "格式不正确，应为 YYYY-MM-DD");
+        }
     }
 
     public Map<String, Object> setFavorite(String ws, String id, boolean fav) {

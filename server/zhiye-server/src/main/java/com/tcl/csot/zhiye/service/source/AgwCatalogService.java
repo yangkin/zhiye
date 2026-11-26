@@ -82,8 +82,11 @@ public class AgwCatalogService {
         body.put("url", dataPlaneUrl(detail));
         body.put("params", params);
         body.put("sample", sample);
+        String projectPublicId = selected.path("projectPublicId").asText("").trim();
+        if (projectPublicId.isEmpty()) projectPublicId = selected.path("project_public_id").asText("").trim();
+        if (projectPublicId.isEmpty()) projectPublicId = selected.path("projectId").asText("").trim();
         body.put("authType", "agw_user");
-        body.put("authHeader", selected.path("projectPublicId").asText(""));
+        body.put("authHeader", projectPublicId);
         return sources.importExternal(ws, "agw", externalId, Json.M.valueToTree(body));
     }
 

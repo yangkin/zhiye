@@ -163,6 +163,123 @@ function unwrap(words) {
   return w
 }
 
+const SEARCH_CMDS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack'])
+const WALK_AND_READ_CMDS = new Set(['find', 'fd', 'fdfind', 'locate', 'tree', 'du', 'ls', 'stat', 'file', 'wc', 'cat', 'head', 'tail', 'less', 'more', 'strings', 'realpath', 'readlink'])
+const GREP_VALUE_FLAGS = new Set(['-e', '-f', '-m', '-A', '-B', '-C', '-d', '-D', '--regexp', '--file', '--max-count', '--after-context', '--before-context', '--context', '--include', '--exclude', '--exclude-dir', '--include-dir', '--glob', '-g', '-t', '--type', '-T', '--type-not', '--color', '--colour', '--label', '--binary-files', '--devices', '--directories', '--max-depth', '--max-filesize', '-j', '--threads'])
+const READ_VALUE_FLAGS = new Set(['-n', '-c', '-q', '-s', '-d', '-L', '-I', '-P', '-t', '-f', '-o', '--lines', '--bytes', '--max-depth', '--maxdepth', '--mindepth', '--exclude', '--ignore', '--format', '--block-size'])
+
+function isAllowedReadTarget(cwd, raw, opts = {}) {
+  if (!raw || raw === '-' || raw === '/dev/null') return true
+  const abs = resolveToolPath(cwd, raw)
+  if (opts.agentDir && isInside(path.join(path.resolve(opts.agentDir), 'skills'), abs) && !abs.split(path.sep).includes('..')) {
+    return true
+  }
+  return isInside(path.resolve(cwd), abs)
+}
+
+function checkSearchAndWalkPaths(cwd, name, args, opts = {}) {
+  if (name === 'locate') return '不允许执行全盘检索命令 locate（请改用 find_files / grep_files）'
+  if (SEARCH_CMDS.has(name)) {
+    let hasExplicitPattern = false
+    let seenDoubleDash = false
+    const positionals = []
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (a === '--' && !seenDoubleDash) { seenDoubleDash = true; continue }
+      if (!seenDoubleDash && a.startsWith('-') && a.length > 1) {
+        if (a === '-e' || a === '-f' || a === '--regexp' || a === '--file') hasExplicitPattern = true
+        if (a.startsWith('--regexp=') || a.startsWith('--file=')) {
+          hasExplicitPattern = true
+          if (a.startsWith('--file=')) {
+            const fp = a.slice('--file='.length)
+            if (!isAllowedReadTarget(cwd, fp, opts)) return `不允许读取或搜索工作区以外的路径：${fp}（请改用 find_files / grep_files，或仅在当前工作区 . 内搜索）`
+          }
+          continue
+        }
+        if (GREP_VALUE_FLAGS.has(a)) {
+          const val = args[++i]
+          if ((a === '-f' || a === '--file') && val && !isAllowedReadTarget(cwd, val, opts)) {
+            return `不允许读取或搜索工作区以外的路径：${val}（请改用 find_files / grep_files，或仅在当前工作区 . 内搜索）`
+          }
+          continue
+        }
+        // 合并短选项如 -rln / -Eef（如果末尾是 e 或 f 且紧跟值）
+        if (/^-[A-Za-z]+[ef]$/.test(a)) {
+          hasExplicitPattern = true
+          const val = args[++i]
+          if (a.endsWith('f') && val && !isAllowedReadTarget(cwd, val, opts)) {
+            return `不允许读取或搜索工作区以外的路径：${val}（请改用 find_files / grep_files，或仅在当前工作区 . 内搜索）`
+          }
+        }
+        continue
+      }
+      positionals.push(a)
+    }
+    const paths = hasExplicitPattern ? positionals : positionals.slice(1)
+    for (const target of paths) {
+      if (!isAllowedReadTarget(cwd, target, opts)) {
+        return `不允许在工作区以外执行全盘或越界搜索：${target}（请改用 find_files / grep_files，或仅在当前工作区 . 内搜索）`
+      }
+    }
+    return null
+  }
+  if (name === 'find') {
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (a === '-H' || a === '-L' || a === '-P' || a === '-E') continue
+      if (a.startsWith('-') || a === '!' || a === '(' || a === ',') break
+      if (!isAllowedReadTarget(cwd, a, opts)) {
+        return `不允许在工作区以外执行全盘或越界遍历：${a}（请改用 find_files，或仅在当前工作区 . 内查找）`
+      }
+    }
+    return null
+  }
+  if (name === 'fd' || name === 'fdfind') {
+    let seenDoubleDash = false
+    const positionals = []
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (a === '--' && !seenDoubleDash) { seenDoubleDash = true; continue }
+      if (!seenDoubleDash && a.startsWith('-') && a.length > 1) {
+        if (a === '--search-path' || a === '-d' || a === '--max-depth' || a === '-e' || a === '--extension' || a === '-E' || a === '--exclude' || a === '-t' || a === '--type') {
+          const val = args[++i]
+          if (a === '--search-path' && val && !isAllowedReadTarget(cwd, val, opts)) {
+            return `不允许在工作区以外执行全盘或越界遍历：${val}（请改用 find_files，或仅在当前工作区 . 内查找）`
+          }
+        } else if (a.startsWith('--search-path=')) {
+          const val = a.slice('--search-path='.length)
+          if (!isAllowedReadTarget(cwd, val, opts)) {
+            return `不允许在工作区以外执行全盘或越界遍历：${val}（请改用 find_files，或仅在当前工作区 . 内查找）`
+          }
+        }
+        continue
+      }
+      positionals.push(a)
+    }
+    for (const target of positionals.slice(1)) {
+      if (!isAllowedReadTarget(cwd, target, opts)) {
+        return `不允许在工作区以外执行全盘或越界遍历：${target}（请改用 find_files，或仅在当前工作区 . 内查找）`
+      }
+    }
+    return null
+  }
+  if (WALK_AND_READ_CMDS.has(name)) {
+    let seenDoubleDash = false
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]
+      if (a === '--' && !seenDoubleDash) { seenDoubleDash = true; continue }
+      if (!seenDoubleDash && a.startsWith('-') && a.length > 1) {
+        if (READ_VALUE_FLAGS.has(a)) i++
+        continue
+      }
+      if (!isAllowedReadTarget(cwd, a, opts)) {
+        return `不允许读取或遍历工作区以外的路径：${a}（请仅访问当前工作区内的文件）`
+      }
+    }
+  }
+  return null
+}
+
 function checkRm(cwd, args) {
   const targets = args.filter((a) => !a.startsWith('-'))
   for (const t of targets) {
@@ -291,6 +408,8 @@ export function checkBash(cwd, command, opts = {}) {
       if (t && t !== '.' && !isInside(path.resolve(cwd), resolveToolPath(cwd, t))) return `不允许进入工作区以外的目录：${t}`
       if (!t) return '不允许进入工作区以外的目录：~'
     }
+    const rSearch = checkSearchAndWalkPaths(cwd, name, args, opts)
+    if (rSearch) return rSearch
   }
   return null
 }
@@ -307,7 +426,7 @@ function checkViteLike(name, args) {
 
 /** Pi tool_call 事件的统一检查。返回原因或 null。 */
 export function checkToolCall(toolName, input, { cwd, projectKind = 'template', agentDir }) {
-  const opts = { projectKind }
+  const opts = { projectKind, agentDir }
   input = input || {}
   switch (toolName) {
     case 'read':

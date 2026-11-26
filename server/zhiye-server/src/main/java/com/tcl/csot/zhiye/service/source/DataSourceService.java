@@ -73,6 +73,31 @@ public class DataSourceService {
         boolean platform() { return workspaceId == null; }
     }
 
+    /**
+     * AGW 数据面（agw_user）鉴权请求头组合：
+     * 不同 AGW 集群/路由在 /agw-api/* 上对用户态令牌的头名与 Bearer 前缀约定可能存在差异，
+     * 默认优先使用 Authentication + X-Project-Id，收到网关 401 时按序自动协商并按网关主机缓存命中模式。
+     */
+    enum AgwUserAuthMode {
+        METIS_AUTHENTICATION,
+        METIS_AUTHORIZATION_BEARER,
+        AGW_JWT_BEARER,
+        AGW_JWT_RAW,
+        METIS_AUTHENTICATION_BEARER;
+
+        static AgwUserAuthMode parse(String raw) {
+            if (raw == null || raw.isBlank() || "auto".equalsIgnoreCase(raw.trim())) return null;
+            return switch (raw.trim().toLowerCase(Locale.ROOT)) {
+                case "metis_authentication", "authentication" -> METIS_AUTHENTICATION;
+                case "metis_authorization_bearer", "metis_bearer" -> METIS_AUTHORIZATION_BEARER;
+                case "agw_jwt_bearer", "jwt_bearer", "authorization_bearer" -> AGW_JWT_BEARER;
+                case "agw_jwt_raw", "jwt_raw", "authorization" -> AGW_JWT_RAW;
+                case "metis_authentication_bearer", "authentication_bearer" -> METIS_AUTHENTICATION_BEARER;
+                default -> null;
+            };
+        }
+    }
+
     private final JdbcClient jdbc;
     private final AppRepository apps;
     private final CloudService cloud;
@@ -80,6 +105,7 @@ public class DataSourceService {
     private final AgwClientTokenService agwClient;
     private final HttpClient http;
     private final SecureRandom random = new SecureRandom();
+    private final java.util.concurrent.ConcurrentHashMap<String, AgwUserAuthMode> agwAuthModeCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     public DataSourceService(JdbcClient jdbc, AppRepository apps, CloudService cloud, SourceProperties props, AgwClientTokenService agwClient) {
         this.jdbc = jdbc;
@@ -215,27 +241,65 @@ public class DataSourceService {
         return call(s, params, appId, origin);
     }
 
-    Map<String, Object> call(Source s, JsonNode params, String appId, String origin) {
+    public Map<String, Object> call(Source s, JsonNode params, String appId, String origin) {
         long start = System.nanoTime();
         Integer status = null;
         try {
-            HttpRequest req = buildRequest(s, params, appId);
-            HttpResponse<InputStream> res;
-            try {
-                res = http.send(req, HttpResponse.BodyHandlers.ofInputStream());
-            } catch (HttpTimeoutException e) {
-                throw new ApiException(HttpStatus.GATEWAY_TIMEOUT, "SOURCE_TIMEOUT", "数据源 " + props.timeoutSeconds() + " 秒内没有响应");
-            } catch (java.io.IOException e) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_UNREACHABLE", "连不上数据源：" + Optional.ofNullable(e.getMessage()).orElse(e.getClass().getSimpleName()));
-            }
+            boolean isAgwUser = "agw_user".equals(s.authType());
+            String loginName = isAgwUser ? workspaceLoginName(s, appId) : null;
+            boolean hasProjectId = s.authHeader() != null && !s.authHeader().isBlank();
+            String cacheKey = isAgwUser ? agwAuthCacheKey(s.url(), hasProjectId) : null;
+            List<AgwUserAuthMode> modes = isAgwUser ? resolveAgwUserModes(cacheKey, hasProjectId) : List.of();
+            AgwUserAuthMode currentMode = modes.isEmpty() ? null : modes.get(0);
+
+            HttpResponse<InputStream> res = sendChecked(buildRequest(s, params, appId, currentMode));
             status = res.statusCode();
-            byte[] body;
-            try (InputStream in = res.body()) {
-                body = in.readNBytes(props.maxResponseBytes() + 1);
+            String text = readBodyText(res);
+
+            // AGW 数据面返回 401（如 invalid request header 或缓存令牌失效）时：
+            // 网关鉴权层已直接拦下未到达业务上游，安全清理令牌缓存并自动协商可用鉴权头组合
+            if (isAgwUser && status == 401) {
+                agwClient.invalidateUser(loginName);
+                List<String> tried = new ArrayList<>();
+                tried.add(String.valueOf(currentMode));
+                // 1) 先用刷新后的新令牌复试首选模式（解决 Metis/AGW 令牌提前失效）
+                HttpResponse<InputStream> retryRes = sendChecked(buildRequest(s, params, appId, currentMode));
+                status = retryRes.statusCode();
+                text = readBodyText(retryRes);
+                res = retryRes;
+                // 2) 若仍为 401，继续尝试其余标准 AGW 请求头组合
+                if (status == 401) {
+                    for (int i = 1; i < modes.size(); i++) {
+                        AgwUserAuthMode alt = modes.get(i);
+                        tried.add(alt.name());
+                        HttpResponse<InputStream> altRes = sendChecked(buildRequest(s, params, appId, alt));
+                        int altStatus = altRes.statusCode();
+                        String altText = readBodyText(altRes);
+                        if (altStatus != 401) {
+                            status = altStatus;
+                            text = altText;
+                            res = altRes;
+                            if (altStatus >= 200 && altStatus < 400 && cacheKey != null) {
+                                agwAuthModeCache.put(cacheKey, alt);
+                                log.info("AGW 数据面鉴权头自动协商成功 key={} hostKey={} mode={}", s.key(), cacheKey, alt);
+                            }
+                            break;
+                        }
+                        status = altStatus;
+                        text = altText;
+                        res = altRes;
+                    }
+                }
+                if (status == 401) {
+                    log.warn("AGW 数据面调用持续返回 401 key={} hostKey={} hasProjectId={} triedModes={} response={}",
+                            s.key(), cacheKey, hasProjectId, tried, snippet(text));
+                    throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_UPSTREAM",
+                            "数据源返回 401：" + snippet(text) + "（已自动尝试多种 AGW/Metis 鉴权头组合，请核对 AGW 接口的鉴权配置与项目授权）");
+                }
+            } else if (isAgwUser && status >= 200 && status < 400 && cacheKey != null && currentMode != null) {
+                agwAuthModeCache.putIfAbsent(cacheKey, currentMode);
             }
-            if (body.length > props.maxResponseBytes())
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_TOO_LARGE", "数据源返回的内容超过 " + (props.maxResponseBytes() / 1024 / 1024) + " MB，请加上分页或筛选参数");
-            String text = new String(body, StandardCharsets.UTF_8);
+
             if (status >= 400)
                 throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_UPSTREAM", "数据源返回 " + status + "：" + snippet(text));
             Object data;
@@ -265,7 +329,72 @@ public class DataSourceService {
         }
     }
 
+    private HttpResponse<InputStream> sendChecked(HttpRequest req) throws InterruptedException {
+        try {
+            return http.send(req, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (HttpTimeoutException e) {
+            throw new ApiException(HttpStatus.GATEWAY_TIMEOUT, "SOURCE_TIMEOUT", "数据源 " + props.timeoutSeconds() + " 秒内没有响应");
+        } catch (java.io.IOException e) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_UNREACHABLE", "连不上数据源：" + Optional.ofNullable(e.getMessage()).orElse(e.getClass().getSimpleName()));
+        }
+    }
+
+    private String readBodyText(HttpResponse<InputStream> res) throws java.io.IOException {
+        byte[] body;
+        try (InputStream in = res.body()) {
+            body = in.readNBytes(props.maxResponseBytes() + 1);
+        }
+        if (body.length > props.maxResponseBytes())
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_TOO_LARGE", "数据源返回的内容超过 " + (props.maxResponseBytes() / 1024 / 1024) + " MB，请加上分页或筛选参数");
+        return new String(body, StandardCharsets.UTF_8);
+    }
+
+    private List<AgwUserAuthMode> resolveAgwUserModes(String cacheKey, boolean hasProjectId) {
+        LinkedHashSet<AgwUserAuthMode> order = new LinkedHashSet<>();
+        AgwUserAuthMode configured = AgwUserAuthMode.parse(agwClient.dataAuthMode());
+        if (configured != null) order.add(configured);
+        if (cacheKey != null) {
+            AgwUserAuthMode cached = agwAuthModeCache.get(cacheKey);
+            if (cached != null) order.add(cached);
+        }
+        if (hasProjectId) {
+            order.add(AgwUserAuthMode.METIS_AUTHENTICATION);
+            order.add(AgwUserAuthMode.METIS_AUTHORIZATION_BEARER);
+            order.add(AgwUserAuthMode.AGW_JWT_BEARER);
+            order.add(AgwUserAuthMode.AGW_JWT_RAW);
+            order.add(AgwUserAuthMode.METIS_AUTHENTICATION_BEARER);
+        } else {
+            order.add(AgwUserAuthMode.AGW_JWT_RAW);
+            order.add(AgwUserAuthMode.AGW_JWT_BEARER);
+            order.add(AgwUserAuthMode.METIS_AUTHORIZATION_BEARER);
+            order.add(AgwUserAuthMode.METIS_AUTHENTICATION);
+        }
+        return List.copyOf(order);
+    }
+
+    private static String agwAuthCacheKey(String url, boolean hasProjectId) {
+        try {
+            URI u = URI.create(url.replace("{", "%7B").replace("}", "%7D"));
+            String host = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.ROOT);
+            int port = u.getPort();
+            return host + (port > 0 ? ":" + port : "") + "|" + (hasProjectId ? "proj" : "noproj");
+        } catch (Exception e) {
+            return "default|" + (hasProjectId ? "proj" : "noproj");
+        }
+    }
+
+    private static String ensureBearer(String token) {
+        if (token == null) return "Bearer ";
+        String t = token.trim();
+        return t.regionMatches(true, 0, "Bearer ", 0, 7) ? t : "Bearer " + t;
+    }
+
     HttpRequest buildRequest(Source s, JsonNode params, String appId) throws Exception {
+        boolean hasProjectId = s.authHeader() != null && !s.authHeader().isBlank();
+        return buildRequest(s, params, appId, hasProjectId ? AgwUserAuthMode.METIS_AUTHENTICATION : AgwUserAuthMode.AGW_JWT_RAW);
+    }
+
+    HttpRequest buildRequest(Source s, JsonNode params, String appId, AgwUserAuthMode agwUserMode) throws Exception {
         Map<String, String> values = checkParams(s, params);
         Map<String, Param> defs = new HashMap<>();
         for (Param p : s.params()) defs.put(p.name(), p);
@@ -307,12 +436,18 @@ public class DataSourceService {
             case "agw_client" -> b.header("Authorization", agwClient.authorization());
             case "agw_user" -> {
                 String loginName = workspaceLoginName(s, appId);
-                if (s.authHeader() != null && !s.authHeader().isBlank()) {
-                    b.header("Authentication", agwClient.metisAccessTokenForUser(loginName));
-                    b.header("X-Project-Id", s.authHeader());
-                } else {
-                    b.header("Authorization", agwClient.authorizationForUser(loginName));
+                boolean hasProjectId = s.authHeader() != null && !s.authHeader().isBlank();
+                AgwUserAuthMode mode = agwUserMode != null ? agwUserMode
+                        : (hasProjectId ? AgwUserAuthMode.METIS_AUTHENTICATION : AgwUserAuthMode.AGW_JWT_RAW);
+                switch (mode) {
+                    case METIS_AUTHENTICATION -> b.header("Authentication", agwClient.metisAccessTokenForUser(loginName));
+                    case METIS_AUTHENTICATION_BEARER -> b.header("Authentication", ensureBearer(agwClient.metisAccessTokenForUser(loginName)));
+                    case METIS_AUTHORIZATION_BEARER -> b.header("Authorization", ensureBearer(agwClient.metisAccessTokenForUser(loginName)));
+                    case AGW_JWT_BEARER -> b.header("Authorization", ensureBearer(agwClient.authorizationForUser(loginName)));
+                    case AGW_JWT_RAW -> b.header("Authorization", agwClient.authorizationForUser(loginName));
                 }
+                if (hasProjectId) b.header("X-Project-Id", s.authHeader());
+                b.header("x-agw-request-id", UUID.randomUUID().toString());
             }
             case "header" -> b.header(s.authHeader(), secret);
             case "basic" -> b.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(secret.getBytes(StandardCharsets.UTF_8)));

@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { checkToolCall, checkBash, checkWritePath, checkReadPath } from '../src/guard.mjs'
+import { createBoundedBashTool, resolveBashTimeoutSec } from '../src/safe-bash.mjs'
 
 const ws = mkdtempSync(path.join(os.tmpdir(), 'guard-'))
 mkdirSync(path.join(ws, 'src'))
@@ -156,4 +157,71 @@ test('云服务规则与云函数：允许 cloud/policies.json、functions/*.ts�
   assert.ok(checkWritePath(cwd, 'functions/sub/x.ts'))
   assert.ok(checkWritePath(cwd, 'functions/run.sh'))
   assert.ok(checkWritePath(cwd, 'cloud/server.js'))
+})
+
+test('bash 拦截全盘/越界搜索与遍历，放行工作区内合法搜索', () => {
+  for (const c of [
+    'grep -rln "TEMPLATE_NODE_MODULES" /',
+    'grep -rn "foo" /usr',
+    'grep -e "bar" /etc/hosts',
+    'grep -f /etc/passwd src/App.tsx',
+    'rg TEMPLATE /',
+    'rg -n "foo" ..',
+    'find / -name "*.jar"',
+    'find .. -type f',
+    'fd main /opt',
+    'ls /',
+    'ls -la ../other',
+    'cat /etc/passwd',
+    'head -n 20 /etc/hosts',
+    'du -sh /',
+    'tree /',
+    'locate pom.xml',
+  ]) {
+    const r = checkBash(ws, c, { projectKind: 'service' })
+    assert.ok(r, `应拦截全盘或越界命令：${c}`)
+    assert.match(r, /不允许/)
+  }
+
+  for (const c of [
+    'grep -rn "http://example.com/a/b" src',
+    'grep -rln "TEMPLATE_NODE_MODULES" .',
+    'grep -e "foo/bar" src/App.tsx',
+    'cat src/App.tsx | grep "a/b"',
+    'find src -maxdepth 2 -name "*.ts"',
+    'ls -la src',
+    'du -sh src',
+  ]) {
+    assert.equal(checkBash(ws, c, { projectKind: 'service' }), null, `应放行工作区内命令：${c}`)
+  }
+})
+
+test('bounded bash 强制默认超时并杀死整个子进程树', async () => {
+  assert.equal(resolveBashTimeoutSec(undefined), 120)
+  assert.equal(resolveBashTimeoutSec(null), 120)
+  assert.equal(resolveBashTimeoutSec(0), 120)
+  assert.equal(resolveBashTimeoutSec(15), 15)
+  assert.equal(resolveBashTimeoutSec(9999), 300)
+
+  const tool = createBoundedBashTool(ws, { defaultTimeoutSec: 1, maxTimeoutSec: 5 })
+  const pidFile = path.join(ws, 'grandchild.pid')
+  const started = Date.now()
+  await assert.rejects(
+    () => tool.execute('call-1', { command: `sleep 30 & echo $! > "${pidFile}"; wait` }),
+    /timed out after 1 seconds/i,
+  )
+  const elapsedMs = Date.now() - started
+  assert.ok(elapsedMs < 6000, `命令应在超时后立即结束，实际耗时 ${elapsedMs}ms`)
+
+  // 确认后台子进程（sleep 30）已随进程组被彻底终止，无残留孤儿进程
+  await new Promise((r) => setTimeout(r, 150))
+  const fs = await import('node:fs')
+  if (fs.existsSync(pidFile)) {
+    const childPid = Number(fs.readFileSync(pidFile, 'utf8').trim())
+    if (Number.isInteger(childPid) && childPid > 0) {
+      let alive = true
+      try { process.kill(childPid, 0) } catch { alive = false }
+      assert.equal(alive, false, `超时后子进程 pid=${childPid} 不应残留存活`)
+    }
+  }
 })

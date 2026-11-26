@@ -50,6 +50,18 @@ public class AgwClientTokenService {
         return metisAccessToken(normalizeUser(loginName));
     }
 
+    /** 上游返回 401 时驱逐该用户的本地 Token 缓存，确保重试时重新向 Metis / AGW 换取新令牌。 */
+    public void invalidateUser(String loginName) {
+        if (blank(loginName)) return;
+        String key = cacheKey(normalizeUser(loginName));
+        agwCache.remove(key);
+        metisCache.remove(key);
+    }
+
+    public String dataAuthMode() {
+        return props == null || blank(props.dataAuthMode()) ? "auto" : props.dataAuthMode().trim();
+    }
+
     private String authorization(String loginName) {
         String cacheKey = cacheKey(loginName);
         Cached hit = agwCache.get(cacheKey);

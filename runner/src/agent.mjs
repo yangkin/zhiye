@@ -17,6 +17,7 @@ import { createEndpointTestExtension } from './endpoint-test.mjs'
 import { createCodeIntelExtension } from './code-intel.mjs'
 import { createPackageInstallExtension } from './package-installer.mjs'
 import { createMcpBridgeExtension } from './mcp-bridge.mjs'
+import { createBoundedBashTool } from './safe-bash.mjs'
 
 export { toolSummary }
 import { emitEvent, log, RunnerError, classifyError } from './util.mjs'
@@ -188,6 +189,7 @@ export class Agent {
       thinkingLevel: THINKING[cmd.thinking] || 'low',
       modelRuntime,
       resourceLoader,
+      customTools: [createBoundedBashTool(cwd, { env })],
       tools: [
         'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files',
         'typecheck_diagnostics', 'code_symbols', 'inspect_source', 'mcp_list', 'mcp_call', 'verify_app',

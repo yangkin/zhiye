@@ -17,7 +17,7 @@ public final class ServiceRuntimeDetector {
 
     public record Spec(
             String runtime,       // python | node | java | go | dockerfile
-            String framework,     // 人类可读框架名称
+            String framework,     // 人类可读框架名称（永不为 null 或空串）
             String frontendDir,   // 前后端一体时的前端子目录（空表示无独立前端）
             String backendDir,    // 后端目录（空表示根目录）
             String buildCmd,      // 推断的构建命令
@@ -26,7 +26,28 @@ public final class ServiceRuntimeDetector {
             String healthPath,    // 健康检查路径
             int memoryMb,         // 推荐内存上限
             int cpuMillicores     // 推荐 CPU 上限
-    ) {}
+    ) {
+        public Spec {
+            runtime = (runtime == null || runtime.isBlank()) ? "node" : runtime.trim();
+            framework = (framework == null || framework.isBlank()) ? defaultFrameworkFor(runtime) : framework.trim();
+            frontendDir = frontendDir == null ? "" : frontendDir.trim();
+            backendDir = backendDir == null ? "" : backendDir.trim();
+            buildCmd = buildCmd == null ? "" : buildCmd.trim();
+            startCmd = startCmd == null ? "" : startCmd.trim();
+            healthPath = (healthPath == null || healthPath.isBlank()) ? "/" : healthPath.trim();
+        }
+    }
+
+    public static String defaultFrameworkFor(String runtime) {
+        if (runtime == null) return "Node.js 服务端";
+        return switch (runtime.trim().toLowerCase(Locale.ROOT)) {
+            case "java" -> "Java (Spring Boot)";
+            case "python" -> "Python";
+            case "go" -> "Go";
+            case "dockerfile" -> "Docker 自定义服务";
+            default -> "Node.js 服务端";
+        };
+    }
 
     private static final List<String> BACKEND_HINTS = List.of("backend", "server", "api", "service", "app");
     private static final List<String> FRONTEND_HINTS = List.of("frontend", "web", "client", "ui", "portal", "admin");
@@ -123,8 +144,11 @@ public final class ServiceRuntimeDetector {
             Optional<Spec> node = detectNodeServer(dir, files, reader);
             if (node.isPresent()) return node;
         } else {
-            // 无 package.json 的零依赖 Node HTTP 服务（例如 node:http 的 server.js / api.mjs）
-            String rawNodeEntry = firstPresent(dir, List.of("server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs"), files);
+            // 无 package.json 的零依赖 Node HTTP 服务（例如 node:http 的 server.js / server/index.mjs）
+            String rawNodeEntry = firstPresent(dir, List.of(
+                    "server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs",
+                    "server/index.mjs", "server/index.js", "server/server.mjs", "server/server.js",
+                    "src/server.mjs", "src/server.js", "src/index.mjs", "src/index.js"), files);
             if (rawNodeEntry == null) rawNodeEntry = findRootByExt(dir, List.of(".mjs", ".js", ".cjs"), files);
             if (rawNodeEntry != null) {
                 String src = safeRead(dir, rawNodeEntry, reader);
@@ -272,7 +296,19 @@ public final class ServiceRuntimeDetector {
 
         String mainEntry = pkg.path("main").asText("").trim();
         String entry = !mainEntry.isEmpty() && has(dir, mainEntry, files) ? mainEntry
-                : firstPresent(dir, List.of("server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs", "src/server.js", "src/index.js"), files);
+                : firstPresent(dir, List.of(
+                        "server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs",
+                        "server/index.mjs", "server/index.js", "server/server.mjs", "server/server.js",
+                        "server/app.mjs", "server/app.js",
+                        "src/server.mjs", "src/server.js", "src/index.mjs", "src/index.js",
+                        "src/app.mjs", "src/app.js"), files);
+        if (entry == null && !startScript.isEmpty()) {
+            Matcher sm = Pattern.compile("\\b([A-Za-z0-9_./-]+\\.(?:mjs|cjs|js))\\b").matcher(startScript);
+            while (sm.find()) {
+                String cand = sm.group(1).replaceFirst("^\\./", "");
+                if (has(dir, cand, files)) { entry = cand; break; }
+            }
+        }
 
         String src = entry == null ? "" : safeRead(dir, entry, reader);
         if (serverFw == null && startScript.isEmpty() && !looksLikeNodeWebSource(src)) return Optional.empty();

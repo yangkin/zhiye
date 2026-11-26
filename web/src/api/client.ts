@@ -207,6 +207,8 @@ export interface HistoryQuery {
   q?: string;
   appId?: string;
   filter?: 'all' | 'favorite' | 'published';
+  startDate?: string;
+  endDate?: string;
 }
 
 /** 创造页的「问一句」：流式读 SSE（delta / done / error），不创建应用。 */

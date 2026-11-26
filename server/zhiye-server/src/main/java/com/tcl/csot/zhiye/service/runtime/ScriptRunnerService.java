@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 
 /**
  * 无页面 Python 3 / Node.js (JS/MJS/CJS) 脚本在线安全执行引擎。
@@ -101,6 +102,12 @@ public class ScriptRunnerService {
         out.put("defaultEntry", entryFiles.isEmpty() ? null : entryFiles.get(0).get("path"));
         out.put("sampleFiles", sampleFiles);
         out.put("history", history);
+        String pyBin = resolvePythonBinary();
+        String nodeBin = resolveNodeBinary();
+        Map<String, Object> runtimes = new LinkedHashMap<>();
+        runtimes.put("python", Map.of("available", pyBin != null));
+        runtimes.put("node", Map.of("available", nodeBin != null));
+        out.put("runtimes", runtimes);
         return out;
     }
 
@@ -137,8 +144,13 @@ public class ScriptRunnerService {
 
             Map<String, Long> beforeSnapshot = snapshotFiles(runDir);
 
+            String binary = isPy ? resolvePythonBinary() : resolveNodeBinary();
+            if (binary == null) {
+                throw runtimeUnavailable(isPy);
+            }
+
             List<String> cmd = new ArrayList<>();
-            cmd.add(isPy ? resolvePythonBinary() : props.nodeBinary());
+            cmd.add(binary);
             cmd.add(rel);
             cmd.addAll(parsedArgs);
 
@@ -160,7 +172,17 @@ public class ScriptRunnerService {
             }
 
             long t0 = System.currentTimeMillis();
-            Process proc = pb.start();
+            Process proc;
+            try {
+                proc = pb.start();
+            } catch (IOException e) {
+                String msg = e.getMessage() == null ? "" : e.getMessage();
+                if (msg.contains("No such file") || msg.contains("error=2") || msg.contains("Cannot run program")) {
+                    throw runtimeUnavailable(isPy);
+                }
+                throw new ApiException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                        "SCRIPT_START_FAILED", "脚本进程启动失败：" + msg);
+            }
 
             // 写入标准输入后关闭 stdin，防止脚本阻塞等待 EOF
             if (stdinText != null && !stdinText.isEmpty()) {
@@ -305,11 +327,66 @@ public class ScriptRunnerService {
         return 4;
     }
 
-    private static String resolvePythonBinary() {
-        for (String candidate : List.of("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3")) {
-            if (Files.isExecutable(Path.of(candidate))) return candidate;
+    String resolvePythonBinary() {
+        return findExecutable(List.of("/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "/usr/bin/python"),
+                List.of("python3", "python"));
+    }
+
+    String resolveNodeBinary() {
+        String configured = props.nodeBinary();
+        List<String> direct = new ArrayList<>();
+        if (configured != null && !configured.isBlank() && (configured.contains("/") || configured.contains("\\"))) {
+            direct.add(configured.trim());
         }
-        return "python3";
+        direct.addAll(List.of("/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node"));
+        String home = System.getProperty("user.home", "");
+        if (!home.isEmpty()) {
+            Path nvm = Path.of(home, ".nvm", "versions", "node");
+            if (Files.isDirectory(nvm)) {
+                try (var stream = Files.list(nvm)) {
+                    stream.filter(Files::isDirectory).sorted(Comparator.reverseOrder())
+                            .map(d -> d.resolve("bin").resolve("node").toString())
+                            .forEach(direct::add);
+                } catch (IOException ignored) {}
+            }
+        }
+        List<String> names = new ArrayList<>();
+        if (configured != null && !configured.isBlank() && !configured.contains("/") && !configured.contains("\\")) {
+            names.add(configured.trim());
+        }
+        if (!names.contains("node")) names.add("node");
+        return findExecutable(direct, names);
+    }
+
+    public static String findExecutable(List<String> explicitPaths, List<String> pathNames) {
+        for (String candidate : explicitPaths) {
+            if (candidate == null || candidate.isBlank()) continue;
+            try {
+                Path p = Path.of(candidate);
+                if (Files.isRegularFile(p) && Files.isExecutable(p)) return p.toAbsolutePath().toString();
+            } catch (Exception ignored) {}
+        }
+        String pathEnv = System.getenv("PATH");
+        if (pathEnv != null && !pathEnv.isBlank()) {
+            String[] dirs = pathEnv.split(Pattern.quote(File.pathSeparator));
+            for (String name : pathNames) {
+                if (name == null || name.isBlank()) continue;
+                for (String dir : dirs) {
+                    if (dir == null || dir.isBlank()) continue;
+                    try {
+                        Path p = Path.of(dir, name);
+                        if (Files.isRegularFile(p) && Files.isExecutable(p)) return p.toAbsolutePath().toString();
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+        return null;
+    }
+
+    private static ApiException runtimeUnavailable(boolean isPy) {
+        String label = isPy ? "Python 3" : "Node.js";
+        return new ApiException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "SCRIPT_RUNTIME_UNAVAILABLE",
+                "当前服务节点未安装 " + label + " 运行时，暂无法在线执行该脚本；请联系运维更新含 python3 / node 的服务镜像，或点击「导出源码」在本地运行");
     }
 
     private static void augmentPath(Map<String, String> env) {

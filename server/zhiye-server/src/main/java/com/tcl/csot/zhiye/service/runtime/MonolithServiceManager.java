@@ -232,7 +232,7 @@ public class MonolithServiceManager {
                 return find(app.id()).orElseThrow();
             } catch (Exception e) {
                 long durationMs = System.currentTimeMillis() - t0;
-                String msg = truncate(e.getMessage(), 4000);
+                String msg = LogRedactor.redact(truncate(e.getMessage(), 4000));
                 var diag = diagnoseFailure(msg, msg, cur, app);
                 jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, duration_ms = ?, error_category = ?, diagnosis_json = ?::jsonb, finished_at = now() where id = ?")
                         .params(msg, msg, durationMs, diag == null ? null : diag.category(), diag == null ? null : Json.write(diag.toMap()), relId).update();
@@ -257,14 +257,23 @@ public class MonolithServiceManager {
         ServiceRow existing = find(app.id()).orElse(null);
         if (existing != null) return;
         checkWorkspaceServiceCount(app.workspaceId(), app.id());
+        String fallbackFw = (app.framework() != null && !app.framework().isBlank())
+                ? app.framework().trim() : ServiceRuntimeDetector.defaultFrameworkFor("node");
         ServiceRuntimeDetector.Spec detected = detectFromCommit(app.id(), ver.gitCommit())
-                .orElse(new ServiceRuntimeDetector.Spec("node", app.framework(), "", "", "", "npm start", 8080, "/", 512, 500));
+                .orElse(new ServiceRuntimeDetector.Spec("node", fallbackFw, "", "", "", "npm start", 8080, "/", 512, 500));
         int initMem = Math.min(Math.max(128, detected.memoryMb()), props.maxMemoryMb());
         int initCpu = Math.min(Math.max(100, detected.cpuMillicores()), props.maxCpuMillicores());
         int initIdle = props.allowNeverSleep()
                 ? Math.max(0, props.defaultIdleSleepMinutes())
                 : Math.max(props.minIdleSleepMinutes(), props.defaultIdleSleepMinutes());
         boolean autoPg = needsManagedPostgres(app.id(), ver.gitCommit());
+        if (autoPg && !dbService.canCreateRole()) {
+            log.warn("当前数据库账号缺少 CREATEROLE 权限，跳过自动启用托管 PG Schema（服务将使用 DATA_DIR 运行）app={}", app.id());
+            logEvent(true, "SERVICE_PG_AUTO_SKIPPED", app,
+                    "当前数据库账号缺少 CREATEROLE 权限，已跳过自动开通托管 PG，服务将使用 DATA_DIR 持久化运行",
+                    null, Map.of("runtime", detected.runtime(), "framework", detected.framework()));
+            autoPg = false;
+        }
         jdbc.sql("insert into app_service (app_id, runtime, framework, frontend_dir, backend_dir, build_cmd, start_cmd, port, health_path, memory_mb, cpu_millicores, idle_sleep_min, pg_enabled, status, desired_version_id) "
                         + "values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
                 .params(app.id(), detected.runtime(), detected.framework(), detected.frontendDir(), detected.backendDir(),
@@ -275,20 +284,65 @@ public class MonolithServiceManager {
                 .params(detected.framework(), app.id()).update();
     }
 
-    /** 自动检测全栈项目是否使用 PostgreSQL（pg/psycopg/spring-postgresql/DATABASE_URL），是则自动开通托管 PG Schema。 */
-    private boolean needsManagedPostgres(String appId, String commit) {
-        for (String p : List.of("package.json", "backend/package.json", "requirements.txt", "backend/requirements.txt",
-                "pom.xml", "backend/pom.xml", "go.mod", "server/index.mjs", "server/index.js", "server/db.mjs")) {
+    /**
+     * 自动检测全栈项目是否实际需要托管 PostgreSQL Schema：
+     * - Java/Spring Boot 项目中 pom.xml 常带可选 postgresql 驱动但 application.properties 排除了 DataSourceAutoConfiguration（走 DATA_DIR），
+     *   因此仅当配置了真实数据源（spring.datasource.url / JDBC_DATABASE_URL / JPA 等）且未排除 DataSourceAutoConfiguration 时才自动开通托管 PG。
+     */
+    boolean needsManagedPostgres(String appId, String commit) {
+        return needsManagedPostgres(p -> {
             try {
-                Optional<byte[]> raw = git.readFile(appId, commit, p);
-                if (raw.isEmpty()) continue;
-                String txt = new String(raw.get(), StandardCharsets.UTF_8);
-                if (p.endsWith("package.json") && txt.contains("\"pg\"")) return true;
-                if (p.endsWith("requirements.txt") && (txt.contains("psycopg") || txt.contains("asyncpg"))) return true;
-                if (p.endsWith("pom.xml") && txt.contains("postgresql")) return true;
-                if (p.endsWith("go.mod") && (txt.contains("pgx") || txt.contains("lib/pq"))) return true;
-                if (txt.contains("DATABASE_URL") || txt.contains("JDBC_DATABASE_URL")) return true;
-            } catch (Exception ignored) {}
+                return git.readFile(appId, commit, p).map(b -> new String(b, StandardCharsets.UTF_8)).orElse(null);
+            } catch (Exception ignored) {
+                return null;
+            }
+        });
+    }
+
+    public static boolean needsManagedPostgres(java.util.function.Function<String, String> reader) {
+        for (String p : List.of("package.json", "backend/package.json", "requirements.txt", "backend/requirements.txt",
+                "go.mod", "backend/go.mod", "server/index.mjs", "server/index.js", "server/db.mjs",
+                "backend/server/index.mjs", "backend/server/index.js")) {
+            String txt = reader.apply(p);
+            if (txt == null || txt.isBlank()) continue;
+            if (p.endsWith("package.json") && txt.contains("\"pg\"")) return true;
+            if (p.endsWith("requirements.txt") && (txt.contains("psycopg") || txt.contains("asyncpg"))) return true;
+            if (p.endsWith("go.mod") && (txt.contains("pgx") || txt.contains("lib/pq"))) return true;
+            if (txt.contains("DATABASE_URL") || txt.contains("JDBC_DATABASE_URL")) return true;
+        }
+        // Java / Spring Boot：结合 application.properties / application.yml 精准判断是否实际启用数据源
+        boolean hasJavaPgDriver = false;
+        boolean hasJavaOrm = false;
+        for (String p : List.of("pom.xml", "backend/pom.xml", "build.gradle", "backend/build.gradle", "build.gradle.kts", "backend/build.gradle.kts")) {
+            String txt = reader.apply(p);
+            if (txt == null || txt.isBlank()) continue;
+            if (txt.contains("postgresql")) hasJavaPgDriver = true;
+            if (txt.contains("spring-boot-starter-data-jpa") || txt.contains("mybatis") || txt.contains("flyway") || txt.contains("liquibase")) {
+                hasJavaOrm = true;
+            }
+        }
+        if (hasJavaPgDriver) {
+            boolean excludesDataSource = false;
+            boolean configuresDataSource = false;
+            for (String p : List.of(
+                    "src/main/resources/application.properties", "backend/src/main/resources/application.properties",
+                    "src/main/resources/application.yml", "backend/src/main/resources/application.yml",
+                    "src/main/resources/application.yaml", "backend/src/main/resources/application.yaml")) {
+                String txt = reader.apply(p);
+                if (txt == null || txt.isBlank()) continue;
+                for (String rawLine : txt.split("\\R")) {
+                    String line = rawLine.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    if (line.contains("DataSourceAutoConfiguration")) excludesDataSource = true;
+                    if (line.contains("spring.datasource.url") || line.contains("JDBC_DATABASE_URL")
+                            || line.contains("DATABASE_URL") || line.startsWith("datasource:")) {
+                        configuresDataSource = true;
+                    }
+                }
+            }
+            if (configuresDataSource) return true;
+            if (excludesDataSource) return false;
+            return hasJavaOrm;
         }
         return false;
     }
@@ -388,10 +442,11 @@ public class MonolithServiceManager {
                         Map.of("runtime", s.runtime(), "provider", provider.name(), "slug", app.slug()));
                 return endpoint;
             } catch (Exception e) {
+                String safeMsg = LogRedactor.redact(truncate(e.getMessage(), 4000));
                 jdbc.sql("update app_service set status = 'failed', last_error = ?, updated_at = now() where app_id = ?")
-                        .params(truncate(e.getMessage(), 2000), appId).update();
-                logEvent(false, "SERVICE_WAKE", app, "单体服务唤醒失败：" + app.name() + " · " + truncate(e.getMessage(), 180),
-                        truncate(e.getMessage(), 4000), Map.of("runtime", s.runtime(), "provider", provider.name()));
+                        .params(truncate(safeMsg, 2000), appId).update();
+                logEvent(false, "SERVICE_WAKE", app, "单体服务唤醒失败：" + app.name() + " · " + truncate(safeMsg, 180),
+                        safeMsg, Map.of("runtime", s.runtime(), "provider", provider.name()));
                 throw e;
             } finally {
                 GitService.deleteRecursively(tempSrc);
@@ -1074,7 +1129,7 @@ public class MonolithServiceManager {
             return find(app.id()).orElseThrow();
         } catch (Exception e) {
             long durationMs = System.currentTimeMillis() - t0;
-            String msg = truncate(e.getMessage(), 4000);
+            String msg = LogRedactor.redact(truncate(e.getMessage(), 4000));
             var diag = diagnoseFailure(msg, msg, cur, app);
             jdbc.sql("update app_service_release set status = 'failed', error = ?, build_log = ?, duration_ms = ?, error_category = ?, diagnosis_json = ?::jsonb, finished_at = now() where id = ?")
                     .params(msg, msg, durationMs, diag == null ? null : diag.category(), diag == null ? null : Json.write(diag.toMap()), relId).update();
@@ -1124,7 +1179,7 @@ public class MonolithServiceManager {
             return find(app.id()).orElseThrow();
         } catch (Exception e) {
             long durationMs = System.currentTimeMillis() - t0;
-            String msg = truncate(e.getMessage(), 4000);
+            String msg = LogRedactor.redact(truncate(e.getMessage(), 4000));
             var diag = diagnoseFailure(msg, msg, cur, app);
             boolean stillAlive = provider.isRunning(app.id(), app.slug());
             jdbc.sql("update app_service set status = ?, last_error = ?, build_log = ?, updated_at = now() where app_id = ?")

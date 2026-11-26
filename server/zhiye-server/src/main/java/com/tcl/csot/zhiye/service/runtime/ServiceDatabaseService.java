@@ -1,6 +1,7 @@
 package com.tcl.csot.zhiye.service.runtime;
 
 import com.tcl.csot.zhiye.exception.ApiException;
+import com.tcl.csot.zhiye.util.LogRedactor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +52,46 @@ public class ServiceDatabaseService {
         return "zhiye_svc_" + clean;
     }
 
+    /** 检查当前平台数据库账号是否具备创建应用独立隔离角色（CREATEROLE / SUPERUSER）的权限。 */
+    public boolean canCreateRole() {
+        try {
+            Boolean ok = jdbc.sql("select coalesce(rolsuper or rolcreaterole, false) from pg_roles where rolname = current_user")
+                    .query(Boolean.class).optional().orElse(false);
+            return Boolean.TRUE.equals(ok);
+        } catch (Exception e) {
+            log.debug("检测 PG CREATEROLE 权限失败: {}", sanitizeDbError(e, null));
+            return false;
+        }
+    }
+
+    /**
+     * 剥离 Spring JdbcClient 异常里带有的原始 SQL（防止 CREATE/ALTER ROLE 中的明文密码泄露到日志与接口响应），
+     * 优先返回 PostgreSQL 服务端可读错误摘要并做脱敏。
+     */
+    public static String sanitizeDbError(Throwable e, String secretToMask) {
+        String msg = null;
+        Throwable cur = e;
+        int depth = 0;
+        // 优先取底层 JDBC SQLException（如 PostgreSQL PSQLException），其消息仅含数据库错误原因，不含 Spring 拼接的原始 SQL
+        while (cur != null && depth++ < 12) {
+            if (cur instanceof java.sql.SQLException se && se.getMessage() != null && !se.getMessage().isBlank()) {
+                msg = se.getMessage();
+                break;
+            }
+            cur = cur.getCause();
+        }
+        if (msg == null) {
+            msg = e == null || e.getMessage() == null ? "数据库操作失败" : e.getMessage();
+        }
+        // 剥离任何可能残留的 [create/alter role ...] 原始 SQL 片段
+        msg = msg.replaceAll("(?is)\\[\\s*(?:create|alter)\\s+role\\b[^\\]]*]", "[REDACTED SQL]");
+        msg = LogRedactor.redact(msg);
+        if (secretToMask != null && !secretToMask.isEmpty()) {
+            msg = msg.replace(secretToMask, "***");
+        }
+        return msg;
+    }
+
     public ProvisionedDb ensureSchema(String appId, String existingSchema, String existingRole, String existingPasswordEnc) {
         String schema = (existingSchema != null && SAFE_IDENT.matcher(existingSchema).matches())
                 ? existingSchema : schemaNameFor(appId);
@@ -90,9 +131,10 @@ public class ServiceDatabaseService {
                 passPlain = candidatePass;
                 passEnc = crypto.encrypt(candidatePass);
             } catch (Exception e) {
-                log.error("创建独立 PG 隔离角色失败，拒绝回退平台凭据 app={} schema={}: {}", appId, schema, e.getMessage());
+                String safeErr = sanitizeDbError(e, candidatePass);
+                log.error("创建独立 PG 隔离角色失败，拒绝回退平台凭据 app={} schema={}: {}", appId, schema, safeErr);
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_DB_PROVISION_FAILED",
-                        "托管数据库隔离账号创建失败，出于安全要求已拒绝启用（严禁回退平台主库凭据；请确认数据库账号具备 CREATEROLE 权限）：" + e.getMessage());
+                        "托管数据库隔离账号创建失败，出于安全要求已拒绝启用（严禁回退平台主库凭据；请确认数据库账号具备 CREATEROLE 权限）：" + safeErr);
             }
         } else {
             if (role.equals(datasourceUser)) {
@@ -310,7 +352,7 @@ public class ServiceDatabaseService {
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
-            throw ApiException.validation("SQL 执行失败：" + e.getMessage());
+            throw ApiException.validation("SQL 执行失败：" + sanitizeDbError(e, passPlain));
         }
     }
 

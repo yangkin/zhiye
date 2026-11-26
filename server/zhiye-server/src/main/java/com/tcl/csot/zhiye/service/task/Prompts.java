@@ -25,7 +25,7 @@ public final class Prompts {
         sb.append('\n');
     }
 
-    static String generate(AppRow app, List<String> assetPaths) {
+    public static String generate(AppRow app, List<String> assetPaths) {
         if (app.isSkill()) return generateSkill(app, assetPaths);
         if (app.isService()) return generateService(app, assetPaths);
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
@@ -63,13 +63,23 @@ public final class Prompts {
                 || Catalog.looksLikeVueSpringBoot(app.prompt()));
         StringBuilder sb = new StringBuilder();
         if (cleanWs) {
-            sb.append("当前是一个干净的自由全栈工作区（未预塞固定模板）。请直接根据用户需求自主选择最合适的技术栈、目录结构与架构并完整实现。\n\n");
+            sb.append("当前是一个干净的自由全栈工作区（未预塞固定模板）。请严格按照用户指定的技术栈与架构自主规划目录并完整实现。\n\n");
+            if (Catalog.looksLikeJavaBackend(app.prompt())) {
+                sb.append("**技术栈强约束**：用户明确指定了 Java / Spring Boot 后端，请基于 Java + Maven（`pom.xml`）实现后端服务，严禁擅自改用 Node.js / Express / Python 替代。\n\n");
+            }
         } else if (vueSpring) {
-            sb.append("当前工作区预置了 Vue 3 + Spring Boot 加速骨架（仅作为可选起点；如需求需要可自由调整目录结构与实现方式）。请实现下面这个全栈应用：\n\n");
+            sb.append("当前工作区已预置官方 **Vue 3 + Java Spring Boot** 离线加速骨架（`frontend/` 为 Vue 3 + Vite + TypeScript + Tailwind，`backend/` 为 Java 17 + Spring Boot 3.5 + Maven，本地 `.m2` 仓库已预热离线依赖）。请严格遵循该技术栈实现下面这个全栈应用：\n\n");
         } else {
             sb.append("当前工作区预置了前后端一体加速骨架（仅作为可选起点；如果用户指定了其他技术栈或架构，请自由调整目录、实现对应技术栈并通过 `zhiye.yaml` 声明工作流）。请实现下面这个应用：\n\n");
         }
-        sb.append("## 平台运行态契约（不绑定模板）\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+        if (vueSpring) {
+            sb.append("## 技术栈硬性要求（Vue 3 + Java Spring Boot）\n").append(Catalog.VUE_SPRINGBOOT_HINT).append("\n")
+                    .append("- **严禁偷换后端技术栈**：必须在 `backend/` 下保留并使用 `pom.xml` 与 Java 源码（`backend/src/main/java/...`）实现全部后端 API，**严禁**删除 `backend/pom.xml` 或用 `backend/package.json` / Node.js / Express / Python 替代 Java 后端。\n")
+                    .append("- **离线构建规范**：先阅读内置技能 `vue-springboot-enterprise`；前端在 `frontend/` 下使用已预装依赖构建，后端使用 `mvn -B -o -DskipTests package` 离线打包（仅使用 `pom.xml` 已声明并预热的 Spring Boot 3.5 Web / JDBC / Jackson / PostgreSQL 依赖，不要引入未预热的冷门三方 Maven 依赖）。\n")
+                    .append("- **持久化与免 DB 启动兜底**：优先兼容 `DATA_DIR` JSON/文件持久化（保留 `DataSourceAutoConfiguration` 排除，除非用户显式要求 PostgreSQL 且配置 `JDBC_DATABASE_URL`），确保不依赖数据库 `CREATEROLE` 权限即可一键托管启动。\n\n");
+        } else {
+            sb.append("## 平台运行态契约（不绑定模板）\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+        }
         sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
         if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
         sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())

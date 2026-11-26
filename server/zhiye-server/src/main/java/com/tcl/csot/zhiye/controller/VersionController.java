@@ -49,8 +49,10 @@ public class VersionController {
 
     @GetMapping("/history")
     public List<Map<String, Object>> history(@RequestParam(required = false) String q, @RequestParam(required = false) String appId,
-                                             @RequestParam(required = false, defaultValue = "all") String filter) {
-        return versions.history(ws(), q, appId, filter);
+                                             @RequestParam(required = false, defaultValue = "all") String filter,
+                                             @RequestParam(required = false) String startDate,
+                                             @RequestParam(required = false) String endDate) {
+        return versions.history(ws(), q, appId, filter, startDate, endDate);
     }
 
     @PatchMapping("/versions/{id}")

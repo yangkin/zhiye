@@ -54,7 +54,16 @@ public final class Catalog {
     }
 
     private static final java.util.regex.Pattern SPRING_BOOT_HINT = java.util.regex.Pattern.compile(
-            "(spring\\s*boot|springboot|java\\s*(?:\\d+\\s*)?[+＋&与和/]\\s*vue(?:\\s*3)?|vue(?:\\s*3)?\\s*[+＋&与和/]\\s*java|java\\s*后端|spring\\s*mvc)",
+            "(spring\\s*boot|springboot|spring\\s*mvc"
+                    + "|java\\s*(?:\\d+\\s*)?(?:后端)?\\s*[+＋&与和/，,、]\\s*(?:前端\\s*(?:用|采用|使用)?\\s*)?vue(?:\\s*3)?"
+                    + "|vue(?:\\s*3)?\\s*(?:前端|界面)?\\s*[+＋&与和/，,、]\\s*(?:后端\\s*(?:用|采用|使用)?\\s*)?java"
+                    + "|前端\\s*(?:用|采用|使用)?\\s*vue(?:\\s*3)?[^\\n。！？]{0,30}后端\\s*(?:用|采用|使用)?\\s*java"
+                    + "|后端\\s*(?:用|采用|使用)?\\s*java[^\\n。！？]{0,30}前端\\s*(?:用|采用|使用)?\\s*vue(?:\\s*3)?"
+                    + "|java\\s*后端|后端\\s*(?:用|采用|使用)\\s*java)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private static final java.util.regex.Pattern NO_TEMPLATE_HINT = java.util.regex.Pattern.compile(
+            "(不要模板|不用模板|从零搭建|自定义架构|自由架构)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private static final java.util.regex.Pattern CUSTOM_STACK_HINT = java.util.regex.Pattern.compile(
@@ -62,18 +71,31 @@ public final class Catalog {
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private static final java.util.regex.Pattern REACT_HINT = java.util.regex.Pattern.compile("\\breact\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern VUE_HINT = java.util.regex.Pattern.compile("\\bvue(?:\\s*3)?\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
 
-    /** 用户明确要求 Vue + Spring Boot 时，可用官方预热的 vue-springboot-template 作为可选加速起点。 */
+    /** 用户明确要求 Java / Spring Boot 后端时返回 true。 */
+    public static boolean looksLikeJavaBackend(String prompt) {
+        return prompt != null && !prompt.isBlank() && SPRING_BOOT_HINT.matcher(prompt).find();
+    }
+
+    /** 用户明确要求 Vue + Spring Boot / Vue + Java 时，使用官方预热的 vue-springboot-template 作为骨架。 */
     public static boolean looksLikeVueSpringBoot(String prompt) {
         if (prompt == null || prompt.isBlank()) return false;
-        return SPRING_BOOT_HINT.matcher(prompt).find() && !REACT_HINT.matcher(prompt).find() && !CUSTOM_STACK_HINT.matcher(prompt).find();
+        if (!SPRING_BOOT_HINT.matcher(prompt).find()) return false;
+        if (NO_TEMPLATE_HINT.matcher(prompt).find()) return false;
+        // 仅当明确指定 React 且未指定 Vue（如 "Spring Boot + React"）时，不套 Vue 骨架
+        if (REACT_HINT.matcher(prompt).find() && !VUE_HINT.matcher(prompt).find()) return false;
+        return !CUSTOM_STACK_HINT.matcher(prompt).find() || VUE_HINT.matcher(prompt).find();
     }
 
     /** 用户要求 Python/Go/Rust/SpringBoot+React/Next.js 或明确拒绝固定模板时，初始化干净自由工作区，避免硬塞错误模板。 */
     public static boolean prefersCleanWorkspace(String prompt) {
         if (prompt == null || prompt.isBlank()) return false;
-        if (CUSTOM_STACK_HINT.matcher(prompt).find()) return true;
-        return SPRING_BOOT_HINT.matcher(prompt).find() && REACT_HINT.matcher(prompt).find();
+        if (NO_TEMPLATE_HINT.matcher(prompt).find()) return true;
+        if (SPRING_BOOT_HINT.matcher(prompt).find()) {
+            return REACT_HINT.matcher(prompt).find() && !VUE_HINT.matcher(prompt).find();
+        }
+        return CUSTOM_STACK_HINT.matcher(prompt).find();
     }
 
     public static final String VUE_SPRINGBOOT_HINT = "全栈应用（Vue 3 + Spring Boot）：前端在 frontend/（Vue 3 + Vite + TypeScript + Tailwind），"

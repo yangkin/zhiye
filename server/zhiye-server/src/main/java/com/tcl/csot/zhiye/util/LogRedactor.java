@@ -19,6 +19,10 @@ public final class LogRedactor {
             "\\b(postgresql|postgres|mysql|redis|amqps?|mongodb)://([^:@/\\s]+):([^@/\\s]+)@");
     private static final Pattern KV_SECRETS = Pattern.compile(
             "(?i)((?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|client_secret)\\s*[:=]\\s*[\"']?)[^\\s\"',;}{)]{6,}");
+    private static final Pattern SQL_PASSWORD_SINGLE = Pattern.compile(
+            "(?i)(\\b(?:with\\s+)?(?:encrypted\\s+|unencrypted\\s+)?password\\s+)'[^']*'");
+    private static final Pattern SQL_PASSWORD_DOUBLE = Pattern.compile(
+            "(?i)(\\b(?:with\\s+)?(?:encrypted\\s+|unencrypted\\s+)?password\\s+)\"[^\"]*\"");
 
     private LogRedactor() {}
 
@@ -29,6 +33,8 @@ public final class LogRedactor {
         out = HEADER_SECRETS.matcher(out).replaceAll("$1***");
         out = SK_KEY.matcher(out).replaceAll("sk-***");
         out = DB_URI_CREDS.matcher(out).replaceAll("$1://$2:***@");
+        out = SQL_PASSWORD_SINGLE.matcher(out).replaceAll("$1'***'");
+        out = SQL_PASSWORD_DOUBLE.matcher(out).replaceAll("$1\"***\"");
         out = KV_SECRETS.matcher(out).replaceAll("$1***");
         return out;
     }

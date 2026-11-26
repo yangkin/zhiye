@@ -54,10 +54,26 @@ COPY server/zhiye-server/target/zhiye-server.jar /zhiye-server.jar
 FROM jar-${JAR_SOURCE} AS jar
 
 FROM ${DENO_IMAGE} AS deno
+FROM ${NODE_IMAGE} AS node-bin
 
 # ---------- 运行镜像 ----------
 FROM ${JRE_IMAGE}
-RUN set -eux; groupadd -g 10001 zhiye; useradd -u 10001 -g 10001 -M -d /var/lib/zhiye -s /usr/sbin/nologin zhiye; \
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+COPY --from=node-bin /usr/local/bin/node /usr/local/bin/node
+RUN set -eux; \
+    if [ -n "${APT_MIRROR}" ]; then \
+      if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+        sed -i "s|archive.ubuntu.com|${APT_MIRROR}|g; s|security.ubuntu.com|${APT_MIRROR}|g; s|ports.ubuntu.com|${APT_MIRROR}|g" /etc/apt/sources.list.d/ubuntu.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s|archive.ubuntu.com|${APT_MIRROR}|g; s|security.ubuntu.com|${APT_MIRROR}|g; s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3 ca-certificates libstdc++6 libatomic1; \
+    rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man; \
+    ln -sf /usr/bin/python3 /usr/local/bin/python; \
+    node --version && python3 --version; \
+    groupadd -g 10001 zhiye; useradd -u 10001 -g 10001 -M -d /var/lib/zhiye -s /usr/sbin/nologin zhiye; \
     mkdir -p /opt/zhiye/server /var/lib/zhiye/runtime; chown -R 10001:10001 /var/lib/zhiye
 COPY --from=web /src/web/dist /opt/zhiye/web/dist
 COPY packages/app-template /opt/zhiye/packages/app-template
@@ -74,6 +90,7 @@ COPY --from=jar /zhiye-server.jar /opt/zhiye/server/zhiye-server.jar
 
 ENV ZHIYE_ROOT=/opt/zhiye \
     ZHIYE_RUNTIME_DIR=/var/lib/zhiye/runtime \
+    ZHIYE_NODE_BINARY=/usr/local/bin/node \
     SPRING_PROFILES_ACTIVE=api \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8"

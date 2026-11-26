@@ -684,51 +684,61 @@ export function CreatePage() {
                   <em>{count}</em>
                 </button>
               ))}
-              <div className="tpl-gal-nav-title" style={{ marginTop: 14 }}>应用形态</div>
-              <div className="tpl-gal-types">
-                <button
-                  type="button"
-                  className={galleryType === '全部' ? 'active' : ''}
-                  onClick={() => {
-                    setGalleryType('全部');
-                    setGalleryDomain('全部');
-                  }}
-                >
-                  全部
-                </button>
-                {APP_TYPES.map((tp) => (
-                  <button
-                    key={tp}
-                    type="button"
-                    className={galleryType === tp ? 'active' : ''}
-                    onClick={() => {
-                      setGalleryType(tp);
-                      setGalleryDomain('全部');
-                    }}
-                  >
-                    {tp}
-                  </button>
-                ))}
-              </div>
             </aside>
             <section className="tpl-gal-main">
               <div className="tpl-gal-toolbar">
-                <label className="template-search tpl-gal-search" aria-label="在模板库中搜索">
-                  <Icon name="search" />
-                  <input
-                    type="text"
-                    autoFocus
-                    value={galleryQuery}
-                    onChange={(e) => setGalleryQuery(e.target.value)}
-                    placeholder="搜索模板标题、行业场景或能力关键词（如 良率、飞书、Excel、审批）…"
-                  />
-                  {galleryQuery ? (
-                    <button type="button" className="template-search-clear" aria-label="清空搜索" onClick={() => setGalleryQuery('')}>
-                      <Icon name="close" />
+                <div className="tpl-gal-toolbar-top">
+                  <label className="template-search tpl-gal-search" aria-label="在模板库中搜索">
+                    <Icon name="search" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={galleryQuery}
+                      onChange={(e) => setGalleryQuery(e.target.value)}
+                      placeholder="搜索模板标题、行业场景或能力关键词（如 良率、飞书、Excel、审批）…"
+                    />
+                    {galleryQuery ? (
+                      <button type="button" className="template-search-clear" aria-label="清空搜索" onClick={() => setGalleryQuery('')}>
+                        <Icon name="close" />
+                      </button>
+                    ) : null}
+                  </label>
+                  <span className="tpl-gal-count">匹配 <b>{galleryTemplates.length}</b> 个模板</span>
+                </div>
+                <div className="tpl-gal-type-bar" role="tablist" aria-label="按应用形态筛选">
+                  <span className="tpl-gal-type-label">应用形态</span>
+                  <div className="tpl-gal-type-pills">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={galleryType === '全部'}
+                      className={galleryType === '全部' ? 'active' : ''}
+                      onClick={() => {
+                        setGalleryType('全部');
+                        setGalleryDomain('全部');
+                      }}
+                    >
+                      <span>全部形态</span>
+                      <em>{TEMPLATES.length}</em>
                     </button>
-                  ) : null}
-                </label>
-                <span className="tpl-gal-count">匹配 {galleryTemplates.length} 个模板</span>
+                    {APP_TYPES.map((tp) => (
+                      <button
+                        key={tp}
+                        type="button"
+                        role="tab"
+                        aria-selected={galleryType === tp}
+                        className={galleryType === tp ? 'active' : ''}
+                        onClick={() => {
+                          setGalleryType(tp);
+                          setGalleryDomain('全部');
+                        }}
+                      >
+                        <span>{tp}</span>
+                        <em>{templatesOf(tp).length}</em>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               {galleryTemplates.length > 0 ? (
                 <div className="tpl-gal-scroll">
