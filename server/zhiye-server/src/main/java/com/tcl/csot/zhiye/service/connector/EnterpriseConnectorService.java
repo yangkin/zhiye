@@ -55,11 +55,87 @@ public class EnterpriseConnectorService {
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
     // 本地沙箱模式下的多维表格模拟存储（connectorId -> recordId -> fields）
     private final ConcurrentHashMap<String, LinkedHashMap<String, Map<String, Object>>> sandboxBitables = new ConcurrentHashMap<>();
+    private final String appTokenSigningKey;
 
     public EnterpriseConnectorService(JdbcClient jdbc, ServiceCrypto crypto) {
         this.jdbc = jdbc;
         this.crypto = crypto;
+        String envKey = System.getenv("ZHIYE_CONNECTOR_TOKEN_SECRET");
+        this.appTokenSigningKey = (envKey != null && !envKey.isBlank()) ? envKey : "zhiye-app-connector-bridge-v1-dev";
         seedSandboxBitable();
+    }
+
+    /** 为单体全栈应用签发受控连接器网关令牌（仅标识 appId，不含任何飞书真实密钥）。 */
+    public String issueAppConnectorToken(String appId) {
+        if (appId == null || appId.isBlank()) return "";
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(appTokenSigningKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            String sig = HexFormat.of().formatHex(mac.doFinal(appId.getBytes(StandardCharsets.UTF_8)));
+            return "zct1." + appId + "." + sig;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 校验单体应用连接器网关令牌并返回其 appId。 */
+    public String verifyAppConnectorToken(String authHeaderOrToken) {
+        String raw = authHeaderOrToken == null ? "" : authHeaderOrToken.trim();
+        if (raw.startsWith("Bearer ")) raw = raw.substring(7).trim();
+        String[] parts = raw.split("\\.");
+        if (parts.length != 3 || !"zct1".equals(parts[0]) || parts[1].isBlank()) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CONNECTOR_TOKEN", "无效的应用连接器令牌");
+        }
+        String expected = issueAppConnectorToken(parts[1]);
+        if (!java.security.MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), raw.getBytes(StandardCharsets.UTF_8))) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CONNECTOR_TOKEN", "应用连接器令牌验签失败");
+        }
+        return parts[1];
+    }
+
+    /** 将工作空间可用企业连接器清单（完全脱敏，无密钥）写入 .zhiye/connectors.json 供编码智能体查阅。 */
+    public void writeConnectorsCatalogForAgent(java.nio.file.Path agentDir, String ws) {
+        try {
+            List<Map<String, Object>> enabled = list(ws).stream()
+                    .filter(c -> Boolean.TRUE.equals(c.get("enabled")))
+                    .toList();
+            java.nio.file.Files.createDirectories(agentDir);
+            java.nio.file.Files.writeString(agentDir.resolve("connectors.json"),
+                    Json.write(Map.of("connectors", enabled)), StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            log.warn("写入连接器清单失败: {}", e.getMessage());
+        }
+    }
+
+    /** 为编码智能体提示词生成简洁清晰的「平台已托管企业连接器与调用方式」段落，确保 AI 直接调用真连接器而非瞎写 fetch。 */
+    public String promptGuideForAgent(String ws, boolean isService, boolean cloudEnabled) {
+        List<Map<String, Object>> enabled = list(ws).stream()
+                .filter(c -> Boolean.TRUE.equals(c.get("enabled")))
+                .toList();
+        if (enabled.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\n## 平台已托管企业连接器（免密直连，严禁在源码硬编码飞书密钥或前端直连 open.feishu.cn）\n");
+        sb.append("当前可用连接器清单（详单见 `.zhiye/connectors.json`）：\n");
+        for (Map<String, Object> c : enabled) {
+            sb.append("- `").append(c.get("id")).append("` — **").append(c.get("name")).append("**")
+                    .append("（类型：`").append(c.get("kind")).append("`，模式：`").append(c.get("mode")).append("`）\n");
+        }
+        if (isService) {
+            sb.append("""
+                    - **单体全栈后端调用方式（已自动注入环境变量 `ZHIYE_CONNECTOR_API` 与 `ZHIYE_CONNECTOR_TOKEN`，无需用户手动配密钥）**：
+                      - 发飞书卡片：`POST ${ZHIYE_CONNECTOR_API}/feishu/send-card`，Header `Authorization: Bearer ${ZHIYE_CONNECTOR_TOKEN}`，Body `{ connectorId, title, content, templateColor: "blue"|"green"|"orange"|"red", fields: [{label, value}] }`
+                      - 飞书多维表格 CRUD：`POST ${ZHIYE_CONNECTOR_API}/bitable/list`、`.../bitable/create`（`{ connectorId, fields }`）、`.../bitable/update`（`{ connectorId, recordId, fields }`）
+                      - 查企业员工目录：`POST ${ZHIYE_CONNECTOR_API}/org/employees`（`{ q }`）
+                    """);
+        }
+        if (cloudEnabled || !isService) {
+            sb.append("""
+                    - **云函数（`functions/*.ts`）调用方式（Deno 宿主已原生注入，零密钥泄露）**：
+                      - `await ctx.feishu.sendCard({ connectorId, title, content, templateColor, fields })`
+                      - `await ctx.bitable.list(connectorId)` / `await ctx.bitable.create(connectorId, fields)` / `await ctx.bitable.update(connectorId, recordId, fields)`
+                      - `await ctx.org.searchEmployees(q)`
+                    """);
+        }
+        return sb.toString();
     }
 
     private void seedSandboxBitable() {

@@ -96,6 +96,9 @@ public class TaskExecutor {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.LiveWorkspaceService liveWorkspace;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService enterpriseConnectors;
+
     public TaskExecutor(TaskRepository tasks, TaskEvents events, TaskSignals signals, TaskService taskService,
                         AppRepository apps, MessageRepository messages, DraftRepository drafts, VersionRepository versions,
                         VersionService versionService, GitService git, SandboxProvider sandbox, TaskTokenService tokens,
@@ -548,9 +551,12 @@ public class TaskExecutor {
                 log.warn("写入全栈运行态快照失败 app={}：{}", app.id(), e.getMessage());
             }
         }
-        // Harness V2：写入企业 MCP 清单（脱敏）+ 绑定数据源探测快照，供智能体 mcp_list/mcp_call 与 inspect_source 使用
+        // Harness V2：写入企业 MCP 清单（脱敏）+ 企业连接器清单 + 绑定数据源探测快照，供智能体调用
         if (mcpRegistry != null) {
             mcpRegistry.writeCatalogForAgent(ctx.agentDir);
+        }
+        if (enterpriseConnectors != null && !app.isSkill()) {
+            enterpriseConnectors.writeConnectorsCatalogForAgent(ctx.agentDir, app.workspaceId());
         }
         if (!app.isSkill()) {
             writeSourcesInspectSnapshot(ctx.agentDir, app.id());
@@ -601,6 +607,10 @@ public class TaskExecutor {
         phase(ctx, "RUNNING", "正在编写代码", 20);
         String instruction = modify ? Prompts.modify(input.path("content").asText(), elementContext, app.projectKind())
                 : Prompts.generate(app, assetPaths(app, app.assetIds()));
+        if (!app.isSkill() && enterpriseConnectors != null) {
+            String connGuide = enterpriseConnectors.promptGuideForAgent(app.workspaceId(), app.isService(), cloudOn);
+            if (!connGuide.isBlank()) instruction = instruction + connGuide;
+        }
         if (modify && !msgAssets.isEmpty()) {
             StringBuilder sb = new StringBuilder("\n\n## 用户这次附带的素材（已放进项目）\n");
             for (String p : assetPaths(app, msgAssets)) {
@@ -1101,6 +1111,10 @@ public class TaskExecutor {
         } else if (app.isService() && Files.isRegularFile(ctx.workspace.resolve("package.json")) && Files.isRegularFile(ctx.workspace.resolve("server/index.mjs"))) {
             Path nm = props.runtimePath().resolve("fullstack-template-cache/node_modules");
             Path link = ctx.workspace.resolve("node_modules");
+            if (Files.isDirectory(nm) && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) Files.createSymbolicLink(link, nm);
+        } else if (app.isService() && Files.isRegularFile(ctx.workspace.resolve("frontend/package.json"))) {
+            Path nm = props.runtimePath().resolve("vue-template-cache/node_modules");
+            Path link = ctx.workspace.resolve("frontend/node_modules");
             if (Files.isDirectory(nm) && !Files.exists(link, LinkOption.NOFOLLOW_LINKS)) Files.createSymbolicLink(link, nm);
         }
     }

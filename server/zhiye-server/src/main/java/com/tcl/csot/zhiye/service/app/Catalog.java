@@ -41,6 +41,21 @@ public final class Catalog {
         if (prompt == null || prompt.isBlank()) return false;
         return SCRIPT_HINT.matcher(prompt).find() && !WEB_HINT.matcher(prompt).find();
     }
+
+    private static final java.util.regex.Pattern SPRING_BOOT_HINT = java.util.regex.Pattern.compile(
+            "(spring\\s*boot|springboot|java\\s*[+＋&与和]\\s*vue|vue\\s*[+＋&与和]\\s*java|java后端|spring\\s*mvc)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** 用户明确要求 Vue + Spring Boot / Java 全栈时，走官方预热的 vue-springboot-template 骨架。 */
+    public static boolean looksLikeVueSpringBoot(String prompt) {
+        if (prompt == null || prompt.isBlank()) return false;
+        return SPRING_BOOT_HINT.matcher(prompt).find();
+    }
+
+    public static final String VUE_SPRINGBOOT_HINT = "全栈应用（Vue 3 + Spring Boot）：前端在 frontend/（Vue 3 + Vite + TypeScript + Tailwind），"
+            + "后端在 backend/（Spring Boot 3.5 + Java 17 + Maven，入口 Application.java）。"
+            + "后端通过 server.port=${PORT:8080} 监听，保留 GET /api/health，数据优先支持托管 PG（JDBC_DATABASE_URL）并兼容 DATA_DIR 本地持久化，"
+            + "企业飞书/多维表格/员工目录直接注入 ConnectorClient 免密调用；前端请求统一用相对路径 /api/...。";
     public static final String TYPE_ERROR = "应用类型只能是：日常开发、开发网站、全栈应用、开发skill、技术文档";
     public static final List<String> MODES = List.of("快速", "适中", "深度");
 

@@ -84,6 +84,10 @@ public class MonolithServiceManager {
     private DeployDiagnosisService diagnosisService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private DeployLogBroadcaster deployLogBroadcaster;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService enterpriseConnectors;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.util.ServerPort serverPort;
     private final ConcurrentHashMap<String, Object> appLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastTouchMs = new ConcurrentHashMap<>();
 
@@ -1133,6 +1137,12 @@ public class MonolithServiceManager {
             env.put("DATABASE_URL", p.databaseUrl());
             env.put("JDBC_DATABASE_URL", p.jdbcUrl());
             env.put("PG_SCHEMA", p.schema());
+        }
+        // 自动注入平台受控企业连接器网关地址与本应用专属签名令牌（零明文飞书密钥进容器）
+        if (enterpriseConnectors != null) {
+            String apiBase = (serverPort != null ? serverPort.selfBase() : "http://127.0.0.1:8080") + "/internal/app-connectors";
+            env.put("ZHIYE_CONNECTOR_API", apiBase);
+            env.put("ZHIYE_CONNECTOR_TOKEN", enterpriseConnectors.issueAppConnectorToken(app.id()));
         }
 
         Path customDf = sourceDir.resolve("Dockerfile");

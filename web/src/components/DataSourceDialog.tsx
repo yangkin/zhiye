@@ -4,6 +4,7 @@ import { api, errorMessage } from '../api/client';
 import { qk } from '../api/queries';
 import type { DataSourceInfo, DataSourceInput, DataSourceParam } from '../api/types';
 import { Icon } from '../lib/icons';
+import { copyText } from '../lib/format';
 import { toast, useUi } from '../lib/store';
 import { Modal } from './Modal';
 import { Select } from './Select';
@@ -14,13 +15,13 @@ const TYPES: DataSourceParam['type'][] = ['string', 'number', 'integer', 'boolea
 const TYPE_LABEL: Record<DataSourceParam['type'], string> = { string: '文本', number: '数字', integer: '整数', boolean: '是/否', date: '日期', json: 'JSON' };
 const AUTH_LABEL: Record<DataSourceInfo['authType'], string> = { none: '无需鉴权', bearer: 'Bearer 令牌', header: '自定义请求头', basic: 'Basic（用户名:密码）', agw: 'API 网关签名', agw_key: 'API 网关项目 Key', agw_client: 'API 网关客户端模式', agw_user: 'API 网关用户模式' };
 
-type View = { kind: 'list' } | { kind: 'catalog' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
+type View = { kind: 'list' } | { kind: 'connectors' } | { kind: 'catalog' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
 
 export function useSources(enabled = true) {
   return useQuery({ queryKey: qk.sources, queryFn: api.sources, enabled, staleTime: 30_000 });
 }
 
-/** 数据源管理：从 API 网关（AGW）添加当前账号可调用的查询接口，凭证只存在服务端。 */
+/** 数据源与企业生态连接器管理：统一在工作台入口管理 AGW 真实接口与飞书/多维表格托管连接器。 */
 export function DataSourceDialog() {
   const open = useUi((s) => s.sourcesOpen);
   const setOpen = useUi((s) => s.setSourcesOpen);
@@ -30,11 +31,43 @@ export function DataSourceDialog() {
     setOpen(false);
     setView({ kind: 'list' });
   };
-  const title = view.kind === 'catalog' ? '可调用 API' : view.kind === 'edit' ? '编辑数据源' : view.kind === 'test' ? `试调用 · ${view.source.name}` : '数据源与 API';
+  const title =
+    view.kind === 'catalog'
+      ? '可调用 API'
+      : view.kind === 'edit'
+        ? '编辑数据源'
+        : view.kind === 'test'
+          ? `试调用 · ${view.source.name}`
+          : '数据源与企业生态连接器';
+  const showTopTabs = view.kind === 'list' || view.kind === 'connectors';
   return (
     <Modal title={title} onClose={close} className="source-modal">
+      {showTopTabs ? (
+        <div className="svc-seg" role="tablist" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view.kind === 'list'}
+            className={view.kind === 'list' ? 'active' : ''}
+            onClick={() => setView({ kind: 'list' })}
+          >
+            企业数据源 (AGW / API)
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view.kind === 'connectors'}
+            className={view.kind === 'connectors' ? 'active' : ''}
+            onClick={() => setView({ kind: 'connectors' })}
+          >
+            飞书与企业连接器（免密直连）
+          </button>
+        </div>
+      ) : null}
       {view.kind === 'list' ? (
         <SourceList onAddApi={() => setView({ kind: 'catalog' })} onEdit={(source) => setView({ kind: 'edit', source })} onTest={(source) => setView({ kind: 'test', source })} />
+      ) : view.kind === 'connectors' ? (
+        <ConnectorPickerPane />
       ) : view.kind === 'catalog' ? (
         <AgwCatalog onDone={() => setView({ kind: 'list' })} />
       ) : view.kind === 'edit' ? (
@@ -43,6 +76,101 @@ export function DataSourceDialog() {
         <SourceTest source={view.source} onBack={() => setView({ kind: 'list' })} />
       )}
     </Modal>
+  );
+}
+
+function ConnectorPickerPane() {
+  const q = useQuery({ queryKey: ['workspace-connectors'], queryFn: api.connectorsList, staleTime: 15_000 });
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const items = q.data ?? [];
+
+  const handleTest = async (id: string) => {
+    setTestingId(id);
+    try {
+      const r = await api.connectorTest(id);
+      const text = `自检通过（mode=${String(r.mode ?? 'ok')}）`;
+      setTestResults((prev) => ({ ...prev, [id]: { ok: true, text } }));
+      toast(`连接器${text}。`);
+    } catch (e) {
+      const msg = errorMessage(e);
+      setTestResults((prev) => ({ ...prev, [id]: { ok: false, text: msg } }));
+      toast(msg, 'error');
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const copyPrompt = async (c: Record<string, unknown>) => {
+    const id = String(c.id ?? '');
+    const name = String(c.name ?? id);
+    const kind = String(c.kind ?? '');
+    const prompt =
+      kind === 'feishu_bitable'
+        ? `请接入平台托管的飞书多维表格连接器「${name}」(connectorId: "${id}")，实现列表拉取、新增写入与状态回写同步（云函数用 ctx.bitable，全栈后端用 ZHIYE_CONNECTOR_API/bitable）。`
+        : `请接入平台托管的飞书机器人连接器「${name}」(connectorId: "${id}")，在提交或告警时推送飞书交互卡片（云函数用 ctx.feishu.sendCard，全栈后端用 ZHIYE_CONNECTOR_API/feishu/send-card）。`;
+    const ok = await copyText(prompt);
+    if (ok) {
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 2500);
+    }
+    toast(ok ? '已复制生态接入指令，直接粘贴到对话栏发送即可让 AI 自动接入！' : '复制失败，请手动复制。');
+  };
+
+  return (
+    <div className="source-list">
+      <p className="source-intro">
+        平台已统一加密托管以下企业连接器，<b>AI 编码智能体会自动读取它们</b>。无论共享云服务（<code>ctx.feishu</code> / <code>ctx.bitable</code>）还是单体全栈应用（自动注入 <code>ZHIYE_CONNECTOR_API</code>），均无需手动配置密钥即可直接调用。
+      </p>
+      {q.isLoading ? <p className="muted-note">正在读取企业连接器…</p> : null}
+      {q.error ? <p className="inline-error">{errorMessage(q.error)}</p> : null}
+      {!q.isLoading && items.length === 0 ? (
+        <div className="source-empty">
+          <Icon name="globe" />
+          <b>暂无可用企业连接器</b>
+          <p>管理员可在「管理 → 配额与运行 → 公域飞书控制面 &amp; 企业连接器中心」登记飞书机器人或多维表格。</p>
+        </div>
+      ) : null}
+      <ul>
+        {items.map((c) => {
+          const id = String(c.id ?? '');
+          const kind = String(c.kind ?? '');
+          const mode = String(c.mode ?? 'sandbox');
+          const tr = testResults[id];
+          return (
+            <li key={id} className="source-row">
+              <span className="source-row-icon">
+                <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
+              </span>
+              <span className="source-row-main">
+                <b>
+                  {String(c.name ?? id)}
+                  <em className="source-badge">{kind}</em>
+                  <em className="source-badge">{mode === 'live' ? '公域直连' : '沙箱可测'}</em>
+                </b>
+                <small>
+                  <code>{id}</code> · {c.hasSecrets ? '密钥已加密托管' : '沙箱免密开箱即用'} · 限流 {String(c.rateLimitPerMin ?? 60)}/min
+                </small>
+                {tr ? (
+                  <small style={{ display: 'block', marginTop: 4, color: tr.ok ? '#059669' : '#dc2626', fontWeight: 500 }}>
+                    {tr.ok ? '✓ ' : '✗ '}{tr.text}
+                  </small>
+                ) : null}
+              </span>
+              <span className="source-row-actions">
+                <button type="button" className="subtle-button" disabled={testingId === id} onClick={() => void handleTest(id)}>
+                  {testingId === id ? '测试中…' : '测试连通'}
+                </button>
+                <button type="button" className="primary-button" style={{ height: 30, padding: '0 10px', fontSize: 12 }} onClick={() => void copyPrompt(c)}>
+                  {copiedId === id ? '✓ 已复制指令' : '复制 AI 接入指令'}
+                </button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

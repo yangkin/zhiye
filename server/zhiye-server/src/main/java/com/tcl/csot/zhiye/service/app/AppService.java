@@ -107,10 +107,11 @@ public class AppService {
         // 明显是命令行/脚本的需求（例如「写一个 python 程序清洗 excel」）→ 脚本项目，没有页面预览
         boolean script = "日常开发".equals(type) && Catalog.looksLikeScript(prompt);
         String kind = script ? "script" : Catalog.projectKindFor(type);
+        boolean vueSpringBoot = "service".equals(kind) && Catalog.looksLikeVueSpringBoot(prompt);
         String desc = userText(prompt);
         AppRow row = new AppRow(id, ws, name, named, type, desc.length() > 60 ? desc.substring(0, 60) : desc, prompt,
                 skill ? prompt : "", "lavender", false, mode, model, false,
-                skill ? "generating" : "planning", "create", null,
+                skill ? "generating" : "planning", "create", vueSpringBoot ? "Java (Spring Boot) + Vue" : null,
                 kind, true, Ids.slug(), assetIds, null, null, null, null, null);
         apps.insert(row);
         if (memories != null) memories.learnFromPrompt(ws, prompt);
@@ -120,7 +121,7 @@ public class AppService {
         try {
             String tpl = row.isSkill() ? "skill-template"
                     : row.isScript() ? "script-template"
-                    : row.isService() ? "fullstack-template" : "app-template";
+                    : row.isService() ? (vueSpringBoot ? "vue-springboot-template" : "fullstack-template") : "app-template";
             git.initFromTemplate(id, tpl);
         } catch (Exception e) {
             apps.softDelete(id);

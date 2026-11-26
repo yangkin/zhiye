@@ -476,14 +476,22 @@ public class LiveWorkspaceService {
     private void attachTemplateCacheIfPresent(AppRow app, Path dir) {
         try {
             Path link = dir.resolve("node_modules");
-            if (Files.exists(link, LinkOption.NOFOLLOW_LINKS)) return;
-            Path cache = null;
-            if (app.isVue()) cache = props.runtimePath().resolve("vue-template-cache/node_modules");
-            else if (app.isTemplateLike()) cache = props.runtimePath().resolve("template-cache/node_modules");
-            else if (app.isService() && Files.isRegularFile(dir.resolve("server/index.mjs"))) {
-                cache = props.runtimePath().resolve("fullstack-template-cache/node_modules");
+            if (!Files.exists(link, LinkOption.NOFOLLOW_LINKS)) {
+                Path cache = null;
+                if (app.isVue()) cache = props.runtimePath().resolve("vue-template-cache/node_modules");
+                else if (app.isTemplateLike()) cache = props.runtimePath().resolve("template-cache/node_modules");
+                else if (app.isService() && Files.isRegularFile(dir.resolve("server/index.mjs"))) {
+                    cache = props.runtimePath().resolve("fullstack-template-cache/node_modules");
+                }
+                if (cache != null && Files.isDirectory(cache)) Files.createSymbolicLink(link, cache);
             }
-            if (cache != null && Files.isDirectory(cache)) Files.createSymbolicLink(link, cache);
+            // Vue + Spring Boot / 前后端分目录项目：自动软链 frontend/node_modules
+            Path frontDir = dir.resolve("frontend");
+            Path frontLink = frontDir.resolve("node_modules");
+            if (app.isService() && Files.isRegularFile(frontDir.resolve("package.json")) && !Files.exists(frontLink, LinkOption.NOFOLLOW_LINKS)) {
+                Path vueCache = props.runtimePath().resolve("vue-template-cache/node_modules");
+                if (Files.isDirectory(vueCache)) Files.createSymbolicLink(frontLink, vueCache);
+            }
         } catch (Exception ignored) {}
     }
 
@@ -494,6 +502,7 @@ public class LiveWorkspaceService {
         int port = freePort();
         ProcessBuilder pb;
         String mode;
+        Path workDir = dir;
         if ("service".equals(kind) && Files.isRegularFile(dir.resolve("server/index.mjs"))) {
             pb = new ProcessBuilder(props.nodeBinary(), "server/index.mjs");
             mode = "fullstack-node";
@@ -501,10 +510,15 @@ public class LiveWorkspaceService {
             pb = new ProcessBuilder(props.nodeBinary(), "node_modules/vite/bin/vite.js",
                     "--host", "127.0.0.1", "--port", String.valueOf(port), "--strictPort");
             mode = "vite-hmr";
+        } else if (Files.isRegularFile(dir.resolve("frontend/node_modules/vite/bin/vite.js"))) {
+            pb = new ProcessBuilder(props.nodeBinary(), "node_modules/vite/bin/vite.js",
+                    "--host", "127.0.0.1", "--port", String.valueOf(port), "--strictPort");
+            workDir = dir.resolve("frontend");
+            mode = "vite-hmr-frontend";
         } else {
             return null;
         }
-        pb.directory(dir.toFile());
+        pb.directory(workDir.toFile());
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();
         env.put("PORT", String.valueOf(port));
