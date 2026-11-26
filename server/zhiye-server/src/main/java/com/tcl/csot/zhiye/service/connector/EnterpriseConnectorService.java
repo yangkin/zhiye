@@ -219,6 +219,52 @@ public class EnterpriseConnectorService {
         return toView(findById(id).orElseThrow());
     }
 
+    /**
+     * 普通工作空间用户自助添加/编辑自己的飞书群机器人或飞书多维表格（仅作用于当前工作空间，绝不能修改平台全局或其他工作空间连接器）。
+     * 支持直接粘贴飞书多维表格完整链接（自动解析 appToken 与 tableId），大幅降低使用门槛。
+     */
+    public Map<String, Object> upsertForWorkspace(String ws, JsonNode body) {
+        if (ws == null || ws.isBlank()) throw ApiException.validation("缺少工作空间上下文");
+        ObjectNode normalized = body != null && body.isObject() ? (ObjectNode) body.deepCopy() : Json.obj();
+        normalized.put("platformWide", false);
+        String id = normalized.path("id").asText("").trim();
+        if (!id.isEmpty()) {
+            Optional<ConnectorRow> existing = findById(id);
+            if (existing.isPresent() && !ws.equals(existing.get().workspaceId())) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_READONLY", "平台托管连接器仅管理员可修改，请新建自己的工作空间连接器");
+            }
+        }
+        // 支持用户直接粘贴飞书多维表格浏览器链接，自动提取 appToken & tableId
+        String bitableUrl = normalized.path("bitableUrl").asText("").trim();
+        if (!bitableUrl.isEmpty()) {
+            ObjectNode cfg = normalized.has("config") && normalized.get("config").isObject()
+                    ? (ObjectNode) normalized.get("config") : Json.obj();
+            var mApp = java.util.regex.Pattern.compile("/base/([A-Za-z0-9_-]+)").matcher(bitableUrl);
+            if (mApp.find() && cfg.path("appToken").asText("").isBlank()) cfg.put("appToken", mApp.group(1));
+            var mTbl = java.util.regex.Pattern.compile("[?&]table=([A-Za-z0-9_-]+)").matcher(bitableUrl);
+            if (mTbl.find() && cfg.path("tableId").asText("").isBlank()) cfg.put("tableId", mTbl.group(1));
+            normalized.set("config", cfg);
+        }
+        // 若用户填写了真实的公域飞书 Webhook URL，自动切换为 live 模式；否则允许 sandbox 模式先演练
+        String wh = normalized.path("secrets").path("webhookUrl").asText("").trim();
+        if (!wh.isEmpty()) {
+            validateOutboundUrl(wh, normalized.path("config"));
+            if (!normalized.has("mode") || normalized.path("mode").asText("").isBlank()) {
+                normalized.put("mode", "live");
+            }
+        }
+        return upsert(ws, normalized);
+    }
+
+    /** 普通工作空间用户删除自己创建的连接器（不可删除平台全局连接器）。 */
+    public void deleteForWorkspace(String ws, String id) {
+        ConnectorRow row = findById(id).orElseThrow(() -> ApiException.notFound("企业连接器"));
+        if (ws == null || !ws.equals(row.workspaceId())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_READONLY", "平台全局连接器不可删除");
+        }
+        delete(id);
+    }
+
     public void delete(String id) {
         jdbc.sql("delete from enterprise_connector where id = ?").param(id).update();
         tokenCache.remove(id);

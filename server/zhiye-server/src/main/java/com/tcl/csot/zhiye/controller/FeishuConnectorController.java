@@ -47,10 +47,29 @@ public class FeishuConnectorController {
 
     @GetMapping("/api/connectors")
     public List<Map<String, Object>> listForWorkspace() {
-        return connectors.list(ws());
+        String curWs = ws();
+        return connectors.list(curWs).stream().map(m -> {
+            Map<String, Object> copy = new java.util.LinkedHashMap<>(m);
+            copy.put("owned", curWs != null && curWs.equals(m.get("workspaceId")));
+            return copy;
+        }).toList();
     }
 
-    /** 普通工作空间用户也可以在工作台「数据源与连接器」弹窗里直接自检连接器连通性。 */
+    /** 普通工作空间用户自助登记自己的飞书群机器人 Webhook 或多维表格（加密保存在当前工作空间，免找管理员）。 */
+    @PostMapping("/api/connectors")
+    public Map<String, Object> upsertForWorkspace(@RequestBody JsonNode body) {
+        Map<String, Object> saved = new java.util.LinkedHashMap<>(connectors.upsertForWorkspace(ws(), body));
+        saved.put("owned", true);
+        return saved;
+    }
+
+    @DeleteMapping("/api/connectors/{id}")
+    public Map<String, Object> deleteForWorkspace(@PathVariable String id) {
+        connectors.deleteForWorkspace(ws(), id);
+        return Map.of("ok", true);
+    }
+
+    /** 普通工作空间用户也可以直接自检连接器连通性。 */
     @PostMapping("/api/connectors/{id}/test")
     public Map<String, Object> testForWorkspace(@PathVariable String id) {
         return connectors.testConnector(id);

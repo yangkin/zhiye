@@ -39,6 +39,13 @@ public class McpController {
         this.tasks = tasks;
     }
 
+    /** 普通用户工作台/首页「生态」选择器读取已启用的企业知识与工具 MCP 列表（脱敏，无密钥）。 */
+    @GetMapping("/api/mcp-servers")
+    public List<Map<String, Object>> listForWorkspace() {
+        principal.workspaceId();
+        return mcp.listEnabledForWorkspace();
+    }
+
     @GetMapping("/api/admin/mcp-servers")
     public Map<String, Object> list(HttpServletRequest req) {
         admin.requireActor(req, principal.workspaceId());

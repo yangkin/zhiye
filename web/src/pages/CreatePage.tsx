@@ -17,6 +17,7 @@ import { Icon, kindIcon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt } from '../components/ComposerPopovers';
+import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { loadDraft, saveDraft } from '../lib/drafts';
 
 interface CreateForm {
@@ -133,6 +134,10 @@ export function CreatePage() {
   const { data: meta } = useMeta();
   const active = useActiveTask(5000).data ?? null;
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
+  const [ecoOpen, setEcoOpen] = useState(false);
+  const [ecosystems, setEcosystems] = useState<EcosystemItem[]>([]);
+  const toggleEco = (item: EcosystemItem) =>
+    setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev.filter((x) => x.id !== item.id) : [...prev, item]));
   // 默认不选类型：直接进对话，类型由模型在构建时判断；也可以手动指定一个类型作为提示
   const typeChosen = f.typeChosen;
   const setTypeChosen = (typeChosen: boolean) => f.set({ typeChosen });
@@ -191,8 +196,9 @@ export function CreatePage() {
     setError('');
     try {
       const conv = await api.createConversation(f.sources.map((s) => s.id));
+      const fullPrompt = appendEcosystemContext(prompt, ecosystems);
       const state = {
-        initialMessage: prompt,
+        initialMessage: fullPrompt,
         ...(typeChosen ? { type: f.type } : {}),
         model: f.model,
         mode: f.mode,
@@ -201,6 +207,7 @@ export function CreatePage() {
         sources: f.sources,
       };
       f.set({ prompt: '', attachments: [], skills: [], sources: [], typeChosen: false });
+      setEcosystems([]);
       navigate('/chat/' + conv.id, { state });
     } catch (err) {
       setError(errorMessage(err));
@@ -398,8 +405,9 @@ export function CreatePage() {
             <SourceChips sources={f.sources} onRemove={(id) => f.set({ sources: f.sources.filter((x) => x.id !== id) })} />
           </div>
         ) : null}
-        {f.attachments.length || f.skills.length ? (
+        {f.attachments.length || f.skills.length || ecosystems.length ? (
           <div className="attachments">
+            <EcosystemChips items={ecosystems} onRemove={(id) => setEcosystems((prev) => prev.filter((x) => x.id !== id))} />
             <SkillChips skills={f.skills} onRemove={(id) => f.set({ skills: f.skills.filter((x) => x.id !== id) })} />
             {f.attachments.map((a) => (
               <span key={a.id}>
@@ -438,6 +446,16 @@ export function CreatePage() {
             >
               <Icon name="book" />
               技能
+            </button>
+            <button
+              type="button"
+              className={`skill-button${ecosystems.length ? ' on' : ''}`}
+              aria-label="选择企业生态能力"
+              title="一键接入飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
+              onClick={() => setEcoOpen(true)}
+            >
+              <Icon name="globe" />
+              {ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}
             </button>
           </div>
           <div className="composer-actions">
@@ -613,6 +631,14 @@ export function CreatePage() {
           f.set({ skills: [...st.skills, sk] });
           setPicker(null);
         }}
+      />
+      <EcosystemPickerModal
+        open={ecoOpen}
+        onClose={() => setEcoOpen(false)}
+        selected={ecosystems}
+        onToggle={toggleEco}
+        pickedSourceIds={f.sources.map((s) => s.id)}
+        onPickSource={(s) => f.set({ sources: [...useCreateForm.getState().sources, { id: s.id, name: s.name }] })}
       />
     </div>
   );

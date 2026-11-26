@@ -3,7 +3,9 @@ package com.tcl.csot.zhiye.service.connector;
 import com.tcl.csot.zhiye.config.ZhiyeProperties;
 import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.service.app.Catalog;
+import com.tcl.csot.zhiye.service.mcp.McpRegistryService;
 import com.tcl.csot.zhiye.service.runtime.ServiceRuntimeDetector;
+import com.tcl.csot.zhiye.util.Json;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,7 +24,39 @@ import static org.junit.jupiter.api.Assertions.*;
 class PolyglotAndEcosystemClosingTest {
 
     @Autowired EnterpriseConnectorService connectors;
+    @Autowired McpRegistryService mcp;
     @Autowired ZhiyeProperties props;
+
+    @Test
+    void workspaceSelfServiceConnectorAndMcpListingWorkSafely() {
+        String ws = "ws_self_service_test";
+        var body = Json.obj()
+                .put("name", "我的产线多维表格")
+                .put("kind", "feishu_bitable")
+                .put("bitableUrl", "https://demo.feishu.cn/base/bascnAuto999?table=tblAuto888&view=vew1");
+        var saved = connectors.upsertForWorkspace(ws, body);
+        String id = String.valueOf(saved.get("id"));
+        try {
+            assertEquals(ws, saved.get("workspaceId"));
+            var cfg = (com.fasterxml.jackson.databind.JsonNode) saved.get("config");
+            assertEquals("bascnAuto999", cfg.path("appToken").asText());
+            assertEquals("tblAuto888", cfg.path("tableId").asText());
+
+            // 其他工作空间或平台全局连接器不能被普通工作空间删除
+            assertThrows(ApiException.class, () -> connectors.deleteForWorkspace("ws_other", id));
+            assertThrows(ApiException.class, () -> connectors.deleteForWorkspace(ws, "conn_feishu_bot_sandbox"));
+
+            // 普通用户可见脱敏 MCP 列表（不含密钥/内部地址）
+            var mcps = mcp.listEnabledForWorkspace();
+            assertNotNull(mcps);
+            for (var m : mcps) {
+                assertFalse(m.containsKey("secretEnc"));
+                assertFalse(m.containsKey("authHeader"));
+            }
+        } finally {
+            connectors.deleteForWorkspace(ws, id);
+        }
+    }
 
     @Test
     void appConnectorTokenAndPromptGuideWorkEndToEnd() throws Exception {

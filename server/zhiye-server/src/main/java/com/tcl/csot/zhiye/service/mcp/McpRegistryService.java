@@ -74,6 +74,22 @@ public class McpRegistryService {
                 .query(ServerRow::map).list().stream().map(this::view).toList();
     }
 
+    /** 面向普通工作空间用户的已启用企业 MCP 目录（完全脱敏，不含内部地址与鉴权头）。 */
+    public List<Map<String, Object>> listEnabledForWorkspace() {
+        return jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
+                .query(ServerRow::map).list().stream().map(r -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", r.id());
+                    m.put("serverKey", r.serverKey());
+                    m.put("name", r.name());
+                    m.put("description", r.description());
+                    m.put("transport", r.transport());
+                    m.put("builtin", r.builtin());
+                    m.put("tools", r.toolsJson());
+                    return m;
+                }).toList();
+    }
+
     public List<Map<String, Object>> recentAudits(int limit) {
         int lim = Math.max(1, Math.min(limit <= 0 ? 50 : limit, 200));
         return jdbc.sql("select id, server_key, tool_name, task_id, app_id, ok, duration_ms, error, created_at from mcp_call_audit order by id desc limit ?")
