@@ -8,6 +8,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { Type } from 'typebox'
 import { log } from './util.mjs'
+import { discoverWorkspaceLayout, loadProjectWorkflow } from './workflow.mjs'
+
+const FORBIDDEN_START = /(?:^|[;&|`($\s])(sudo|su|doas|curl|wget|ssh|scp|nc|ncat|netcat|docker|kubectl|rm\s+-rf\s+\/)\b/i
+
+function resolveSafeSubdir(cwd, rel) {
+  const target = rel ? path.resolve(cwd, rel) : path.resolve(cwd)
+  const r = path.relative(path.resolve(cwd), target)
+  if (r.startsWith('..') || path.isAbsolute(r)) throw new Error(`zhiye.yaml 中的工作目录越界：${rel}`)
+  return target
+}
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -40,23 +50,49 @@ function findBuiltJavaJar(dir) {
 }
 
 function detectLaunchSpec(cwd) {
-  // 1. Java / Spring Boot（已构建的可执行 JAR，支持根目录与 backend/）
-  for (const dir of ['', 'backend', 'server']) {
+  // 0. 项目自声明工作流（zhiye.yaml -> start.command）拥有最高优先级，不写死任何框架或入口
+  const wf = loadProjectWorkflow(cwd)
+  if (wf?.start?.command) {
+    if (FORBIDDEN_START.test(wf.start.command)) {
+      throw new Error(`zhiye.yaml start.command 包含不允许的系统/网络命令：${wf.start.command}`)
+    }
+    const base = resolveSafeSubdir(cwd, wf.start.cwd)
+    return {
+      cmd: 'sh',
+      args: ['-c', wf.start.command],
+      cwd: base,
+      label: `zhiye.yaml: ${wf.start.command}`,
+      healthPath: wf.start.health || '/api/health',
+      timeoutMs: wf.start.timeoutMs || 30_000,
+    }
+  }
+
+  const layout = discoverWorkspaceLayout(cwd)
+  const candDirs = [...new Set([...(layout.backend?.dir ? [layout.backend.dir] : []), '', 'backend', 'server', 'api', 'service', 'app'])]
+
+  // 1. Java / Spring Boot（已构建的可执行 JAR，支持根目录与任意后端子目录）
+  for (const dir of candDirs) {
     const base = dir ? path.join(cwd, dir) : cwd
-    if (!existsSync(path.join(base, 'pom.xml')) && !existsSync(path.join(base, 'app.jar'))) continue
+    if (!existsSync(path.join(base, 'pom.xml')) && !existsSync(path.join(base, 'build.gradle')) && !existsSync(path.join(base, 'build.gradle.kts')) && !existsSync(path.join(base, 'app.jar'))) continue
     const jar = findBuiltJavaJar(base)
     if (jar) {
       return { cmd: 'java', args: ['-jar', jar, '--server.port=__PORT__'], cwd: base, label: `java -jar ${path.relative(cwd, jar)}`, timeoutMs: 45_000 }
     }
   }
-  // 2. 标准织页全栈骨架：server/index.mjs 或 backend/server.js
-  for (const rel of ['server/index.mjs', 'server/index.js', 'backend/server.js', 'backend/index.js', 'server.mjs', 'server.js']) {
-    if (existsSync(path.join(cwd, rel))) {
-      return { cmd: process.execPath, args: [path.join(cwd, rel)], cwd: rel.startsWith('backend/') ? path.join(cwd, 'backend') : cwd, label: `node ${rel}` }
+  // 2. Node.js 入口（不限于固定 server/index.mjs，兼容任意子目录）
+  for (const dir of candDirs) {
+    const base = dir ? path.join(cwd, dir) : cwd
+    for (const entry of ['server/index.mjs', 'server/index.js', 'index.mjs', 'server.mjs', 'server.js', 'app.mjs', 'app.js', 'index.js']) {
+      if (dir === '' && entry === 'index.js') continue
+      const full = path.join(base, entry)
+      if (!existsSync(full)) continue
+      const rel = path.relative(cwd, full)
+      if (rel.startsWith('src/') || rel.startsWith('frontend/') || rel.startsWith('web/')) continue
+      return { cmd: process.execPath, args: [full], cwd: base, label: `node ${rel}` }
     }
   }
   // 3. package.json start 脚本（Node 后端）
-  for (const dir of ['', 'backend', 'server']) {
+  for (const dir of candDirs) {
     const base = dir ? path.join(cwd, dir) : cwd
     const pkg = readJsonSafe(path.join(base, 'package.json'))
     if (pkg?.scripts?.start) {
@@ -69,9 +105,12 @@ function detectLaunchSpec(cwd) {
       return { cmd: 'sh', args: ['-c', start], cwd: base, label: start }
     }
   }
-  // 4. Python（FastAPI / Flask / 标准 HTTP）
-  for (const dir of ['', 'backend', 'server', 'api']) {
+  // 4. Python（FastAPI / Flask / Django / 标准 HTTP）
+  for (const dir of candDirs) {
     const base = dir ? path.join(cwd, dir) : cwd
+    if (existsSync(path.join(base, 'manage.py'))) {
+      return { cmd: 'python3', args: ['manage.py', 'runserver', '127.0.0.1:__PORT__', '--noreload'], cwd: base, label: 'django runserver', timeoutMs: 25_000 }
+    }
     for (const py of ['main.py', 'app.py', 'server.py']) {
       const full = path.join(base, py)
       if (!existsSync(full)) continue
@@ -83,10 +122,14 @@ function detectLaunchSpec(cwd) {
       return { cmd: 'python3', args: [py], cwd: base, label: `python3 ${py}` }
     }
   }
-  // 5. 已编译 Go 二进制
-  for (const rel of ['app', 'backend/app', 'server/app']) {
-    if (existsSync(path.join(cwd, rel))) {
-      return { cmd: path.join(cwd, rel), args: [], cwd: path.dirname(path.join(cwd, rel)), label: rel }
+  // 5. 已编译 Go / Rust 二进制
+  for (const dir of candDirs) {
+    const base = dir ? path.join(cwd, dir) : cwd
+    for (const bin of ['app', 'server', 'target/release/app', 'target/debug/app']) {
+      const full = path.join(base, bin)
+      if (existsSync(full)) {
+        return { cmd: full, args: [], cwd: base, label: path.relative(cwd, full) }
+      }
     }
   }
   return null
@@ -149,8 +192,11 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
   if (!spec) throw new Error('未能识别可启动的后端入口（需要 server/index.mjs、package.json start 或 main.py）')
   const port = await freePort()
   const dataDir = mkdtempSync(path.join(os.tmpdir(), 'zhiye-ep-data-'))
-  const args = spec.args.map((a) => a.replace(/__PORT__/g, String(port)))
-  const staticCandidate = existsSync(path.join(cwd, 'frontend', 'dist')) ? path.join(cwd, 'frontend', 'dist') : path.join(cwd, 'dist')
+  const args = spec.args.map((a) => a.replace(/__PORT__/g, String(port)).replace(/\$\{PORT(?::-\d+)?\}/g, String(port)))
+  const layout = discoverWorkspaceLayout(cwd)
+  const frontDist = layout.frontendDir ? path.join(cwd, layout.frontendDir, 'dist') : null
+  const staticCandidate = (frontDist && existsSync(frontDist)) ? frontDist : existsSync(path.join(cwd, 'frontend', 'dist')) ? path.join(cwd, 'frontend', 'dist') : path.join(cwd, 'dist')
+  const effectiveHealth = spec.healthPath || healthPath || '/api/health'
   const logs = []
   const pushLog = (prefix, chunk) => {
     const s = String(chunk || '')
@@ -191,8 +237,8 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
 
   const effectiveTimeout = Math.max(startupTimeoutMs, spec.timeoutMs || 0)
   try {
-    await waitReady(port, healthPath, proc, effectiveTimeout)
-    return { port, origin: `http://127.0.0.1:${port}`, label: spec.label, logs, close }
+    const readyStatus = await waitReady(port, effectiveHealth, proc, effectiveTimeout)
+    return { port, origin: `http://127.0.0.1:${port}`, label: spec.label, readyStatus, healthPath: effectiveHealth, logs, close }
   } catch (e) {
     const tail = logs.slice(-20).join('\n')
     await close()

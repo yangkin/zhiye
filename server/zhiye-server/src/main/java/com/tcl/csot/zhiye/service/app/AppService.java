@@ -107,7 +107,8 @@ public class AppService {
         // 明显是命令行/脚本的需求（例如「写一个 python 程序清洗 excel」）→ 脚本项目，没有页面预览
         boolean script = "日常开发".equals(type) && Catalog.looksLikeScript(prompt);
         String kind = script ? "script" : Catalog.projectKindFor(type);
-        boolean vueSpringBoot = "service".equals(kind) && Catalog.looksLikeVueSpringBoot(prompt);
+        boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(prompt);
+        boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(prompt);
         String desc = userText(prompt);
         AppRow row = new AppRow(id, ws, name, named, type, desc.length() > 60 ? desc.substring(0, 60) : desc, prompt,
                 skill ? prompt : "", "lavender", false, mode, model, false,
@@ -119,10 +120,14 @@ public class AppService {
             jdbc.sql("update app set skill_app_ids = ?::jsonb where id = ?").params(Json.write(skillAppIds), id).update();
         dataSources.bindAll(id, sourceIds);
         try {
-            String tpl = row.isSkill() ? "skill-template"
-                    : row.isScript() ? "script-template"
-                    : row.isService() ? (vueSpringBoot ? "vue-springboot-template" : "fullstack-template") : "app-template";
-            git.initFromTemplate(id, tpl);
+            if (cleanWorkspace) {
+                git.initCleanWorkspace(id, name);
+            } else {
+                String tpl = row.isSkill() ? "skill-template"
+                        : row.isScript() ? "script-template"
+                        : row.isService() ? (vueSpringBoot ? "vue-springboot-template" : "fullstack-template") : "app-template";
+                git.initFromTemplate(id, tpl);
+            }
         } catch (Exception e) {
             apps.softDelete(id);
             git.deleteRepo(id);

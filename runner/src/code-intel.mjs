@@ -9,6 +9,8 @@ import { parse as babelParse } from '@babel/parser'
 import { Type } from 'typebox'
 import { run } from './util.mjs'
 import { buildEnv, templateLint, vueLint } from './verify.mjs'
+import { discoverWorkspaceLayout } from './workflow.mjs'
+import { checkBash } from './guard.mjs'
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.zhiye', '.pi', 'dist', 'build', 'target', '__pycache__', '.venv', 'venv'])
 
@@ -57,25 +59,64 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
     }
   }
 
-  if (projectKind === 'vue') {
+  const layout = discoverWorkspaceLayout(cwd)
+  // 0. 项目自声明诊断命令（zhiye.yaml -> diagnostics）优先执行
+  if (layout.workflow?.diagnostics?.length) {
+    for (const s of layout.workflow.diagnostics) {
+      const stepCwd = s.cwd ? path.resolve(cwd, s.cwd) : path.resolve(cwd)
+      const blocked = checkBash(stepCwd, s.command, { projectKind: 'service' })
+      if (blocked) {
+        diagnostics.push({ file: layout.workflow.file, line: 1, col: 1, severity: 'error', code: 'GUARD', message: blocked })
+        continue
+      }
+      const r = await run('sh', ['-c', s.command], { cwd: stepCwd, env: buildEnv(env), timeoutMs: s.timeoutMs || 60_000 })
+      if (r.code !== 0) {
+        diagnostics.push({ file: s.cwd || layout.workflow.file, line: 1, col: 1, severity: 'error', code: 'DIAG', message: String(r.out || `exit=${r.code}`).trim().slice(0, 600) })
+      }
+    }
+  } else if (projectKind === 'vue') {
     await runTs(cwd, 'node_modules/vue-tsc/bin/vue-tsc.js')
     for (const p of vueLint(cwd)) diagnostics.push({ file: p.split('：')[0], line: 1, col: 1, severity: 'error', code: 'VUE_LINT', message: p })
   } else if (projectKind === 'template' || projectKind === 'vite') {
     await runTs(cwd, 'node_modules/typescript/bin/tsc')
     for (const p of templateLint(cwd)) diagnostics.push({ file: p.split('：')[0], line: 1, col: 1, severity: 'error', code: 'TEMPLATE_LINT', message: p })
   } else if (projectKind === 'service') {
-    await runTs(cwd, 'node_modules/typescript/bin/tsc')
-    // 前后端分目录全栈（如 Vue + Spring Boot / React + FastAPI）：检查 frontend/ 类型
-    const frontDir = path.join(cwd, 'frontend')
-    if (existsSync(path.join(frontDir, 'tsconfig.json'))) {
-      if (existsSync(path.join(frontDir, 'node_modules/vue-tsc/bin/vue-tsc.js'))) {
-        await runTs(frontDir, 'node_modules/vue-tsc/bin/vue-tsc.js')
-      } else {
-        await runTs(frontDir, 'node_modules/typescript/bin/tsc')
+    // 动态扫描所有存在语言/配置文件的目录（不写死 frontend/ 或 backend/）
+    for (const relDir of layout.diagDirs) {
+      const base = relDir ? path.join(cwd, relDir) : cwd
+      if (existsSync(path.join(base, 'tsconfig.json'))) {
+        if (existsSync(path.join(base, 'node_modules/vue-tsc/bin/vue-tsc.js'))) {
+          await runTs(base, 'node_modules/vue-tsc/bin/vue-tsc.js')
+        } else {
+          await runTs(base, 'node_modules/typescript/bin/tsc')
+        }
+      }
+      if (existsSync(path.join(base, 'pom.xml'))) {
+        const r = await run('mvn', ['-B', '-o', 'test-compile'], { cwd: base, env: buildEnv(env), timeoutMs: 90_000 })
+        if (r.code !== 0) {
+          const errLines = String(r.out || '').split(/\r?\n/).filter((l) => l.startsWith('[ERROR]'))
+          let matched = 0
+          for (const l of errLines) {
+            const m = /\[ERROR\]\s+(.+\.java):\[(\d+),(\d+)\]\s*(.+)/.exec(l)
+            if (m) {
+              diagnostics.push({ file: path.relative(cwd, m[1]) || m[1], line: Number(m[2]), col: Number(m[3]), severity: 'error', code: 'JAVAC', message: m[4].trim() })
+              matched++
+            }
+          }
+          if (matched === 0) {
+            diagnostics.push({ file: path.join(relDir, 'pom.xml'), line: 1, col: 1, severity: 'error', code: 'MAVEN', message: errLines.slice(0, 8).join('\n').slice(0, 600) || `mvn test-compile exit=${r.code}` })
+          }
+        }
+      }
+      if (existsSync(path.join(base, 'go.mod'))) {
+        const r = await run('go', ['vet', './...'], { cwd: base, env: buildEnv(env), timeoutMs: 60_000 })
+        if (r.code !== 0) {
+          diagnostics.push({ file: path.join(relDir, 'go.mod'), line: 1, col: 1, severity: 'error', code: 'GO_VET', message: String(r.out || `go vet exit=${r.code}`).trim().slice(0, 600) })
+        }
       }
     }
     const files = walkCodeFiles(cwd)
-    for (const rel of files.filter((f) => /\.(mjs|cjs|js)$/.test(f) && /^(server|backend|api)\//.test(f)).slice(0, 30)) {
+    for (const rel of files.filter((f) => /\.(mjs|cjs|js)$/.test(f) && !/^(src|frontend|web|client|ui|public)\//.test(f)).slice(0, 30)) {
       const r = await run(process.execPath, ['--check', rel], { cwd, env: buildEnv(env), timeoutMs: 10_000 })
       if (r.code !== 0) diagnostics.push({ file: rel, line: 1, col: 1, severity: 'error', code: 'JS_SYNTAX', message: (r.out || '语法错误').trim().slice(0, 400) })
     }
@@ -83,37 +124,6 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
     if (pyFiles.length) {
       const r = await run('python3', ['-m', 'py_compile', ...pyFiles], { cwd, env: buildEnv(env), timeoutMs: 15_000 })
       if (r.code !== 0) diagnostics.push({ file: pyFiles[0], line: 1, col: 1, severity: 'error', code: 'PY_SYNTAX', message: (r.out || 'Python 语法错误').trim().slice(0, 400) })
-    }
-    // Java / Spring Boot 离线增量编译检查（mvn -B -o test-compile）
-    for (const relPomDir of ['', 'backend', 'server']) {
-      const pomDir = relPomDir ? path.join(cwd, relPomDir) : cwd
-      if (!existsSync(path.join(pomDir, 'pom.xml'))) continue
-      const r = await run('mvn', ['-B', '-o', 'test-compile'], { cwd: pomDir, env: buildEnv(env), timeoutMs: 90_000 })
-      if (r.code !== 0) {
-        const errLines = String(r.out || '').split(/\r?\n/).filter((l) => l.startsWith('[ERROR]'))
-        let matched = 0
-        for (const l of errLines) {
-          const m = /\[ERROR\]\s+(.+\.java):\[(\d+),(\d+)\]\s*(.+)/.exec(l)
-          if (m) {
-            diagnostics.push({ file: path.relative(cwd, m[1]) || m[1], line: Number(m[2]), col: Number(m[3]), severity: 'error', code: 'JAVAC', message: m[4].trim() })
-            matched++
-          }
-        }
-        if (matched === 0) {
-          diagnostics.push({ file: path.join(relPomDir, 'pom.xml'), line: 1, col: 1, severity: 'error', code: 'MAVEN', message: errLines.slice(0, 8).join('\n').slice(0, 600) || `mvn test-compile exit=${r.code}` })
-        }
-      }
-      break
-    }
-    // Go 静态诊断（go vet ./...）
-    for (const relGoDir of ['', 'backend', 'server']) {
-      const goDir = relGoDir ? path.join(cwd, relGoDir) : cwd
-      if (!existsSync(path.join(goDir, 'go.mod'))) continue
-      const r = await run('go', ['vet', './...'], { cwd: goDir, env: buildEnv(env), timeoutMs: 60_000 })
-      if (r.code !== 0) {
-        diagnostics.push({ file: path.join(relGoDir, 'go.mod'), line: 1, col: 1, severity: 'error', code: 'GO_VET', message: String(r.out || `go vet exit=${r.code}`).trim().slice(0, 600) })
-      }
-      break
     }
   } else if (projectKind === 'script') {
     const files = walkCodeFiles(cwd)
@@ -224,6 +234,37 @@ function extractPySymbols(rel, src) {
   return { symbols, routes }
 }
 
+function extractJavaSymbols(rel, src) {
+  const symbols = []
+  const routes = []
+  const lines = src.split('\n')
+  let classPrefix = ''
+  lines.forEach((l, i) => {
+    const cls = /\b(public\s+)?(class|interface|record|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(l)
+    if (cls) symbols.push({ file: rel, line: i + 1, kind: cls[2], name: cls[3], exported: Boolean(cls[1]) })
+    const rm = /@RequestMapping\s*\(\s*(?:value\s*=\s*)?["']([^"']+)["']/.exec(l)
+    if (rm) classPrefix = rm[1].replace(/\/$/, '')
+    const mp = /@(Get|Post|Put|Patch|Delete)Mapping\s*\(\s*(?:value\s*=\s*)?(?:["']([^"']+)["'])?/.exec(l)
+    if (mp) routes.push({ file: rel, line: i + 1, method: mp[1].toUpperCase(), path: `${classPrefix}${mp[2] || ''}` || '/' })
+  })
+  return { symbols, routes }
+}
+
+function extractGoSymbols(rel, src) {
+  const symbols = []
+  const routes = []
+  const lines = src.split('\n')
+  lines.forEach((l, i) => {
+    const fn = /^func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(l)
+    if (fn) symbols.push({ file: rel, line: i + 1, kind: 'func', name: fn[1], exported: /^[A-Z]/.test(fn[1]) })
+    const tp = /^type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(struct|interface)\b/.exec(l)
+    if (tp) symbols.push({ file: rel, line: i + 1, kind: tp[2], name: tp[1], exported: /^[A-Z]/.test(tp[1]) })
+    const rt = /\.(GET|POST|PUT|PATCH|DELETE|HandleFunc)\s*\(\s*["']([^"']+)["']/i.exec(l)
+    if (rt) routes.push({ file: rel, line: i + 1, method: rt[1].toUpperCase() === 'HANDLEFUNC' ? 'HTTP' : rt[1].toUpperCase(), path: rt[2] })
+  })
+  return { symbols, routes }
+}
+
 export function analyzeWorkspaceCode(cwd, { dir = '', maxFiles = 120 } = {}) {
   const all = walkCodeFiles(cwd, dir).slice(0, maxFiles)
   const symbols = []
@@ -239,6 +280,14 @@ export function analyzeWorkspaceCode(cwd, { dir = '', maxFiles = 120 } = {}) {
       routes.push(...r.routes)
     } else if (rel.endsWith('.py')) {
       const r = extractPySymbols(rel, src)
+      symbols.push(...r.symbols)
+      routes.push(...r.routes)
+    } else if (rel.endsWith('.java')) {
+      const r = extractJavaSymbols(rel, src)
+      symbols.push(...r.symbols)
+      routes.push(...r.routes)
+    } else if (rel.endsWith('.go')) {
+      const r = extractGoSymbols(rel, src)
       symbols.push(...r.symbols)
       routes.push(...r.routes)
     } else if (rel.endsWith('.sql')) {

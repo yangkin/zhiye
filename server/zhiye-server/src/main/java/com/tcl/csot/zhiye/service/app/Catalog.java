@@ -14,9 +14,10 @@ public final class Catalog {
     public static final String DEFAULT_TYPE = "开发网站";
     public static final String SKILL_TYPE = "开发skill";
     public static final String FULLSTACK_TYPE = "全栈应用";
-    public static final String FULLSTACK_HINT = "全栈应用：前后端一体全栈单体项目（React + Vite + TypeScript 前端在 src/，Node.js Express 后端在 server/index.mjs）。"
-            + "后端监听 0.0.0.0:${PORT:-8080}，必须提供 GET /api/health，持久化数据写入 DATA_DIR（默认 .data/）或托管 PG（DATABASE_URL），"
-            + "构建产物 dist/ 由 Express 同源托管；前端请求一律使用相对路径 /api/...，禁止硬编码 localhost。";
+    public static final String FULLSTACK_HINT = "全栈应用：不限定固定语言或固定目录模板（支持 Node.js / Python FastAPI·Flask·Django / Java Spring Boot / Go / React / Vue / 自定义架构）。"
+            + "唯一运行态契约：后端监听 0.0.0.0:${PORT:-8080}，提供健康探活接口（默认 GET /api/health，或在 zhiye.yaml 中声明 start.health），"
+            + "持久化数据写入 DATA_DIR（默认 .data/）或托管数据库（DATABASE_URL / JDBC_DATABASE_URL），前端接口请求使用相对路径 /api/...；"
+            + "自定义构建、测试或启动方式可直接通过根目录 zhiye.yaml 声明。";
     public static final String SKILL_HINT = "开发skill：产出一个符合 SkillHub 规范的 skill 包（不是网页）。仓库根目录就是 skill 目录：`SKILL.md` 放根目录且总行数不超过 500 行"
             + "（YAML 配置头：`name` 仅小写英文字母、数字和连字符 `-`，≤64 字符，不含版本号，建议 2~4 个词段如 `t11-stk-alarm-query`；"
             + "`description` 说明做什么与何时使用，严格不超过 120 字；有特定运行环境、工具或接口依赖时须填写 `compatibility` 并写明具体依赖，不得只写「兼容飞书」等笼统描述），"
@@ -46,10 +47,23 @@ public final class Catalog {
             "(spring\\s*boot|springboot|java\\s*[+＋&与和]\\s*vue|vue\\s*[+＋&与和]\\s*java|java后端|spring\\s*mvc)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
-    /** 用户明确要求 Vue + Spring Boot / Java 全栈时，走官方预热的 vue-springboot-template 骨架。 */
+    private static final java.util.regex.Pattern CUSTOM_STACK_HINT = java.util.regex.Pattern.compile(
+            "(fastapi|flask|django|python\\s*(后端|全栈|服务|api)|golang|\\bgo\\b\\s*(后端|全栈|服务|gin|echo|fiber)|gin\\b|nestjs|fastify|next\\.?js|nuxt|rust|不要模板|不用模板|从零搭建|自定义架构|自由架构)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private static final java.util.regex.Pattern REACT_HINT = java.util.regex.Pattern.compile("\\breact\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** 用户明确要求 Vue + Spring Boot 时，可用官方预热的 vue-springboot-template 作为可选加速起点。 */
     public static boolean looksLikeVueSpringBoot(String prompt) {
         if (prompt == null || prompt.isBlank()) return false;
-        return SPRING_BOOT_HINT.matcher(prompt).find();
+        return SPRING_BOOT_HINT.matcher(prompt).find() && !REACT_HINT.matcher(prompt).find() && !CUSTOM_STACK_HINT.matcher(prompt).find();
+    }
+
+    /** 用户要求 Python/Go/Rust/SpringBoot+React/Next.js 或明确拒绝固定模板时，初始化干净自由工作区，避免硬塞错误模板。 */
+    public static boolean prefersCleanWorkspace(String prompt) {
+        if (prompt == null || prompt.isBlank()) return false;
+        if (CUSTOM_STACK_HINT.matcher(prompt).find()) return true;
+        return SPRING_BOOT_HINT.matcher(prompt).find() && REACT_HINT.matcher(prompt).find();
     }
 
     public static final String VUE_SPRINGBOOT_HINT = "全栈应用（Vue 3 + Spring Boot）：前端在 frontend/（Vue 3 + Vite + TypeScript + Tailwind），"
