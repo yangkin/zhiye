@@ -193,6 +193,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const chatHint = useChat((s) => s.hint);
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
   const [ecoOpen, setEcoOpen] = useState(false);
+  const ecoBtn = useRef<HTMLButtonElement>(null);
   const [ecosystems, setEcosystems] = useState<EcosystemItem[]>([]);
   const toggleEco = (item: EcosystemItem) =>
     setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev.filter((x) => x.id !== item.id) : [...prev, item]));
@@ -891,11 +892,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               </button>
               {!skill ? (
                 <button
+                  ref={ecoBtn}
                   type="button"
                   className={`skill-button${ecosystems.length ? ' on' : ''}`}
                   aria-label="选择企业生态能力"
+                  aria-expanded={ecoOpen}
                   title="一键勾选飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
-                  onClick={() => setEcoOpen(true)}
+                  onClick={() => setEcoOpen((v) => !v)}
                 >
                   <Icon name="globe" />
                   <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
@@ -903,6 +906,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               ) : null}
               <EcosystemPickerModal
                 open={ecoOpen}
+                anchor={ecoBtn}
                 onClose={() => setEcoOpen(false)}
                 selected={ecosystems}
                 onToggle={toggleEco}
