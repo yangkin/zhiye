@@ -61,11 +61,11 @@ zhiye:
     site-host-suffix: localhost:8083
   task:
     concurrency: 4
-    # 不限制任务的总步数：每做 max-agent-turns 步暂停一次，弹出「要继续吗？」，用户点「继续」或说「继续」接着做
-    max-agent-turns: 60
+    # 默认取消中途「要继续吗？」弹窗：单次任务连续执行最多 max-agent-turns 步 / max-duration-minutes 分钟，不打断用户，随时可点停止
+    max-agent-turns: ${ZHIYE_TASK_MAX_TURNS:200}
+    continue-checkpoint-enabled: ${ZHIYE_TASK_CONTINUE_CHECKPOINT:false}
     continue-wait-minutes: 30
-    # 一段运行（两次「继续」之间）的时限，只防执行环境卡死
-    max-duration-minutes: 60
+    max-duration-minutes: ${ZHIYE_TASK_MAX_MINUTES:45}
     sandbox-max-hours: 8
     verify-fix-rounds: 3
     lease-seconds: 30

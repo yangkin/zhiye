@@ -25,10 +25,12 @@ zhiye:
     site-host-suffix: ${ZHIYE_SITE_HOST_SUFFIX:localhost:18083}
   task:
     concurrency: ${ZHIYE_TASK_CONCURRENCY:4}
-    # 一段运行（两次「继续」之间）的防卡死时限；任务总步数不限
-    max-duration-minutes: ${ZHIYE_TASK_MAX_MINUTES:60}
+    # 默认取消中途步数确认弹窗：单次任务连续执行最多 200 步 / 45 分钟，避免打断用户；如需恢复确认卡可设 ZHIYE_TASK_CONTINUE_CHECKPOINT=true
+    max-agent-turns: ${ZHIYE_TASK_MAX_TURNS:200}
+    continue-checkpoint-enabled: ${ZHIYE_TASK_CONTINUE_CHECKPOINT:false}
+    max-duration-minutes: ${ZHIYE_TASK_MAX_MINUTES:45}
     continue-wait-minutes: ${ZHIYE_TASK_CONTINUE_WAIT_MINUTES:30}
-    # 沙箱存活上限：要覆盖多次「继续」，不能按单段时限算
+    # 沙箱存活上限：兜底防止资源泄漏
     sandbox-max-hours: ${ZHIYE_SANDBOX_MAX_HOURS:8}
   # 登录：anonymous（免登录）或 sso（平台统一认证，内网）。见 docs/sso.md
   auth:

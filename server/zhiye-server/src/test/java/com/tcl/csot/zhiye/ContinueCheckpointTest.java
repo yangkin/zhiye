@@ -7,6 +7,7 @@ import com.tcl.csot.zhiye.util.Json;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 
 import java.util.List;
 import java.util.Map;
@@ -14,9 +15,10 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 不限制执行步数：每做一段（runner 报 TURN_LIMIT）暂停并发「要继续吗？」确认卡，
- * 点「继续」或在输入框里说话就在同一会话里接着做；「先到这里」暂停为 PAUSED，重试接着做。
+ * 显式开启步数检查点确认（zhiye.task.continue-checkpoint-enabled=true）时的兼容测试。
+ * 默认方案 B（无中途弹框确认，达到硬上限自动暂停并可重试）见 HardTurnLimitTest。
  */
+@TestPropertySource(properties = "zhiye.task.continue-checkpoint-enabled=true")
 class ContinueCheckpointTest extends IntegrationTest {
     @Autowired JdbcClient jdbc;
 

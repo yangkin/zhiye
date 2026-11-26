@@ -1356,8 +1356,14 @@ public class TaskExecutor {
         if (err != null && !err.isNull()) {
             String msg = err.isTextual() ? err.asText() : err.path("message").asText("模型调用失败");
             String code = err.isObject() ? err.path("code").asText("MODEL_ERROR") : "MODEL_ERROR";
-            // 到了步数检查点：不算失败，暂停下来问用户要不要继续；继续就在同一个 agent 会话里接着做
-            if ("TURN_LIMIT".equals(code) || msg.startsWith("超过最大轮数")) return prompt(ctx, Prompts.keepGoing(awaitContinue(ctx)));
+            if ("TURN_LIMIT".equals(code) || msg.startsWith("超过最大轮数")) {
+                if (props.task().continueCheckpointEnabled()) {
+                    return prompt(ctx, Prompts.keepGoing(awaitContinue(ctx)));
+                }
+                throw new TaskContext.Fail("PAUSED",
+                        "本次任务已连续执行 " + ctx.turns + " 步达到单次步数上限（" + props.task().maxAgentTurns()
+                                + " 步），已自动暂停并保留当前进度；如需继续完善，点「重试」即可接着做。");
+            }
             throw modelFailure(ctx, code, msg);
         }
         ctx.checkCancelled();
@@ -1437,7 +1443,7 @@ public class TaskExecutor {
     }
 
     private TaskContext.Fail timeout() {
-        return new TaskContext.Fail("TIMEOUT", "这一段运行超过了 " + props.task().maxDurationMinutes() + " 分钟还没结束（执行环境可能卡住了）。已做的部分都保留着，点「重试」会接着做。");
+        return new TaskContext.Fail("TIMEOUT", "本次任务运行超过了 " + props.task().maxDurationMinutes() + " 分钟还没结束（执行环境可能卡住了）。已做的部分都保留着，点「重试」会接着做。");
     }
 
     private TaskContext.Fail modelFailure(TaskContext ctx, String code, String detail) {

@@ -37,11 +37,13 @@ public record ZhiyeProperties(
     public record Task(@DefaultValue("4") int concurrency,
                        /** 优雅停机：停止领新任务后，等在跑任务完成的最长时间（秒）；超时仍退出并标记 worker_lost */
                        @DefaultValue("600") int shutdownWaitSeconds,
-                       /** 一段运行的时限（只为防止执行环境卡死）；每次「继续」后重新计时 */
-                       @DefaultValue("60") int maxDurationMinutes,
-                       /** 步数检查点：每做这么多步暂停一下，问用户要不要继续（不是上限） */
-                       @DefaultValue("60") int maxAgentTurns,
-                       /** 等用户回应「继续」的时间，超时先暂停任务（可重试接着做） */
+                       /** 单次任务连续运行的时长硬兜底（防止执行环境卡死，默认 45 分钟） */
+                       @DefaultValue("45") int maxDurationMinutes,
+                       /** 单次任务最大连续执行步数硬上限（默认 200 步；达到后自动保留进度并暂停，点「重试」可继续） */
+                       @DefaultValue("200") int maxAgentTurns,
+                       /** 是否启用中途步数检查点确认卡（默认 false：连续执行不打断用户，用户随时可点停止） */
+                       @DefaultValue("false") boolean continueCheckpointEnabled,
+                       /** 开启步数检查点时，等用户回应「继续」的时间，超时先暂停任务（可重试接着做） */
                        @DefaultValue("30") int continueWaitMinutes,
                        /** 沙箱（k8s Pod / OpenSandbox）的最长存活时间：一个任务可以多次「继续」，这里只兜底防止资源泄漏 */
                        @DefaultValue("8") int sandboxMaxHours,
