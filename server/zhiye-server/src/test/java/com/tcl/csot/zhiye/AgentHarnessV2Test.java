@@ -24,7 +24,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Phase 1 Harness V2 集成测试：企业受控 MCP 注册与审计、检查点时间旅行（含 QA 报告）、多应用并行配额。 */
+/** Phase 1 Harness V2 集成测试：企业受控 MCP 注册与审计、检查点时间旅行（含 QA 报告）、工作空间任务配额。 */
 class AgentHarnessV2Test extends IntegrationTest {
     static { System.setProperty("KIMI_API_KEY", System.getenv().getOrDefault("KIMI_API_KEY", "test-key")); }
 
@@ -132,9 +132,9 @@ class AgentHarnessV2Test extends IntegrationTest {
     }
 
     @Test
-    void workspaceAllowsParallelMultiAppTasksByDefault() {
+    void workspaceDefaultsToOneActiveTaskPerPerson() {
         var c = client();
         String wsId = c.ok(c.get("/api/workspace")).path("id").asText();
-        assertThat(quota.effectiveLimits(wsId).maxConcurrentTasks()).isGreaterThanOrEqualTo(3);
+        assertThat(quota.effectiveLimits(wsId).maxConcurrentTasks()).isEqualTo(1);
     }
 }

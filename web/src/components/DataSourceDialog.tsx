@@ -72,11 +72,6 @@ function SourceList({ onAddApi, onEdit, onTest }: { onAddApi: () => void; onEdit
       <p className="source-intro">
         从 API 网关添加当前账号<b>可调用的查询接口</b>后，在对话框「＋ → 数据源」里选择，生成的应用就能用真实数据。接口地址和凭证只保存在平台，不会出现在页面代码里。
       </p>
-      <div className="source-eco-strip" aria-label="企业生态连接能力">
-        <span><b>AGW 真实接口</b> · 查 MES / 设备 / 经营数据</span>
-        <span><b>飞书生态联动</b> · 群机器人卡片 / 多维表格互导</span>
-        <span><b>华星 SSO 身份</b> · 自动识别工号与审批角色</span>
-      </div>
       <div className="source-list-head">
         <span>{list.data ? `共 ${list.data.length} 个` : ''}</span>
         <div className="source-list-buttons">
@@ -351,28 +346,31 @@ export function SourceTest({ source, onBack }: { source: DataSourceInfo; onBack:
       </p>
       {source.params.length ? (
         <div className="source-test-params">
-          {source.params.map((p) => (
-            <label key={p.name}>
-              <span className="field-label">
-                {p.name === '_body' ? '完整 JSON 请求体' : p.name}
-                {p.required ? <i>*</i> : null}
-                <small>{TYPE_LABEL[p.type]}{p.name === '_body' ? ' · 填写后覆盖其他参数' : p.description ? ` · ${p.description}` : ''}</small>
-              </span>
-              {p.type === 'json' ? (
-                <textarea
-                  className="field mono source-json-input"
-                  aria-label={p.name === '_body' ? '完整 JSON 请求体' : p.name}
-                  rows={p.name === '_body' ? 7 : 4}
-                  maxLength={20000}
-                  placeholder={'{"appId":"填写接口要求的 appId","其他字段":"按接口契约填写"}'}
-                  value={values[p.name] ?? ''}
-                  onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                />
-              ) : (
-                <input className="field mono" aria-label={p.name} value={values[p.name] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))} />
-              )}
-            </label>
-          ))}
+          {source.params.map((p) => {
+            const sensitive = /secret|password|credential|token|app[-_]?key|api[-_]?key|authorization|webhook/i.test(p.name);
+            return (
+              <label key={p.name}>
+                <span className="field-label">
+                  {p.name === '_body' ? '完整 JSON 请求体' : p.name}
+                  {p.required ? <i>*</i> : null}
+                  <small>{TYPE_LABEL[p.type]}{p.position ? ` · ${p.position}` : ''}{sensitive ? ' · 敏感信息，不保存' : p.name === '_body' ? ' · 填写后覆盖其他参数' : p.description ? ` · ${p.description}` : ''}</small>
+                </span>
+                {p.type === 'json' ? (
+                  <textarea
+                    className="field mono source-json-input"
+                    aria-label={p.name === '_body' ? '完整 JSON 请求体' : p.name}
+                    rows={p.name === '_body' ? 7 : 4}
+                    maxLength={20000}
+                    placeholder={'{"appId":"填写接口要求的 appId","其他字段":"按接口契约填写"}'}
+                    value={values[p.name] ?? ''}
+                    onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
+                  />
+                ) : (
+                  <input className="field mono" type={sensitive ? 'password' : 'text'} autoComplete={sensitive ? 'off' : undefined} aria-label={p.name} value={values[p.name] ?? ''} onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))} />
+                )}
+              </label>
+            );
+          })}
         </div>
       ) : (
         <p className="muted-note">这个数据源不需要参数。</p>

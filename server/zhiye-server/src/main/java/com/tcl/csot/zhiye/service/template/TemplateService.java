@@ -64,7 +64,8 @@ public class TemplateService {
         this.taskService = taskService;
         this.quota = quota;
         this.views = views;
-        this.previewBase = props.site().previewBase().replaceAll("/+$", "");
+        String templateBase = props.site().templatePreviewBase();
+        this.previewBase = (templateBase == null || templateBase.isBlank() ? props.site().previewBase() : templateBase).replaceAll("/+$", "");
     }
 
     private record Tpl(String id, String ws, String name, String description, String type, String kind, String framework,

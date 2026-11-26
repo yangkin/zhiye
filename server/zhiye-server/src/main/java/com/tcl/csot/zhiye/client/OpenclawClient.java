@@ -86,21 +86,24 @@ public class OpenclawClient {
     public JsonNode usage(String platformToken) { return userGet("/" + org() + "/tokenCostDetail/usage", platformToken); }
 
     /**
-     * 服务间：取员工在 llm-gateway 上的模型路由。modelRef 为 "providerId:modelId"，为空时用该员工在五星AI岛的默认模型。
+     * 服务间：取员工在 llm-gateway 上的模型路由。billingType=FREE 时平台按公共免费 Key 下发路由，
+     * PAID 时返回该员工的个人虚拟密钥（由 LlmRouter 决定实际用哪把 Key 调网关）。
      * 返回 {baseUrl, providerModelName, virtualKey, providerId, providerName, modelId, modelName}。
      */
-    public JsonNode route(String userAccount, String modelRef) {
-        var body = Json.obj().put("userAccount", userAccount);
-        if (modelRef != null && !modelRef.isBlank()) {
-            int i = modelRef.indexOf(':');
-            body.put("providerId", modelRef.substring(0, i)).put("modelId", modelRef.substring(i + 1));
-        }
+    public JsonNode route(String userAccount, String providerId, String modelId, String billingType) {
+        var body = Json.obj().put("userAccount", userAccount).put("includePlatformFreeModels", true);
+        if (providerId != null && !providerId.isBlank()) body.put("providerId", providerId);
+        if (modelId != null && !modelId.isBlank()) body.put("modelId", modelId);
+        if (billingType != null && !billingType.isBlank()) body.put("billingType", billingType);
         return internalPost("/internal/llm/route", body);
     }
 
-    /** 服务间：实际可用的个人模型（已校验网关 Provider、Key 和模型授权），返回裸 JSON 数组。 */
+    /**
+     * 服务间：实际可用的模型（个人模型 + 平台免费模型，后者带 billingType=FREE），返回裸 JSON 数组。
+     */
     public JsonNode availableModels(String userAccount) {
-        return internalPost("/internal/llm/models", Json.obj().put("userAccount", userAccount));
+        return internalPost("/internal/llm/models",
+                Json.obj().put("userAccount", userAccount).put("includePlatformFreeModels", true));
     }
 
     private JsonNode internalPost(String path, JsonNode body) {

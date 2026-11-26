@@ -4,14 +4,14 @@ kind: Deployment
 metadata:
   name: zhiye-site
   namespace: zhiye
-  labels: { app: zhiye-site }
+  labels: { app: zhiye-site, app.kubernetes.io/part-of: zhiye }
 spec:
   replicas: 2
   selector:
     matchLabels: { app: zhiye-site }
   template:
     metadata:
-      labels: { app: zhiye-site }
+      labels: { app: zhiye-site, app.kubernetes.io/part-of: zhiye }
     spec:
       serviceAccountName: zhiye-site
       # 需要按需唤醒 zhiye-apps 命名空间里已休眠的单体服务（最小权限 Role: zhiye-user-service-waker）
@@ -33,6 +33,7 @@ spec:
             - { name: http, containerPort: 8083 }
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: "site,k8s" }
+            - { name: XDG_CONFIG_HOME, value: "/tmp/zhiye-config" }
             # site 不执行任务：显式 local，覆盖 ConfigMap 里的 opensandbox（Deployment env 优先于 envFrom），
             # 避免构造 OpenSandbox SDK 客户端。
             - { name: ZHIYE_SANDBOX_PROVIDER, value: local }
@@ -48,6 +49,9 @@ spec:
             # 发布站点的应用内 AI（/__zhiye/ai）按作者工号走五星AI岛路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
             - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+            # 公共免费虚拟 Key：billingType=FREE 的模型用它调网关，不占个人额度
+            - name: ZHIYE_FIVESTAR_PUBLIC_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_FIVESTAR_PUBLIC_KEY, optional: true } }
             - name: ZHIYE_AGW_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_AGW_CLIENT_SECRET, optional: true } }
           envFrom:
@@ -87,7 +91,7 @@ kind: Service
 metadata:
   name: zhiye-site
   namespace: zhiye
-  labels: { app: zhiye-site }
+  labels: { app: zhiye-site, app.kubernetes.io/part-of: zhiye }
 spec:
   selector: { app: zhiye-site }
   ports:

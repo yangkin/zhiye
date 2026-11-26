@@ -49,6 +49,18 @@ docker build -f deploy/docker/server.Dockerfile --build-arg JAR_SOURCE=prebuilt 
 
 内网构建时把 `--build-arg MAVEN_MIRROR=`、`NPM_REGISTRY=` 指到公司 Nexus / npm 镜像。改了模板依赖要同步更新 `deploy/docker/*template-cache/package-lock.json`（只取发布满 7 天的版本，见 `AGENTS.md`）。
 
+公司安全网关会对 npm 等外网 HTTPS 请求重新签发 `CSOT` 证书。runner 和导入服务的 Node / Python / Java / Go 基础镜像必须信任 `deploy/docker/csot-root-ca.crt`，不能用 `strict-ssl=false` 绕过。`runner.Dockerfile` 已内置该证书；在已有基础镜像上生成内网版本：
+
+```bash
+docker build -f deploy/docker/service-base.Dockerfile \
+  --build-arg BASE_IMAGE=node:22-alpine \
+  -t <registry>/zhiye/base-node:22-alpine-csot .
+```
+
+该镜像同时配置系统 CA、`NODE_EXTRA_CA_CERTS`、pip/requests、curl 和 Git 的 CA 路径。测试 overlay 的 `ZHIYE_SERVICE_IMAGE_*` 使用对应的 `-csot` 镜像；自定义 Dockerfile 的基础镜像由项目作者负责，在内网也应选择已配置公司 CA 的镜像。
+
+若集群出口把 registry 的 `.tgz` 请求拦成“URL过滤”HTML，可配置 `ZHIYE_NPM_TARBALL_CDN=https://cdn.npmmirror.com/packages`。Kaniko 只改写临时构建上下文中的公共 npm tarball URL，runner 安装结束后恢复原锁文件；私有 registry、Git 依赖和 integrity 均不变。自动 Dockerfile 对无锁项目先执行 `npm install --package-lock-only`；自定义 Dockerfile 应提交锁文件并使用 `npm ci`。不要通过关闭 TLS 或 integrity 校验绕过。
+
 ## 4. Kubernetes
 
 ```bash
@@ -70,6 +82,8 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 | `ZHIYE_RUNTIME_DIR` | `/var/lib/zhiye/runtime` | 共享卷挂载点 |
 | `ZHIYE_PUBLIC_BASE_URL` | — | 工作台地址（站点登录回跳、预览注入用） |
 | `ZHIYE_PREVIEW_BASE`、`ZHIYE_SITE_SCHEME`、`ZHIYE_SITE_HOST_SUFFIX` | — | 预览地址、发布站点的协议和域名后缀（`{slug}.后缀`） |
+| `ZHIYE_SITE_TEMPLATE_PREVIEW_BASE` | 同 `ZHIYE_PREVIEW_BASE` | 社区页面快照地址；证书无法覆盖独立预览域名时可设为主站地址，并由 Ingress 把主站 `/t/` 转给 site。只影响静态快照，不改变工作台 `/p/` 预览隔离 |
+| `ZHIYE_SITE_BUILD_PREVIEW_BASE` | 同 `ZHIYE_PREVIEW_BASE` | 工作台应用预览地址；证书只覆盖主站时可设为主站地址，并由 Ingress 把主站 `/p/` 转给 site。`/p`、`/t` 文档响应带 `CSP sandbox`，不能读取主站登录态；服务型应用的独立站点域名不受此项影响 |
 | `ZHIYE_STORAGE_TYPE` + `ZHIYE_S3_*`（`ACCESS_KEY`*、`SECRET_KEY`*） | `local` | 对象存储 |
 | `ZHIYE_CLOUD_SECRET`* | — | 云服务令牌签名密钥，k8s profile 下必填（≥ 32 位随机串） |
 | `ZHIYE_TASK_CONCURRENCY` | 4 | 每个实例同时执行的任务数 |
@@ -80,6 +94,7 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 | `ZHIYE_SANDBOX_PROVIDER` | `opensandbox` | `opensandbox` / `k8s`（回滚）/ `local`（site 固定 local） |
 | `ZHIYE_OPENSANDBOX_*`、`ZHIYE_RUNNER_IMAGE`、`ZHIYE_SANDBOX_PVC`、`ZHIYE_SANDBOX_CPU_*`、`ZHIYE_SANDBOX_MEMORY_*` | 见 ConfigMap | 沙箱 |
 | `ZHIYE_GATEWAY_URL` | `http://zhiye-api.zhiye.svc:8080/llm/v1` | 沙箱访问织页模型网关的集群内地址 |
+| `ZHIYE_SERVICE_IMAGE_*`、`ZHIYE_NPM_TARBALL_CDN` | 见测试 overlay | 导入服务基础镜像；可选的公共 npm tarball CDN 转换 |
 | `KIMI_API_KEY`* / `DEEPSEEK_API_KEY`* + `ZHIYE_LLM_*` | — | 本地统一上游（不开五星AI岛时） |
 | `ZHIYE_AUTH_MODE` | `anonymous` | `sso` 开启统一登录 |
 | `ZHIYE_AUTH_LOGIN_ALLOWLIST_ENABLED` | `true`（base 配置） | 人员管理：sso 下开启登录白名单，仅「管理 → 人员管理」中启用的人员与管理员可登录，其他账号登录返回 403 `PLATFORM_ACCESS_DENIED`；本地开发/测试默认关闭 |
@@ -87,6 +102,7 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 | `ZHIYE_FIVESTAR_ENABLED`、`ZHIYE_FIVESTAR_ORG`、`ZHIYE_OPENCLAW_BASE_URL`、`ZHIYE_LLM_GATEWAY_URL` | `false` / 31 / — / — | 五星AI岛模型、额度、llm-gateway 路由（需要 sso） |
 | `ZHIYE_FIVESTAR_PROJECT_ID` | `zhiye` | 发往 llm-gateway 的来源项目标识 |
 | `ZHIYE_OPENCLAW_INTERNAL_TOKEN`* | — | 调 openclaw 内部接口的服务令牌（api 和 site 都要） |
+| `ZHIYE_FIVESTAR_PUBLIC_KEY`* | — | 公共免费虚拟 Key：`billingType=FREE` 的模型用它调网关，不占个人额度（api 和 site 都要） |
 | `ZHIYE_SKILLHUB_ENABLED`、`ZHIYE_SKILLHUB_URL`、`ZHIYE_SKILLHUB_FILE_URL`、`ZHIYE_SKILLHUB_UPLOAD_URL`、`ZHIYE_SKILLHUB_PORTAL`、`ZHIYE_SKILLHUB_ORG` | `false` / — / — / — / 测试详情页 / 31 | 公司 SkillHub 浏览、安装和发布；上传地址为 `http://网关/tfle/v1`，发布前先把 ZIP 传到文件服务 |
 | `ZHIYE_SOURCES_ALLOWED_HOSTS` | 空 | 数据源代理允许访问的主机（逗号分隔，支持 `*.域名`） |
 | `ZHIYE_AGW_CLIENT_ID`、`ZHIYE_AGW_CLIENT_SECRET`*、`ZHIYE_AGW_CLIENT_TOKEN_URL`、`ZHIYE_AGW_CLIENT_BASE_URL` | 见 ConfigMap | 手动数据源的 `agw_client` 鉴权：客户端模式取 Metis Token，再换 AGW JWT；Secret 只注入 api 和 site |
@@ -100,7 +116,7 @@ Spring 的环境变量映射：`zhiye.task.max-duration-minutes` ⇔ `ZHIYE_TASK
 ## 6. 上线检查
 
 1. 数据库：RDS PostgreSQL 16 可达，账号有建 schema 权限（每个应用的云数据库是一个 schema）；首次启动 Flyway 自动迁移到最新版本（日志里 `now at version vNN`）。
-2. 密钥：`ZHIYE_CLOUD_SECRET`、数据库密码、对象存储、OpenSandbox、（开五星时）`ZHIYE_OPENCLAW_INTERNAL_TOKEN` 都在 Secret 里；模型密钥只给 api。
+2. 密钥：`ZHIYE_CLOUD_SECRET`、数据库密码、对象存储、OpenSandbox、（开五星时）`ZHIYE_OPENCLAW_INTERNAL_TOKEN` 和 `ZHIYE_FIVESTAR_PUBLIC_KEY` 都在 Secret 里；模型密钥只给 api。
 3. 域名：工作台、预览、发布站点三个域名（站点用通配符证书）；`ZHIYE_PUBLIC_BASE_URL`、`ZHIYE_PREVIEW_BASE`、`ZHIYE_SITE_HOST_SUFFIX` 一致。证书 SAN 必须覆盖工作台、预览及 `*.zhiye.csot.tcl.com` 这类发布站点泛域名；只有 `*.csot.tcl.com` 时不能覆盖多级子域名，浏览器会报 `ERR_CERT_COMMON_NAME_INVALID`。
 4. Ingress：SSE 不缓冲、读超时 ≥ 10 分钟、请求体 ≥ 61 MB（导入）。
 5. 沙箱：OpenSandbox 能创建沙箱、PVC 能挂进去、沙箱能访问 `ZHIYE_GATEWAY_URL`、出网默认拒绝（`deploy/k8s/README.md` 第 9 节逐项验证）。

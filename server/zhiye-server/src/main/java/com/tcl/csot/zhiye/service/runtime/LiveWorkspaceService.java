@@ -315,7 +315,12 @@ public class LiveWorkspaceService {
                     Path liveNm = liveDir.resolve("node_modules");
                     if (Files.isSymbolicLink(liveNm)) Files.delete(liveNm);
                     else GitService.deleteRecursively(liveNm);
-                    Files.move(taskNm, liveNm, StandardCopyOption.REPLACE_EXISTING);
+                    try {
+                        Files.move(taskNm, liveNm, StandardCopyOption.REPLACE_EXISTING);
+                    } catch (FileSystemException e) {
+                        copyDir(taskNm, liveNm);
+                        GitService.deleteRecursively(taskNm);
+                    }
                 }
                 String depsHash = computeDepsHash(liveDir);
                 LiveProc lp = running.get(app.id());

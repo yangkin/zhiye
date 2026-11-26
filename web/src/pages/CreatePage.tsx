@@ -16,7 +16,7 @@ import { TemplateIcon } from '../lib/templateIcons';
 import { Icon, kindIcon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
-import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt } from '../components/ComposerPopovers';
+import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt, useModelList } from '../components/ComposerPopovers';
 import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { loadDraft, saveDraft } from '../lib/drafts';
 
@@ -154,8 +154,14 @@ export function CreatePage() {
   }, [thread]);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
-  const models = meta?.models?.length ? meta.models : [{ id: 'auto', label: 'Auto' }];
+  const { models, defaultId } = useModelList();
   const modes: Mode[] = meta?.modes?.length ? meta.modes : ['快速', '适中', '深度'];
+  // 新会话优先选免费模型（用户自己点过就不再改）
+  const modelTouched = useRef(false);
+  useEffect(() => {
+    if (!modelTouched.current && defaultId && defaultId !== 'auto' && (f.model === 'auto' || !f.model)) f.set({ model: defaultId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultId]);
 
   useEffect(() => {
     textarea.current?.focus();
@@ -436,7 +442,7 @@ export function CreatePage() {
               pickedSourceIds={f.sources.map((s) => s.id)}
               onPickSource={(s) => f.set({ sources: [...useCreateForm.getState().sources, { id: s.id, name: s.name }] })}
             />
-            <ModelModeButton models={models} modes={modes} model={f.model} mode={f.mode} onModel={(m) => f.set({ model: m })} onMode={(m) => f.set({ mode: m })} />
+            <ModelModeButton models={models} modes={modes} model={f.model} mode={f.mode} onModel={(m) => { modelTouched.current = true; f.set({ model: m }); }} onMode={(m) => f.set({ mode: m })} />
             <button
               ref={skillBtn}
               type="button"

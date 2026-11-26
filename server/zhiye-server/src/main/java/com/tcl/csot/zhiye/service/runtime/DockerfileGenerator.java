@@ -24,11 +24,13 @@ public final class DockerfileGenerator {
         if (!frontDir.isEmpty()) {
             sb.append("FROM ").append(props.baseImageNode()).append(" AS frontend-builder\n");
             sb.append("ARG NPM_REGISTRY=").append(props.npmRegistry()).append("\n");
+            sb.append("ARG NPM_TARBALL_CDN=").append(props.npmTarballCdn()).append("\n");
             sb.append("WORKDIR /frontend\n");
             // 优先仅拷贝依赖清单以命中 Docker/Kaniko 依赖缓存层
             sb.append("COPY ").append(frontDir).append("/package*.json ./\n");
             sb.append("RUN if [ -f package.json ]; then \\\n");
             sb.append("      if [ -n \"$NPM_REGISTRY\" ]; then npm config set registry \"$NPM_REGISTRY\"; fi && \\\n");
+            appendNpmTarballRewrite(sb);
             sb.append("      (npm ci --no-audit --no-fund || npm install --no-audit --no-fund); \\\n");
             sb.append("    fi\n");
             sb.append("COPY ").append(frontDir).append("/ ./\n");
@@ -43,6 +45,12 @@ public final class DockerfileGenerator {
             default -> appendNode(sb, spec, props, backDir, frontDir, port);
         }
         return sb.toString();
+    }
+
+    private static void appendNpmTarballRewrite(StringBuilder sb) {
+        sb.append("      if [ -n \"$NPM_TARBALL_CDN\" ]; then \\\n");
+        sb.append("        if [ ! -f package-lock.json ]; then npm install --package-lock-only --ignore-scripts --no-audit --no-fund; fi && \\\n");
+        sb.append("        node -e 'const fs=require(\"fs\"),p=\"package-lock.json\",j=JSON.parse(fs.readFileSync(p,\"utf8\")),hosts=new Set([\"registry.npmjs.org\",\"registry.npmmirror.com\"]),cdn=process.env.NPM_TARBALL_CDN.replace(/[/]+$/,\"\");const walk=o=>{if(!o||typeof o!==\"object\")return;if(typeof o.resolved===\"string\"){try{const u=new URL(o.resolved);if(hosts.has(u.hostname)){const a=u.pathname.split(\"/\"),i=a.lastIndexOf(\"-\");if(i>1&&i===a.length-2){const n=a.slice(1,i).join(\"/\"),f=a[i+1],b=n.split(\"/\").pop(),v=f.startsWith(b+\"-\")&&f.endsWith(\".tgz\")?f.slice(b.length+1,-4):\"\";if(n&&v)o.resolved=cdn+\"/\"+n+\"/\"+v+\"/\"+f}}}catch{}};Object.values(o).forEach(walk)};walk(j);fs.writeFileSync(p,JSON.stringify(j,null,2)+\"\\n\")'; fi && \\\n");
     }
 
     private static void appendPython(StringBuilder sb, ServiceRuntimeDetector.Spec spec, ServiceRuntimeProperties props,
@@ -80,12 +88,14 @@ public final class DockerfileGenerator {
         String srcPrefix = backDir.isEmpty() ? "" : backDir + "/";
         sb.append("FROM ").append(props.baseImageNode()).append("\n");
         sb.append("ARG NPM_REGISTRY=").append(props.npmRegistry()).append("\n");
+        sb.append("ARG NPM_TARBALL_CDN=").append(props.npmTarballCdn()).append("\n");
         sb.append("ENV NODE_ENV=production PORT=").append(port).append(" DATA_DIR=/data\n");
         sb.append("WORKDIR /app\n");
         // 分层缓存：先拷贝 package*.json 安装 node_modules，再拷贝业务代码
         sb.append("COPY ").append(srcPrefix).append("package*.json ./\n");
         sb.append("RUN if [ -f package.json ]; then \\\n");
         sb.append("      if [ -n \"$NPM_REGISTRY\" ]; then npm config set registry \"$NPM_REGISTRY\"; fi && \\\n");
+        appendNpmTarballRewrite(sb);
         sb.append("      (npm ci --include=dev --no-audit --no-fund || npm install --include=dev --no-audit --no-fund); \\\n");
         sb.append("    fi\n");
         sb.append("COPY ").append(backDir.isEmpty() ? "." : backDir + "/").append(" ./\n");
@@ -107,6 +117,9 @@ public final class DockerfileGenerator {
         String srcPrefix = backDir.isEmpty() ? "" : backDir + "/";
         sb.append("FROM ").append(props.baseImageJavaBuild()).append(" AS builder\n");
         sb.append("ARG MAVEN_MIRROR_URL=").append(props.mavenMirrorUrl()).append("\n");
+        sb.append("RUN if [ -n \"$MAVEN_MIRROR_URL\" ]; then \\\n");
+        sb.append("      mkdir -p /root/.m2 && printf '%s' '<settings><mirrors><mirror><id>mirror</id><mirrorOf>central</mirrorOf><url>'\"$MAVEN_MIRROR_URL\"'</url></mirror></mirrors></settings>' > /root/.m2/settings.xml; \\\n");
+        sb.append("    fi\n");
         sb.append("WORKDIR /src\n");
         // 分层缓存：先拷贝 pom.xml / build.gradle 预拉取依赖，再拷贝全部源码编译
         sb.append("COPY ").append(srcPrefix).append("pom.xml* ").append(srcPrefix).append("build.gradle* ").append(srcPrefix).append("settings.gradle* ./\n");

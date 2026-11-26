@@ -18,6 +18,9 @@ ARG NODE_IMAGE=node:22-bookworm-slim
 FROM ${NODE_IMAGE} AS deps
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ENV npm_config_registry=${NPM_REGISTRY} npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false
+COPY deploy/docker/csot-root-ca.crt /usr/local/share/ca-certificates/csot-root-ca.crt
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/csot-root-ca.crt \
+    SSL_CERT_FILE=/usr/local/share/ca-certificates/csot-root-ca.crt
 WORKDIR /build
 
 COPY runner/package.json runner/package-lock.json runner/
@@ -54,6 +57,7 @@ RUN --mount=type=cache,target=/root/.npm cd fullstack-template-cache && npm inst
 
 # ---------- 运行镜像 ----------
 FROM ${NODE_IMAGE}
+COPY deploy/docker/csot-root-ca.crt /usr/local/share/ca-certificates/csot-root-ca.crt
 # 构建机到镜像源的速度差异很大，按需换（mirrors.aliyun.com / mirrors.tuna.tsinghua.edu.cn / 空 = 官方源）
 ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
 ARG MAVEN_MIRROR=https://maven.aliyun.com/repository/public
@@ -63,6 +67,7 @@ RUN set -eux; \
       sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends chromium git python3 bash ca-certificates fonts-noto-cjk tini openjdk-17-jdk-headless maven; \
+    update-ca-certificates; \
     rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man; \
     JAVA_DIR="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"; \
     ln -sfn "${JAVA_DIR}" /usr/lib/jvm/zhiye-jdk; \
@@ -101,6 +106,7 @@ RUN set -eux; \
     chmod -R a+rX /opt/zhiye/m2
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_TARBALL_CDN=
 ARG PNPM_VERSION=10.34.9
 ENV COREPACK_HOME=/opt/zhiye/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 RUN corepack enable pnpm && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm --version && chmod -R a+rX /opt/zhiye/corepack
@@ -119,6 +125,13 @@ ENV JAVA_HOME=/usr/lib/jvm/zhiye-jdk \
     HOME=/agent \
     TMPDIR=/tmp \
     NODE_ENV=production \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    GIT_SSL_CAINFO=/etc/ssl/certs/ca-certificates.crt \
+    ZHIYE_NPM_TARBALL_CDN=${NPM_TARBALL_CDN} \
     npm_config_update_notifier=false
 
 USER 10001:10001

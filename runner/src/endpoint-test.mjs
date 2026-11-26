@@ -1,13 +1,13 @@
 // 全栈/单体本地回环接口实测引擎（test_endpoint）与临时服务启动器：
 // 严格仅绑定 127.0.0.1 随机空闲端口与临时 DATA_DIR，自动等待就绪、执行多步有状态 HTTP 断言并回收进程。
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { Type } from 'typebox'
-import { log } from './util.mjs'
+import { log, normalizeShellCommand } from './util.mjs'
 import { discoverWorkspaceLayout, loadProjectWorkflow } from './workflow.mjs'
 
 const FORBIDDEN_START = /(?:^|[;&|`($\s])(sudo|su|doas|curl|wget|ssh|scp|nc|ncat|netcat|docker|kubectl|rm\s+-rf\s+\/)\b/i
@@ -206,7 +206,10 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
       logs.push(`${prefix}${line}`.slice(0, 500))
     }
   }
-  const proc = spawn(spec.cmd, args, {
+  const executable = process.platform === 'win32' && spec.cmd === 'python3' ? 'python' : spec.cmd
+  const launchArgs = process.platform === 'win32' && spec.cmd === 'sh' && args[0] === '-c'
+    ? [args[0], normalizeShellCommand(args[1]), ...args.slice(2)] : args
+  const proc = spawn(executable, launchArgs, {
     cwd: spec.cwd,
     env: {
       ...env,
@@ -226,9 +229,16 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
   const close = async () => {
     try {
       if (proc.exitCode === null) {
-        proc.kill('SIGTERM')
+        const terminate = (signal) => {
+          if (process.platform === 'win32') {
+            spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' })
+          } else {
+            try { proc.kill(signal) } catch {}
+          }
+        }
+        terminate('SIGTERM')
         await new Promise((r) => {
-          const t = setTimeout(() => { try { proc.kill('SIGKILL') } catch {}; r() }, 2000)
+          const t = setTimeout(() => { terminate('SIGKILL'); r() }, 2000)
           proc.once('exit', () => { clearTimeout(t); r() })
         })
       }

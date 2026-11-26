@@ -600,7 +600,7 @@ class MonolithServiceE2ETest extends IntegrationTest {
 
             // 2. 点击「开始生成」→ 自动生成前后端代码、提交 V1、自动启动 Express 服务
             JsonNode genTask = c.ok(c.post("/api/apps/" + appId + "/generate", Map.of()));
-            JsonNode genDone = c.waitTask(genTask.path("id").asText());
+            JsonNode genDone = c.waitTask(genTask.path("id").asText(), java.time.Duration.ofMinutes(5));
             assertThat(genDone.path("status").asText()).as(genDone.toString()).isEqualTo("SUCCEEDED");
 
             JsonNode app = c.ok(c.get("/api/apps/" + appId));
@@ -625,7 +625,7 @@ class MonolithServiceE2ETest extends IntegrationTest {
             assertThat(listItems.body()).contains("T11 曝光机异常点检");
 
             // 4. 发布后通过独立子域名网关访问 SPA 页面与后端接口
-            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of()));
+            c.ok(c.post("/api/apps/" + appId + "/publish", Map.of(), java.time.Duration.ofMinutes(5)));
             JsonNode pubApp = c.ok(c.get("/api/apps/" + appId));
             String host = siteHost(pubApp);
             var home = c.getWithHost("/", host);

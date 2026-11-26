@@ -16,6 +16,7 @@
 !deploy/docker/template-cache/**
 !deploy/docker/vue-template-cache/**
 !deploy/docker/start-runner.sh
+!deploy/docker/csot-root-ca.crt
 **/node_modules
 **/target
 **/.DS_Store

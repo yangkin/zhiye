@@ -22,6 +22,7 @@
 - **跨集群网络**：`zhiye-api` 和负责应用内 AI 的 `zhiye-site` 都要能访问 openclaw / llm-gateway 的平台网关或 Ingress；独立集群之间不能直接使用对方集群的 `*.svc` DNS 地址。织页只作为出站 HTTP 调用方，不需要注册到对方 Nacos。
 - 模型路由（含虚拟密钥）只缓存在内存里（默认 10 分钟），不落库、不给浏览器、不进生成的应用。网关返回 401 时清缓存重取。
 - 额度按人：用量计入这个员工在五星AI岛的周额度，和星Claw、星域工作台共用；`X-Project-Id: zhiye` 只用于区分来源。
+- **模型选择与免费/付费**：模型菜单来自 `/api/llm/models`（个人模型 + 平台免费模型）。下拉框只显示模型名，`billingType=PAID` 的加「付费」标识，选中时提示会扣个人额度；新会话优先选免费模型（`defaultId`）。用户选中后前端把 `providerId`、`modelId`（合一成 `供应商ID:模型ID` 的 `model`）和 `billingType` 随消息传给织页后端（问答 / 开始做 / 修改都带）；后端按 `billingType` 决定用公共 Key 还是个人 `virtualKey`。模型列表和路由在内存里缓存 10 分钟，网关 401 时清缓存重取。
 - 应用内 AI（发布后的应用里调用 `zhiye.ai`）记在**应用作者**的额度上（访问者可能未登录）。
 - 不设任务级 token 上限。额度用完时（llm-gateway 429 且错误体是额度类）：任务失败为 `PROVIDER_QUOTA`，提示「你在五星AI岛的本周模型额度已用完，X月X日 HH:mm 重置。已做的部分都保留着，额度恢复后点「重试」会接着做。」；问答、润色、小织直接提示。
 - 五星模式要求统一登录（`zhiye.auth.mode=sso`）；匿名工作空间调用模型会返回 `LOGIN_REQUIRED`。
@@ -43,10 +44,11 @@
 | `zhiye.skillhub.organization-id` | SkillHub 租户 ID | `31` |
 | `zhiye.skillhub.portal-url` | 技能详情页，`{id}` 替换为技能 ID | `http://网关/fivestar-front/skillsHub?type=detail&id={id}` |
 | `ZHIYE_OPENCLAW_INTERNAL_TOKEN`（环境变量） | 服务间令牌 | 由 openclaw 团队提供，放 Secret |
+| `ZHIYE_FIVESTAR_PUBLIC_KEY`（环境变量 / `zhiye.fivestar.public-key-env`） | 公共免费虚拟 Key：`billingType=FREE` 的模型用它调网关 | 平台提供，放 Secret |
 | `zhiye.fivestar.project-id` | `X-Project-Id` | `zhiye` |
 
 外网模拟：`ZHIYE_MOCK_INTRANET=1 bash scripts/dev-up.sh`（profile `mock`，见 `application-mock.yml`）。
-登录页会跳到模拟统一认证，输入任意工号登录；模拟 openclaw 给每人两个供应商三个模型，模拟网关每人每周 500 万 tokens（`ZHIYE_MOCK_QUOTA`），请求转给本机配置的 DeepSeek / Kimi。`MockSkillHubController` 同时提供可搜索、下载、安装和发布的本地技能市场。
+登录页会跳到模拟统一认证，输入任意工号登录；模拟 openclaw 给每人两个个人供应商三个模型 + 一个平台免费模型（`billingType=FREE`，走公共 Key、不扣额度），模拟网关每人每周 500 万 tokens（`ZHIYE_MOCK_QUOTA`），请求转给本机配置的 DeepSeek / Kimi。`MockSkillHubController` 同时提供可搜索、下载、安装和发布的本地技能市场。
 
 ## 三、openclaw 服务间路由接口
 
@@ -54,9 +56,25 @@
 （openclaw 已有把虚拟密钥下发给 CM 的先例：`CmDefaultModelSyncHelper`）。该接口已在 openclaw-service `dev` 实现，模拟实现见 `MockFivestarController.route`。
 
 ```
+POST /internal/llm/models
+X-Internal-Token: <服务间令牌>
+{"userAccount": "工号", "includePlatformFreeModels": true}
+
+200 [
+  {"providerId":"11","providerName":"deepseek","modelId":"deepseek-v4-flash","modelName":"DeepSeek V4 Flash",
+   "multimodal":true,"preferred":true,"billingType":"PAID"},
+  {"providerId":"1","providerName":"platform-free","modelId":"glm-4.5-flash-free","modelName":"GLM-4.5 Flash（免费）",
+   "multimodal":false,"preferred":false,"billingType":"FREE"}
+]
+```
+
+`includePlatformFreeModels: true` 时把平台免费模型一并返回；`billingType` 缺失按 `PAID` 处理（用个人 Key，和旧行为一致）。
+
+```
 POST /internal/llm/route
 X-Internal-Token: <服务间令牌>
-{"userAccount": "工号", "providerId": "11", "modelId": "deepseek-v4-flash"}   // 两个字段都不传 = 用该员工的默认模型
+{"userAccount": "工号", "includePlatformFreeModels": true,
+ "providerId": "11", "modelId": "deepseek-v4-flash", "billingType": "PAID"}   // 都不传 = 用该员工的默认模型
 
 200 {
   "baseUrl": "http://llm-gateway/v1",
@@ -65,6 +83,10 @@ X-Internal-Token: <服务间令牌>
   "providerId": "11", "providerName": "deepseek", "modelId": "deepseek-v4-flash", "modelName": "DeepSeek V4 Flash",
   "multimodal": true}
 ```
+
+免费模型（`billingType=FREE`）的调用方式：织页仍调 `/internal/llm/route` 拿 `baseUrl` / `providerModelName`，
+但 `Authorization: Bearer` 用公共免费虚拟 Key（`ZHIYE_FIVESTAR_PUBLIC_KEY`），不用路由返回的个人密钥；
+付费模型用路由返回的个人 `virtualKey`。两者都带 `X-User-Id: <工号>` 和 `X-Project-Id: zhiye`。
 
 此内部接口成功返回**裸 JSON**，不套 metis Result；业务错误为 400/422/503 + `{code,message}`。
 

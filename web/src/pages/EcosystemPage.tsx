@@ -588,8 +588,8 @@ function FeishuConnectorModal({
               />
               <small>系统会自动从链接中解析 appToken 与 tableId，无需手动拆分参数。</small>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div className="eco-field">
+            <div className="eco-grid-2">
+              <div className="eco-field eco-field-pair">
                 <label>飞书自建应用 App ID</label>
                 <input
                   type="text"
@@ -598,7 +598,7 @@ function FeishuConnectorModal({
                   onChange={(e) => setAppId(e.target.value)}
                 />
               </div>
-              <div className="eco-field">
+              <div className="eco-field eco-field-pair">
                 <label>飞书应用 App Secret（加密托管）</label>
                 <input
                   type="password"

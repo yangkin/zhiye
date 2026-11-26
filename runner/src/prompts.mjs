@@ -63,7 +63,7 @@ const VUE = `
 - 完成后执行 \`npx vue-tsc --noEmit -p tsconfig.json\` 自查类型错误，有错就修，直到没有输出为止。`
 
 const SCRIPT = `
-## 项目结构（无页面 Python / Node.js 命令行与数据处理脚本项目）
+## 项目结构（无页面 Python / Node.js 数据处理与命令行脚本项目）
 - 这是一个无页面的 Python 3 或 Node.js (JS/MJS) 脚本项目，**不产出网页**：不要创建 index.html 或前端框架代码，也不需要构建。
 - 入口脚本放在工作区根目录（Python 优先 \`main.py\`，Node.js 优先 \`index.mjs\` 或 \`index.js\`）；辅助模块可放 \`scripts/\` 或 \`lib/\`；样例数据放 \`examples/\`（体积要小）。
 - 只用 Python 3 标准库或 Node.js 内置模块（\`node:fs\`、\`node:path\`、\`node:crypto\` 等）；不能联网安装依赖。

@@ -13,14 +13,16 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 预览域名 preview.{siteHostSuffix} 落在发布站点泛域名里时，/p/{buildId} 仍要走预览，不能被当成 slug=preview 的应用站点。 */
+/** 工作台 /p 预览可独立配置为主站同源地址，旧预览域名仍保留；两类作品文档都必须带 CSP sandbox。 */
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:postgresql://127.0.0.1:5433/zhiye_test?currentSchema=ctx_previewhost", "spring.flyway.schemas=ctx_previewhost",
         "zhiye.site.preview-base=http://preview.localhost:8083",
-        "zhiye.site.site-host-suffix=localhost:8083"})
+        "zhiye.site.site-host-suffix=localhost:8083",
+        "zhiye.site.template-preview-base=https://zhiye.example.com/",
+        "zhiye.site.build-preview-base=https://zhiye.example.com/"})
 class SitePreviewHostTest extends IntegrationTest {
 
-    private record Res(int status, String body) {}
+    private record Res(int status, String body, String csp) {}
 
     private Res getWithHost(String url, String host) throws Exception {
         URI u = URI.create(url);
@@ -34,7 +36,9 @@ class SitePreviewHostTest extends IntegrationTest {
             String headers = raw.substring(0, raw.indexOf("\r\n\r\n"));
             String body = raw.substring(raw.indexOf("\r\n\r\n") + 4);
             if (headers.toLowerCase(java.util.Locale.ROOT).contains("transfer-encoding: chunked")) body = dechunk(body);
-            return new Res(status, body);
+            String csp = headers.lines().filter(x -> x.toLowerCase(java.util.Locale.ROOT).startsWith("content-security-policy:"))
+                    .map(x -> x.substring(x.indexOf(':') + 1).trim()).findFirst().orElse("");
+            return new Res(status, body, csp);
         }
     }
 
@@ -54,7 +58,7 @@ class SitePreviewHostTest extends IntegrationTest {
     }
 
     @Test
-    void previewDomainServesBuildPreviewInsteadOfSlugSite() throws Exception {
+    void previewAndTemplateRoutesUseIndependentBases() throws Exception {
         Client c = client();
         JsonNode created = c.ok(c.post("/api/apps", Map.of("type", "开发网站", "prompt", "做一个点击计数器", "mode", "快速", "model", "auto", "assetIds", List.of())));
         String appId = created.path("id").asText();
@@ -63,15 +67,27 @@ class SitePreviewHostTest extends IntegrationTest {
         assertThat(c.waitTask(task.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
         JsonNode app = c.ok(c.get("/api/apps/" + appId));
         String previewUrl = app.path("previewUrl").asText();
-        assertThat(previewUrl).startsWith("http://preview.localhost:8083/p/");
+        assertThat(previewUrl).startsWith("https://zhiye.example.com/p/");
+        String buildId = previewUrl.replaceAll(".*/p/([^/]+)/index.html", "$1");
 
-        // 预览域名 + /p/{buildId}/index.html：200，且是带 data-loc 的预览版
-        Res preview = getWithHost(local(previewUrl), "preview.localhost:8083");
+        // 主站同源 + /p/{buildId}/index.html：200，仍带 data-loc，并用 CSP sandbox 隔离主站登录态
+        Res preview = getWithHost(local(previewUrl), "zhiye.example.com");
         assertThat(preview.status()).as(preview.body()).isEqualTo(200);
         assertThat(preview.body()).contains("data-loc=\"src/App.tsx:");
+        assertThat(preview.csp()).contains("sandbox").doesNotContain("allow-same-origin");
 
-        // 其他 slug 仍按发布站点处理（不存在的站点 404），互不影响
-        Res slug = getWithHost(local(previewUrl), "nosuch.localhost:8083");
-        assertThat(slug.status()).isEqualTo(404);
+        // 原预览域名仍能直接服务预览（供尚未切换的部署平滑回退）
+        Res legacy = getWithHost(local("http://preview.localhost:8083/p/" + buildId + "/index.html"), "preview.localhost:8083");
+        assertThat(legacy.status()).as(legacy.body()).isEqualTo(200);
+        assertThat(legacy.body()).contains("data-loc=\"src/App.tsx:");
+        assertThat(legacy.csp()).contains("sandbox").doesNotContain("allow-same-origin");
+
+        JsonNode template = c.ok(c.post("/api/templates", Map.of("appId", appId)));
+        String templateId = template.path("id").asText();
+        assertThat(template.path("previewUrl").asText()).isEqualTo("https://zhiye.example.com/t/" + templateId + "/");
+        Res snapshot = getWithHost(local(template.path("previewUrl").asText()), "zhiye.example.com");
+        assertThat(snapshot.status()).as(snapshot.body()).isEqualTo(200);
+        assertThat(snapshot.body()).contains("<html").doesNotContain("__ZHIYE_CLOUD__");
+        assertThat(snapshot.csp()).contains("sandbox").doesNotContain("allow-same-origin");
     }
 }

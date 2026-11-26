@@ -10,7 +10,7 @@ resources:
 images:
   - name: zhiye-server
     newName: 10.110.27.113/zhiye/zhiye-server
-    newTag: "v0.3.3-test"
+    newTag: "v0.3.17-test"
 patches:
   # 现有 zhiye/zhiye-runtime 由集群手工创建，api 与沙箱直接复用。
   - patch: |-

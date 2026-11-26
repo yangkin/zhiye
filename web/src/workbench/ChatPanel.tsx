@@ -11,7 +11,7 @@ import { copyText, fmtDate, fmtTime, shortDay } from '../lib/format';
 import { toast, useChat } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { AssetChips, type ChatAsset } from '../components/AssetChips';
-import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, mentionAt, useMySkills } from '../components/ComposerPopovers';
+import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, useMySkills } from '../components/ComposerPopovers';
 import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { styleFor } from '../components/Thumbnail';
 import { isQuestion, quickRoute } from '../pages/CreatePage';
@@ -94,6 +94,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   });
   const convMessages = appConv.data?.messages ?? [];
   const meta = useMeta().data;
+  const { models: modelList } = useModelList();
   const draft = useChat((s) => s.draft);
   const setDraft = useChat((s) => s.setDraft);
   const ctx = useChat((s) => s.elementContext);
@@ -421,6 +422,8 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           {
             content,
             appId: app.id,
+            model: app.model ?? 'auto',
+            ...(billingOf(modelList, app.model ?? 'auto') ? { billingType: billingOf(modelList, app.model ?? 'auto')! } : {}),
             ...(history.length ? { history } : {}),
             ...(chatSkills.length ? { skillAppIds: chatSkills.map((k) => k.id) } : {}),
             ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),

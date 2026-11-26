@@ -53,6 +53,9 @@ public class AskService {
     public static final int MAX_HISTORY_TOTAL_TOKENS = 28000;
     private static final java.util.regex.Pattern FILE_BLOCK = java.util.regex.Pattern.compile(
             "\\[\\[file:([^\\]\\r\\n]+)\\]\\][\\s\\S]*?\\[\\[/file\\]\\]");
+    /** 用户已明确要求开工：模型漏掉 [[build]] 时会说“正在写”但系统不会创建，必须在最后再强化一次 */
+    private static final java.util.regex.Pattern START_REQUEST = java.util.regex.Pattern.compile(
+            "(开始|动手|直接做|直接生成|生成吧|写吧|按你的|按默认|就按这个)");
 
     /** 一次回答：正文 + 模型的思考过程（可能为空） */
     public record Reply(String content, String thinking) {}
@@ -82,6 +85,8 @@ public class AskService {
               如果还有影响实现的关键问题没问清，先问，不要输出 [[build]]。
             - 只有当用户**明确表示现在就开始**（「开始做」「就这样做」「动手吧」「直接生成」），或者需求已经足够清楚且用户在催你开始时，
               在回答**第一行**单独输出标记 [[build:类型]]，第二行开始再用两三句话说明你准备怎么做。其他任何时候都不要输出这个标记。
+            - 标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——
+              那样系统不会开始创建，用户会以为卡住了。
             - [[build:类型]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一，例如 [[build:日常开发]] 或 [[build:全栈应用]]：
               · 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（纯前端或结合内置云服务）；
               · 开发网站：多角色、带状态流转的业务系统，或官网、活动页这类重视觉的站点；
@@ -332,9 +337,9 @@ public class AskService {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
         String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
+        boolean explicitBackend = conversation && (com.tcl.csot.zhiye.service.app.Catalog.looksLikeVueSpringBoot(content)
+                || com.tcl.csot.zhiye.service.app.Catalog.prefersCleanWorkspace(content));
         if (conversation) {
-            boolean explicitBackend = com.tcl.csot.zhiye.service.app.Catalog.looksLikeVueSpringBoot(content)
-                    || com.tcl.csot.zhiye.service.app.Catalog.prefersCleanWorkspace(content);
             if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type) || explicitBackend) {
                 context += "\n\n【重要约束】当前为「全栈应用」需求（织页原生支持 Vue 3 + Java Spring Boot、React + Node.js Express、Python FastAPI/Flask、Go 等多技术栈在对话中直接生成、离线编译并托管，支持独立后端 API、/data 持久化存储与独立 PostgreSQL Schema）。"
                         + "请尊重用户指定的前后端技术栈（例如 Vue + Java Spring Boot），绝不要声称不支持 Java/Spring Boot 或劝退用户改用 Express / 本地导入；需求明确时直接在回答第一行输出 [[build:全栈应用]] 启动创建。";
@@ -355,7 +360,13 @@ public class AskService {
             norm = norm.subList(0, norm.size() - 1);
         }
         for (JsonNode h : norm) msgs.add(h);
-        msgs.add(userMessage(mergedUser, assets));
+        String buildHint = "";
+        if (conversation && START_REQUEST.matcher(content).find()) {
+            String hintType = explicitBackend ? com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE : (com.tcl.csot.zhiye.service.app.Catalog.TYPES.contains(type) ? type : "类型");
+            buildHint = "\n\n【系统提醒：用户已明确要求现在开始。本轮回答第一行必须输出 [[build:" + hintType
+                    + "]] 且前面不能有任何文字；只写「系统已经开始构建 / 正在写」而不输出标记，系统不会创建任何文件或任务。】";
+        }
+        msgs.add(userMessage(mergedUser + buildHint, assets));
         return msgs;
     }
 
@@ -470,17 +481,22 @@ public class AskService {
     public void answer(String ws, String content, List<String> skillAppIds, String appId,
                        java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets,
                        java.util.function.Consumer<Reply> done, Sink sink) {
-        answer(ws, content, skillAppIds, appId, history, type, assets, "", done, sink);
+        answer(ws, content, skillAppIds, appId, history, type, assets, "", com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO, null, done, sink);
     }
 
+    /**
+     * @param modelRef    用户在这一条消息里选的模型（auto 或 "供应商ID:模型ID"），null 按五星默认
+     * @param billingType 随消息传来的 FREE / PAID，只作为这一次路由的提示
+     */
     public void answer(String ws, String content, List<String> skillAppIds, String appId,
                        java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext,
+                       String modelRef, String billingType,
                        java.util.function.Consumer<Reply> done, Sink sink) {
         boolean hasApp = appId != null && !appId.isBlank();
         boolean builtins = !skillRefs.builtinCatalog().isEmpty();
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
         try {
-            route = router.forWorkspace(ws, com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO);
+            route = router.forWorkspace(ws, modelRef == null ? com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO : modelRef, billingType);
         } catch (ApiException e) {
             if (platformLogs != null) {
                 platformLogs.error("llm_gateway", "ASK_ROUTE_FAILED", ws, null, hasApp ? appId : null, null,

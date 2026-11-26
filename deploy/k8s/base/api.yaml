@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: zhiye-api
   namespace: zhiye
-  labels: { app: zhiye-api }
+  labels: { app: zhiye-api, app.kubernetes.io/part-of: zhiye }
 spec:
   replicas: 2
   strategy:
@@ -14,7 +14,7 @@ spec:
     matchLabels: { app: zhiye-api }
   template:
     metadata:
-      labels: { app: zhiye-api }
+      labels: { app: zhiye-api, app.kubernetes.io/part-of: zhiye }
     spec:
       serviceAccountName: zhiye-api
       # 任务工作进程优雅退出：停止领新任务后等在跑任务完成（TaskWorker.shutdownWaitSeconds 默认 600 秒 + 余量）
@@ -41,6 +41,7 @@ spec:
             - { name: http, containerPort: 8080 }
           env:
             - { name: SPRING_PROFILES_ACTIVE, value: "api,k8s" }
+            - { name: XDG_CONFIG_HOME, value: "/tmp/zhiye-config" }
             # 沙箱 provider 由 ConfigMap 的 ZHIYE_SANDBOX_PROVIDER 决定（默认 opensandbox；回滚改为 k8s）
             - name: KIMI_API_KEY
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: KIMI_API_KEY } }
@@ -63,6 +64,9 @@ spec:
             # 五星AI岛开启时按工号取 llm-gateway 路由（只在 ZHIYE_FIVESTAR_ENABLED=true 时用到）
             - name: ZHIYE_OPENCLAW_INTERNAL_TOKEN
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_OPENCLAW_INTERNAL_TOKEN, optional: true } }
+            # 公共免费虚拟 Key：billingType=FREE 的模型用它调网关，不占个人额度
+            - name: ZHIYE_FIVESTAR_PUBLIC_KEY
+              valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_FIVESTAR_PUBLIC_KEY, optional: true } }
             - name: ZHIYE_AGW_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: zhiye-secrets, key: ZHIYE_AGW_CLIENT_SECRET, optional: true } }
           envFrom:
@@ -99,7 +103,7 @@ kind: Service
 metadata:
   name: zhiye-api
   namespace: zhiye
-  labels: { app: zhiye-api }
+  labels: { app: zhiye-api, app.kubernetes.io/part-of: zhiye }
 spec:
   selector: { app: zhiye-api }
   ports:

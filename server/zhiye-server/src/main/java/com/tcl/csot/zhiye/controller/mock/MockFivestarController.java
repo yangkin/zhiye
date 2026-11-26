@@ -46,7 +46,16 @@ public class MockFivestarController {
     static final List<Provider> PROVIDERS = List.of(
             new Provider("11", "deepseek", "deepseek", List.of(new String[]{"101", "deepseek-v4-flash", "DeepSeek V4 Flash", "true"},
                     new String[]{"102", "deepseek-v4-pro", "DeepSeek V4 Pro", "false"})),
-            new Provider("12", "moonshot", "moonshot", List.<String[]>of(new String[]{"201", "kimi-k2.6", "Kimi K2.6", "true"})));
+            new Provider("12", "moonshot", "moonshot", List.<String[]>of(new String[]{"201", "kimi-k2.6", "Kimi K2.6", "true"})),
+            // 平台免费模型：billingType=FREE，用公共免费 Key 调网关，不扣个人额度
+            new Provider("1", "platform-free", "openai", List.<String[]>of(new String[]{"901", "glm-4.5-flash-free", "GLM-4.5 Flash（免费）", "false"})));
+
+    /** 模拟的公共免费虚拟 Key：真实环境配置 ZHIYE_FIVESTAR_PUBLIC_KEY */
+    static final String MOCK_PUBLIC_KEY = "sk-mock-public-key";
+    /** 公共 Key 下的模型名形如 free/{modelId} */
+    static final String FREE_PREFIX = "free/";
+
+    static boolean isFreeProvider(Provider p) { return "1".equals(p.id()); }
 
     private final FivestarProperties fs;
     private final UpstreamClient upstream;
@@ -167,7 +176,7 @@ public class MockFivestarController {
         return envelope(org, v);
     }
 
-    /** 与 openclaw 一致的服务间接口：按工号和模型取 llm-gateway 路由，返回裸 JSON。 */
+    /** 与 openclaw 一致的服务间接口：按工号、模型和计费类型取 llm-gateway 路由，返回裸 JSON。 */
     @PostMapping("/mock/openclaw/internal/llm/route")
     public ResponseEntity<Map<String, Object>> route(@RequestHeader(value = "X-Internal-Token", required = false) String token,
                                                      @RequestBody JsonNode body) {
@@ -180,14 +189,17 @@ public class MockFivestarController {
         if (p == null) return ResponseEntity.status(422).body(Map.of("code", "llm.internal.provider.id.invalid", "message", "供应商不存在或未启用"));
         String[] m = mid.isEmpty() ? p.models().get(0) : p.models().stream().filter(x -> x[1].equals(mid)).findFirst().orElse(null);
         if (m == null) return ResponseEntity.status(422).body(Map.of("code", "llm.internal.model.id.invalid", "message", "模型不存在或未启用"));
+        String asked = body.path("billingType").asText("");
+        boolean free = "FREE".equalsIgnoreCase(asked) || (asked.isBlank() && isFreeProvider(p));
         Map<String, Object> v = new LinkedHashMap<>();
         v.put("baseUrl", fs.llmGatewayBaseUrl().replace("{self}", port.selfBase()).replaceAll("/+$", "") + "/v1");
-        v.put("providerModelName", "xclaw-" + a + "-" + p.name() + "/" + m[1]);
-        v.put("virtualKey", "vk-" + a);
+        v.put("providerModelName", free ? FREE_PREFIX + m[1] : "xclaw-" + a + "-" + p.name() + "/" + m[1]);
+        v.put("virtualKey", free ? (fs.publicKey().isBlank() ? MOCK_PUBLIC_KEY : fs.publicKey()) : "vk-" + a);
         v.put("providerId", p.id());
         v.put("providerName", p.name());
         v.put("modelId", m[1]);
         v.put("modelName", m[2]);
+        v.put("billingType", free ? "FREE" : "PAID");
         return ResponseEntity.ok(v);
     }
 
@@ -199,18 +211,23 @@ public class MockFivestarController {
         String account = body.path("userAccount").asText("");
         if (!account.matches("[A-Za-z0-9._-]{1,64}"))
             return ResponseEntity.status(422).body(Map.of("code", "llm.internal.user.account.invalid", "message", "userAccount 不合法"));
+        boolean includeFree = body.path("includePlatformFreeModels").asBoolean(false);
         List<Map<String, Object>> out = new ArrayList<>();
         boolean preferred = true;
-        for (Provider p : PROVIDERS) for (String[] m : p.models()) {
-            Map<String, Object> v = new LinkedHashMap<>();
-            v.put("providerId", p.id());
-            v.put("providerName", p.name());
-            v.put("modelId", m[1]);
-            v.put("modelName", m[2]);
-            v.put("multimodal", Boolean.parseBoolean(m[3]));
-            v.put("preferred", preferred);
-            preferred = false;
-            out.add(v);
+        for (Provider p : PROVIDERS) {
+            if (isFreeProvider(p) && !includeFree) continue;
+            for (String[] m : p.models()) {
+                Map<String, Object> v = new LinkedHashMap<>();
+                v.put("providerId", p.id());
+                v.put("providerName", p.name());
+                v.put("modelId", m[1]);
+                v.put("modelName", m[2]);
+                v.put("multimodal", Boolean.parseBoolean(m[3]));
+                v.put("billingType", isFreeProvider(p) ? "FREE" : "PAID");
+                v.put("preferred", preferred);
+                preferred = false;
+                out.add(v);
+            }
         }
         return ResponseEntity.ok(out);
     }
@@ -226,45 +243,67 @@ public class MockFivestarController {
         res.getOutputStream().write(Json.write(e).getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 校验虚拟密钥和 X-User-Id，返回工号；失败已写好错误响应，返回 null */
-    private static String gatewayAccount(HttpServletRequest req, HttpServletResponse res) throws IOException {
+    /** 网关调用方：个人路由（虚拟密钥，计入个人额度）或公共免费 Key（不计入个人额度） */
+    private record Caller(String account, boolean free) {}
+
+    /** 校验 Key 和 X-User-Id，返回调用方；失败已写好错误响应，返回 null */
+    private Caller gatewayCaller(HttpServletRequest req, HttpServletResponse res) throws IOException {
         String auth = req.getHeader("Authorization");
         String user = req.getHeader("X-User-Id");
-        if (auth == null || !auth.startsWith("Bearer vk-")) { gatewayError(res, 401, "authentication_error", "invalid_virtual_key", "virtual key is invalid", null); return null; }
-        String a = auth.substring("Bearer vk-".length()).trim();
-        if (user == null || !user.equals(a)) { gatewayError(res, 400, "invalid_request_error", "user_mismatch", "X-User-Id is required and must match the virtual key owner", null); return null; }
-        return a;
+        if (auth == null || !auth.startsWith("Bearer ")) { gatewayError(res, 401, "authentication_error", "invalid_virtual_key", "virtual key is invalid", null); return null; }
+        String key = auth.substring("Bearer ".length()).trim();
+        if (key.startsWith("vk-")) {
+            String a = key.substring("vk-".length()).trim();
+            if (user == null || !user.equals(a)) { gatewayError(res, 400, "invalid_request_error", "user_mismatch", "X-User-Id is required and must match the virtual key owner", null); return null; }
+            return new Caller(a, false);
+        }
+        String pub = fs.publicKey().isBlank() ? MOCK_PUBLIC_KEY : fs.publicKey();
+        if (key.equals(pub)) return new Caller(user == null ? "" : user, true);
+        gatewayError(res, 401, "authentication_error", "invalid_virtual_key", "virtual key is invalid", null);
+        return null;
     }
 
     @GetMapping("/mock/llm-gateway/v1/models")
     public void gatewayModels(HttpServletRequest req, HttpServletResponse res) throws IOException {
-        String a = gatewayAccount(req, res);
-        if (a == null) return;
+        Caller caller = gatewayCaller(req, res);
+        if (caller == null) return;
         ObjectNode n = Json.obj().put("object", "list");
         var data = n.putArray("data");
-        for (Provider p : PROVIDERS) for (String[] m : p.models()) data.addObject().put("id", "xclaw-" + a + "-" + p.name() + "/" + m[1]).put("object", "model");
+        for (Provider p : PROVIDERS) {
+            if (caller.free() != isFreeProvider(p)) continue;
+            for (String[] m : p.models()) data.addObject()
+                    .put("id", caller.free() ? FREE_PREFIX + m[1] : "xclaw-" + caller.account() + "-" + p.name() + "/" + m[1])
+                    .put("object", "model");
+        }
         res.setContentType("application/json;charset=UTF-8");
         res.getOutputStream().write(Json.write(n).getBytes(StandardCharsets.UTF_8));
     }
 
     @PostMapping("/mock/llm-gateway/v1/chat/completions")
     public void gatewayChat(HttpServletRequest req, HttpServletResponse res) throws Exception {
-        String a = gatewayAccount(req, res);
-        if (a == null) return;
+        Caller caller = gatewayCaller(req, res);
+        if (caller == null) return;
+        String a = caller.account();
         Map<String, String> h = new LinkedHashMap<>();
         h.put("X-User-Id", req.getHeader("X-User-Id"));
         h.put("X-Project-Id", String.valueOf(req.getHeader("X-Project-Id")));
         LAST_HEADERS.addFirst(h);
         while (LAST_HEADERS.size() > 50) LAST_HEADERS.pollLast();
-        if (used(a) >= fs.mockLimitTokens()) {
+        if (!caller.free() && used(a) >= fs.mockLimitTokens()) {
             gatewayError(res, 429, "rate_limit_exceeded", "token_quota_exceeded", "token quota exceeded for user " + a, resetAt());
             return;
         }
         JsonNode body = Json.M.readTree(req.getInputStream().readAllBytes());
         String asked = body.path("model").asText("");
-        String prefix = "xclaw-" + a + "-";
-        if (!asked.startsWith(prefix)) { gatewayError(res, 400, "invalid_request_error", "model_not_found", "model " + asked + " is not routed for this key", null); return; }
-        String modelId = asked.substring(asked.indexOf('/') + 1);
+        String modelId;
+        if (caller.free()) {
+            if (!asked.startsWith(FREE_PREFIX)) { gatewayError(res, 400, "invalid_request_error", "model_not_found", "model " + asked + " is not routed for this key", null); return; }
+            modelId = asked.substring(FREE_PREFIX.length());
+        } else {
+            String prefix = "xclaw-" + a + "-";
+            if (!asked.startsWith(prefix)) { gatewayError(res, 400, "invalid_request_error", "model_not_found", "model " + asked + " is not routed for this key", null); return; }
+            modelId = asked.substring(asked.indexOf('/') + 1);
+        }
         var local = upstream.localRoute();
         ((ObjectNode) body).put("model", local.model());
         boolean stream = body.path("stream").asBoolean(false);
@@ -289,7 +328,7 @@ public class MockFivestarController {
                 try { JsonNode u = UsageService.findUsage(Json.M.readTree(l)); if (u != null) lastUsage = u; } catch (Exception ignored) { }
             }
         }
-        if (lastUsage != null && up.statusCode() < 400) {
+        if (lastUsage != null && up.statusCode() < 400 && !caller.free()) {
             long t = lastUsage.path("prompt_tokens").asLong(0) + lastUsage.path("completion_tokens").asLong(0);
             used.computeIfAbsent(a, k -> new AtomicLong()).addAndGet(t);
             byModel.computeIfAbsent(a, k -> new ConcurrentHashMap<>()).computeIfAbsent(modelId, k -> new AtomicLong()).addAndGet(t);

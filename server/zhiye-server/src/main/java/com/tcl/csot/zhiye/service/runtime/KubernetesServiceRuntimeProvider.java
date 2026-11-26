@@ -233,7 +233,7 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
         return ready != null && ready > 0;
     }
 
-    private static void stageBuildContext(DeploySpec spec, Path stageDir) throws IOException {
+    private void stageBuildContext(DeploySpec spec, Path stageDir) throws IOException {
         Files.createDirectories(stageDir);
         if (spec.sourceDir() != null && Files.isDirectory(spec.sourceDir())) {
             try (var stream = Files.walk(spec.sourceDir())) {
@@ -255,6 +255,7 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
         if (spec.dockerfile() != null && !spec.dockerfile().isBlank()) {
             Files.writeString(stageDir.resolve("Dockerfile"), spec.dockerfile(), StandardCharsets.UTF_8);
         }
+        NpmTarballMirror.rewriteLocks(stageDir, props.npmTarballCdn());
     }
 
     private void waitJobComplete(String ns, String jobName, Duration timeout, StringBuilder buildLog) throws InterruptedException {

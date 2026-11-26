@@ -72,7 +72,7 @@ public class AppService {
     }
 
     public record CreateRequest(String type, String prompt, String mode, String model, List<String> assetIds, String name,
-                                List<String> skillAppIds, List<String> sourceIds) {}
+                                List<String> skillAppIds, List<String> sourceIds, String billingType) {}
 
     public Map<String, Object> create(String ws, CreateRequest req, String idemKey) throws Exception {
         try {
@@ -143,7 +143,10 @@ public class AppService {
             throw e;
         }
         try {
-            taskService.create(ws, id, skill ? "generate" : "plan", null, Json.obj(), idemKey, 1, null);
+            ObjectNode planInput = Json.obj();
+            String billing = com.tcl.csot.zhiye.service.llm.LlmRouter.normalizeBilling(req.billingType());
+            if (billing != null) planInput.put("modelBilling", billing);
+            taskService.create(ws, id, skill ? "generate" : "plan", null, planInput, idemKey, 1, null);
         } catch (RuntimeException e) {
             apps.softDelete(id);
             git.deleteRepo(id);
@@ -386,6 +389,9 @@ public class AppService {
             if (!Catalog.validModel(model)) throw ApiException.validation("不支持的模型：" + model);
             input.put("model", model);
         }
+        String billing = com.tcl.csot.zhiye.service.llm.LlmRouter.normalizeBilling(
+                body.hasNonNull("billingType") ? body.path("billingType").asText() : null);
+        if (billing != null) input.put("modelBilling", billing);
         if (!msgAssets.isEmpty()) input.set("assetIds", Json.M.valueToTree(msgAssets));
         if (!msgSkills.isEmpty()) input.set("skillAppIds", Json.M.valueToTree(msgSkills));
         // 上一轮被停止：没有手动修改草稿和选中元素时，沿用上一轮的工作区先补完再做这句

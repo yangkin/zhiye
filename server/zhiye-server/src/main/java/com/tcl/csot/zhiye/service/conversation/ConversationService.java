@@ -56,7 +56,8 @@ public class ConversationService {
         this.files = files;
     }
 
-    public record BuildRequest(String type, String mode, String model, List<String> assetIds, List<String> skillAppIds, List<String> sourceIds) {}
+    public record BuildRequest(String type, String mode, String model, List<String> assetIds, List<String> skillAppIds, List<String> sourceIds,
+                               String billingType) {}
 
     /** 已在请求线程中完成校验并保存 user 消息，后台线程只负责调用模型。 */
     /** type：创造页选的应用类型（只作参考，形态仍由模型判断） */
@@ -291,7 +292,7 @@ public class ConversationService {
         }
         if (!hasUser) throw ApiException.validation("对话还没有用户需求，请先聊几句再创建应用");
 
-        BuildRequest req = request == null ? new BuildRequest(null, null, null, null, null, null) : request;
+        BuildRequest req = request == null ? new BuildRequest(null, null, null, null, null, null, null) : request;
         String brief = dialogueBrief(messages, MAX_BRIEF_CHARS);
         // 复用现有创建入口时不能超过它的 prompt 限制；两次压缩都保留首条需求、最近 assistant 和最近 user。
         String prompt = brief.length() <= APP_PROMPT_CHARS ? brief : dialogueBrief(messages, APP_PROMPT_CHARS);
@@ -306,7 +307,7 @@ public class ConversationService {
         for (var source : dataSources.visibleSelection(ws, sourceIds(conversation.sourceIds()))) selectedSources.add(source.id());
         if (req.sourceIds() != null) selectedSources.addAll(req.sourceIds());
         AppService.CreateRequest create = new AppService.CreateRequest(type, prompt, req.mode(), req.model(),
-                List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources));
+                List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources), req.billingType());
         Map<String, Object> app = apps.create(ws, create, idemKey);
         Object appId = app.get("id");
         if (appId != null) {

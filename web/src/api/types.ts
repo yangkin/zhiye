@@ -434,7 +434,7 @@ export interface ImportWarning {
 }
 
 export interface Meta {
-  models: { id: string; label: string; desc?: string; cost?: number }[];
+  models: { id: string; label: string; desc?: string; cost?: number; billingType?: 'FREE' | 'PAID' }[];
   modes: Mode[];
   styles: { id: StyleId; label: string; accent: string }[];
   limits: { uploadMaxBytes: number; uploadMaxFiles: number; assetMaxBytes: number };
@@ -459,6 +459,8 @@ export interface LlmModel {
   desc?: string;
   provider?: string;
   multimodal?: boolean;
+  /** FREE 用平台公共免费 Key；PAID 计入个人五星AI岛额度 */
+  billingType?: 'FREE' | 'PAID';
 }
 
 export interface LlmModels {

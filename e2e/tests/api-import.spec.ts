@@ -110,18 +110,16 @@ test('无效文件与不安全的压缩包给出可修正提示', async () => {
   expect(empty.status).toBe(400)
 })
 
-test('框架识别：Next.js 不可部署并说明原因，后端拒绝创建', async () => {
+test('框架识别：Next.js SSR 与 Python 项目识别为可托管单体服务', async () => {
   const n = await upload('next-app.zip', zip({ 'next-app/package.json': JSON.stringify({ dependencies: { next: '15.0.0', react: '19.0.0' } }), 'next-app/app/page.tsx': 'export default function P(){return <h1>hi</h1>}' }))
   expect(n.status).toBe(200)
-  expect(n.body.framework).toBe('Next.js')
-  expect(n.body.deployable).toBe(false)
-  expect(n.body.unsupportedReason).toContain('Next.js')
-  const before = await appIds()
-  await api.expectError('POST', '/api/imports', { uploadId: n.body.uploadId, name: 'next' }, 400, 'IMPORT_UNSUPPORTED')
-  expect(await appIds()).toEqual(before)
+  expect(n.body.framework).toBe('Next.js (SSR)')
+  expect(n.body.deployable).toBe(true)
+  expect(n.body.projectKind).toBe('service')
   const py = await upload('py.zip', zip({ 'app.py': 'print(1)', 'requirements.txt': 'flask' }))
-  expect(py.body.framework).toBe('Python')
-  expect(py.body.deployable).toBe(false)
+  expect(py.body.framework).toContain('Python')
+  expect(py.body.deployable).toBe(true)
+  expect(py.body.projectKind).toBe('service')
 })
 
 test('Vite 项目：真实安装依赖并构建部署', async ({ page }) => {
@@ -161,7 +159,7 @@ test('导入中取消：不创建应用', async () => {
   await api.expectError('GET', `/api/apps/${app.id}`, undefined, 404)
 })
 
-test('前后端同仓库：只部署前端子目录；默认 base、前置检查失败也能构建；预览子路径可用；之后改代码离线重建', async ({ page }) => {
+test('前后端同仓库：默认识别全栈服务，也可只选前端子目录构建、预览和在线重建', async ({ page }) => {
   const front = {
     ...VITE_FILES,
     'package.json': JSON.stringify({ ...JSON.parse(VITE_PKG), scripts: { build: 'node -e "process.exit(1)" && vite build' } }),
@@ -171,8 +169,9 @@ test('前后端同仓库：只部署前端子目录；默认 base、前置检查
   for (const [k, v] of Object.entries(front)) files['repo/frontend/' + k] = v
   const u = await upload('repo.zip', zip(files))
   expect(u.body.deployable).toBe(true)
-  expect(u.body.rootDir).toBe('frontend')
-  expect(u.body.warnings.map((w: any) => w.code)).toEqual(expect.arrayContaining(['backend', 'api']))
+  expect(u.body.rootDir).toBe('')
+  expect(u.body.projectKind).toBe('service')
+  expect(u.body.warnings.map((w: any) => w.code)).toEqual(expect.arrayContaining(['service-runtime', 'fullstack', 'scale-to-zero']))
   const { app, task } = await api.post('/api/imports', { uploadId: u.body.uploadId, name: '前后端仓库', rootDir: 'frontend' })
   const done = await api.waitTask(task.id, { timeoutMs: 10 * 60_000 })
   expect(done.status, JSON.stringify(done.error)).toBe('SUCCEEDED')

@@ -8,7 +8,7 @@ import { useActiveTask, useMeta } from '../api/queries';
 import type { AppType, Asset, Mode } from '../api/types';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { AssetChips } from '../components/AssetChips';
-import { ModelModeButton, SkillChips, SkillPicker, mentionAt, type SkillRef } from '../components/ComposerPopovers';
+import { ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, type SkillRef } from '../components/ComposerPopovers';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
@@ -42,6 +42,19 @@ interface ChatMessage extends ConversationMessage {
 }
 
 const stripBuildMarker = (text: string) => text.replace(/^(\s*\[\[build(?::[^\]]*)?\]\]\s*)+/, '');
+const START_REQUEST = /(开始|动手|直接做|直接生成|生成吧|写吧|按你的|按默认|就按这个)/;
+const STARTED_CLAIM = /(系统(?:已经|正在)(?:开始)?(?:构建|创建|生成|编写)|已经(?:开始|在)(?:构建|创建|生成|编写|写)|正在(?:生成|编写|创建|写)(?:代码|文件|后端|前端|项目)|正在落盘|开始创建项目文件|开始写代码)/;
+
+/** 模型偶尔会漏掉 [[build]] 却声称已经开工；只在这种自相矛盾时由前端兜底触发创建。 */
+function missedStart(messages: ChatMessage[], index: number): boolean {
+  const answer = messages[index];
+  if (answer?.role !== 'assistant' || !STARTED_CLAIM.test(answer.content)) return false;
+  if (messages.slice(index + 1).some((m) => m.role === 'assistant')) return false;
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return START_REQUEST.test(messages[i].content);
+  }
+  return false;
+}
 function AnswerBody({ text, openName, onPreview }: { text: string; openName?: string; onPreview: (f: OpenFile) => void }) {
   const { body } = useMemo(() => splitNext(text), [text]);
   const parts = useMemo(() => splitFiles(body), [body]);
@@ -105,9 +118,15 @@ export function ChatPage() {
   const action = useRef<'ask' | 'build' | null>(null);
   const initialStarted = useRef(false);
 
-  const models = meta?.models?.length ? meta.models : [{ id: 'auto', label: 'Auto' }];
+  const { models, defaultId } = useModelList();
   const modes: Mode[] = meta?.modes?.length ? meta.modes : ['快速', '适中', '深度'];
   const busy = asking || building || sourceSaving;
+  // 新会话优先选免费模型：还没用户点选、也没有历史模型时用默认（免费）模型
+  const modelTouched = useRef(!!initial?.model);
+  useEffect(() => {
+    if (!modelTouched.current && defaultId && defaultId !== 'auto' && (!model || model === 'auto')) setModel(defaultId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultId, id, model]);
 
   useEffect(() => {
     if (!data) return;
@@ -137,6 +156,7 @@ export function ChatPage() {
     setBuilding(false);
     setType(initial?.type ?? (id ? loadDraft<AppType>('chat-type:' + id) : null) ?? '开发网站');
     setModel(initial?.model ?? 'auto');
+    modelTouched.current = !!initial?.model;
     setMode(initial?.mode ?? '适中');
     setAttachments(initial?.attachments ?? []);
     setSkills(initial?.skills ?? []);
@@ -192,6 +212,7 @@ export function ChatPage() {
         type,
         mode,
         model,
+        ...(billingOf(models, model) ? { billingType: billingOf(models, model)! } : {}),
         ...(attachments.length ? { assetIds: attachments.map((a) => a.id) } : {}),
         ...(buildSkills.length ? { skillAppIds: buildSkills.map((s) => s.id) } : {}),
       });
@@ -268,7 +289,8 @@ export function ChatPage() {
     try {
       await api.askConversation(
         id,
-        { content, type, ...(selectedSkills.length ? { skillAppIds: selectedSkills.map((s) => s.id) } : {}),
+        { content, type, model, ...(billingOf(models, model) ? { billingType: billingOf(models, model)! } : {}),
+          ...(selectedSkills.length ? { skillAppIds: selectedSkills.map((s) => s.id) } : {}),
           ...(sentAssets.length ? { assetIds: sentAssets.map((a) => a.id) } : {}) },
         (text) => {
           if (!answer && thinking && thinkSeconds === undefined) thinkSeconds = Math.max(1, Math.round((Date.now() - stamp) / 1000));
@@ -281,8 +303,9 @@ export function ChatPage() {
           setMessages((list) => list.map((m) => (m.id === assistantId ? { ...m, thinking } : m)));
         },
       );
-      // 只认模型的 [[build]]：需求不清楚时不要因为一句「开始做」就硬建一个空应用
-      const wantsBuild = /^\s*\[\[build(?::[^\]]*)?\]\]/.test(answer);
+      // 优先认模型的 [[build]]；若用户已明确要求开始且模型声称在写却没给标记，也直接创建，避免停在假进度。
+      // 模型不一定严格把它放在第一行（可能前面先写一句「好，开始动手」），回答里出现就按建应用处理。
+      const wantsBuild = /\[\[build(?::[^\]]*)?\]\]/.test(answer) || (START_REQUEST.test(content) && STARTED_CLAIM.test(answer));
       setMessages((list) => list.map((m) => (m.id === assistantId ? { ...m, content: stripBuildMarker(answer), pending: false, builtApp: wantsBuild } : m)));
       // 后端在首个用户消息时自动命名；这里同步一下标题，避免停留在「新会话」
       setTitle((t) => (t === '新会话' || t === '新对话' ? content.replace(/\s+/g, ' ').slice(0, 20) : t));
@@ -395,7 +418,7 @@ export function ChatPage() {
               <p>说说你想做什么。不用先选类型，我会边聊边判断，聊清楚了直接开始做。</p>
             </div>
           ) : null}
-          {messages.map((message) =>
+          {messages.map((message, index) =>
             message.role === 'user' ? (
               <article className="chat-msg user msg-row" key={message.id}>
                 <div className="chat-msg-meta">
@@ -494,7 +517,7 @@ export function ChatPage() {
                       </span>
                       <Icon name="arrow" />
                     </Link>
-                  ) : (message.builtApp || stripBuildMarker(message.content) !== message.content) && !data?.appId ? (
+                  ) : (message.builtApp || missedStart(messages, index) || stripBuildMarker(message.content) !== message.content) && !data?.appId ? (
                     <button
                       type="button"
                       className="conv-app-card"
@@ -578,7 +601,7 @@ export function ChatPage() {
                   pickedSourceIds={sources.map((s) => s.id)}
                   onPickSource={(s) => void changeSources(sources.some((x) => x.id === s.id) ? sources : [...sources, { id: s.id, name: s.name }])}
                 />
-                <ModelModeButton models={models} modes={modes} model={model} mode={mode} onModel={setModel} onMode={setMode} />
+                <ModelModeButton models={models} modes={modes} model={model} mode={mode} onModel={(m) => { modelTouched.current = true; setModel(m); }} onMode={setMode} />
                 <button ref={skillBtn} type="button" className="skill-button" aria-label="选择技能" aria-expanded={picker !== null} onClick={() => setPicker(picker ? null : { via: 'button' })}>
                   <Icon name="book" /> 技能
                 </button>

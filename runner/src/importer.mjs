@@ -1,9 +1,10 @@
 // 导入：安全解包 ZIP / 单个 HTML，识别框架；安装依赖。
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, lstatSync, statSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, lstatSync, statSync, renameSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Inflate } from 'fflate'
 import { RunnerError, run, emitLog, flushLogs, summarize, log } from './util.mjs'
+import { rewriteNpmTarballs } from './npm-tarball-mirror.mjs'
 
 export const LIMITS = { totalBytes: 200 * 1024 * 1024, files: 5000, fileBytes: 20 * 1024 * 1024 }
 const SKIP_DIRS = new Set(['node_modules', '.git', '__MACOSX'])
@@ -312,6 +313,9 @@ export async function installDeps(cwd, { env = process.env } = {}) {
   const choice = pickPackageManager(cwd, env)
   const notes = choice.note ? [choice.note] : []
   const runEnv = { ...env, NODE_ENV: 'development', npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false', CI: '1' }
+  const cdn = choice.pm === 'npm' ? String(env.ZHIYE_NPM_TARBALL_CDN || '').trim() : ''
+  const lockFile = path.join(cwd, 'package-lock.json')
+  const originalLock = cdn && existsSync(lockFile) ? readFileSync(lockFile) : null
   const store = path.join(env.npm_config_cache ? path.dirname(env.npm_config_cache) : os.tmpdir(), 'zhiye-pnpm-store')
   const attempts = choice.pm === 'pnpm'
     ? [['pnpm', ['install', '--frozen-lockfile', '--ignore-scripts', '--prod=false', '--reporter=append-only', `--store-dir=${store}`]],
@@ -322,8 +326,17 @@ export async function installDeps(cwd, { env = process.env } = {}) {
   try {
     let last = null
     for (let i = 0; i < attempts.length; i++) {
-      const [bin, args, why] = attempts[i]
+      const [bin, originalArgs, why] = attempts[i]
+      let args = originalArgs
       if (why) notes.push(why)
+      if (bin === 'npm' && cdn) {
+        if (args[0] === 'install') {
+          last = await runInstall(cwd, bin, [...args, '--package-lock-only'], runEnv)
+          if (!last.ok) break
+          args = ['ci', ...args.slice(1)]
+        }
+        rewriteNpmTarballs(cwd, cdn)
+      }
       last = await runInstall(cwd, bin, args, runEnv)
       if (last.ok) {
         for (const n of notes) emitLog(`提示：${n}`)
@@ -338,6 +351,10 @@ export async function installDeps(cwd, { env = process.env } = {}) {
     const head = last.timedOut ? '安装依赖超时（5 分钟）' : `安装依赖失败（${last.cmd} 退出码 ${last.code}）`
     return { ok: false, notes, log: summarize(`${head}\n${installHint(last.out)}${last.out}`) }
   } finally {
+    if (cdn) {
+      if (originalLock) writeFileSync(lockFile, originalLock)
+      else rmSync(lockFile, { force: true })
+    }
     if (hidden && existsSync(hidden)) renameSync(hidden, path.join(cwd, choice.hideLock))
   }
 }

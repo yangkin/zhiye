@@ -15,6 +15,12 @@ spec:
     - host: zhiye.csot.tcl.com
       http:
         paths:
+          - path: /t/
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
+          - path: /p/
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
           - path: /llm
             pathType: Prefix
             backend: { service: { name: zhiye-site, port: { number: 8083 } } }

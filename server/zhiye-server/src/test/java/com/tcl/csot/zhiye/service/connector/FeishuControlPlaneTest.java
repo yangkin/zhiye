@@ -27,7 +27,7 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
-@ActiveProfiles("api")
+@ActiveProfiles({"api", "test"})
 class FeishuControlPlaneTest {
 
     @Autowired EnterpriseConnectorService connectors;

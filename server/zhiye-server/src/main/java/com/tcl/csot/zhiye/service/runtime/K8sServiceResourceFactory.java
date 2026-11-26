@@ -52,6 +52,7 @@ public final class K8sServiceResourceFactory {
         args.add("--context=" + contextUrl);
         args.add("--destination=" + imageRef);
         if (!props.npmRegistry().isBlank()) args.add("--build-arg=NPM_REGISTRY=" + props.npmRegistry());
+        if (!props.npmTarballCdn().isBlank()) args.add("--build-arg=NPM_TARBALL_CDN=" + props.npmTarballCdn());
         if (!props.pipIndexUrl().isBlank()) args.add("--build-arg=PIP_INDEX_URL=" + props.pipIndexUrl());
         if (!props.mavenMirrorUrl().isBlank()) args.add("--build-arg=MAVEN_MIRROR_URL=" + props.mavenMirrorUrl());
         if (!props.goProxy().isBlank()) args.add("--build-arg=GOPROXY=" + props.goProxy());

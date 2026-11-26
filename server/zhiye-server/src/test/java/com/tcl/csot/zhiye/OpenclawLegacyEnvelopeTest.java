@@ -23,8 +23,8 @@ class OpenclawLegacyEnvelopeTest extends IntegrationTest {
         Map<String, String> auth = Map.of("Authorization", "Bearer tok-legacy-user");
 
         JsonNode models = c.ok(c.send("GET", "/api/llm/models", null, auth));
-        assertThat(models.path("models")).hasSize(4);
-        assertThat(models.path("defaultId").asText()).isEqualTo("11:deepseek-v4-flash");
+        assertThat(models.path("models")).hasSize(5);
+        assertThat(models.path("defaultId").asText()).isEqualTo("1:glm-4.5-flash-free");
 
         JsonNode quota = c.ok(c.send("GET", "/api/llm/quota", null, auth));
         assertThat(quota.path("packageName").asText()).isEqualTo("Lite");

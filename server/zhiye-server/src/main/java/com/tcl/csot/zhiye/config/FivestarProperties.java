@@ -22,6 +22,8 @@ public record FivestarProperties(
         @DefaultValue("zhiye") String projectId,
         /** 服务间令牌所在的环境变量名（调用 openclaw 内部接口取用户路由） */
         @DefaultValue("ZHIYE_OPENCLAW_INTERNAL_TOKEN") String internalTokenEnv,
+        /** 公共免费虚拟 Key 所在的环境变量名：billingType=FREE 的模型用它调网关，付费模型才用个人 virtualKey */
+        @DefaultValue("ZHIYE_FIVESTAR_PUBLIC_KEY") String publicKeyEnv,
         @DefaultValue("600") int routeCacheSeconds,
         @DefaultValue("10") int timeoutSeconds,
         /** 模拟网关的每周额度（tokens） */
@@ -30,6 +32,13 @@ public record FivestarProperties(
     public String internalToken() {
         String k = System.getenv(internalTokenEnv);
         if (k == null || k.isBlank()) k = System.getProperty(internalTokenEnv);
+        return k == null ? "" : k.trim();
+    }
+
+    /** 公共免费虚拟 Key；未配置时返回空串（免费模型会退回路由下发的个人 Key） */
+    public String publicKey() {
+        String k = System.getenv(publicKeyEnv);
+        if (k == null || k.isBlank()) k = System.getProperty(publicKeyEnv);
         return k == null ? "" : k.trim();
     }
 }

@@ -43,7 +43,9 @@ public class Views {
     }
 
     public String previewUrl(String buildId) {
-        return buildId == null ? null : props.site().previewBase().replaceAll("/+$", "") + "/p/" + buildId + "/index.html";
+        String base = props.site().buildPreviewBase();
+        String root = base == null || base.isBlank() ? props.site().previewBase() : base;
+        return buildId == null ? null : root.replaceAll("/+$", "") + "/p/" + buildId + "/index.html";
     }
 
     public String siteUrl(String slug) {

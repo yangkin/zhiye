@@ -32,7 +32,8 @@ class K8sServiceRuntimeTest {
                 "https://maven.csot.internal/repository/public", "https://goproxy.csot.internal",
                 "csi-nas", true, "zhiye", "app.kubernetes.io/part-of", "zhiye",
                 List.of("10.96.0.10/32"), 20, 60, 5, 120, 200,
-                1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000, "zhiye-builds", "zhiye-runtime");
+                1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000, "zhiye-builds", "zhiye-runtime",
+                "https://cdn.npmmirror.com/packages");
     }
 
     @Test
@@ -45,11 +46,13 @@ class K8sServiceRuntimeTest {
 
         String node = DockerfileGenerator.generate(new ServiceRuntimeDetector.Spec("node", "Node.js (Express)", "", "",
                 "npm run build", "npm start", 8080, "/", 512, 500), props);
-        assertThat(node).contains("harbor.csot.internal/node:22-alpine").contains("NPM_REGISTRY=https://npm.csot.internal").contains("USER 10001");
+        assertThat(node).contains("harbor.csot.internal/node:22-alpine").contains("NPM_REGISTRY=https://npm.csot.internal")
+                .contains("NPM_TARBALL_CDN=https://cdn.npmmirror.com/packages").contains("npm install --package-lock-only").contains("USER 10001");
 
         String java = DockerfileGenerator.generate(new ServiceRuntimeDetector.Spec("java", "Java (Spring Boot)", "", "",
                 "mvn -B -DskipTests package", "java -jar app.jar --server.port=${PORT}", 8080, "/actuator/health", 1024, 1000), props);
-        assertThat(java).contains("harbor.csot.internal/maven:3.9-temurin-21").contains("harbor.csot.internal/temurin:21-jre").contains("USER 10001");
+        assertThat(java).contains("harbor.csot.internal/maven:3.9-temurin-21").contains("harbor.csot.internal/temurin:21-jre")
+                .contains("MAVEN_MIRROR_URL=https://maven.csot.internal/repository/public").contains("/root/.m2/settings.xml").contains("USER 10001");
 
         String go = DockerfileGenerator.generate(new ServiceRuntimeDetector.Spec("go", "Go (Gin)", "", "",
                 "go build -o app .", "./app", 8080, "/healthz", 256, 500), props);
@@ -75,7 +78,8 @@ class K8sServiceRuntimeTest {
                     assertThat(vm.getReadOnly()).isTrue();
                 });
         assertThat(job.getSpec().getTemplate().getSpec().getContainers().get(0).getArgs())
-                .contains("--build-arg=PIP_INDEX_URL=https://pypi.csot.internal/simple", "--build-arg=GOPROXY=https://goproxy.csot.internal");
+                .contains("--build-arg=PIP_INDEX_URL=https://pypi.csot.internal/simple", "--build-arg=GOPROXY=https://goproxy.csot.internal",
+                        "--build-arg=NPM_TARBALL_CDN=https://cdn.npmmirror.com/packages");
 
         Deployment dep = K8sServiceResourceFactory.buildDeployment(props, spec, "harbor.csot.internal/zhiye-app-yield-api:ver-1", 1);
         var podSec = dep.getSpec().getTemplate().getSpec().getSecurityContext();

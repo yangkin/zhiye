@@ -311,6 +311,25 @@
   color: #2c2640;
 }
 
+/* 同一行两列字段：左侧标签一行、右侧可能两行，给标签预留两行高度让输入框对齐 */
+.eco-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.eco-field-pair > label {
+  min-height: 2.8em;
+}
+@media (max-width: 560px) {
+  .eco-grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .eco-field-pair > label {
+    min-height: 0;
+  }
+}
+
 .eco-field > input {
   height: 38px;
   border-radius: 10px;

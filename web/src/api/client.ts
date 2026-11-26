@@ -315,7 +315,10 @@ export const api = {
       `/api/apps/${enc(appId)}/conversation`,
     ),
   ask: (
-    input: { content: string; skillAppIds?: string[]; assetIds?: string[]; appId?: string; history?: { role: string; content: string }[] },
+    input: {
+      content: string; skillAppIds?: string[]; assetIds?: string[]; appId?: string; history?: { role: string; content: string }[];
+      model?: string; billingType?: 'FREE' | 'PAID';
+    },
     onDelta: (text: string) => void,
     signal?: AbortSignal,
     onThinking?: (text: string) => void,
@@ -323,7 +326,10 @@ export const api = {
   ) => askStream('/api/chat/ask', input, onDelta, signal, onThinking || onHandoff ? { onThinking, onHandoff } : undefined),
   askConversation: (
     id: string,
-    input: { content: string; skillAppIds?: string[]; assetIds?: string[]; history?: { role: string; content: string }[] },
+    input: {
+      content: string; skillAppIds?: string[]; assetIds?: string[]; history?: { role: string; content: string }[];
+      model?: string; billingType?: 'FREE' | 'PAID';
+    },
     onDelta: (text: string) => void,
     signal?: AbortSignal,
   ) => askStream(`/api/conversations/${enc(id)}/ask`, input, onDelta, signal),
@@ -333,7 +339,10 @@ export const api = {
   deleteConversation: (id: string) => request<{ ok: boolean }>(`/api/conversations/${enc(id)}`, { method: 'DELETE' }),
   buildConversation: (
     id: string,
-    input: { type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[]; sourceIds?: string[] },
+    input: {
+      type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[]; sourceIds?: string[];
+      billingType?: 'FREE' | 'PAID';
+    },
     idempotencyKey?: string,
   ) => request<AppDetail>(`/api/conversations/${enc(id)}/build`, { method: 'POST', body: input, idempotencyKey }),
   /** new：和当前应用无关的另一个应用（一个对话只对应一个应用） */
@@ -377,7 +386,7 @@ export const api = {
   listApps: (q: AppListQuery = {}) =>
     request<AppSummary[]>('/api/apps' + qs({ ...q, favorite: q.favorite ? true : undefined })),
   createApp: (
-    input: { type: AppType; prompt: string; mode: Mode; model: string; assetIds: string[]; skillAppIds?: string[]; sourceIds?: string[] },
+    input: { type: AppType; prompt: string; mode: Mode; model: string; assetIds: string[]; skillAppIds?: string[]; sourceIds?: string[]; billingType?: 'FREE' | 'PAID' },
     idempotencyKey?: string,
   ) => request<AppDetail>('/api/apps', { method: 'POST', body: input, idempotencyKey }),
   appsSummary: () => request<AppsSummary>('/api/apps/summary'),

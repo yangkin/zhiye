@@ -47,8 +47,12 @@ public class Client {
     public String base() { return base; }
 
     public Res send(String method, String path, Object body, Map<String, String> headers) {
+        return send(method, path, body, headers, Duration.ofSeconds(60));
+    }
+
+    public Res send(String method, String path, Object body, Map<String, String> headers, Duration timeout) {
         try {
-            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(path.startsWith("http") ? path : base + path)).timeout(Duration.ofSeconds(60));
+            HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(path.startsWith("http") ? path : base + path)).timeout(timeout);
             defaultHeaders.forEach(b::header);
             headers.forEach(b::header);
             if (body != null) {
@@ -85,6 +89,7 @@ public class Client {
 
     public Res get(String path) { return send("GET", path, null, Map.of()); }
     public Res post(String path, Object body) { return send("POST", path, body == null ? Map.of() : body, Map.of("Idempotency-Key", UUID.randomUUID().toString())); }
+    public Res post(String path, Object body, Duration timeout) { return send("POST", path, body, Map.of("Idempotency-Key", UUID.randomUUID().toString()), timeout); }
     public Res post(String path, Object body, String idemKey) { return send("POST", path, body, Map.of("Idempotency-Key", idemKey)); }
     public Res put(String path, Object body) { return send("PUT", path, body, Map.of()); }
     public Res patch(String path, Object body) { return send("PATCH", path, body, Map.of()); }

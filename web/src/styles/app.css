@@ -2314,6 +2314,7 @@ a.skill-chip{text-decoration:none}
 .model-pop-name small{font-size:11px;color:#8a849a;line-height:1.5}
 .model-cost{font-size:12px;color:#6f52d4;white-space:nowrap;letter-spacing:1px}
 .model-cost i{font-style:normal;color:#ddd8e8}
+.model-paid{flex:none;font-size:11px;line-height:1;padding:3px 6px;border-radius:6px;background:#fdf0e3;color:#9a5a1b;white-space:nowrap}
 .model-pop-more{font-size:11px;color:#a6a1b2;padding:8px 10px;border-top:1px solid #f0edf5;margin-top:4px}
 @media(max-width:700px){.model-pop-sub{left:0;top:calc(100% + 6px);width:100%}}
 

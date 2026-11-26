@@ -37,7 +37,7 @@
 | 发布站点 `{slug}.{suffix}` | `POST /__zhiye/source/{key}`（站点网关同源） | 站点本身，页面里没有令牌；只接受 `application/json` |
 | 试调用 | `POST /api/sources/{id}/test` | 工作空间 |
 
-平台代理：按参数定义校验（未知参数、缺必填、类型不对 → 400 中文原因）→ 拼路径参数和查询串（POST 为 JSON 体）→ 注入凭证和 `X-Zhiye-App` → 10 秒超时、返回体最大 2 MB、不跟随跳转。上游非 2xx → 502「数据源返回 500：…」。每次调用记一条 `data_source_call`（不记参数和返回内容）。
+平台代理：按参数定义校验（未知参数、缺必填、类型不对 → 400 中文原因）→ 拼路径参数和查询串（POST 为 JSON 体）→ 注入凭证和 `X-Zhiye-App` → 10 秒超时、返回体最大 2 MB。3xx 不自动跟随，结构化返回 `status` 与 `data.location/message`，由应用按业务处理；其他非 2xx → 502「数据源返回 500：…」。每次调用记一条 `data_source_call`（不记参数和返回内容）。敏感字段示例不写库、不返回浏览器；V43 迁移清理历史示例。
 
 ## 网络安全
 
@@ -52,10 +52,22 @@
 
 鉴权由 `AgwClientTokenService` 使用 `ZHIYE_AGW_CLIENT_ID` / `ZHIYE_AGW_CLIENT_SECRET` 完成：管理端用 `grant_type=username` 按 SSO 工号取得用户 Token，再经 `/api/auth/metis` 换 AGW JWT；数据面用用户 Metis UUID Token + `X-Project-Id: projectPublicId`。Token 按身份在内存缓存并提前刷新，不落库、不返回浏览器。已有项目 Key（`agw_key`）和 V1 签名（`agw`）仍兼容；`agw_client` 用于系统身份查询。
 
-实际响应的 `apiPubUrl` 若已经包含 `/agw-api/{apiCode}` 就直接使用，不能重复拼接。POST 支持参数组 JSON，也支持 `_body` 类型的完整 JSON 数组/对象；试调用里 `_body` 使用 JSON 文本框，填写后覆盖其他参数。旧版误存为 `root(string)` 的 AGW 数据源在读取时自动转换为 `_body(json)`，无需重新添加。请求体示例压缩后超过 200 字时留空，不再截成无效 JSON。测试环境已完成真实闭环：当前用户 9 条可调用 API、3 个消费项目，授权复核、契约添加、数据面用户登录态调用及业务返回值断言均通过。写入类动作（发送消息、同步、变更）不因出现在清单里就自动执行，仍须由用户明确选择并遵守业务权限。
+实际响应的 `apiPubUrl` 若已经包含 `/agw-api/{apiCode}` 就直接使用，不能重复拼接。POST 支持参数组 JSON，也支持 `_body` 类型的完整 JSON 数组/对象；试调用里 `_body` 使用 JSON 文本框，填写后覆盖其他参数。旧版误存为 `root(string)` 的 AGW 数据源在读取时自动转换为 `_body(json)`，无需重新添加。请求体示例压缩后超过 200 字时留空，不再截成无效 JSON。除显式参数列表外，`AgwCatalogService` 还从详情中的 `{{agw.body/header/query/path.参数}}` 引用补全契约；敏感字段（secret/password/token/credential/appKey 等）不提供示例，试调用用密码框当次输入，禁止写死、持久化或记录日志。测试环境已完成真实闭环：当前用户 9 条可调用 API、3 个消费项目，授权复核、契约添加、数据面用户登录态调用及业务返回值断言均通过。写入类动作（发送消息、同步、变更）不因出现在清单里就自动执行，仍须由用户明确选择并遵守业务权限。
 
 ## 已知限制
 
 - 只读：不开放写入类接口。
 - 调用身份固定为「应用身份」；透传访问者身份需要先接 SSO，后续再做。
 - 构建按应用隔离（`build.app_id`）后，预览地址才能唯一对应到应用；迁移前多个应用共用的旧构建不注入令牌，重新生成一次即可。
+
+## 2026-11-25 全量审计与共性修复
+
+当时当前工作空间有 8 个数据源：4 个结构化参数、2 个只有自由 JSON 请求体、2 个无参数定义。完成以下修复并部署 `v0.3.5-test`：
+
+- AGW 详情中的 `agw.body/header/query/path` 引用补全为参数契约，标明必填、位置和敏感字段。
+- 302 不再直接报错，不自动跟随，返回 `data.location/message`；飞书授权接口真实试调用由 502 `SOURCE_REDIRECT` 变为 200。
+- 4 个有必填参数的接口空参试调用均返回 400 且指出缺失字段。
+- 敏感参数支持密码框当次输入；V43 清理历史敏感示例，复测中 `sensitiveExampleFields` 全部为空。
+- 修复 `X-Feishu-App-Secret` 等带连字符 Header 参数的保存与代理校验。
+
+原始审计数据：`runtime/source-audit-20261125.json`、`runtime/source-audit-fixed-20261125.json`；脚本：`e2e/audit-sources.mjs`。该审计不主动发送消息、不执行预算变更、不使用真实凭证。飞书发送消息等契约仍依赖 AGW 返回完整参数，不能由模型猜测。

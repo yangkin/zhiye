@@ -65,7 +65,7 @@ zhiye:
     lease-seconds: 30
   workspace:
     daily-task-limit: 200
-    max-concurrent-tasks: ${ZHIYE_WORKSPACE_MAX_CONCURRENT:3}
+    max-concurrent-tasks: ${ZHIYE_WORKSPACE_MAX_CONCURRENT:1}
     max-apps: 10
   sandbox:
     provider: local
@@ -95,6 +95,7 @@ zhiye:
     llm-gateway-base-url: ${ZHIYE_LLM_GATEWAY_URL:{self}/mock/llm-gateway}
     project-id: ${ZHIYE_FIVESTAR_PROJECT_ID:zhiye}
     internal-token-env: ZHIYE_OPENCLAW_INTERNAL_TOKEN
+    public-key-env: ZHIYE_FIVESTAR_PUBLIC_KEY
   storage:
     type: local
   dev:

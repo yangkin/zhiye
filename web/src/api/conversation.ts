@@ -112,7 +112,7 @@ const enc = encodeURIComponent;
 
 async function askConversation(
   id: string,
-  input: { content: string; skillAppIds?: string[]; assetIds?: string[]; type?: AppType },
+  input: { content: string; skillAppIds?: string[]; assetIds?: string[]; type?: AppType; model?: string; billingType?: 'FREE' | 'PAID' },
   onDelta: (text: string) => void,
   signal?: AbortSignal,
   onThinking?: (text: string) => void,
@@ -200,7 +200,10 @@ export const api = {
   stopAsk: (id: string) => request<{ finished: boolean }>(`/api/conversations/${enc(id)}/ask/stop`, { method: 'POST', body: {} }),
   buildConversation: (
     id: string,
-    input: { type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[]; sourceIds?: string[] },
+    input: {
+      type: AppType; mode: Mode; model: string; assetIds?: string[]; skillAppIds?: string[]; sourceIds?: string[];
+      billingType?: 'FREE' | 'PAID';
+    },
   ) => request<AppDetail>(`/api/conversations/${enc(id)}/build`, { method: 'POST', body: input }),
   deleteConversation: (id: string) => request<void>(`/api/conversations/${enc(id)}`, { method: 'DELETE' }),
   conversationFiles: (id: string) => request<ConversationFile[]>(`/api/conversations/${enc(id)}/files`),

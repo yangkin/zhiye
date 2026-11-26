@@ -236,12 +236,17 @@ public class DataSourceService {
             if (body.length > props.maxResponseBytes())
                 throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_TOO_LARGE", "数据源返回的内容超过 " + (props.maxResponseBytes() / 1024 / 1024) + " MB，请加上分页或筛选参数");
             String text = new String(body, StandardCharsets.UTF_8);
-            if (status >= 300 && status < 400)
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_REDIRECT", "数据源返回了跳转（" + status + "），请登记最终地址");
             if (status >= 400)
                 throw new ApiException(HttpStatus.BAD_GATEWAY, "SOURCE_UPSTREAM", "数据源返回 " + status + "：" + snippet(text));
             Object data;
             try { data = text.isBlank() ? null : Json.M.readTree(text); } catch (Exception e) { data = text; }
+            if (status >= 300 && status < 400) {
+                String location = res.headers().firstValue("Location").orElse("");
+                ObjectNode redirect = Json.obj();
+                redirect.put("location", location);
+                redirect.put("message", "数据源返回跳转；平台没有自动跟随，请由应用按业务需要处理");
+                data = redirect;
+            }
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("data", data);
             out.put("status", status);
@@ -479,10 +484,15 @@ public class DataSourceService {
             if (s.params().isEmpty()) sb.append("参数：无\n");
             else {
                 sb.append("参数：\n");
-                for (Param p : s.params())
-                    sb.append("- `").append(p.name()).append("`（").append(p.type()).append(p.required() ? "，必填" : "，可选").append("）")
+                for (Param p : s.params()) {
+                    sb.append("- `").append(p.name()).append("`（").append(p.type()).append(p.required() ? "，必填" : "，可选")
+                            .append("，位置 ").append(p.position() == null ? ("POST".equals(s.method()) ? "body" : "query") : p.position()).append("）")
                             .append(p.description().isBlank() ? "" : "：" + p.description())
-                            .append(p.example().isBlank() ? "" : "，例如 " + p.example()).append('\n');
+                            .append(p.example().isBlank() ? "" : "，例如 " + p.example());
+                    if (sensitiveName(p.name()))
+                        sb.append("；敏感凭证必须由用户在页面密码框当次填写，禁止写死、持久化到 localStorage 或打印日志");
+                    sb.append('\n');
+                }
             }
             if (s.sample() != null && !s.sample().isBlank() && budget > 0) {
                 String sample = s.sample().length() > Math.min(3000, budget) ? s.sample().substring(0, Math.min(3000, budget)) + "\n…（已截断）" : s.sample();
@@ -573,9 +583,11 @@ public class DataSourceService {
 
     private Source row(java.sql.ResultSet rs) throws java.sql.SQLException {
         List<Param> params = new ArrayList<>();
-        for (JsonNode p : Json.read(rs.getString("params")))
-            params.add(new Param(p.path("name").asText(), p.path("type").asText("string"), p.path("required").asBoolean(false),
-                    p.path("description").asText(""), p.path("example").asText(""), p.path("position").asText(null)));
+        for (JsonNode p : Json.read(rs.getString("params"))) {
+            String name = p.path("name").asText();
+            params.add(new Param(name, p.path("type").asText("string"), p.path("required").asBoolean(false),
+                    p.path("description").asText(""), sensitiveName(name) ? "" : p.path("example").asText(""), p.path("position").asText(null)));
+        }
         // 旧版 AGW 导入把完整请求体误存成 root(string)。读取时兼容为 _body，历史数据源无需重新添加。
         if ("agw".equals(rs.getString("provider")) && params.size() == 1) {
             Param p = params.get(0);
@@ -590,6 +602,10 @@ public class DataSourceService {
                 rs.getString("description"), rs.getString("method"), rs.getString("url"), params, rs.getString("sample"),
                 rs.getString("auth_type"), rs.getString("auth_header"), rs.getString("secret_enc"), rs.getString("secret_env"),
                 Db.iso(Db.ts(rs, "created_at")), rs.getString("provider"), rs.getString("external_id"));
+    }
+
+    static boolean sensitiveName(String name) {
+        return name != null && name.toLowerCase(Locale.ROOT).matches(".*(?:secret|password|credential|token|app[-_]?key|api[-_]?key|authorization|webhook).*");
     }
 
     private Map<String, Object> view(Source s, String ws) {
@@ -692,17 +708,19 @@ public class DataSourceService {
             if (arr.size() > 30) throw ApiException.validation("参数最多 30 个");
             for (JsonNode p : arr) {
                 String name = p.path("name").asText("").trim();
-                if (!PARAM.matcher(name).matches()) throw ApiException.validation("参数名「" + name + "」不合法：只能用字母、数字、下划线");
+                String position = p.path("position").asText(null);
+                boolean header = "header".equals(position);
+                if (header ? !HEADER.matcher(name).matches() : !PARAM.matcher(name).matches())
+                    throw ApiException.validation("参数名「" + name + "」不合法" + (header ? "：Header 只能使用标准请求头字符" : "：只能用字母、数字、下划线"));
                 if (!names.add(name)) throw ApiException.validation("参数 " + name + " 重复了");
                 String type = p.path("type").asText("string").trim();
                 if (!TYPES.contains(type)) throw ApiException.validation("参数 " + name + " 的类型只能是 string / number / integer / boolean / date");
                 String d = p.path("description").asText("").trim();
-                String ex = p.path("example").asText("").trim();
+                String ex = sensitiveName(name) ? "" : p.path("example").asText("").trim();
                 if (d.length() > 200 || ex.length() > 200) throw ApiException.validation("参数说明和示例最多 200 字");
-                String position = p.path("position").asText(null);
                 if (position != null && !Set.of("query", "path", "header", "body").contains(position))
                     throw ApiException.validation("参数 " + name + " 的位置不合法");
-                if ("header".equals(position) && (!HEADER.matcher(name).matches() || RESERVED_HEADERS.contains(name.toLowerCase(Locale.ROOT))))
+                if (header && RESERVED_HEADERS.contains(name.toLowerCase(Locale.ROOT)))
                     throw ApiException.validation("参数 " + name + " 不能作为 Header 传递");
                 out.add(new Param(name, type, p.path("required").asBoolean(false), d, ex, position));
             }

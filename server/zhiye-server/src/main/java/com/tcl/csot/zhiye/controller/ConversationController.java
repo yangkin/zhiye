@@ -100,9 +100,12 @@ public class ConversationController {
         StringBuilder shown = new StringBuilder(), thought = new StringBuilder();
         long[] lastSendAt = { System.currentTimeMillis() };
         long[] lastStopPollAt = { 0L };
+        final String modelRef = body.path("model").asText("");
+        final String billingType = body.path("billingType").asText("");
         Threads.start("conv-ask", () -> {
             try {
                 ask.answer(ws, p.content(), p.skillAppIds(), null, p.history(), p.type(), p.assets(), p.sourceContext(),
+                        modelRef, billingType,
                         (reply) -> {
                             if (run.stop().get() || remoteStopped(id, startedAt)) {
                                 run.stop().set(true);
@@ -185,7 +188,7 @@ public class ConversationController {
         JsonNode b = body == null ? Json.obj() : body;
         ConversationService.BuildRequest req = new ConversationService.BuildRequest(
                 text(b, "type"), text(b, "mode"), text(b, "model"),
-                list(b, "assetIds"), list(b, "skillAppIds"), list(b, "sourceIds"));
+                list(b, "assetIds"), list(b, "skillAppIds"), list(b, "sourceIds"), text(b, "billingType"));
         return conversations.build(principal.workspaceId(), id, req, key);
     }
 

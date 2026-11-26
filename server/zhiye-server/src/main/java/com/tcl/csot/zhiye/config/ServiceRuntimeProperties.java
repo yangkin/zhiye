@@ -49,7 +49,8 @@ public record ServiceRuntimeProperties(
         Integer maxPlatformRunningMemoryMb,
         Integer maxPlatformRunningCpuMillicores,
         String buildNamespace,
-        String buildContextPvc
+        String buildContextPvc,
+        String npmTarballCdn
 ) {
     public ServiceRuntimeProperties {
         if (provider == null || provider.isBlank()) provider = "local";
@@ -67,6 +68,7 @@ public record ServiceRuntimeProperties(
         if (baseImageGoBuild == null || baseImageGoBuild.isBlank()) baseImageGoBuild = "golang:1.23-alpine";
         if (baseImageGoRuntime == null || baseImageGoRuntime.isBlank()) baseImageGoRuntime = "alpine:3.20";
         if (npmRegistry == null) npmRegistry = "";
+        if (npmTarballCdn == null) npmTarballCdn = "";
         if (pipIndexUrl == null) pipIndexUrl = "";
         if (mavenMirrorUrl == null) mavenMirrorUrl = "";
         if (goProxy == null) goProxy = "";

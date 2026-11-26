@@ -473,7 +473,7 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
 
         Map<String, String> env = pb.environment();
         augmentPath(env);
-        Path venvBin = appDir(spec.appId()).resolve(".venv").resolve("bin");
+        Path venvBin = appDir(spec.appId()).resolve(".venv").resolve(File.pathSeparator.equals(";") ? "Scripts" : "bin");
         if (Files.isDirectory(venvBin)) {
             env.put("PATH", venvBin.toAbsolutePath() + File.pathSeparator + env.getOrDefault("PATH", ""));
             env.put("VIRTUAL_ENV", appDir(spec.appId()).resolve(".venv").toAbsolutePath().toString());
@@ -506,7 +506,7 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
             terminateProcess(proc);
             throw new IllegalStateException("服务启动失败或监听端口超时（PORT=" + port + "）。运行日志：\n" + recent);
         }
-        emitStage(spec.appId(), "ready", "[zhiye] 新实例健康检查通过，监听 http://127.0.0.1:" + port, buildLog);
+        emitStage(spec.appId(), "ready", "[zhiye] 服务启动成功，新实例健康检查通过，监听 http://127.0.0.1:" + port, buildLog);
         return new RunningProc(proc, port, logFile, (staticOut != null && Files.isDirectory(staticOut)) ? staticOut : null, Instant.now());
     }
 
@@ -588,12 +588,15 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                 return "";
             }
             if (rawBuild.contains("pip install")) {
+                boolean windows = File.pathSeparator.equals(";");
                 String venvDir = shellQuote(appBase.resolve(".venv").toAbsolutePath().toString());
-                String pipCmd = rawBuild.replaceFirst("pip3?\\s+install", venvDir + "/bin/pip install");
+                String pip = venvDir + (windows ? "/Scripts/pip.exe" : "/bin/pip");
+                String python = windows ? "python" : "python3";
+                String pipCmd = rawBuild.replaceFirst("pip3?\\s+install", pip + " install");
                 if (!props.pipIndexUrl().isBlank() && !pipCmd.contains(" -i ")) {
                     pipCmd = pipCmd + " -i " + shellQuote(props.pipIndexUrl());
                 }
-                return "([ -d " + venvDir + " ] || python3 -m venv " + venvDir + ") && " + pipCmd;
+                return "([ -d " + venvDir + " ] || " + python + " -m venv " + venvDir + ") && " + pipCmd;
             }
             return rawBuild;
         }
@@ -605,7 +608,15 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
                 if (!Files.exists(localNm, LinkOption.NOFOLLOW_LINKS)
                         && Files.isDirectory(cachedNm) && Files.isRegularFile(cachedPkg)
                         && Arrays.equals(Files.readAllBytes(bdir.resolve("package.json")), Files.readAllBytes(cachedPkg))) {
-                    Files.createSymbolicLink(localNm, cachedNm);
+                    try {
+                        Files.createSymbolicLink(localNm, cachedNm);
+                    } catch (Exception e) {
+                        if (File.pathSeparator.equals(";")) {
+                            Process link = new ProcessBuilder("cmd.exe", "/c", "mklink", "/J",
+                                    localNm.toString(), cachedNm.toString()).redirectErrorStream(true).start();
+                            if (!link.waitFor(10, TimeUnit.SECONDS)) link.destroyForcibly();
+                        }
+                    }
                 }
             } catch (Exception ignored) {}
             if (Files.exists(localNm, LinkOption.NOFOLLOW_LINKS)) return rawBuild;
@@ -669,6 +680,11 @@ public class LocalServiceRuntimeProvider implements ServiceRuntimeProvider {
     }
 
     private String resolveLocalStartCmd(DeploySpec spec, Path bdir) {
+        if ("python".equals(spec.runtime()) && File.pathSeparator.equals(";")) {
+            if (spec.startCmd() != null && !spec.startCmd().isBlank())
+                return spec.startCmd().replaceFirst("^python3\\b", "python");
+            return "python main.py";
+        }
         if (spec.startCmd() != null && !spec.startCmd().isBlank()) return spec.startCmd();
         return switch (spec.runtime()) {
             case "python" -> "python3 main.py";

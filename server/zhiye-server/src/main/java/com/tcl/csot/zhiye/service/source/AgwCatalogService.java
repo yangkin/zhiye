@@ -54,6 +54,7 @@ public class AgwCatalogService {
         readParams(detail.path("restfulParams"), params);
         JsonNode database = detail.path("dataBaseParams");
         if (database.isObject()) database.fields().forEachRemaining(e -> readParams(e.getValue(), params));
+        addReferencedParams(detail, params);
         String bodyExample = detail.path("reqBodyExample").asText("").trim();
         if ("POST".equals(method) && !bodyExample.isEmpty() && params.stream().noneMatch(x -> "_body".equals(x.get("name")))) {
             Map<String, Object> body = new HashMap<>();
@@ -138,6 +139,43 @@ public class AgwCatalogService {
             param.put("position", row.path("inPosition").asText("query").toLowerCase());
             out.add(param);
         }
+    }
+
+    private static final java.util.regex.Pattern REQUEST_REFERENCE = java.util.regex.Pattern.compile(
+            "\\{\\{\\s*([#/^])?\\s*agw\\.(body|header|query|path)\\.([A-Za-z0-9_-]+)");
+
+    private static void addReferencedParams(JsonNode node, List<Map<String, Object>> out) {
+        if (node == null) return;
+        if (node.isTextual()) {
+            var matcher = REQUEST_REFERENCE.matcher(node.asText());
+            while (matcher.find()) {
+                String position = matcher.group(2);
+                String name = matcher.group(3);
+                boolean required = !"#".equals(matcher.group(1));
+                Map<String, Object> existing = out.stream().filter(x -> name.equals(x.get("name"))).findFirst().orElse(null);
+                if (existing != null) {
+                    if (required && !Boolean.TRUE.equals(existing.get("required"))) existing.put("required", true);
+                    continue;
+                }
+                Map<String, Object> param = new HashMap<>();
+                param.put("name", name);
+                param.put("type", "string");
+                param.put("required", required);
+                String description = "API 配置引用的 " + position + " 参数";
+                if (isSensitive(name)) description += "；敏感凭证：仅在页面用密码框当次填写，禁止写死、持久化或记录日志";
+                param.put("description", description);
+                param.put("example", "");
+                param.put("position", position);
+                out.add(param);
+            }
+            return;
+        }
+        if (node.isObject()) node.fields().forEachRemaining(e -> addReferencedParams(e.getValue(), out));
+        else if (node.isArray()) node.forEach(x -> addReferencedParams(x, out));
+    }
+
+    private static boolean isSensitive(String name) {
+        return DataSourceService.sensitiveName(name);
     }
 
     private static String paramType(String type) {

@@ -284,12 +284,21 @@ export function shortModelLabel(label: string) {
   return base.replace(/-\d{4}$/, '');
 }
 
-/** 可选模型：五星模式下是用户在五星AI岛配置的模型（含「五星默认」），否则是平台统一模型 */
-export function useModelList(): { fivestar: boolean; models: ModelInfo[] } {
+/** 可选模型：五星模式下是用户在五星AI岛配置的模型（含「五星默认」和平台免费模型），否则是平台统一模型 */
+export function useModelList(): { fivestar: boolean; models: ModelInfo[]; defaultId: string | null } {
   const meta = useMeta().data;
   const fivestar = !!meta?.fivestar;
   const q = useQuery({ queryKey: ['llm-models'], queryFn: api.llmModels, enabled: fivestar, staleTime: 60_000, retry: false });
-  return { fivestar, models: fivestar ? (q.data?.models ?? []) : (meta?.models ?? []) };
+  return {
+    fivestar,
+    models: fivestar ? (q.data?.models ?? []) : (meta?.models ?? []),
+    defaultId: fivestar ? (q.data?.defaultId ?? null) : 'auto',
+  };
+}
+
+/** 当前模型是否付费；五星之外一律免费 */
+export function billingOf(models: { id: string; billingType?: 'FREE' | 'PAID' }[], id: string): 'FREE' | 'PAID' | undefined {
+  return models.find((m) => m.id === id)?.billingType;
 }
 
 /** 1234567 → 123.5 万 */
@@ -382,6 +391,7 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
               {list.length > 1 ? (
                 <button type="button" className="model-pop-row" aria-haspopup="menu" aria-expanded={sub} onClick={() => setSub((v) => !v)} onMouseEnter={() => setSub(true)}>
                   <span>选择模型</span>
+                  {current.billingType === 'PAID' ? <span className="model-paid">付费</span> : null}
                   <span className="model-pop-value" title={current.label}>
                     {shortModelLabel(current.label)} <i aria-hidden="true">›</i>
                   </span>
@@ -409,14 +419,18 @@ export function ModelModeButton({ models, model, onModel, className = 'model-but
                         aria-checked={m.id === model}
                         className={m.id === model ? 'on' : ''}
                         onClick={() => {
+                          if (m.billingType === 'PAID') toast('该模型会计入你在五星AI岛的个人额度，超出本周额度会暂停使用');
                           onModel(m.id);
                           setSub(false);
                         }}
                       >
                         <span className="model-pop-name">
                           <b title={m.label}>{shortModelLabel(m.label)}</b>
-                          <small>{m.desc ?? (m.id === 'auto' ? '根据需求自动选择合适的模型' : '')}</small>
+                          <small>{m.desc ?? (m.id === 'auto' ? '根据需求自动选择合适的模型（优先免费）' : '')}</small>
                         </span>
+                        {m.billingType === 'PAID' ? (
+                          <span className="model-paid" title="使用该模型会扣减你在五星AI岛的个人额度">付费</span>
+                        ) : null}
                         {cost ? (
                           <span className="model-cost" aria-label={`费用：${COST[cost]}`}>
                             {'●'.repeat(cost)}

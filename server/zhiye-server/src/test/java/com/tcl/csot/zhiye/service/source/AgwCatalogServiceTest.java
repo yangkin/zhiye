@@ -36,7 +36,7 @@ class AgwCatalogServiceTest {
                 {"code":"ok","success":true,"data":[{"projectCode":"proj","projectName":"查询项目","projectPublicId":"public-1","apiId":"api-1","apiName":"账号校验","apiCode":"account-check","apiMethod":"POST","apiPubUrl":"/agw-api/account-check","grantTier":"project","matchedBy":"PROJECT_GRANT"}]}
                 """));
         server.createContext("/api/agw-admin/apiInfo/api-1", exchange -> respond(exchange, """
-                {"code":"ok","success":true,"data":{"apiName":"账号校验","apiCode":"account-check","apiMethod":"POST","apiPubUrl":"/agw-api/account-check","reqBodyExample":"[]","resReturnExample":"{}","restfulParams":[{"inParamName":"top","inPosition":"QUERY","bgDataType":"int","required":0}]}}
+                {"code":"ok","success":true,"data":{"apiName":"账号校验","apiCode":"account-check","apiMethod":"POST","apiPubUrl":"/agw-api/account-check","reqBodyExample":"[]","resReturnExample":"{}","restfulParams":[{"inParamName":"top","inPosition":"QUERY","bgDataType":"int","required":0}],"connectorConfig":{"request":"{{agw.body.appId}} {{agw.header.X-Feishu-App-Secret}} {{#agw.query.trace}}"}}}
                 """));
         server.start();
         try {
@@ -59,11 +59,24 @@ class AgwCatalogServiceTest {
             assertThat(body.path("authType").asText()).isEqualTo("agw_user");
             assertThat(body.path("authHeader").asText()).isEqualTo("public-1");
             assertThat(body.path("params").get(0).path("type").asText()).isEqualTo("integer");
-            assertThat(body.path("params").get(1).path("name").asText()).isEqualTo("_body");
-            assertThat(body.path("params").get(1).path("type").asText()).isEqualTo("json");
+            JsonNode appId = param(body, "appId");
+            assertThat(appId.path("required").asBoolean()).isTrue();
+            assertThat(appId.path("position").asText()).isEqualTo("body");
+            JsonNode secret = param(body, "X-Feishu-App-Secret");
+            assertThat(secret.path("required").asBoolean()).isTrue();
+            assertThat(secret.path("position").asText()).isEqualTo("header");
+            assertThat(secret.path("description").asText()).contains("禁止写死");
+            assertThat(param(body, "trace").path("required").asBoolean()).isFalse();
+            JsonNode fullBody = param(body, "_body");
+            assertThat(fullBody.path("type").asText()).isEqualTo("json");
         } finally {
             server.stop(0);
         }
+    }
+
+    private static JsonNode param(JsonNode body, String name) {
+        for (JsonNode p : body.path("params")) if (p.path("name").asText().equals(name)) return p;
+        throw new AssertionError("缺少参数 " + name + "：" + body.path("params"));
     }
 
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body) throws IOException {

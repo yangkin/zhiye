@@ -42,7 +42,7 @@ function realResolve(abs) {
 /** 检查写入目标，返回原因或 null。 */
 const SCRIPT_WRITABLE = (rel) => {
   const segs = rel.split('/')
-  if (['package-lock.json', 'tsconfig.json', 'jsconfig.json'].includes(rel)) return false
+  if (['package.json', 'package-lock.json', 'tsconfig.json', 'jsconfig.json'].includes(rel)) return false
   if (segs.length === 1) return ['scripts', 'examples', 'docs', 'tmp', 'lib', 'utils', 'data', 'tests'].includes(rel) || /\.(py|js|mjs|cjs|sh|md|txt|json|csv|yaml|yml|sql|ini)$/i.test(rel)
   return ['scripts', 'examples', 'docs', 'tmp', 'lib', 'utils', 'data', 'tests'].includes(segs[0])
 }

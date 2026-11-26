@@ -129,6 +129,7 @@ zhiye:
     base-image-go-build: ${ZHIYE_SERVICE_IMAGE_GO_BUILD:golang:1.23-alpine}
     base-image-go-runtime: ${ZHIYE_SERVICE_IMAGE_GO_RUNTIME:alpine:3.20}
     npm-registry: ${ZHIYE_NPM_REGISTRY:}
+    npm-tarball-cdn: ${ZHIYE_NPM_TARBALL_CDN:}
     pip-index-url: ${ZHIYE_PIP_INDEX_URL:}
     maven-mirror-url: ${ZHIYE_MAVEN_MIRROR_URL:}
     go-proxy: ${ZHIYE_GO_PROXY:}

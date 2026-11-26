@@ -21,7 +21,7 @@ class GatewayTest extends IntegrationTest {
 
     String runningTask() {
         String id = Ids.newId("task");
-        jdbc.sql("insert into task (id, workspace_id, app_id, type, status) values (?, 'ws_x', ?, 'generate', 'RUNNING')")
+        jdbc.sql("insert into task (id, workspace_id, app_id, type, status, lease_owner, lease_until) values (?, 'ws_x', ?, 'generate', 'RUNNING', 'gateway-test', now() + interval '1 hour')")
                 .params(id, Ids.newId("app")).update();
         return id;
     }

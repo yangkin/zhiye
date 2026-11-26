@@ -105,11 +105,13 @@ public class AskController {
         if (app != null) messages.insert(app, "user", c, null, null, "ok", assetIds.isEmpty() ? null : assetIds);
         final String appForSave = app;
         final java.util.List<JsonNode> hist = java.util.List.copyOf(history);
+        final String modelRef = body.path("model").asText("");
+        final String billingType = body.path("billingType").asText("");
         SseEmitter emitter = new SseEmitter(0L);
         Threads.start("ask", () -> {
             try {
                 // appId 非空时走只读工具循环（模型可按需读代码），否则一次普通回答
-                ask.answer(ws, c, skillIds, appForSave, hist, null, attached,
+                ask.answer(ws, c, skillIds, appForSave, hist, null, attached, "", modelRef, billingType,
                         (reply) -> {
                             if (appForSave != null) messages.insert(appForSave, "assistant", reply.content(), null, null, "ok");
                         },

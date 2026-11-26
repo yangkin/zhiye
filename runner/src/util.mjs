@@ -62,6 +62,11 @@ export function flushLogs() {
   emitEvent({ type: 'log', line: kept.join('\n') })
 }
 
+export function normalizeShellCommand(command) {
+  const text = String(command || '')
+  return process.platform === 'win32' ? text.replace(/\bpython3\b/g, 'python') : text
+}
+
 /**
  * 执行命令，收集输出。返回 { code, out, timedOut, signal }。
  * onLine：每行输出的回调（用于 log 事件）。
@@ -74,7 +79,9 @@ export function run(cmd, args, { cwd, env, timeoutMs = 300000, onLine, input, si
     try {
       const needsShell = process.platform === 'win32' && ['npm', 'npm.cmd', 'npx', 'npx.cmd', 'pnpm', 'pnpm.cmd', 'yarn', 'yarn.cmd'].includes(cmd)
       const executable = process.platform === 'win32' && cmd === 'python3' ? 'python' : cmd
-      child = spawn(executable, args, { cwd, env: env || process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', shell: needsShell })
+      const actualArgs = process.platform === 'win32' && cmd === 'sh' && args[0] === '-c'
+        ? [args[0], normalizeShellCommand(args[1]), ...args.slice(2)] : args
+      child = spawn(executable, actualArgs, { cwd, env: env || process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', shell: needsShell })
     } catch (e) {
       resolve({ code: -1, out: String(e.message), timedOut: false })
       return

@@ -62,6 +62,7 @@ RUN set -eux; groupadd -g 10001 zhiye; useradd -u 10001 -g 10001 -M -d /var/lib/
 COPY --from=web /src/web/dist /opt/zhiye/web/dist
 COPY packages/app-template /opt/zhiye/packages/app-template
 COPY packages/vue-template /opt/zhiye/packages/vue-template
+COPY packages/vue-springboot-template /opt/zhiye/packages/vue-springboot-template
 COPY packages/fullstack-template /opt/zhiye/packages/fullstack-template
 COPY packages/skill-template /opt/zhiye/packages/skill-template
 COPY packages/static-template /opt/zhiye/packages/static-template

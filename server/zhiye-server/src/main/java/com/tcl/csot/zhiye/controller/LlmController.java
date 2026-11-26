@@ -43,7 +43,7 @@ public class LlmController {
         Map<String, Object> out = new LinkedHashMap<>();
         List<Map<String, Object>> list = new ArrayList<>();
         if (!fs.enabled()) {
-            for (Catalog.Model m : Catalog.MODELS) list.add(model(m.id(), m.label(), "平台统一配置的模型", null, false));
+            for (Catalog.Model m : Catalog.MODELS) list.add(model(m.id(), m.label(), "平台统一配置的模型", null, false, null));
             out.put("source", "local");
             out.put("models", list);
             out.put("defaultId", LlmRouter.AUTO);
@@ -54,21 +54,25 @@ public class LlmController {
         String account = router.accountOf(principal.workspaceId());
         if (account == null)
             throw new com.tcl.csot.zhiye.exception.ApiException(org.springframework.http.HttpStatus.UNAUTHORIZED, "LOGIN_REQUIRED", "使用模型需要先用公司统一账号登录");
-        JsonNode available = openclaw.availableModels(account);
-        String defaultId = LlmRouter.AUTO, defaultLabel = null;
+        JsonNode available = router.availableModels(account);
+        String defaultId = LlmRouter.AUTO, defaultLabel = null, freeId = null;
         for (JsonNode m : available) {
             String id = m.path("providerId").asText() + ":" + m.path("modelId").asText();
+            String billing = billing(m);
+            if (LlmRouter.FREE.equals(billing) && freeId == null) freeId = id;
             if (m.path("preferred").asBoolean(false)) {
                 defaultId = id;
                 defaultLabel = m.path("modelName").asText(m.path("modelId").asText());
             }
             list.add(model(id, m.path("modelName").asText(m.path("modelId").asText()),
-                    m.path("providerName").asText(""), m.path("providerName").asText(null), m.path("multimodal").asBoolean(false)));
+                    m.path("providerName").asText(""), m.path("providerName").asText(null),
+                    m.path("multimodal").asBoolean(false) || m.path("isMultimodal").asBoolean(false), billing));
         }
-        list.add(0, model(LlmRouter.AUTO, "五星默认", defaultLabel == null ? "使用当前账号的首选可用模型" : "跟随五星AI岛默认模型：" + defaultLabel, null, false));
+        list.add(0, model(LlmRouter.AUTO, "五星默认", defaultLabel == null ? "使用当前账号的首选可用模型" : "跟随五星AI岛默认模型：" + defaultLabel, null, false, null));
         out.put("source", "fivestar");
         out.put("models", list);
-        out.put("defaultId", defaultId);
+        // 新会话优先选免费模型；没有免费模型时跟随五星AI岛的默认模型
+        out.put("defaultId", freeId != null ? freeId : defaultId);
         return out;
     }
 
@@ -91,14 +95,21 @@ public class LlmController {
         return out;
     }
 
-    private static Map<String, Object> model(String id, String label, String desc, String provider, boolean multimodal) {
+    private static Map<String, Object> model(String id, String label, String desc, String provider, boolean multimodal, String billingType) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", id);
         m.put("label", label);
         m.put("desc", desc);
         if (provider != null) m.put("provider", provider);
         m.put("multimodal", multimodal);
+        if (billingType != null) m.put("billingType", billingType);
         return m;
+    }
+
+    private static String billing(JsonNode m) {
+        String b = m.path("billingType").asText("");
+        if (b.isBlank()) b = m.path("billing").asText("");
+        return LlmRouter.FREE.equalsIgnoreCase(b) ? LlmRouter.FREE : LlmRouter.PAID;
     }
 
     private static String text(JsonNode n, String k) { return n.hasNonNull(k) ? n.get(k).asText() : null; }

@@ -128,6 +128,7 @@ public class SiteFilter extends OncePerRequestFilter {
             if (!isRead(req)) { res.sendError(405); return; }
             String prefix = jdbc.sql("select preview_prefix from template where id = ? and preview_prefix is not null").param(t.group(1)).query(String.class).optional().orElse(null);
             if (prefix == null) { notFound(res, "这个作品没有页面预览"); return; }
+            res.setHeader("Content-Security-Policy", PREVIEW_SANDBOX);
             serve(prefix, null, t.group(2) == null ? "/" : t.group(2), res, "HEAD".equals(req.getMethod()), false, null, null);
             return;
         }
@@ -142,7 +143,11 @@ public class SiteFilter extends OncePerRequestFilter {
 
     private static boolean isRead(HttpServletRequest req) { return "GET".equals(req.getMethod()) || "HEAD".equals(req.getMethod()); }
 
+    /** 同源预览/社区快照也不能读取主站登录态或操作父页面；CSP sandbox 让文档始终处于 opaque origin。 */
+    private static final String PREVIEW_SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-downloads";
+
     private void servePreview(String buildId, String path, HttpServletResponse res, boolean head, String role) throws IOException {
+        res.setHeader("Content-Security-Policy", PREVIEW_SANDBOX);
         var build = versions.build(buildId);
         if (build.isEmpty()) { notFound(res, "预览不存在或已过期"); return; }
         // buildId 显式传入：previewPrefix 的最后一段是 "preview"，不能靠它反推

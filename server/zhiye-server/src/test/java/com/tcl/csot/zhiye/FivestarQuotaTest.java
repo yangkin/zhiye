@@ -53,10 +53,12 @@ class FivestarQuotaTest extends IntegrationTest {
 
         JsonNode m = c.ok(c.send("GET", "/api/llm/models", null, bearer("fs-alice")));
         assertThat(m.path("source").asText()).isEqualTo("fivestar");
-        assertThat(m.path("defaultId").asText()).isEqualTo("11:deepseek-v4-flash");
+        // 新会话优先免费模型
+        assertThat(m.path("defaultId").asText()).isEqualTo("1:glm-4.5-flash-free");
         List<String> ids = m.path("models").findValuesAsText("id");
-        assertThat(ids).containsExactly("auto", "11:deepseek-v4-flash", "11:deepseek-v4-pro", "12:kimi-k2.6");
+        assertThat(ids).containsExactly("auto", "11:deepseek-v4-flash", "11:deepseek-v4-pro", "12:kimi-k2.6", "1:glm-4.5-flash-free");
         assertThat(m.path("models").get(0).path("desc").asText()).contains("DeepSeek V4 Flash");
+        assertThat(m.path("models").findValuesAsText("billingType")).contains("PAID", "FREE");
 
         JsonNode q = c.ok(c.send("GET", "/api/llm/quota", null, bearer("fs-alice")));
         assertThat(q.path("packageName").asText()).isEqualTo("Lite");
@@ -96,16 +98,38 @@ class FivestarQuotaTest extends IntegrationTest {
         assertThat(used).isPositive();
         assertThat(c.ok(c.send("GET", "/api/llm/quota", null, bearer(bob))).path("usedTokens").asLong()).isEqualTo(used);
 
-        // 额度用完：润色直接说清楚；对话修改失败为 PROVIDER_QUOTA，提示里有重置时间，进度保留可重试
+        // 额度用完：付费模型的任务失败为 PROVIDER_QUOTA，提示里有重置时间，进度保留可重试；
+        // auto / 免费模型走公共 Key，不受个人额度影响
         mock.setUsed(bob, 1_000_000);
         var polish = c.post("/api/chat/polish", Map.of("content", "做个看板"));
-        assertThat(polish.status()).isEqualTo(503);
-        assertThat(polish.json().path("message").asText()).startsWith("你在五星AI岛的本周模型额度已用完").contains("重置");
+        assertThat(polish.status()).isEqualTo(200);
         JsonNode t = c.ok(c.post("/api/apps/" + appId + "/messages", Map.of("content", "把按钮改成绿色")));
         JsonNode done = c.waitTask(t.path("task").path("id").asText());
         assertThat(done.path("status").asText()).isEqualTo("FAILED");
         assertThat(done.path("error").path("code").asText()).isEqualTo("PROVIDER_QUOTA");
         assertThat(done.path("error").path("message").asText()).contains("你在五星AI岛的本周模型额度已用完").contains("重置").contains("重试");
+    }
+
+    @Test
+    void freeModelUsesPublicKeyAndDoesNotConsumeQuota() {
+        String dan = "fs-dan-" + System.nanoTime();
+        Client c = login(dan);
+        mock.setUsed(dan, 0);
+        MockFivestarController.LAST_HEADERS.clear();
+        JsonNode app = c.ok(c.post("/api/apps", Map.of("type", "开发网站", "prompt", "做一个计数器", "mode", "快速",
+                "model", "1:glm-4.5-flash-free", "billingType", "FREE", "assetIds", List.of())));
+        String appId = app.path("id").asText();
+        assertThat(c.waitTask(app.path("activeTask").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        JsonNode g = c.ok(c.post("/api/apps/" + appId + "/generate", Map.of()));
+        assertThat(c.waitTask(g.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+
+        // 免费模型走公共 Key：模型名是 free/…，不扣个人额度
+        List<String> models = jdbc.sql("select distinct u.model from model_usage u join task t on t.id = u.task_id where t.app_id = ?")
+                .param(appId).query(String.class).list();
+        assertThat(models).containsExactly("free/glm-4.5-flash-free");
+        assertThat(mock.used(dan)).isZero();
+        assertThat(MockFivestarController.LAST_HEADERS).isNotEmpty()
+                .allSatisfy(h -> assertThat(h).containsEntry("X-User-Id", dan).containsEntry("X-Project-Id", "zhiye"));
     }
 
     @Test

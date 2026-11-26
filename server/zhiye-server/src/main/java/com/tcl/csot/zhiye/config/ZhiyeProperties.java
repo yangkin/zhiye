@@ -29,7 +29,9 @@ public record ZhiyeProperties(
 
     public record Site(@DefaultValue("http://127.0.0.1:8083") String previewBase,
                        @DefaultValue("http") String siteScheme,
-                       @DefaultValue("localhost:8083") String siteHostSuffix) {}
+                       @DefaultValue("localhost:8083") String siteHostSuffix,
+                       String templatePreviewBase,
+                       String buildPreviewBase) {}
 
     public record Task(@DefaultValue("4") int concurrency,
                        /** 优雅停机：停止领新任务后，等在跑任务完成的最长时间（秒）；超时仍退出并标记 worker_lost */
@@ -51,7 +53,7 @@ public record ZhiyeProperties(
                        @DefaultValue("500") long pollMillis) {}
 
     public record Workspace(@DefaultValue("50") int dailyTaskLimit,
-                            @DefaultValue("3") int maxConcurrentTasks,
+                            @DefaultValue("1") int maxConcurrentTasks,
                             /** 每人最多应用数（已删除的不算） */
                             @DefaultValue("10") int maxApps,
                             @DefaultValue("zhiye_ws") String cookieName,

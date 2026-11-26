@@ -26,10 +26,10 @@ class AgentAutonomyTest {
     @Test
     void serviceGeneratePromptTargetsFullstackAndDoesNotRestrictToSrcOnly() {
         String p = Prompts.generate(sampleApp("全栈应用", "service"), List.of());
-        assertTrue(p.contains("server/index.mjs"), "full-stack prompt must instruct server/index.mjs");
+        assertTrue(p.contains("不限定固定语言或固定目录模板"), "full-stack prompt must not require a fixed stack or directory layout");
+        assertTrue(p.contains("zhiye.yaml"), "full-stack prompt must support custom runtime workflows");
         assertTrue(p.contains("verify_app"), "full-stack prompt must instruct verify_app self-check");
-        assertTrue(p.contains("docs/PROJECT_NOTES.md"), "prompt should mention project notes");
-        assertFalse(p.contains("只修改 `src/`、`public/`、`index.html`"), "service prompt must NOT forbid editing server/");
+        assertFalse(p.contains("只修改 `src/`、`public/`、`index.html`"), "service prompt must NOT forbid editing server code");
     }
 
     @Test

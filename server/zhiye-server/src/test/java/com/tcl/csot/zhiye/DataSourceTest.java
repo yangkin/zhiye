@@ -271,7 +271,10 @@ class DataSourceTest extends IntegrationTest {
         assertThat(f.status()).isEqualTo(502);
         assertThat(f.body()).contains("数据源返回 500").contains("boom");
         String redir = registerSource(c, Map.of("key", "k_redir", "name", "跳转", "url", base + "/redirect")).path("id").asText();
-        assertThat(c.post("/api/sources/" + redir + "/test", Map.of()).body()).contains("跳转");
+        JsonNode redirected = c.ok(c.post("/api/sources/" + redir + "/test", Map.of()));
+        assertThat(redirected.path("status").asInt()).isEqualTo(302);
+        assertThat(redirected.path("data").path("location").asText()).contains("/test-source/fail");
+        assertThat(redirected.path("data").path("message").asText()).contains("没有自动跟随");
         String big = registerSource(c, Map.of("key", "k_big", "name", "超大", "url", base + "/big")).path("id").asText();
         assertThat(c.post("/api/sources/" + big + "/test", Map.of()).body()).contains("超过 2 MB");
         String text = registerSource(c, Map.of("key", "k_text", "name", "文本", "url", base + "/text")).path("id").asText();
@@ -279,6 +282,11 @@ class DataSourceTest extends IntegrationTest {
         // 链路本地 / 元数据地址
         String meta = registerSource(c, Map.of("key", "k_meta", "name", "元数据", "url", "http://169.254.169.254/latest")).path("id").asText();
         assertThat(c.post("/api/sources/" + meta + "/test", Map.of()).status()).isEqualTo(403);
+
+        String sensitive = registerSource(c, Map.of("key", "k_sensitive", "name", "敏感示例", "url", base + "/search",
+                "params", List.of(Map.of("name", "X-Feishu-App-Secret", "position", "header", "example", "must-not-return")))).path("id").asText();
+        assertThat(c.ok(c.get("/api/sources/" + sensitive)).toString()).doesNotContain("must-not-return");
+        assertThat(c.ok(c.get("/api/sources/" + sensitive)).path("params").get(0).path("example").asText()).isEmpty();
 
         // 其他工作空间看不到、不能试调用、不能绑定
         Client other = client();

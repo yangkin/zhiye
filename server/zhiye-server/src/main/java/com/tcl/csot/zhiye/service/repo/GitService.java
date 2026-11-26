@@ -340,13 +340,17 @@ public class GitService {
         deleteWithRetry(p);
     }
 
-    /** Windows 下新写入的文件常被句柄/杀毒/索引短暂锁住，删除失败稍等重试，避免误伤主流程。 */
+    /** Windows 下文件可能被短暂锁住，JGit 对象也可能带只读属性；先清只读再重试，避免误伤主流程。 */
     private static void deleteWithRetry(Path p) throws IOException {
         IOException last = null;
         for (int attempt = 1; attempt <= 5; attempt++) {
             try { Files.deleteIfExists(p); return; }
             catch (IOException e) {
                 last = e;
+                if (e instanceof AccessDeniedException) {
+                    try { Files.setAttribute(p, "dos:readonly", false, LinkOption.NOFOLLOW_LINKS); }
+                    catch (Exception ignored) {}
+                }
                 if (attempt < 5) {
                     try { Thread.sleep(200); }
                     catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw e; }

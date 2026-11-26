@@ -9,6 +9,8 @@ deploy/
 ├── docker/
 │   ├── runner.Dockerfile        runner 沙箱镜像（Node 22 + Chromium + git/python3/bash + 模板依赖），也是 OpenSandbox 的 sandbox 镜像
 │   ├── server.Dockerfile        主服务镜像（api / site 同一个镜像，SPRING_PROFILES_ACTIVE 区分）
+│   ├── service-base.Dockerfile  给导入服务基础镜像加入公司 CA（Node / Python / Java / Go）
+│   ├── csot-root-ca.crt         公司安全网关的公共根 CA（不是私钥）
 │   ├── start-runner.sh          镜像内的 runner 启动脚本（修正 node_modules 链接后 exec runner），OpenSandbox entrypoint
 │   ├── template-cache/package-lock.json   React 模板依赖锁文件（与 packages/app-template/package.json 对应）
 │   └── vue-template-cache/package-lock.json   Vue 模板依赖锁文件（与 packages/vue-template/package.json 对应）

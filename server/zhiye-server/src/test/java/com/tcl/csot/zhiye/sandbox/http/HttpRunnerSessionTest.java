@@ -65,7 +65,7 @@ class HttpRunnerSessionTest {
             server.createContext("/v1/events", ex -> {
                 if (!auth(ex)) { ex.sendResponseHeaders(401, -1); ex.close(); return; }
                 long after = Long.parseLong(ex.getRequestURI().getQuery().replace("after=", ""));
-                long oldest = buffer.isEmpty() ? seq.get() + 1 : Long.parseLong(buffer.get(0)[0]) + 1;
+                long oldest = buffer.isEmpty() ? seq.get() + 1 : Long.parseLong(buffer.get(0)[0]);
                 if (after < oldest - 1) { ex.sendResponseHeaders(409, -1); ex.close(); return; }
                 ex.getResponseHeaders().add("Content-Type", "text/event-stream");
                 ex.sendResponseHeaders(200, 0);

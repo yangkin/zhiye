@@ -132,7 +132,7 @@ interface Patch {                      // 每个 loc 一条，前端合并同一
 interface ImportManifest {
   uploadId: string; name: string;
   format: 'html' | 'zip';
-  framework: string;                   // 'HTML' | '静态站点' | 'Vite + React' | 'Vite + Vue' | 'Next.js' | 'Nuxt.js' | 'React' | 'Vue' | 'Python' | 'Go' | 'Java' | '待识别'
+  framework: string;                   // 'HTML' | '静态站点' | 'Vite + React' | 'Vite + Vue' | 'Next.js' | 'Next.js (SSR)' | 'Nuxt.js' | 'React' | 'Vue' | 'Python' | 'Go' | 'Java' | '待识别'
   deployable: boolean;                 // false 时 unsupportedReason 说明原因，前端禁用「导入并部署」
   unsupportedReason: string | null;
   fileCount: number; totalSize: number;
@@ -177,7 +177,7 @@ interface Meta {
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/apps?q=&type=&favorite=&published=all\|published\|unpublished&sort=updated\|created\|name` | → `AppSummary[]`；`type` 取上面五种之一，不传为全部 |
-| POST | `/api/apps` | `{ type, prompt, mode, model, assetIds, skillAppIds? }`（`skillAppIds`：最多 5 个自己的、已生成的「开发skill」应用，生成时遵循这些技能，不合法 → 400） → `AppDetail`（phase=planning，同时创建 plan 任务，`activeTask` 指向它）。空白 prompt → 400。**开发skill 跳过创造计划**：不创建 plan 任务，`planDoc` = 用户需求，名称取自需求，直接 phase=generating 并创建 generate 任务（`activeTask.type='generate'`）；没有设计风格/制作素材；之后的阶段与其他类型相同（成功 ready、失败 failed 可重试、停止可继续） |
+| POST | `/api/apps` | `{ type, prompt, mode, model, billingType?, assetIds, skillAppIds? }`（`skillAppIds`：最多 5 个自己的、已生成的「开发skill」应用，生成时遵循这些技能，不合法 → 400） → `AppDetail`（phase=planning，同时创建 plan 任务，`activeTask` 指向它）。空白 prompt → 400。**开发skill 跳过创造计划**：不创建 plan 任务，`planDoc` = 用户需求，名称取自需求，直接 phase=generating 并创建 generate 任务（`activeTask.type='generate'`）；没有设计风格/制作素材；之后的阶段与其他类型相同（成功 ready、失败 failed 可重试、停止可继续） |
 | GET | `/api/apps/{id}` | → `AppDetail` |
 | PATCH | `/api/apps/{id}` | 局部更新：`{ name?, favorite?, planDoc?, style?, materials?, model?, mode?, skillAppIds? }`。`skillAppIds` 把技能挂到应用上持久保存（规则同创建，`[]` 清空），`AppDetail.skills` 返回 `[{id,name}]`（已删除的技能不返回）；`model` 为模型 id（`auto` 表示默认），`mode` 取 快速/适中/深度；只影响之后的修改任务 → `AppDetail` |
 | PATCH | `/api/apps/{id}` | `{ name?, favorite?, planDoc?, style?, materials? }` → `AppDetail`。名称 1～40 字 |
@@ -188,7 +188,7 @@ interface Meta {
 | GET | `/api/skillhub/apps/{id}/publications` | → `{ id, versionId, versionNumber, skillId, skillVersion, url, visibility, status, reviewStatus, publishedAt }[]`（时间降序） |
 | POST | `/api/apps/{id}/generate` | 按当前计划执行生成 → `Task`。phase 必须是 plan 或 failed |
 | GET | `/api/apps/{id}/messages` | → `Message[]`（时间升序） |
-| POST | `/api/apps/{id}/messages` | `{ content, elementContext?, assetIds?, skillAppIds? }` → `{ message: Message, task: Task }`，创建 modify 任务。存在草稿时任务会先应用草稿再修改。`elementContext.appId` 不等于路径 id → 400。`assetIds`：当前工作空间的素材（最多 20 个），复制到项目 `public/assets/`（skill 应用为 `references/assets/`）并写进指令；`skillAppIds`：同上，最多 5 个，技能文件放在 agent 目录 `skills/{name}/`（不进入项目）。不属于自己 → 400 |
+| POST | `/api/apps/{id}/messages` | `{ content, elementContext?, assetIds?, skillAppIds?, model?, billingType? }` → `{ message: Message, task: Task }`，创建 modify 任务。存在草稿时任务会先应用草稿再修改。`elementContext.appId` 不等于路径 id → 400。`assetIds`：当前工作空间的素材（最多 20 个），复制到项目 `public/assets/`（skill 应用为 `references/assets/`）并写进指令；`skillAppIds`：同上，最多 5 个，技能文件放在 agent 目录 `skills/{name}/`（不进入项目）。不属于自己 → 400 |
 | GET | `/api/apps/{id}/tasks?active=true` | → `Task[]` |
 | POST | `/api/apps/{id}/code` | 代码页编辑：`{ baseVersionId, files: [{ path, content?, delete?: true }] }` → `Task`（code_save）。不经过 agent：写入/删除文件 → 校验（按 projectKind）→ 新版本（source=code，标题「代码编辑 · N 个文件」）；校验失败 → 任务 FAILED（「检查没有通过，修改未保存：…」），不产生版本。路径只能是相对路径，不能含 `..`、反斜杠，不能在 `.git/`、`node_modules/`、`.zhiye/` 下；最多 50 个文件，每个 ≤1 MB 文本。`baseVersionId` 不是当前版本 → 409 `VERSION_MISMATCH`；有草稿 → 409 `DRAFT_PENDING`；有进行中任务 → 409 `APP_BUSY`；支持 `Idempotency-Key`。所有项目类型可用 |
 
@@ -239,7 +239,7 @@ interface Meta {
 | POST | `/api/sources/{id}/test` | `{ params }` → `{ data, status }`；`GET /api/sources/{id}/calls` 最近 20 次调用 |
 | GET/POST/DELETE | `/api/apps/{id}/sources[/{sourceId}]` | 应用绑定的数据源；POST `{ sourceId }` 绑定（最多 100 个，调用名不能重复）。创建应用 / 会话转应用时也可带 `sourceIds` |
 | POST | `/cloud/{appId}/source/{key}`、站点 `/__zhiye/source/{key}` | 应用运行时调用：`{ params }` → `{ data, status }`。预览带应用令牌；发布站点同源、只接受 JSON |
-| POST | `/api/chat/ask` | `{ content, skillAppIds? }` → SSE：`delta`（`{text}`）/ `done` / `error`（`{message}`）。只是回答问题，不创建应用、不落库；`skillAppIds` 是自己的工作空间里已生成的 skill 应用（最多 5 个），会把技能包里的 Markdown/脚本内容作为上下文带给模型；同时带上织页内置技能目录，模型可用只读工具 `read_skill` 读取内置技能后再回答。资源不可用 → 503 `ASK_UNAVAILABLE`。创造页在识别到「这是一句问题」时调用它 |
+| POST | `/api/chat/ask` | `{ content, skillAppIds?, model?, billingType? }` → SSE：`delta`（`{text}`）/ `done` / `error`（`{message}`）。只是回答问题，不创建应用、不落库；`skillAppIds` 是自己的工作空间里已生成的 skill 应用（最多 5 个），会把技能包里的 Markdown/脚本内容作为上下文带给模型；同时带上织页内置技能目录，模型可用只读工具 `read_skill` 读取内置技能后再回答。资源不可用 → 503 `ASK_UNAVAILABLE`。创造页在识别到「这是一句问题」时调用它 |
 
 ### 云服务（每个应用一份独立 schema + 存储前缀）
 
@@ -370,8 +370,8 @@ interface Selection {
 
 - `POST /api/conversations`（可带 `sourceIds`）→ `{id,title,createdAt,updatedAt}`；`GET /api/conversations` 列表；`GET /api/conversations/{id}` 含 messages 和已连接的 `sources`；`DELETE` 软删。
 - `PUT /api/conversations/{id}/sources {sourceIds}` → 更新会话级数据源并返回 `sources`。数据源随会话持久化，问答时向模型提供名称、说明和参数；它不是一次性消息附件。
-- `POST /api/conversations/{id}/ask` → SSE（delta/done/error），先落 user 消息，完成后落 assistant 消息；自动带上会话已连接的数据源说明。
-- `POST /api/conversations/{id}/build` → `{type?,mode?,model?,assetIds?,skillAppIds?,sourceIds?}`，用整段对话（含 assistant 结论）创建应用，返回应用详情；自动绑定会话数据源，并合并请求里额外给的 `sourceIds`。
+- `POST /api/conversations/{id}/ask` → SSE（delta/done/error），body `{ content, type?, skillAppIds?, assetIds?, history?, model?, billingType? }`，先落 user 消息，完成后落 assistant 消息；自动带上会话已连接的数据源说明。
+- `POST /api/conversations/{id}/build` → `{type?,mode?,model?,billingType?,assetIds?,skillAppIds?,sourceIds?}`，用整段对话（含 assistant 结论）创建应用，返回应用详情；自动绑定会话数据源，并合并请求里额外给的 `sourceIds`。
 - `POST /api/chat/polish {content}` → `{text}`。
 - `GET /api/apps/{appId}/queued`、`POST /api/tasks/{taskId}/queued {content}`、`DELETE /api/queued/{id}`：生成中补充消息排队，任务结束后按顺序自动执行。
 - `POST /api/apps/{id}/plan-feedback {content}`：计划阶段把补充追加到 planDoc 的「补充反馈」段。
@@ -396,7 +396,7 @@ interface Selection {
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/llm/models` | → `{ source: "fivestar" \| "local", defaultId, models: [{ id, label, desc, provider?, multimodal }] }`。五星模式下是员工在五星AI岛配置的模型（`id` = `供应商ID:模型ID`，另有 `auto`=五星默认）；关闭时只有本地统一上游的 `auto`。五星模式未登录 401 `PLATFORM_TOKEN_MISSING` |
+| GET | `/api/llm/models` | → `{ source: "fivestar" \| "local", defaultId, models: [{ id, label, desc, provider?, multimodal, billingType? }] }`。五星模式下是员工可用的模型（个人模型 + 平台免费模型，`id` = `供应商ID:模型ID`，另有 `auto`=五星默认）；`billingType=FREE` 用平台公共 Key、不计个人额度，`PAID` 计入个人额度；`defaultId` 优先免费模型。关闭时只有本地统一上游的 `auto`。五星模式未登录 401 `PLATFORM_TOKEN_MISSING` |
 | GET | `/api/llm/quota` | 个人额度 → `{ enabled, packageName, status, usedTokens, limitTokens, remainingTokens, resetAt, usableModels }`（取自五星AI岛 `tokenCostDetail/usage`）；`enabled=false` 表示没开五星对接，前端不显示额度行 |
 
 ### 会话停止回答

@@ -22,6 +22,14 @@ spec:
     - host: zhiye.example.com
       http:
         paths:
+          # 云服务令牌只在 /p 预览注入；主站同源时仍需 site 提供静态产物，响应带 CSP sandbox 隔离主站登录态
+          - path: /p/
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
+          # 社区页面快照可通过主站同源提供，避免独立预览域名证书影响 iframe；仍由 site 静态返回且不注入令牌
+          - path: /t/
+            pathType: Prefix
+            backend: { service: { name: zhiye-site, port: { number: 8083 } } }
           # 模型网关只给集群内的沙箱用，不对外暴露：/llm 转给 site（site 没有这个路由，返回 404）
           - path: /llm
             pathType: Prefix
