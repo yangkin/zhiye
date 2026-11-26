@@ -55,10 +55,20 @@ public class FeishuConnectorController {
         }).toList();
     }
 
-    /** 普通工作空间用户自助登记自己的飞书群机器人 Webhook 或多维表格（加密保存在当前工作空间，免找管理员）。 */
+    /** 普通工作空间用户自助登记/修改自己的飞书群机器人 Webhook 或多维表格（加密保存在当前工作空间，免找管理员）。 */
     @PostMapping("/api/connectors")
     public Map<String, Object> upsertForWorkspace(@RequestBody JsonNode body) {
         Map<String, Object> saved = new java.util.LinkedHashMap<>(connectors.upsertForWorkspace(ws(), body));
+        saved.put("owned", true);
+        return saved;
+    }
+
+    @PutMapping("/api/connectors/{id}")
+    public Map<String, Object> updateForWorkspace(@PathVariable String id, @RequestBody JsonNode body) {
+        com.fasterxml.jackson.databind.node.ObjectNode obj = body != null && body.isObject()
+                ? (com.fasterxml.jackson.databind.node.ObjectNode) body.deepCopy() : Json.obj();
+        obj.put("id", id);
+        Map<String, Object> saved = new java.util.LinkedHashMap<>(connectors.upsertForWorkspace(ws(), obj));
         saved.put("owned", true);
         return saved;
     }

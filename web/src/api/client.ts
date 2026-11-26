@@ -650,6 +650,8 @@ export const api = {
   connectorsList: () => request<Record<string, unknown>[]>('/api/connectors'),
   connectorSave: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/connectors', { method: 'POST', body: input }),
+  connectorUpdate: (id: string, input: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/connectors/${enc(id)}`, { method: 'PUT', body: input }),
   connectorDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/connectors/${enc(id)}`, { method: 'DELETE' }),
   connectorTest: (id: string) =>
@@ -657,6 +659,10 @@ export const api = {
   mcpServersList: () => request<Record<string, unknown>[]>('/api/mcp-servers'),
   mcpServerCreate: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/mcp-servers', { method: 'POST', body: input }),
+  mcpServerUpdate: (id: string, input: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/mcp-servers/${enc(id)}`, { method: 'PUT', body: input }),
+  mcpServerDiscover: (input: Record<string, unknown>) =>
+    request<{ ok: boolean; tools: Array<Record<string, unknown>> }>('/api/mcp-servers/discover', { method: 'POST', body: input }),
   mcpServerDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/mcp-servers/${enc(id)}`, { method: 'DELETE' }),
   mcpServerTest: (key: string, tool?: string, args?: Record<string, unknown>) =>

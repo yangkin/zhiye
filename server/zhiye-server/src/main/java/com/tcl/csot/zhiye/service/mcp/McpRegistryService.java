@@ -74,11 +74,13 @@ public class McpRegistryService {
                 .query(ServerRow::map).list().stream().map(this::view).toList();
     }
 
-    /** 面向普通工作空间用户的已启用企业 MCP / 知识库目录（完全脱敏，不含内部地址与鉴权头）。 */
+    /** 面向普通工作空间用户的已启用企业 MCP / 知识库目录（完全脱敏，不含密钥）。 */
     public List<Map<String, Object>> listEnabledForWorkspace(String ws) {
         String ownerTag = ws != null && !ws.isBlank() ? "ws:" + ws : "";
         return jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
                 .query(ServerRow::map).list().stream().map(r -> {
+                    boolean owned = !ownerTag.isEmpty() && ownerTag.equals(r.createdBy());
+                    boolean isKb = "mock".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:");
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", r.id());
                     m.put("serverKey", r.serverKey());
@@ -86,8 +88,13 @@ public class McpRegistryService {
                     m.put("description", r.description());
                     m.put("transport", r.transport());
                     m.put("builtin", r.builtin());
-                    m.put("owned", !ownerTag.isEmpty() && ownerTag.equals(r.createdBy()));
-                    m.put("isKnowledgeBase", "mock".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:"));
+                    m.put("owned", owned);
+                    m.put("isKnowledgeBase", isKb);
+                    m.put("hasSecret", r.secretEnc() != null && !r.secretEnc().isBlank());
+                    if (owned) {
+                        if (isKb) m.put("knowledgeContent", r.endpointUrl().substring(3));
+                        else m.put("endpointUrl", r.endpointUrl());
+                    }
                     m.put("tools", r.toolsJson());
                     return m;
                 }).toList();
@@ -132,13 +139,65 @@ public class McpRegistryService {
                 }
                 norm.set("tools", tools);
             }
+            // 未手填工具名时，自动向真实 HTTP MCP 服务发 tools/list 自动发现工具
+            if (!norm.has("tools") || !norm.get("tools").isArray() || norm.get("tools").isEmpty()) {
+                try {
+                    JsonNode discovered = discoverRemoteTools(
+                            norm.path("endpointUrl").asText("").trim(),
+                            norm.path("authHeader").asText("Authorization").trim(),
+                            norm.path("secret").asText(""));
+                    if (discovered != null && discovered.isArray() && !discovered.isEmpty()) {
+                        norm.set("tools", discovered);
+                    }
+                } catch (Exception e) {
+                    log.debug("自动拉取 MCP tools/list 跳过：{}", e.getMessage());
+                }
+            }
         }
         Map<String, Object> created = new LinkedHashMap<>(create(norm, "ws:" + ws));
         created.put("owned", true);
         created.remove("secretEnc");
         created.remove("authHeader");
-        created.remove("endpointUrl");
         return created;
+    }
+
+    /** 普通工作空间用户修改自己创建的知识库或 HTTP MCP 服务。 */
+    public Map<String, Object> updateForWorkspace(String ws, String id, JsonNode body) {
+        ServerRow cur = findById(id);
+        if (cur.builtin() || ws == null || !("ws:" + ws).equals(cur.createdBy())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_READONLY", "平台内置或管理员托管的 MCP 服务不可修改");
+        }
+        ObjectNode norm = body != null && body.isObject() ? (ObjectNode) body.deepCopy() : Json.obj();
+        String mode = norm.path("mode").asText("").trim().toLowerCase(Locale.ROOT);
+        boolean isKb = "knowledge".equals(mode)
+                || norm.has("knowledgeContent")
+                || ("mock".equals(cur.transport()) && cur.endpointUrl() != null && cur.endpointUrl().startsWith("kb:"));
+        if (isKb) {
+            String kbContent = norm.path("knowledgeContent").asText("").trim();
+            if (kbContent.isEmpty() && cur.endpointUrl() != null && cur.endpointUrl().startsWith("kb:")) {
+                kbContent = cur.endpointUrl().substring(3);
+            }
+            if (kbContent.isEmpty()) throw ApiException.validation("知识库内容不能为空");
+            if (kbContent.length() > 60_000) throw ApiException.validation("单条知识库内容最多 60,000 字");
+            norm.put("transport", "mock");
+            norm.put("endpointUrl", "kb:" + kbContent);
+        } else {
+            norm.put("transport", "http");
+            if (norm.has("toolNames")) {
+                String toolNames = norm.path("toolNames").asText("").trim();
+                ArrayNode tools = Json.M.createArrayNode();
+                for (String t : toolNames.split("[,，\\s]+")) {
+                    String clean = t.trim();
+                    if (!clean.isEmpty()) tools.addObject().put("name", clean).put("description", "调用 MCP 工具 " + clean);
+                }
+                if (!tools.isEmpty()) norm.set("tools", tools);
+            }
+        }
+        Map<String, Object> updated = new LinkedHashMap<>(update(id, norm));
+        updated.put("owned", true);
+        updated.remove("secretEnc");
+        updated.remove("authHeader");
+        return updated;
     }
 
     /** 普通工作空间用户删除自己创建的知识库 / MCP（内置或他人的不可删）。 */
@@ -288,7 +347,151 @@ public class McpRegistryService {
         }
     }
 
+    /** 向远端 Streamable HTTP / JSON-RPC 2.0 MCP 服务发 tools/list 探测，返回标准工具列表。 */
+    public JsonNode discoverRemoteTools(String endpointUrl, String authHeader, String secret) throws Exception {
+        if (endpointUrl == null || (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://"))) {
+            throw ApiException.validation("请提供合法的 http:// 或 https:// MCP 地址");
+        }
+        String sessionId = tryInitializeSession(endpointUrl, authHeader, secret);
+        ObjectNode rpc = Json.obj();
+        rpc.put("jsonrpc", "2.0");
+        rpc.put("id", Ids.newId("rpc"));
+        rpc.put("method", "tools/list");
+        rpc.set("params", Json.obj());
+        JsonNode root = postMcpJsonRpc(endpointUrl, authHeader, secret, sessionId, rpc);
+        JsonNode result = root.has("result") ? root.get("result") : root;
+        JsonNode tools = result.path("tools");
+        ArrayNode out = Json.M.createArrayNode();
+        if (tools.isArray()) {
+            for (JsonNode t : tools) {
+                ObjectNode item = out.addObject();
+                item.put("name", t.path("name").asText(""));
+                String desc = t.path("description").asText("");
+                item.put("description", desc.length() > 160 ? desc.substring(0, 160) + "…" : desc);
+            }
+        }
+        return out;
+    }
+
+    /** 面向工作台卡片的连通性试调用：HTTP MCP 默认走真实的 tools/list 协议握手（并自动同步最新工具列表），知识库/仿真 MCP 直接执行工具调用。 */
+    public Map<String, Object> testForWorkspace(String serverKey, String toolName, JsonNode arguments) {
+        String key = serverKey == null ? "" : serverKey.trim().toLowerCase(Locale.ROOT);
+        ServerRow srv = jdbc.sql("select * from enterprise_mcp_server where server_key = ?")
+                .param(key).query(ServerRow::map).optional()
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "MCP_NOT_FOUND", "未找到 MCP 服务：" + key));
+        if (!srv.enabled()) throw new ApiException(HttpStatus.FORBIDDEN, "MCP_DISABLED", "MCP 服务已停用");
+
+        if ("http".equals(srv.transport()) && (toolName == null || toolName.isBlank() || "__ping__".equals(toolName))) {
+            long t0 = System.currentTimeMillis();
+            try {
+                String secret = (srv.secretEnc() != null && !srv.secretEnc().isBlank()) ? crypto.decrypt(srv.secretEnc()) : "";
+                JsonNode discovered = discoverRemoteTools(srv.endpointUrl(), srv.authHeader(), secret);
+                int ms = (int) (System.currentTimeMillis() - t0);
+                if (discovered.isArray() && !discovered.isEmpty()) {
+                    jdbc.sql("update enterprise_mcp_server set tools_json = ?::jsonb, updated_at = now() where id = ?")
+                            .params(Json.write(discovered), srv.id()).update();
+                }
+                List<String> names = new ArrayList<>();
+                if (discovered.isArray()) discovered.forEach(n -> names.add(n.path("name").asText("")));
+                audit(key, "tools/list", "ws-test", null, true, ms, null);
+                Map<String, Object> out = new LinkedHashMap<>();
+                out.put("ok", true);
+                out.put("serverKey", key);
+                out.put("tool", "tools/list");
+                out.put("durationMs", ms);
+                out.put("tools", discovered);
+                out.put("content", "真实 Streamable HTTP MCP 握手成功，发现 " + names.size() + " 个工具：" + String.join(", ", names.stream().limit(8).toList()));
+                return out;
+            } catch (Exception e) {
+                int ms = (int) (System.currentTimeMillis() - t0);
+                String msg = Optional.ofNullable(e.getMessage()).orElse(e.getClass().getSimpleName());
+                audit(key, "tools/list", "ws-test", null, false, ms, msg);
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_CALL_FAILED", "连接远端 MCP 失败：" + msg);
+            }
+        }
+        String effectiveTool = (toolName == null || toolName.isBlank() || "__ping__".equals(toolName)) ? "search_knowledge" : toolName;
+        return callTool(key, effectiveTool, arguments, "ws-test", null);
+    }
+
+    private String tryInitializeSession(String endpointUrl, String authHeader, String secret) {
+        try {
+            ObjectNode init = Json.obj();
+            init.put("jsonrpc", "2.0");
+            init.put("id", Ids.newId("init"));
+            init.put("method", "initialize");
+            ObjectNode params = init.putObject("params");
+            params.put("protocolVersion", "2025-03-26");
+            params.set("capabilities", Json.obj());
+            params.putObject("clientInfo").put("name", "zhiye").put("version", "2.0");
+
+            HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(endpointUrl))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json, text/event-stream")
+                    .header("MCP-Protocol-Version", "2025-03-26")
+                    .POST(HttpRequest.BodyPublishers.ofString(Json.write(init), StandardCharsets.UTF_8));
+            if (secret != null && !secret.isBlank()) {
+                rb.header(authHeader == null || authHeader.isBlank() ? "Authorization" : authHeader, secret);
+            }
+            HttpResponse<String> res = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return res.headers().firstValue("mcp-session-id").orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private JsonNode postMcpJsonRpc(String endpointUrl, String authHeader, String secret, String sessionId, ObjectNode rpc) throws Exception {
+        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(endpointUrl))
+                .timeout(Duration.ofSeconds(25))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json, text/event-stream")
+                .header("MCP-Protocol-Version", "2025-03-26")
+                .POST(HttpRequest.BodyPublishers.ofString(Json.write(rpc), StandardCharsets.UTF_8));
+        if (sessionId != null && !sessionId.isBlank()) {
+            rb.header("Mcp-Session-Id", sessionId);
+        }
+        if (secret != null && !secret.isBlank()) {
+            rb.header(authHeader == null || authHeader.isBlank() ? "Authorization" : authHeader, secret);
+        }
+        HttpResponse<String> res = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (res.statusCode() >= 400) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_UPSTREAM_ERROR", "远端 MCP 返回 HTTP " + res.statusCode());
+        }
+        String rawBody = res.body() == null ? "" : res.body().trim();
+        JsonNode root = parseJsonOrSse(rawBody);
+        if (root == null) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_BAD_PAYLOAD", "远端 MCP 返回了无法解析的响应格式");
+        }
+        if (root.has("error") && !root.get("error").isNull()) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_RPC_ERROR", root.path("error").path("message").asText("MCP 返回错误"));
+        }
+        return root;
+    }
+
+    /** 兼容标准 application/json 与 Streamable HTTP text/event-stream (event: message / data: {...}) 两种 MCP 响应格式。 */
+    public static JsonNode parseJsonOrSse(String rawBody) {
+        if (rawBody == null || rawBody.isBlank()) return null;
+        if (rawBody.startsWith("{") || rawBody.startsWith("[")) {
+            return Json.read(rawBody);
+        }
+        JsonNode last = null;
+        for (String line : rawBody.split("\\r?\\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("data:")) {
+                String payload = trimmed.substring(5).trim();
+                if (payload.isEmpty() || "[DONE]".equals(payload)) continue;
+                try {
+                    JsonNode parsed = Json.read(payload);
+                    if (parsed != null && parsed.isObject()) last = parsed;
+                } catch (Exception ignored) {}
+            }
+        }
+        return last;
+    }
+
     private String executeHttpJsonRpc(ServerRow srv, String tool, JsonNode args) throws Exception {
+        String secret = (srv.secretEnc() != null && !srv.secretEnc().isBlank()) ? crypto.decrypt(srv.secretEnc()) : "";
+        String sessionId = tryInitializeSession(srv.endpointUrl(), srv.authHeader(), secret);
         ObjectNode rpc = Json.obj();
         rpc.put("jsonrpc", "2.0");
         rpc.put("id", Ids.newId("rpc"));
@@ -297,23 +500,7 @@ public class McpRegistryService {
         p.put("name", tool);
         p.set("arguments", args == null || args.isNull() ? Json.obj() : args);
 
-        HttpRequest.Builder rb = HttpRequest.newBuilder(URI.create(srv.endpointUrl()))
-                .timeout(Duration.ofSeconds(20))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(Json.write(rpc), StandardCharsets.UTF_8));
-        if (srv.secretEnc() != null && !srv.secretEnc().isBlank()) {
-            String secret = crypto.decrypt(srv.secretEnc());
-            if (!secret.isBlank()) rb.header(srv.authHeader().isBlank() ? "Authorization" : srv.authHeader(), secret);
-        }
-        HttpResponse<String> res = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        if (res.statusCode() >= 400) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_UPSTREAM_ERROR", "远端 MCP 返回 HTTP " + res.statusCode());
-        }
-        JsonNode root = Json.read(res.body());
-        if (root.has("error") && !root.get("error").isNull()) {
-            throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_RPC_ERROR", root.path("error").path("message").asText("MCP 返回错误"));
-        }
+        JsonNode root = postMcpJsonRpc(srv.endpointUrl(), srv.authHeader(), secret, sessionId, rpc);
         JsonNode result = root.has("result") ? root.get("result") : root;
         if (result.has("content") && result.get("content").isArray()) {
             StringBuilder sb = new StringBuilder();

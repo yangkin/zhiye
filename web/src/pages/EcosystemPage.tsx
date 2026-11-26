@@ -18,8 +18,8 @@ export function EcosystemPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<EcoTab>('feishu');
   const [query, setQuery] = useState('');
-  const [addFeishuOpen, setAddFeishuOpen] = useState(false);
-  const [addMcpOpen, setAddMcpOpen] = useState(false);
+  const [feishuModal, setFeishuModal] = useState<null | { existing: Record<string, unknown> | null }>(null);
+  const [mcpModal, setMcpModal] = useState<null | { existing: Record<string, unknown> | null }>(null);
   const [agwModal, setAgwModal] = useState<AgwModal>(null);
 
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -84,13 +84,16 @@ export function EcosystemPage() {
     }
   };
 
-  const handleTestMcp = async (key: string, toolName: string) => {
+  const handleTestMcp = async (key: string, isHttp: boolean, toolName: string) => {
     setMcpTestingKey(key);
     try {
-      const r = await api.mcpServerTest(key, toolName, { query: '' });
+      const r = isHttp
+        ? await api.mcpServerTest(key, '__ping__')
+        : await api.mcpServerTest(key, toolName, { query: '' });
       const raw = String(r.content ?? '').replace(/\s+/g, ' ').trim();
-      const preview = raw.length > 110 ? `${raw.slice(0, 110)}…` : raw || '调用成功';
+      const preview = raw.length > 130 ? `${raw.slice(0, 130)}…` : raw || '调用成功';
       setMcpTestResults((prev) => ({ ...prev, [key]: { ok: true, text: `${preview} (${String(r.durationMs ?? 0)}ms)` } }));
+      if (isHttp) void qc.invalidateQueries({ queryKey: ['workspace-mcp-servers'] });
       toast('知识库 / MCP 试调用通过');
     } catch (e) {
       const msg = errorMessage(e);
@@ -120,7 +123,7 @@ export function EcosystemPage() {
           <p>统一维护飞书机器人、多维表格、AGW 企业接口与知识库 MCP；配好后在「创造」和工作台聊天栏直接勾选即用。</p>
         </div>
         {tab === 'feishu' ? (
-          <button type="button" className="primary-button" onClick={() => setAddFeishuOpen(true)}>
+          <button type="button" className="primary-button" onClick={() => setFeishuModal({ existing: null })}>
             <Icon name="plus" />
             添加飞书连接器
           </button>
@@ -130,7 +133,7 @@ export function EcosystemPage() {
             从 AGW 目录添加接口
           </button>
         ) : (
-          <button type="button" className="primary-button" onClick={() => setAddMcpOpen(true)}>
+          <button type="button" className="primary-button" onClick={() => setMcpModal({ existing: null })}>
             <Icon name="plus" />
             添加知识库 / MCP
           </button>
@@ -204,7 +207,7 @@ export function EcosystemPage() {
             <Icon name="globe" />
             <h3>{query ? '没有匹配的飞书连接器' : '还没有飞书连接器'}</h3>
             <p>添加你的飞书群机器人 Webhook 或粘贴飞书多维表格链接，密钥加密托管在当前工作空间，随时可测试连通并在对话中勾选使用。</p>
-            <button type="button" className="primary-button" onClick={() => setAddFeishuOpen(true)}>
+            <button type="button" className="primary-button" onClick={() => setFeishuModal({ existing: null })}>
               <Icon name="plus" /> 添加飞书连接器
             </button>
           </div>
@@ -249,9 +252,14 @@ export function EcosystemPage() {
                         {testingId === id ? '测试中…' : '测试连通'}
                       </button>
                       {owned ? (
-                        <button type="button" className="subtle-button" style={{ color: '#dc2626' }} onClick={() => void handleDeleteConnector(id, name)}>
-                          删除
-                        </button>
+                        <>
+                          <button type="button" className="subtle-button" onClick={() => setFeishuModal({ existing: c })}>
+                            编辑
+                          </button>
+                          <button type="button" className="subtle-button" style={{ color: '#dc2626' }} onClick={() => void handleDeleteConnector(id, name)}>
+                            删除
+                          </button>
+                        </>
                       ) : null}
                     </div>
                   </div>
@@ -322,7 +330,7 @@ export function EcosystemPage() {
             <Icon name="spark" />
             <h3>{query ? '没有匹配的企业知识库或 MCP 服务' : '还没有企业知识库或 MCP 服务'}</h3>
             <p>你可以直接粘贴业务规范、字段字典或 SOP 文档创建本地知识库，也可以接入公司已有的 HTTP MCP 服务，配好后在对话栏「生态」直接勾选给 AI 检索使用。</p>
-            <button type="button" className="primary-button" onClick={() => setAddMcpOpen(true)}>
+            <button type="button" className="primary-button" onClick={() => setMcpModal({ existing: null })}>
               <Icon name="plus" /> 添加知识库 / MCP
             </button>
           </div>
@@ -371,13 +379,23 @@ export function EcosystemPage() {
                   <div className="eco-card-foot">
                     <span className="eco-card-id" title={key}>{key}</span>
                     <div className="eco-card-actions">
-                      <button type="button" className="subtle-button" disabled={mcpTestingKey === key} onClick={() => void handleTestMcp(key, firstTool)}>
+                      <button
+                        type="button"
+                        className="subtle-button"
+                        disabled={mcpTestingKey === key}
+                        onClick={() => void handleTestMcp(key, String(m.transport ?? '') === 'http', firstTool)}
+                      >
                         {mcpTestingKey === key ? '测试中…' : '试调用'}
                       </button>
                       {owned ? (
-                        <button type="button" className="subtle-button" style={{ color: '#dc2626' }} onClick={() => void handleDeleteMcp(id, name)}>
-                          删除
-                        </button>
+                        <>
+                          <button type="button" className="subtle-button" onClick={() => setMcpModal({ existing: m })}>
+                            编辑
+                          </button>
+                          <button type="button" className="subtle-button" style={{ color: '#dc2626' }} onClick={() => void handleDeleteMcp(id, name)}>
+                            删除
+                          </button>
+                        </>
                       ) : null}
                     </div>
                   </div>
@@ -388,23 +406,25 @@ export function EcosystemPage() {
         )
       ) : null}
 
-      {/* 添加飞书连接器弹窗（宽敞清晰、独立维护） */}
-      {addFeishuOpen ? (
-        <AddFeishuConnectorModal
-          onClose={() => setAddFeishuOpen(false)}
+      {/* 添加 / 编辑飞书连接器弹窗 */}
+      {feishuModal ? (
+        <FeishuConnectorModal
+          existing={feishuModal.existing}
+          onClose={() => setFeishuModal(null)}
           onSaved={async () => {
-            setAddFeishuOpen(false);
+            setFeishuModal(null);
             await qc.invalidateQueries({ queryKey: ['workspace-connectors'] });
           }}
         />
       ) : null}
 
-      {/* 添加企业知识库 / MCP 服务弹窗 */}
-      {addMcpOpen ? (
-        <AddMcpModal
-          onClose={() => setAddMcpOpen(false)}
+      {/* 添加 / 编辑企业知识库 / MCP 服务弹窗 */}
+      {mcpModal ? (
+        <McpServerModal
+          existing={mcpModal.existing}
+          onClose={() => setMcpModal(null)}
           onSaved={async () => {
-            setAddMcpOpen(false);
+            setMcpModal(null);
             await qc.invalidateQueries({ queryKey: ['workspace-mcp-servers'] });
           }}
         />
@@ -436,31 +456,57 @@ export function EcosystemPage() {
   );
 }
 
-function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
-  const [kind, setKind] = useState<'feishu_bot' | 'feishu_bitable'>('feishu_bot');
-  const [name, setName] = useState('');
+function FeishuConnectorModal({
+  existing,
+  onClose,
+  onSaved,
+}: {
+  existing: Record<string, unknown> | null;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const isEdit = Boolean(existing);
+  const existingCfg = (existing?.config && typeof existing.config === 'object' ? existing.config : {}) as Record<string, unknown>;
+  const existingBitableHint =
+    existingCfg.appToken && existingCfg.tableId
+      ? `https://feishu.cn/base/${String(existingCfg.appToken)}?table=${String(existingCfg.tableId)}`
+      : '';
+  const [kind, setKind] = useState<'feishu_bot' | 'feishu_bitable'>(
+    String(existing?.kind ?? 'feishu_bot') === 'feishu_bitable' ? 'feishu_bitable' : 'feishu_bot',
+  );
+  const [name, setName] = useState(String(existing?.name ?? ''));
   const [webhookUrl, setWebhookUrl] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
-  const [bitableUrl, setBitableUrl] = useState('');
+  const [bitableUrl, setBitableUrl] = useState(existingBitableHint);
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!name.trim()) return toast('请填写连接器名称', 'error');
     setSaving(true);
     try {
-      const isLive = kind === 'feishu_bot' ? !!webhookUrl.trim() : !!bitableUrl.trim();
-      await api.connectorSave({
+      const hasNewUrl = kind === 'feishu_bot' ? !!webhookUrl.trim() : !!bitableUrl.trim();
+      const effectiveMode = hasNewUrl ? 'live' : String(existing?.mode ?? 'sandbox');
+      const payload: Record<string, unknown> = {
         name: name.trim(),
         kind,
-        mode: isLive ? 'live' : 'sandbox',
+        mode: effectiveMode,
         enabled: true,
         ...(kind === 'feishu_bitable' && bitableUrl.trim() ? { bitableUrl: bitableUrl.trim() } : {}),
         secrets:
-          kind === 'feishu_bot' && webhookUrl.trim()
-            ? { webhookUrl: webhookUrl.trim(), ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}) }
+          kind === 'feishu_bot'
+            ? {
+                ...(webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
+                ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
+              }
             : {},
-      });
-      toast('飞书连接器已保存，可在卡片上点击「测试连通」验证！');
+      };
+      if (isEdit && existing?.id) {
+        await api.connectorUpdate(String(existing.id), payload);
+        toast('飞书连接器已更新！');
+      } else {
+        await api.connectorSave(payload);
+        toast('飞书连接器已保存，可在卡片上点击「测试连通」验证！');
+      }
       await onSaved();
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -470,7 +516,7 @@ function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; on
   };
 
   return (
-    <Modal title="添加飞书连接器" onClose={onClose}>
+    <Modal title={isEdit ? '编辑飞书连接器' : '添加飞书连接器'} onClose={onClose}>
       <div className="eco-form">
         <div className="svc-seg" role="tablist">
           <button type="button" role="tab" aria-selected={kind === 'feishu_bot'} className={kind === 'feishu_bot' ? 'active' : ''} onClick={() => setKind('feishu_bot')}>
@@ -497,7 +543,11 @@ function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; on
               <label>飞书群机器人 Webhook 地址</label>
               <input
                 type="text"
-                placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/...（留空则先建沙箱演示）"
+                placeholder={
+                  isEdit && existing?.hasSecrets
+                    ? '已加密保存，留空保持不变，粘贴新 Webhook 可替换'
+                    : 'https://open.feishu.cn/open-apis/bot/v2/hook/...（留空则先建沙箱演示）'
+                }
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
               />
@@ -507,7 +557,7 @@ function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; on
               <label>签名校验 Secret（可选）</label>
               <input
                 type="password"
-                placeholder="若飞书机器人开启了签名校验，请在此填入密钥"
+                placeholder={isEdit && existing?.hasSecrets ? '留空保持原有签名密钥不变' : '若飞书机器人开启了签名校验，请在此填入密钥'}
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
               />
@@ -529,7 +579,7 @@ function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; on
         <div className="eco-form-foot">
           <button type="button" className="subtle-button" onClick={onClose}>取消</button>
           <button type="button" className="primary-button" disabled={saving || !name.trim()} onClick={() => void handleSave()}>
-            {saving ? '保存中…' : '保存连接器'}
+            {saving ? '保存中…' : isEdit ? '保存修改' : '保存连接器'}
           </button>
         </div>
       </div>
@@ -537,16 +587,53 @@ function AddFeishuConnectorModal({ onClose, onSaved }: { onClose: () => void; on
   );
 }
 
-function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
-  const [mode, setMode] = useState<'knowledge' | 'http'>('knowledge');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [knowledgeContent, setKnowledgeContent] = useState('');
-  const [serverKey, setServerKey] = useState('');
-  const [endpointUrl, setEndpointUrl] = useState('');
+function McpServerModal({
+  existing,
+  onClose,
+  onSaved,
+}: {
+  existing: Record<string, unknown> | null;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const isEdit = Boolean(existing);
+  const existingTools = Array.isArray(existing?.tools)
+    ? (existing!.tools as Array<Record<string, unknown>>).map((t) => String(t.name ?? '')).filter(Boolean).join(', ')
+    : '';
+  const [mode, setMode] = useState<'knowledge' | 'http'>(
+    existing ? (Boolean(existing.isKnowledgeBase) ? 'knowledge' : 'http') : 'knowledge',
+  );
+  const [name, setName] = useState(String(existing?.name ?? ''));
+  const [description, setDescription] = useState(String(existing?.description ?? ''));
+  const [knowledgeContent, setKnowledgeContent] = useState(String(existing?.knowledgeContent ?? ''));
+  const [serverKey, setServerKey] = useState(String(existing?.serverKey ?? ''));
+  const [endpointUrl, setEndpointUrl] = useState(String(existing?.endpointUrl ?? ''));
   const [secret, setSecret] = useState('');
-  const [toolNames, setToolNames] = useState('search_docs');
+  const [toolNames, setToolNames] = useState(existingTools);
+  const [discovering, setDiscovering] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const handleDiscover = async () => {
+    if (!endpointUrl.trim()) return toast('请先填入 HTTP MCP 地址（如 https://mcp.context7.com/mcp）', 'error');
+    setDiscovering(true);
+    try {
+      const r = await api.mcpServerDiscover({
+        endpointUrl: endpointUrl.trim(),
+        ...(secret.trim() ? { secret: secret.trim() } : {}),
+      });
+      const names = (r.tools ?? []).map((t) => String(t.name ?? '')).filter(Boolean);
+      if (names.length > 0) {
+        setToolNames(names.join(', '));
+        toast(`自动发现 ${names.length} 个真实 MCP 工具！`);
+      } else {
+        toast('连接成功，但该 MCP 未返回工具列表，可手动填写工具名。');
+      }
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setDiscovering(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!name.trim()) return toast('请填写名称', 'error');
@@ -554,7 +641,7 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     if (mode === 'http' && !endpointUrl.trim()) return toast('请填写 HTTP MCP 服务地址', 'error');
     setSaving(true);
     try {
-      await api.mcpServerCreate(
+      const payload =
         mode === 'knowledge'
           ? {
               mode: 'knowledge',
@@ -566,13 +653,18 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
               mode: 'http',
               name: name.trim(),
               description: description.trim(),
-              ...(serverKey.trim() ? { serverKey: serverKey.trim() } : {}),
+              ...(!isEdit && serverKey.trim() ? { serverKey: serverKey.trim() } : {}),
               endpointUrl: endpointUrl.trim(),
               ...(secret.trim() ? { secret: secret.trim() } : {}),
-              toolNames: toolNames.trim(),
-            },
-      );
-      toast(mode === 'knowledge' ? '团队知识库已创建，现在就可以在对话栏「生态」中勾选使用！' : 'MCP 服务已添加，点击「试调用」即可验证连通性。');
+              ...(toolNames.trim() ? { toolNames: toolNames.trim() } : {}),
+            };
+      if (isEdit && existing?.id) {
+        await api.mcpServerUpdate(String(existing.id), payload);
+        toast('已保存修改！');
+      } else {
+        await api.mcpServerCreate(payload);
+        toast(mode === 'knowledge' ? '团队知识库已创建，现在就可以在对话栏「生态」中勾选使用！' : 'MCP 服务已添加，点击「试调用」即可验证连通性。');
+      }
       await onSaved();
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -582,22 +674,24 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   };
 
   return (
-    <Modal title="添加知识库 / MCP 服务" onClose={onClose}>
+    <Modal title={isEdit ? '编辑知识库 / MCP 服务' : '添加知识库 / MCP 服务'} onClose={onClose}>
       <div className="eco-form">
-        <div className="svc-seg" role="tablist">
-          <button type="button" role="tab" aria-selected={mode === 'knowledge'} className={mode === 'knowledge' ? 'active' : ''} onClick={() => setMode('knowledge')}>
-            团队知识库（粘贴规范 / 文档）
-          </button>
-          <button type="button" role="tab" aria-selected={mode === 'http'} className={mode === 'http' ? 'active' : ''} onClick={() => setMode('http')}>
-            远端 HTTP MCP 服务
-          </button>
-        </div>
+        {!isEdit ? (
+          <div className="svc-seg" role="tablist">
+            <button type="button" role="tab" aria-selected={mode === 'knowledge'} className={mode === 'knowledge' ? 'active' : ''} onClick={() => setMode('knowledge')}>
+              团队知识库（粘贴规范 / 文档）
+            </button>
+            <button type="button" role="tab" aria-selected={mode === 'http'} className={mode === 'http' ? 'active' : ''} onClick={() => setMode('http')}>
+              远端 HTTP MCP 服务
+            </button>
+          </div>
+        ) : null}
 
         <div className="eco-field">
           <label>名称</label>
           <input
             type="text"
-            placeholder={mode === 'knowledge' ? '例如：产线良率指标口径与 8D 审批规范' : '例如：研发 Jira / Confluence MCP'}
+            placeholder={mode === 'knowledge' ? '例如：产线良率指标口径与 8D 审批规范' : '例如：Context7 官方文档 MCP / DeepWiki MCP'}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -607,7 +701,7 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           <label>一句话说明（可选，帮助 AI 判断何时查阅）</label>
           <input
             type="text"
-            placeholder={mode === 'knowledge' ? '例如：包含良率公式、告警阈值、审批角色与字段命名规范' : '例如：查询需求单、缺陷状态与内部文档'}
+            placeholder={mode === 'knowledge' ? '例如：包含良率公式、告警阈值、审批角色与字段命名规范' : '例如：实时检索最新开源库文档与 GitHub 仓库源码解析'}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -626,20 +720,28 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
         ) : (
           <>
             <div className="eco-field">
-              <label>MCP Endpoint 地址（JSON-RPC 2.0 HTTP）</label>
-              <input
-                type="text"
-                placeholder="https://mcp.internal.example/rpc"
-                value={endpointUrl}
-                onChange={(e) => setEndpointUrl(e.target.value)}
-              />
+              <label>MCP Endpoint 地址（支持标准 Streamable HTTP / JSON-RPC 2.0）</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  style={{ flex: 1 }}
+                  placeholder="https://mcp.context7.com/mcp 或 https://mcp.deepwiki.com/mcp"
+                  value={endpointUrl}
+                  onChange={(e) => setEndpointUrl(e.target.value)}
+                />
+                <button type="button" className="subtle-button" disabled={discovering || !endpointUrl.trim()} onClick={() => void handleDiscover()}>
+                  {discovering ? '探测中…' : '自动拉取工具'}
+                </button>
+              </div>
+              <small>支持公开或内网 Streamable HTTP MCP（自动兼容 application/json 与 text/event-stream），点「自动拉取工具」可直连发现全部工具。</small>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div className="eco-field">
-                <label>服务标识（可选，自动生成）</label>
+                <label>服务标识（{isEdit ? '创建后不可改' : '可选，自动生成'}）</label>
                 <input
                   type="text"
-                  placeholder="如 team-docs-mcp"
+                  disabled={isEdit}
+                  placeholder="如 context7-mcp"
                   value={serverKey}
                   onChange={(e) => setServerKey(e.target.value)}
                 />
@@ -648,17 +750,17 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
                 <label>鉴权 Token（可选，加密保存）</label>
                 <input
                   type="password"
-                  placeholder="Bearer xxx"
+                  placeholder={isEdit && existing?.hasSecret ? '留空保持原有密钥不变' : 'Bearer xxx（公开 MCP 留空）'}
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
                 />
               </div>
             </div>
             <div className="eco-field">
-              <label>暴露工具名（逗号分隔）</label>
+              <label>暴露工具名（逗号分隔；留空时保存会自动向远端拉取）</label>
               <input
                 type="text"
-                placeholder="search_docs, get_ticket, query_schema"
+                placeholder="例如：resolve-library-id, query-docs（留空自动探测）"
                 value={toolNames}
                 onChange={(e) => setToolNames(e.target.value)}
               />
@@ -674,7 +776,7 @@ function AddMcpModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             disabled={saving || !name.trim() || (mode === 'knowledge' ? !knowledgeContent.trim() : !endpointUrl.trim())}
             onClick={() => void handleSave()}
           >
-            {saving ? '保存中…' : mode === 'knowledge' ? '保存知识库' : '保存 MCP 服务'}
+            {saving ? '保存中…' : isEdit ? '保存修改' : mode === 'knowledge' ? '保存知识库' : '保存 MCP 服务'}
           </button>
         </div>
       </div>

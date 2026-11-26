@@ -58,6 +58,16 @@ class PolyglotAndEcosystemClosingTest {
                 var callRes = mcp.callTool(kbKey, "search_knowledge", Json.obj().put("query", "良率"), "test", null);
                 assertEquals(true, callRes.get("ok"));
                 assertTrue(String.valueOf(callRes.get("content")).contains("97.5%"));
+                // 编辑知识库内容后立即生效
+                mcp.updateForWorkspace(ws, kbId, Json.obj()
+                        .put("name", "T9 产线点检规范 V2")
+                        .put("knowledgeContent", "升级规则：良率低于 98.2% 触发告警。"));
+                var callRes2 = mcp.callTool(kbKey, "search_knowledge", Json.obj().put("query", "良率"), "test", null);
+                assertTrue(String.valueOf(callRes2.get("content")).contains("98.2%"));
+                // Streamable HTTP SSE 解析器验证
+                var sseNode = McpRegistryService.parseJsonOrSse("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"resolve-library-id\"}]}}\n\n");
+                assertNotNull(sseNode);
+                assertEquals("resolve-library-id", sseNode.path("result").path("tools").get(0).path("name").asText());
                 assertThrows(ApiException.class, () -> mcp.deleteForWorkspace("ws_other", kbId));
                 var mcps = mcp.listEnabledForWorkspace(ws);
                 assertTrue(mcps.stream().anyMatch(m -> kbKey.equals(m.get("serverKey")) && Boolean.TRUE.equals(m.get("owned"))));

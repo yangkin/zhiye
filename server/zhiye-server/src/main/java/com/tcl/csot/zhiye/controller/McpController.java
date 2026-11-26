@@ -51,6 +51,23 @@ public class McpController {
         return mcp.createForWorkspace(principal.workspaceId(), body);
     }
 
+    /** 普通用户修改自己创建的知识库或 HTTP MCP 服务。 */
+    @PutMapping("/api/mcp-servers/{id}")
+    public Map<String, Object> updateForWorkspace(@PathVariable String id, @RequestBody JsonNode body) {
+        return mcp.updateForWorkspace(principal.workspaceId(), id, body);
+    }
+
+    /** 在线探测远端 Streamable HTTP MCP 服务的真实工具列表（tools/list）。 */
+    @PostMapping("/api/mcp-servers/discover")
+    public Map<String, Object> discoverForWorkspace(@RequestBody JsonNode body) throws Exception {
+        principal.workspaceId();
+        String url = body == null ? "" : body.path("endpointUrl").asText("").trim();
+        String authHeader = body == null ? "Authorization" : body.path("authHeader").asText("Authorization").trim();
+        String secret = body == null ? "" : body.path("secret").asText("");
+        JsonNode tools = mcp.discoverRemoteTools(url, authHeader, secret);
+        return Map.of("ok", true, "tools", tools);
+    }
+
     @DeleteMapping("/api/mcp-servers/{id}")
     public Map<String, Object> deleteForWorkspace(@PathVariable String id) {
         mcp.deleteForWorkspace(principal.workspaceId(), id);
@@ -61,9 +78,8 @@ public class McpController {
     public Map<String, Object> testForWorkspace(@PathVariable String key, @RequestBody(required = false) JsonNode body) {
         principal.workspaceId();
         String tool = body == null ? "" : body.path("tool").asText("").trim();
-        if (tool.isEmpty()) tool = "search_knowledge";
         JsonNode args = body == null ? null : body.get("arguments");
-        return mcp.callTool(key, tool, args, "ws-test", null);
+        return mcp.testForWorkspace(key, tool, args);
     }
 
     @GetMapping("/api/admin/mcp-servers")
