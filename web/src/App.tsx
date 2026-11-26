@@ -15,6 +15,7 @@ import {
   ChatPage,
   CommunityPage,
   DashboardPage,
+  EcosystemPage,
   HistoryPage,
   LogsPage,
   WorkbenchRoute,
@@ -56,6 +57,7 @@ export function App() {
         <Route element={<LightLayout />}>
           <Route path="/create" element={<CreatePage />} />
           <Route path="/apps" element={<AppsPage />} />
+          <Route path="/ecosystem" element={<EcosystemPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/community" element={<CommunityPage />} />
           <Route path="/community/:id" element={<WorkPage />} />

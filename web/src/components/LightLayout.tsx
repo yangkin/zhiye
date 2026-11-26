@@ -73,6 +73,7 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
     ['create', 'plus', '创造'],
     ['community', 'community', '社区'],
     ['apps', 'grid', '应用'],
+    ['ecosystem', 'globe', '生态'],
     ['history', 'history', '历史'],
   ] as const;
   const adminItems = [
