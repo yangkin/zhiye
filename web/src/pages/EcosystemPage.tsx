@@ -478,27 +478,40 @@ function FeishuConnectorModal({
   const [webhookUrl, setWebhookUrl] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
   const [bitableUrl, setBitableUrl] = useState(existingBitableHint);
+  const [appId, setAppId] = useState(String(existingCfg.appId ?? ''));
+  const [appSecret, setAppSecret] = useState('');
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
     if (!name.trim()) return toast('请填写连接器名称', 'error');
     setSaving(true);
     try {
-      const hasNewUrl = kind === 'feishu_bot' ? !!webhookUrl.trim() : !!bitableUrl.trim();
-      const effectiveMode = hasNewUrl ? 'live' : String(existing?.mode ?? 'sandbox');
+      const hasNewLive =
+        kind === 'feishu_bot'
+          ? !!webhookUrl.trim()
+          : !!(bitableUrl.trim() && (appId.trim() || existingCfg.appId) && (appSecret.trim() || existing?.hasSecrets));
+      const effectiveMode = hasNewLive ? 'live' : String(existing?.mode ?? 'sandbox');
       const payload: Record<string, unknown> = {
         name: name.trim(),
         kind,
         mode: effectiveMode,
         enabled: true,
-        ...(kind === 'feishu_bitable' && bitableUrl.trim() ? { bitableUrl: bitableUrl.trim() } : {}),
+        ...(kind === 'feishu_bitable'
+          ? {
+              ...(bitableUrl.trim() ? { bitableUrl: bitableUrl.trim() } : {}),
+              config: { ...(appId.trim() ? { appId: appId.trim() } : {}) },
+            }
+          : {}),
         secrets:
           kind === 'feishu_bot'
             ? {
                 ...(webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
                 ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
               }
-            : {},
+            : {
+                ...(appId.trim() ? { appId: appId.trim() } : {}),
+                ...(appSecret.trim() ? { appSecret: appSecret.trim() } : {}),
+              },
       };
       if (isEdit && existing?.id) {
         await api.connectorUpdate(String(existing.id), payload);
@@ -564,16 +577,38 @@ function FeishuConnectorModal({
             </div>
           </>
         ) : (
-          <div className="eco-field">
-            <label>飞书多维表格链接</label>
-            <input
-              type="text"
-              placeholder="直接粘贴浏览器地址栏链接 https://xxx.feishu.cn/base/... ?table=...（留空建沙箱表）"
-              value={bitableUrl}
-              onChange={(e) => setBitableUrl(e.target.value)}
-            />
-            <small>系统会自动从链接中解析 appToken 与 tableId，无需手动拆分参数。</small>
-          </div>
+          <>
+            <div className="eco-field">
+              <label>飞书多维表格链接</label>
+              <input
+                type="text"
+                placeholder="直接粘贴浏览器地址栏链接 https://xxx.feishu.cn/base/... ?table=...（留空建沙箱表）"
+                value={bitableUrl}
+                onChange={(e) => setBitableUrl(e.target.value)}
+              />
+              <small>系统会自动从链接中解析 appToken 与 tableId，无需手动拆分参数。</small>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="eco-field">
+                <label>飞书自建应用 App ID（直连真实表格必填）</label>
+                <input
+                  type="text"
+                  placeholder="cli_xxxxxxxx（留空则走沙箱模式）"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                />
+              </div>
+              <div className="eco-field">
+                <label>飞书应用 App Secret（加密托管）</label>
+                <input
+                  type="password"
+                  placeholder={isEdit && existing?.hasSecrets ? '留空保持原有密钥不变' : '填入 App Secret'}
+                  value={appSecret}
+                  onChange={(e) => setAppSecret(e.target.value)}
+                />
+              </div>
+            </div>
+          </>
         )}
 
         <div className="eco-form-foot">

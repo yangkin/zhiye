@@ -234,15 +234,21 @@ public class EnterpriseConnectorService {
                 throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_READONLY", "平台托管连接器仅管理员可修改，请新建自己的工作空间连接器");
             }
         }
-        // 支持用户直接粘贴飞书多维表格浏览器链接，自动提取 appToken & tableId
+        // 支持用户直接粘贴飞书多维表格浏览器链接，自动提取 appToken & tableId（同时兼容 bitableAppToken/bitableTableId）
         String bitableUrl = normalized.path("bitableUrl").asText("").trim();
         if (!bitableUrl.isEmpty()) {
             ObjectNode cfg = normalized.has("config") && normalized.get("config").isObject()
                     ? (ObjectNode) normalized.get("config") : Json.obj();
             var mApp = java.util.regex.Pattern.compile("/base/([A-Za-z0-9_-]+)").matcher(bitableUrl);
-            if (mApp.find() && cfg.path("appToken").asText("").isBlank()) cfg.put("appToken", mApp.group(1));
+            if (mApp.find()) {
+                if (cfg.path("appToken").asText("").isBlank()) cfg.put("appToken", mApp.group(1));
+                if (cfg.path("bitableAppToken").asText("").isBlank()) cfg.put("bitableAppToken", mApp.group(1));
+            }
             var mTbl = java.util.regex.Pattern.compile("[?&]table=([A-Za-z0-9_-]+)").matcher(bitableUrl);
-            if (mTbl.find() && cfg.path("tableId").asText("").isBlank()) cfg.put("tableId", mTbl.group(1));
+            if (mTbl.find()) {
+                if (cfg.path("tableId").asText("").isBlank()) cfg.put("tableId", mTbl.group(1));
+                if (cfg.path("bitableTableId").asText("").isBlank()) cfg.put("bitableTableId", mTbl.group(1));
+            }
             normalized.set("config", cfg);
         }
         // 若用户填写了真实的公域飞书 Webhook URL，自动切换为 live 模式；否则允许 sandbox 模式先演练
@@ -325,7 +331,7 @@ public class EnterpriseConnectorService {
             if ("feishu_bot".equals(conn.kind()) && !webhookUrl.isEmpty()) {
                 validateOutboundUrl(webhookUrl, conn.config());
                 Map<String, Object> payload = new LinkedHashMap<>();
-                String signSecret = secrets.path("webhookSignSecret").asText("").trim();
+                String signSecret = secrets.path("webhookSignSecret").asText(secrets.path("webhookSecret").asText("")).trim();
                 if (!signSecret.isEmpty()) {
                     long ts = Instant.now().getEpochSecond();
                     payload.put("timestamp", String.valueOf(ts));
@@ -393,8 +399,8 @@ public class EnterpriseConnectorService {
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
-            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(""));
-            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(""));
+            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(conn.config().path("appToken").asText("")));
+            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(conn.config().path("tableId").asText("")));
             if (appToken.isBlank() || tableId.isBlank()) throw ApiException.validation("缺少多维表格 bitableAppToken 或 bitableTableId");
             int pageSize = Math.max(1, Math.min(100, Integer.parseInt(String.valueOf(opts.getOrDefault("pageSize", 20)))));
             String url = apiBase + "/open-apis/bitable/v1/apps/" + appToken + "/tables/" + tableId + "/records?page_size=" + pageSize;
@@ -433,8 +439,8 @@ public class EnterpriseConnectorService {
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
-            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(""));
-            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(""));
+            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(conn.config().path("appToken").asText("")));
+            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(conn.config().path("tableId").asText("")));
             String url = apiBase + "/open-apis/bitable/v1/apps/" + appToken + "/tables/" + tableId + "/records";
             validateOutboundUrl(url, conn.config());
             HttpResponse<String> resp = postJson(url, Json.write(Map.of("fields", fields == null ? Map.of() : fields)), Map.of("Authorization", "Bearer " + token));
@@ -471,8 +477,8 @@ public class EnterpriseConnectorService {
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
-            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(""));
-            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(""));
+            String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(conn.config().path("appToken").asText("")));
+            String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(conn.config().path("tableId").asText("")));
             String url = apiBase + "/open-apis/bitable/v1/apps/" + appToken + "/tables/" + tableId + "/records/" + recordId;
             validateOutboundUrl(url, conn.config());
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(12))
