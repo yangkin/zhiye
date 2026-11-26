@@ -564,7 +564,7 @@ function Workbench({ id }: { id: string }) {
             disabled={!ready}
             onClick={() => setLiveDockOpen((v) => !v)}
           >
-            <Icon name="code" />
+            <Icon name="terminal" />
           </button>
           <button className="studio-square" aria-label="下载应用" disabled={!ready} onClick={() => setModal('download')}>
             <Icon name="download" />

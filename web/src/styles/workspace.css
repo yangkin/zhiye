@@ -452,37 +452,49 @@ body.studio-mode{background:var(--st-bg);color:var(--st-ink)}
 .cp-qa-item small{color:var(--st-faint);font-size:10.5px}
 .cp-qa-defect{font-size:11px;color:#d93855}
 
-/* Phase 2：持久化活体开发环境与安全终端底部抽屉 */
-.live-dock{flex:none;height:252px;display:flex;flex-direction:column;background:#161421;color:#e6e2f2;border-top:1px solid #2d2842;font-size:12px}
-.live-dock-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 12px;background:#1e1b2d;border-bottom:1px solid #2c2740}
-.live-dock-title{display:flex;align-items:center;gap:8px;min-width:0}
-.live-dock-dot{width:8px;height:8px;border-radius:50%;background:#6b6485;flex:none}
-.live-dock-dot.on{background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.22)}
-.live-dock-badge{font-size:11px;padding:2px 8px;border-radius:999px;background:#2b2640;color:#c7bfe2;white-space:nowrap}
-.live-dock-badge.ok{background:rgba(52,211,153,.14);color:#6ee7b7}
-.live-dock-tabs{display:inline-flex;gap:4px;background:#13111c;padding:2px;border-radius:7px}
-.live-dock-tabs>button{border:0;background:transparent;color:#9d95ba;font-size:11.5px;padding:4px 10px;border-radius:5px;cursor:pointer}
-.live-dock-tabs>button.active{background:#2d2744;color:#fff}
-.live-dock-actions{display:inline-flex;align-items:center;gap:6px}
-.live-dock-actions>button{border:1px solid #352f4f;background:#242038;color:#d6d0ea;font-size:11.5px;padding:4px 9px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
-.live-dock-actions>button.primary{background:#6941d8;border-color:#7c54e8;color:#fff}
-.live-dock-actions>button:hover:not(:disabled){border-color:#6941d8}
-.live-dock-actions>button .icon{width:13px;height:13px}
+/* Phase 2：持久化活体开发环境与安全终端底部抽屉（与浅色工作台视觉完全融合） */
+.live-dock{flex:none;height:278px;display:flex;flex-direction:column;background:var(--st-bg);color:var(--st-ink);border-top:1px solid var(--st-line-strong);box-shadow:0 -6px 20px rgba(42,29,74,.06);font-size:12.5px}
+.live-dock-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px;background:var(--st-panel);border-bottom:1px solid var(--st-line);flex-wrap:wrap}
+.live-dock-left{display:flex;align-items:center;gap:14px;min-width:0;flex-wrap:wrap}
+.live-dock-title{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.live-dock-title>.icon{width:16px;height:16px;color:var(--st-accent-ink);flex:none}
+.live-dock-title>b{font-size:13px;font-weight:600;color:var(--st-ink);white-space:nowrap}
+.live-dock-dot{width:7px;height:7px;border-radius:50%;background:#94a3b8;flex:none;display:inline-block}
+.live-dock-dot.on{background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.22)}
+.live-dock-badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;padding:2px 9px;border-radius:999px;background:#f1eff7;border:1px solid #e2dce9;color:var(--st-ink-2);white-space:nowrap}
+.live-dock-badge.ok{background:#ecfdf5;border-color:#a7f3d0;color:#047857}
+.live-dock-tabs{display:inline-flex;gap:3px;background:var(--st-raised);border:1px solid var(--st-line);padding:2px;border-radius:8px}
+.live-dock-tabs>button{border:0;background:transparent;color:var(--st-muted);font-size:12px;font-weight:500;padding:4px 11px;border-radius:6px;cursor:pointer;white-space:nowrap;transition:background .14s,color .14s}
+.live-dock-tabs>button:hover{color:var(--st-ink)}
+.live-dock-tabs>button.active{background:#fff;color:var(--st-accent-ink);box-shadow:0 1px 3px rgba(42,29,74,.08)}
+.live-dock-actions{display:inline-flex;align-items:center;gap:7px;flex:none}
+.live-dock-actions>button{height:29px;border:1px solid #dfd9ea;background:#fff;color:var(--st-ink-2);font-size:12px;font-weight:500;padding:0 11px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;white-space:nowrap;transition:border-color .14s,background .14s}
+.live-dock-actions>button.primary{background:var(--st-accent);border-color:var(--st-accent);color:#fff;box-shadow:0 2px 6px rgba(111,82,212,.22)}
+.live-dock-actions>button.primary:hover:not(:disabled){background:#5d40c7;border-color:#5d40c7}
+.live-dock-actions>button:not(.primary):hover:not(:disabled){background:var(--st-accent-softer);border-color:var(--st-accent-line);color:var(--st-accent-ink)}
+.live-dock-actions>button.icon-only{width:29px;padding:0;color:var(--st-muted)}
+.live-dock-actions>button .icon{width:13px;height:13px;flex:none}
 .live-dock-term{flex:1;min-height:0;display:flex;flex-direction:column}
-.live-dock-presets{display:flex;align-items:center;gap:6px;padding:6px 12px;border-bottom:1px solid #242036;flex-wrap:wrap}
-.live-dock-presets>button{border:1px solid #312b48;background:#211d33;color:#c7bfe2;font-size:11px;padding:2px 8px;border-radius:5px;cursor:pointer}
-.live-dock-presets>button:hover:not(:disabled){border-color:#7b58e2;color:#fff}
-.live-dock-output{flex:1;min-height:0;overflow:auto;padding:8px 12px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;display:flex;flex-direction:column;gap:8px}
-.live-dock-empty{color:#7c7499;padding:8px 0}
-.live-dock-entry pre{margin:4px 0 0;white-space:pre-wrap;word-break:break-word;color:#d6d2e6;line-height:1.5}
+.live-dock-presets{display:flex;align-items:center;gap:7px;padding:7px 16px;background:#fff;border-bottom:1px solid var(--st-line);flex-wrap:wrap;flex:none}
+.live-dock-presets-label{font-size:11.5px;color:var(--st-muted);font-weight:500}
+.live-dock-presets>button{height:24px;border:1px solid #e2dce9;background:#f8f7fc;color:var(--st-ink-2);font-size:11.5px;padding:0 9px;border-radius:6px;cursor:pointer;white-space:nowrap;transition:all .14s}
+.live-dock-presets>button:hover:not(:disabled){background:var(--st-accent-soft);border-color:var(--st-accent-line);color:var(--st-accent-ink)}
+.live-dock-console{flex:1;min-height:0;margin:10px 16px 12px;border-radius:10px;border:1px solid #242b38;background:#0f172a;color:#e2e8f0;display:flex;flex-direction:column;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+.live-dock-console.is-logs{margin:10px 16px 12px}
+.live-dock-output{flex:1;min-height:0;overflow:auto;padding:10px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;display:flex;flex-direction:column;gap:8px}
+.live-dock-empty{color:#94a3b8;line-height:1.6}
+.live-dock-empty code{background:rgba(148,163,184,.16);color:#e2e8f0;padding:1px 5px;border-radius:4px;font-size:11.5px}
+.live-dock-entry pre{margin:4px 0 0;white-space:pre-wrap;word-break:break-word;color:#e2e8f0;line-height:1.55}
 .live-dock-entry pre.err{color:#fca5a5}
-.live-dock-cmd{display:flex;justify-content:space-between;color:#a78bfa}
-.live-dock-cmd em{font-style:normal;font-size:10.5px}
-.live-dock-cmd em.ok{color:#6ee7b7}
+.live-dock-cmd{display:flex;justify-content:space-between;align-items:center;color:#c4b5fd;font-weight:500}
+.live-dock-cmd em{font-style:normal;font-size:11px}
+.live-dock-cmd em.ok{color:#34d399}
 .live-dock-cmd em.bad{color:#f87171}
-.live-dock-input{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#12101b;border-top:1px solid #262238}
-.live-dock-input>span{color:#a78bfa;font-family:ui-monospace,Menlo,monospace}
-.live-dock-input>input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#f3f0ff;font-family:ui-monospace,Menlo,monospace;font-size:12px}
-.live-dock-input>button{border:0;background:#6941d8;color:#fff;font-size:11.5px;padding:4px 11px;border-radius:6px;cursor:pointer}
-.live-dock-input>button:disabled{opacity:.45;cursor:default}
-.live-dock-logs{flex:1;min-height:0;overflow:auto;margin:0;padding:10px 12px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap}
+.live-dock-input{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#1e293b;border-top:1px solid #334155;flex:none}
+.live-dock-input>span{color:#34d399;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.live-dock-input>input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#f8fafc;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+.live-dock-input>input::placeholder{color:#94a3b8}
+.live-dock-input>button{height:28px;border:0;background:#7c5ce6;color:#fff;font-size:12px;font-weight:600;padding:0 14px;border-radius:7px;cursor:pointer;white-space:nowrap;transition:background .14s,opacity .14s}
+.live-dock-input>button:hover:not(:disabled){background:#6941d8}
+.live-dock-input>button:disabled{background:#475569;color:#cbd5e1;opacity:.85;cursor:not-allowed}
+.live-dock-logs{flex:1;min-height:0;overflow:auto;margin:0;padding:10px 14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.6;color:#e2e8f0;white-space:pre-wrap}

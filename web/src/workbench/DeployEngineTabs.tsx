@@ -260,7 +260,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
             <h4>GitLab / GitHub CI/CD 自动部署</h4>
             <p>绑定企业内网 GitLab 或本地模拟仓库，通过签名校验 Webhook（<code>X-Gitlab-Token</code> / <code>X-Hub-Signature-256</code>）自动触发蓝绿部署。</p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button type="button" className="subtle-button" disabled={!!busy} onClick={() => void triggerCicd()}>
               <Icon name="play" /> {busy === 'trigger-cicd' ? '触发中…' : '立即触发流水线'}
             </button>
@@ -273,7 +273,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
         <div className="svc-grid-4">
           <label className="svc-field">
             <span>代码托管平台</span>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
+            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
               <option value="gitlab">企业 GitLab</option>
               <option value="github">GitHub</option>
               <option value="mock">本地模拟仓库（免外部凭证验证）</option>
@@ -285,7 +285,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
           </label>
           <label className="svc-field">
             <span>目标部署槽位</span>
-            <select value={deploySlot} onChange={(e) => setDeploySlot(e.target.value)} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
+            <select value={deploySlot} onChange={(e) => setDeploySlot(e.target.value)}>
               <option value="preview">预览槽位（零影响线上）</option>
               <option value="live">线上槽位（蓝绿零停机切流）</option>
             </select>
@@ -343,7 +343,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
             <h4>声明式多服务拓扑（<code>zhiye.yaml</code>）与标准 K8s/Docker 部署包</h4>
             <p>支持声明 <code>web</code> / <code>api</code> / <code>worker</code> / <code>cron</code> / <code>postgres</code> / <code>redis</code> 组件，并一键导出生产级 Docker Compose + Helm Chart。</p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <a className="subtle-button" href={api.serviceExportBundleUrl(appId)} download style={{ textDecoration: 'none' }}>
               <Icon name="download" /> 导出 Docker / Helm 部署包 (.zip)
             </a>

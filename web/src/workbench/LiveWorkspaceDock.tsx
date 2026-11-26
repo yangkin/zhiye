@@ -110,23 +110,28 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
   return (
     <section className="live-dock" aria-label="活体开发环境与终端">
       <div className="live-dock-head">
-        <div className="live-dock-title">
-          <span className={`live-dock-dot ${st?.alive ? 'on' : ''}`} />
-          <b>活体开发环境</b>
-          <span className="live-dock-badge">{statusText}</span>
-          {st?.snapshotReady ? (
-            <span className="live-dock-badge ok" title={`depsHash: ${st.depsHash || '-'}`}>
-              Snapshot-to-Deploy 就绪
+        <div className="live-dock-left">
+          <div className="live-dock-title">
+            <Icon name="terminal" />
+            <b>活体开发环境</b>
+            <span className={`live-dock-badge ${st?.alive ? 'ok' : ''}`}>
+              <i className={`live-dock-dot ${st?.alive ? 'on' : ''}`} />
+              {statusText}
             </span>
-          ) : null}
-        </div>
-        <div className="live-dock-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === 'terminal'} className={tab === 'terminal' ? 'active' : ''} onClick={() => setTab('terminal')}>
-            安全终端
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'logs'} className={tab === 'logs' ? 'active' : ''} onClick={() => setTab('logs')}>
-            实时 Dev 日志 ({liveLogs.length})
-          </button>
+            {st?.snapshotReady ? (
+              <span className="live-dock-badge ok" title={`depsHash: ${st.depsHash || '-'}`}>
+                热缓存就绪
+              </span>
+            ) : null}
+          </div>
+          <div className="live-dock-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'terminal'} className={tab === 'terminal' ? 'active' : ''} onClick={() => setTab('terminal')}>
+              安全终端
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'logs'} className={tab === 'logs' ? 'active' : ''} onClick={() => setTab('logs')}>
+              实时 Dev 日志 ({liveLogs.length})
+            </button>
+          </div>
         </div>
         <div className="live-dock-actions">
           {st?.alive ? (
@@ -135,13 +140,14 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
             </button>
           ) : (
             <button type="button" className="primary" disabled={!!busyAction} onClick={() => void doAction('start')}>
-              {busyAction === 'start' ? '唤醒中…' : '启动/唤醒'}
+              <Icon name="play" />
+              {busyAction === 'start' ? '唤醒中…' : '启动 / 唤醒'}
             </button>
           )}
           <button type="button" disabled={!!busyAction} onClick={() => void doAction('reset')}>
             {busyAction === 'reset' ? '重置中…' : '重置'}
           </button>
-          <button type="button" aria-label="关闭活体终端" onClick={onClose}>
+          <button type="button" className="icon-only" aria-label="关闭活体终端" title="收起活体开发环境" onClick={onClose}>
             <Icon name="close" />
           </button>
         </div>
@@ -150,6 +156,7 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
       {tab === 'terminal' ? (
         <div className="live-dock-term">
           <div className="live-dock-presets">
+            <span className="live-dock-presets-label">快捷诊断：</span>
             {QUICK_CMDS.map((q) => (
               <button key={q.cmd} type="button" disabled={runningCmd} onClick={() => void runCmd(q.cmd)}>
                 {q.label}
@@ -161,48 +168,54 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
               </button>
             ) : null}
           </div>
-          <div className="live-dock-output">
-            {entries.length === 0 ? (
-              <div className="live-dock-empty">在隔离的应用工作区内运行安全诊断命令（拦截越权路径、外部联网与 .env 读取）。</div>
-            ) : (
-              entries.map((it) => (
-                <div key={it.id} className="live-dock-entry">
-                  <div className="live-dock-cmd">
-                    <span>$ {it.command}</span>
-                    <em className={it.ok ? 'ok' : 'bad'}>
-                      exit {it.exitCode} · {it.durationMs}ms
-                    </em>
-                  </div>
-                  {it.stdout ? <pre>{it.stdout}</pre> : null}
-                  {it.stderr ? <pre className="err">{it.stderr}</pre> : null}
+          <div className="live-dock-console">
+            <div className="live-dock-output">
+              {entries.length === 0 ? (
+                <div className="live-dock-empty">
+                  在隔离的应用工作区内运行安全诊断命令（自动拦截越权路径、外部联网与 <code>.env</code> 读取）。点击上方快捷按钮或在下方输入命令执行。
                 </div>
-              ))
-            )}
+              ) : (
+                entries.map((it) => (
+                  <div key={it.id} className="live-dock-entry">
+                    <div className="live-dock-cmd">
+                      <span>$ {it.command}</span>
+                      <em className={it.ok ? 'ok' : 'bad'}>
+                        exit {it.exitCode} · {it.durationMs}ms
+                      </em>
+                    </div>
+                    {it.stdout ? <pre>{it.stdout}</pre> : null}
+                    {it.stderr ? <pre className="err">{it.stderr}</pre> : null}
+                  </div>
+                ))
+              )}
+            </div>
+            <form
+              className="live-dock-input"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void runCmd();
+              }}
+            >
+              <span>$</span>
+              <input
+                placeholder="输入安全诊断命令，如 git status、npx tsc --noEmit、ls -la…"
+                aria-label="终端命令输入"
+                value={cmd}
+                disabled={runningCmd}
+                onChange={(e) => setCmd(e.target.value)}
+              />
+              <button type="submit" disabled={runningCmd || !cmd.trim()}>
+                {runningCmd ? '执行中…' : '执行'}
+              </button>
+            </form>
           </div>
-          <form
-            className="live-dock-input"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void runCmd();
-            }}
-          >
-            <span>$</span>
-            <input
-              placeholder="输入安全诊断命令，如 git status、npx tsc --noEmit、ls -la…"
-              aria-label="终端命令输入"
-              value={cmd}
-              disabled={runningCmd}
-              onChange={(e) => setCmd(e.target.value)}
-            />
-            <button type="submit" disabled={runningCmd || !cmd.trim()}>
-              {runningCmd ? '执行中…' : '执行'}
-            </button>
-          </form>
         </div>
       ) : (
-        <pre ref={logBoxRef} className="live-dock-logs">
-          {liveLogs.length ? liveLogs.join('\n') : '暂无实时日志。点击右上角「启动/唤醒」后将在此实时流式输出。'}
-        </pre>
+        <div className="live-dock-console is-logs">
+          <pre ref={logBoxRef} className="live-dock-logs">
+            {liveLogs.length ? liveLogs.join('\n') : '暂无实时日志。点击右上角「启动 / 唤醒」后将在此实时流式输出。'}
+          </pre>
+        </div>
       )}
     </section>
   );
