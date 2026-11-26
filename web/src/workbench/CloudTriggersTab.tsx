@@ -5,21 +5,50 @@ import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
 
-/** 应用自动化触发器面板（嵌入 CloudConsole：支持 Cron 定时 / DB 写入钩子 / 签名入站 Webhook → 飞书卡片或云函数）。 */
-export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNames: string[] }) {
+const CRON_PRESETS: Array<{ label: string; expr: string }> = [
+  { label: '每天早上 09:00', expr: '0 9 * * *' },
+  { label: '每个工作日 09:00', expr: '0 9 * * 1-5' },
+  { label: '每天傍晚 18:00', expr: '0 18 * * *' },
+  { label: '每周一 09:30', expr: '30 9 * * 1' },
+  { label: '每小时整点', expr: '0 * * * *' },
+  { label: '每 5 分钟', expr: '*/5 * * * *' },
+  { label: '自定义 Cron…', expr: '__custom__' },
+];
+
+function cronLabel(expr: string): string {
+  const hit = CRON_PRESETS.find((p) => p.expr === expr);
+  return hit ? `${hit.label} (${expr})` : `Cron: ${expr}`;
+}
+
+/**
+ * 通用应用自动化与飞书通知面板（同时适用于云服务应用与单体全栈应用）：
+ * - 去掉手写 Cron 门槛，提供说人话的定时周期下拉 + 一键场景预设
+ * - 支持定时飞书播报、数据库变更实时告警、签名入站 Webhook、Deno 云函数回调
+ */
+export function CloudTriggersTab({
+  appId,
+  tableNames,
+  mode = 'cloud',
+}: {
+  appId: string;
+  tableNames: string[];
+  mode?: 'cloud' | 'service';
+}) {
   const qc = useQueryClient();
   const listQ = useQuery({ queryKey: ['app-triggers', appId], queryFn: () => api.appTriggersList(appId) });
   const runsQ = useQuery({ queryKey: ['app-trigger-runs', appId], queryFn: () => api.appTriggerRuns(appId, undefined, 20) });
   const connQ = useQuery({ queryKey: ['workspace-connectors'], queryFn: api.connectorsList });
 
+  const isService = mode === 'service';
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'cron' | 'db_insert' | 'db_update' | 'webhook'>('db_insert');
-  const [cronExpr, setCronExpr] = useState('*/5 * * * *');
+  const [kind, setKind] = useState<'cron' | 'db_insert' | 'db_update' | 'webhook'>(isService ? 'cron' : 'db_insert');
+  const [cronPreset, setCronPreset] = useState('0 9 * * 1-5');
+  const [customCron, setCustomCron] = useState('0 9 * * 1-5');
   const [tableName, setTableName] = useState(tableNames[0] || '');
   const [actionType, setActionType] = useState<'feishu_card' | 'cloud_function'>('feishu_card');
   const [connectorId, setConnectorId] = useState('conn_feishu_bot_sandbox');
-  const [cardTitle, setCardTitle] = useState('织页自动化提醒：{{table}} 有新记录');
-  const [cardContent, setCardContent] = useState('触发事件：`{{event}}`\n数据摘要：`{{payload}}`');
+  const [cardTitle, setCardTitle] = useState(isService ? '应用运行日报提醒' : '织页自动化提醒：{{table}} 有新记录');
+  const [cardContent, setCardContent] = useState(isService ? '触发事件：`{{event}}`\n摘要：`{{payload}}`' : '触发事件：`{{event}}`\n数据摘要：`{{payload}}`');
   const [functionName, setFunctionName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -27,12 +56,44 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
   const triggers = listQ.data ?? [];
   const runs = runsQ.data ?? [];
   const connectors = (connQ.data ?? []).filter((c) => c.kind === 'feishu_bot' || c.kind === 'feishu_app');
+  const effectiveCron = cronPreset === '__custom__' ? customCron.trim() : cronPreset;
 
   const refresh = () =>
     Promise.allSettled([
       qc.invalidateQueries({ queryKey: ['app-triggers', appId] }),
       qc.invalidateQueries({ queryKey: ['app-trigger-runs', appId] }),
     ]);
+
+  const applyQuickPreset = (preset: 'daily' | 'weekly' | 'event') => {
+    if (preset === 'daily') {
+      setName('工作日早 9 点飞书日报');
+      setKind('cron');
+      setCronPreset('0 9 * * 1-5');
+      setActionType('feishu_card');
+      setCardTitle('每日运营摘要提醒');
+      setCardContent('已到达每日 09:00 定时播报节点，请查看最新数据看板。');
+    } else if (preset === 'weekly') {
+      setName('每周一早会汇总提醒');
+      setKind('cron');
+      setCronPreset('30 9 * * 1');
+      setActionType('feishu_card');
+      setCardTitle('本周例会数据就绪');
+      setCardContent('周一 09:30 自动提醒：请核对本周重点指标与待办事项。');
+    } else if (isService) {
+      setName('外部系统 Webhook 飞书通知');
+      setKind('webhook');
+      setActionType('feishu_card');
+      setCardTitle('收到外部系统事件通知');
+      setCardContent('事件：`{{event}}`\n负载：`{{payload}}`');
+    } else {
+      setName('新记录提交实时飞书告警');
+      setKind('db_insert');
+      setActionType('feishu_card');
+      setCardTitle('新提交提醒：{{table}}');
+      setCardContent('有新的业务记录写入表 `{{table}}`，详情：`{{payload}}`');
+    }
+    toast('已填入预设模板，直接点「添加」即可生效。');
+  };
 
   const handleAdd = async () => {
     if (!name.trim()) return;
@@ -42,17 +103,17 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
         name: name.trim(),
         kind,
         enabled: true,
-        cronExpr: kind === 'cron' ? cronExpr.trim() : '',
+        cronExpr: kind === 'cron' ? effectiveCron : '',
         tableName: kind === 'db_insert' || kind === 'db_update' ? (tableName.trim() || tableNames[0] || '') : '',
-        actionType,
+        actionType: isService ? 'feishu_card' : actionType,
         actionConfig:
-          actionType === 'feishu_card'
+          isService || actionType === 'feishu_card'
             ? { connectorId, title: cardTitle, content: cardContent, templateColor: 'blue' }
             : { functionName: functionName.trim() },
       });
       if (res.generatedWebhookSecret) setNewSecret(String(res.generatedWebhookSecret));
       setName('');
-      toast('自动化触发器已创建并启用。');
+      toast('自动化规则已创建并启用。');
       await refresh();
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -76,59 +137,95 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
 
   return (
     <div className="cc-section" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div>
-        <h3 style={{ margin: '0 0 4px' }}>自动化触发器（Cron / 数据库事件 / Webhook）</h3>
-        <p className="cc-hint" style={{ margin: 0 }}>
-          在数据库新增/更新、定时计划到达或外部系统推送 Webhook 时，自动执行 Deno 云函数或通过企业连接器发送公域飞书交互卡片。
-        </p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h3 style={{ margin: '0 0 4px' }}>自动化与飞书通知</h3>
+          <p className="cc-hint" style={{ margin: 0 }}>
+            不用手写 Cron 或脚本：选好周期或事件，自动给飞书群推卡片提醒，或接收外部系统签名 Webhook。
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" className="subtle-button" style={{ fontSize: 12, height: 28, padding: '0 10px' }} onClick={() => applyQuickPreset('daily')}>
+            每日 9 点飞书日报
+          </button>
+          <button type="button" className="subtle-button" style={{ fontSize: 12, height: 28, padding: '0 10px' }} onClick={() => applyQuickPreset('weekly')}>
+            每周一早会提醒
+          </button>
+          <button type="button" className="subtle-button" style={{ fontSize: 12, height: 28, padding: '0 10px' }} onClick={() => applyQuickPreset('event')}>
+            {isService ? 'Webhook 推飞书' : '新记录实时告警'}
+          </button>
+        </div>
       </div>
 
       {/* 新建触发器表单 */}
-      <div style={{ padding: 12, borderRadius: 10, border: '1px solid var(--line, #e2e8f0)', background: 'var(--bg-subtle, #f8fafc)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr 1fr', gap: 8 }}>
+      <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', background: 'var(--bg-subtle, #f8fafc)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isService ? '1.4fr 1fr 1.2fr' : '1.4fr 1fr 1.2fr 1fr', gap: 8 }}>
           <input
             type="text"
-            placeholder="触发器名称（如：异常工单飞书告警）"
+            placeholder="规则名称（如：异常工单飞书告警）"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }}
+            style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}
           />
-          <select value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'db_insert' | 'db_update' | 'webhook')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }}>
-            <option value="db_insert">数据库新增 (db_insert)</option>
-            <option value="db_update">数据库更新 (db_update)</option>
-            <option value="cron">定时计划 (cron)</option>
-            <option value="webhook">签名入站 Webhook</option>
+          <select value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'db_insert' | 'db_update' | 'webhook')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}>
+            {!isService ? <option value="db_insert">有新记录提交时</option> : null}
+            {!isService ? <option value="db_update">记录状态更新时</option> : null}
+            <option value="cron">按定时周期触发</option>
+            <option value="webhook">外部系统 Webhook 触发</option>
           </select>
           {kind === 'cron' ? (
-            <input type="text" value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} placeholder="*/5 * * * *" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <select
+                value={cronPreset}
+                onChange={(e) => setCronPreset(e.target.value)}
+                style={{ flex: 1, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}
+              >
+                {CRON_PRESETS.map((p) => (
+                  <option key={p.expr} value={p.expr}>{p.label}</option>
+                ))}
+              </select>
+              {cronPreset === '__custom__' ? (
+                <input
+                  type="text"
+                  value={customCron}
+                  onChange={(e) => setCustomCron(e.target.value)}
+                  placeholder="0 9 * * *"
+                  style={{ width: 110, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}
+                />
+              ) : null}
+            </div>
           ) : kind === 'db_insert' || kind === 'db_update' ? (
-            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }} />
+            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
           ) : (
-            <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>自动签发 HMAC 密钥</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>自动签发 HMAC 签名密钥</span>
           )}
-          <select value={actionType} onChange={(e) => setActionType(e.target.value as 'feishu_card' | 'cloud_function')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }}>
-            <option value="feishu_card">发送飞书交互卡片</option>
-            <option value="cloud_function">调用 Deno 云函数</option>
-          </select>
+          {!isService ? (
+            <select value={actionType} onChange={(e) => setActionType(e.target.value as 'feishu_card' | 'cloud_function')} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }}>
+              <option value="feishu_card">推送飞书交互卡片</option>
+              <option value="cloud_function">执行云函数</option>
+            </select>
+          ) : null}
         </div>
 
-        {actionType === 'feishu_card' ? (
+        {isService || actionType === 'feishu_card' ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.5fr auto', gap: 8, alignItems: 'center' }}>
-            <select value={connectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12 }}>
+            <select value={connectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12 }}>
               {connectors.length === 0 ? <option value="conn_feishu_bot_sandbox">公域飞书沙箱机器人</option> : null}
               {connectors.map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>{String(c.name)} ({String(c.mode)})</option>
+                <option key={String(c.id)} value={String(c.id)}>
+                  {String(c.name)} ({String(c.mode) === 'live' ? '公域直连' : '沙箱'})
+                </option>
               ))}
             </select>
-            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }} />
-            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="支持 {{event}} / {{table}} / {{row.xxx}}" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }} />
+            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
+            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="正文支持 {{event}} / {{table}} / {{payload}}" style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
             <button type="button" className="primary-button" disabled={!!busy || !name.trim()} onClick={() => void handleAdd()}>
               <Icon name="plus" /> 添加
             </button>
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', fontSize: 12.5 }} />
+            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5 }} />
             <button type="button" className="primary-button" disabled={!!busy || !name.trim() || !functionName.trim()} onClick={() => void handleAdd()}>
               <Icon name="plus" /> 添加
             </button>
@@ -144,7 +241,7 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
 
       {/* 已配置触发器列表 */}
       {triggers.length === 0 ? (
-        <p className="cc-hint">暂无触发器，可在上方创建定时播报、数据写入飞书告警或外部 Webhook 自动化。</p>
+        <p className="cc-hint">暂无自动化规则，可点右上角预设快速创建每日飞书日报、实时告警或外部 Webhook 通知。</p>
       ) : (
         <div className="cc-files">
           {triggers.map((t) => {
@@ -157,8 +254,8 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <b>{String(t.name ?? '')}</b>
                   <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>
-                    {kindVal === 'cron' ? `Cron: ${String(t.cronExpr ?? '')}` : kindVal === 'webhook' ? `Webhook: ${whUrl}` : `表 ${String(t.tableName ?? '')} (${kindVal})`}
-                    {' · '}动作：{String(t.actionType ?? '')} · 已运行 {String(t.runCount ?? 0)} 次
+                    {kindVal === 'cron' ? cronLabel(String(t.cronExpr ?? '')) : kindVal === 'webhook' ? `Webhook: ${whUrl}` : `表 ${String(t.tableName ?? '')} (${kindVal === 'db_insert' ? '新增时' : '更新时'})`}
+                    {' · '}动作：{String(t.actionType ?? '') === 'feishu_card' ? '推送飞书卡片' : '执行云函数'} · 已运行 {String(t.runCount ?? 0)} 次
                   </div>
                 </div>
                 {kindVal === 'webhook' ? (
@@ -171,15 +268,15 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
                 </button>
                 <button
                   type="button"
-                  className="icon-button"
-                  aria-label="删除触发器"
+                  className="subtle-button"
+                  style={{ fontSize: 12, padding: '4px 8px', color: '#dc2626' }}
                   onClick={async () => {
                     await api.appTriggerDelete(appId, id);
-                    toast('触发器已删除。');
+                    toast('自动化规则已删除。');
                     await refresh();
                   }}
                 >
-                  <Icon name="trash" />
+                  删除
                 </button>
               </div>
             );
@@ -187,19 +284,19 @@ export function CloudTriggersTab({ appId, tableNames }: { appId: string; tableNa
         </div>
       )}
 
+      {/* 最近触发执行记录 */}
       {runs.length > 0 ? (
         <div>
-          <h4 style={{ margin: '4px 0 6px', fontSize: 13 }}>最近执行记录</h4>
-          <div className="cc-files">
+          <h4 style={{ margin: '4px 0 8px', fontSize: 13 }}>最近执行记录 ({runs.length})</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {runs.slice(0, 8).map((r) => (
-              <div key={String(r.id ?? '')} className="cc-file-row" style={{ fontSize: 12 }}>
-                <span className={`cc-dot ${r.status === 'ok' ? 'ok' : 'bad'}`} />
-                <b>{String(r.eventType ?? '')}</b>
-                <small className="cc-fn-stat">{String(r.durationMs ?? 0)} ms</small>
-                <small className="cc-fn-stat">{r.createdAt ? fmtTime(String(r.createdAt)) : ''}</small>
-                <span style={{ opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {String(r.error || r.resultSummary || 'ok')}
+              <div key={String(r.id)} style={{ fontSize: 12, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--line, #e2e8f0)', display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                <span>
+                  <b style={{ color: r.ok ? '#059669' : '#dc2626' }}>{r.ok ? '✓ 成功' : '✗ 失败'}</b>
+                  {' · '}{String(r.event ?? '')} · {String(r.durationMs ?? 0)}ms
+                  {r.error ? <span style={{ color: '#dc2626' }}> · {String(r.error)}</span> : null}
                 </span>
+                <span style={{ color: 'var(--muted)' }}>{r.createdAt ? fmtTime(String(r.createdAt)) : ''}</span>
               </div>
             ))}
           </div>

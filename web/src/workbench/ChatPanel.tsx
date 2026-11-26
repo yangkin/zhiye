@@ -12,6 +12,7 @@ import { toast, useChat } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { AssetChips, type ChatAsset } from '../components/AssetChips';
 import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, mentionAt, useMySkills } from '../components/ComposerPopovers';
+import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { styleFor } from '../components/Thumbnail';
 import { isQuestion, quickRoute } from '../pages/CreatePage';
 import { PlanCard } from './PlanCard';
@@ -191,6 +192,10 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const chatAssets = useChat((s) => s.assets);
   const chatHint = useChat((s) => s.hint);
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
+  const [ecoOpen, setEcoOpen] = useState(false);
+  const [ecosystems, setEcosystems] = useState<EcosystemItem[]>([]);
+  const toggleEco = (item: EcosystemItem) =>
+    setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev.filter((x) => x.id !== item.id) : [...prev, item]));
   // 直接回答的问题 / 计划阶段讨论（不创建任务）：流式显示的那一条
   const [asking, setAsking] = useState<null | { q: string; a: string; thinking: string; planUpdating: boolean }>(null);
   useEffect(() => {
@@ -465,7 +470,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       const res = await api.sendMessage(
         app.id,
         {
-          content,
+          content: appendEcosystemContext(content, ecosystems),
           ...(elementContext ? { elementContext } : {}),
           ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),
           ...(chatSkills.length ? { skillAppIds: chatSkills.map((k) => k.id) } : {}),
@@ -474,6 +479,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       );
       keyRef.current = null;
       setDraft('');
+      setEcosystems([]);
       setCtx(null);
       useChat.getState().setAssets([]);
       useChat.getState().setSkills([]);
@@ -782,8 +788,9 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 <SourceChips sources={boundSources} onRemove={(id) => void changeSource('unbind', id, boundSources.find((s) => s.id === id)?.name ?? '')} />
               </div>
             ) : null}
-            {chatAssets.length || chatSkills.length ? (
+            {chatAssets.length || chatSkills.length || ecosystems.length ? (
               <div className="attachments chat-attachments">
+                <EcosystemChips items={ecosystems} onRemove={(id) => setEcosystems((prev) => prev.filter((x) => x.id !== id))} />
                 <SkillChips skills={chatSkills} onRemove={(id) => saveSkills(chatSkills.filter((x) => x.id !== id))} />
                 {chatAssets.map((a) => (
                   <span key={a.id}>
@@ -882,6 +889,26 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 <Icon name="book" />
                 <span className="chip-label">技能</span>
               </button>
+              {!skill ? (
+                <button
+                  type="button"
+                  className={`skill-button${ecosystems.length ? ' on' : ''}`}
+                  aria-label="选择企业生态能力"
+                  title="一键勾选飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
+                  onClick={() => setEcoOpen(true)}
+                >
+                  <Icon name="globe" />
+                  <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
+                </button>
+              ) : null}
+              <EcosystemPickerModal
+                open={ecoOpen}
+                onClose={() => setEcoOpen(false)}
+                selected={ecosystems}
+                onToggle={toggleEco}
+                pickedSourceIds={boundSources.map((s) => s.id)}
+                onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+              />
               <SkillPicker
                 open={picker !== null}
                 anchor={picker?.via === 'mention' ? input : skillBtn}

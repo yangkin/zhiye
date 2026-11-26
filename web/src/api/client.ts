@@ -648,8 +648,13 @@ export const api = {
 
   // Phase 4: 企业连接器中心 & 自动化触发器 & 公域飞书控制面
   connectorsList: () => request<Record<string, unknown>[]>('/api/connectors'),
+  connectorSave: (input: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/api/connectors', { method: 'POST', body: input }),
+  connectorDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/connectors/${enc(id)}`, { method: 'DELETE' }),
   connectorTest: (id: string) =>
     request<Record<string, unknown>>(`/api/connectors/${enc(id)}/test`, { method: 'POST' }),
+  mcpServersList: () => request<Record<string, unknown>[]>('/api/mcp-servers'),
   adminConnectorsList: () => request<Record<string, unknown>[]>('/api/admin/connectors'),
   adminConnectorSave: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/admin/connectors', { method: 'POST', body: input }),
