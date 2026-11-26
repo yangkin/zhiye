@@ -5,6 +5,7 @@ import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
 import { Modal } from './Modal';
+import { Select } from './Select';
 import { confirmDialog } from './ConfirmDialog';
 
 /**
@@ -359,68 +360,116 @@ export function AdminFeishuConnectorPanel() {
       )}
 
       {addOpen ? (
-      <Modal title="新建企业连接器（公域飞书）" onClose={() => setAddOpen(false)}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <label className="svc-field">
-            <span>连接器名称</span>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：研发告警飞书群机器人" />
-          </label>
-          <label className="svc-field">
-            <span>连接器类型</span>
-            <select value={kind} onChange={(e) => setKind(e.target.value as 'feishu_bot' | 'feishu_bitable' | 'feishu_app')} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
-              <option value="feishu_bot">飞书群自定义机器人 (feishu_bot)</option>
-              <option value="feishu_bitable">飞书多维表格 (feishu_bitable)</option>
-              <option value="feishu_app">飞书自建应用 IM (feishu_app)</option>
-            </select>
-          </label>
-          {kind === 'feishu_bot' ? (
-            <>
-              <label className="svc-field">
-                <span>Webhook 地址（https://open.feishu.cn/open-apis/bot/v2/hook/...）</span>
-                <input type="text" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="live 模式必填" />
-              </label>
-              <label className="svc-field">
-                <span>签名校验密钥（可选，AES-256-GCM 加密）</span>
-                <input type="password" value={webhookSignSecret} onChange={(e) => setWebhookSignSecret(e.target.value)} placeholder="飞书机器人安全设置中的签名密钥" />
-              </label>
-            </>
-          ) : (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <label className="svc-field">
-                  <span>飞书 App ID</span>
-                  <input type="text" value={appIdField} onChange={(e) => setAppIdField(e.target.value)} placeholder="cli_xxxxxx" />
-                </label>
-                <label className="svc-field">
-                  <span>飞书 App Secret（加密存储）</span>
-                  <input type="password" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="******" />
-                </label>
-              </div>
-              {kind === 'feishu_bitable' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <label className="svc-field">
-                    <span>多维表格 App Token</span>
-                    <input type="text" value={bitableAppToken} onChange={(e) => setBitableAppToken(e.target.value)} placeholder="bascnXXXXXX" />
-                  </label>
-                  <label className="svc-field">
-                    <span>数据表 Table ID</span>
-                    <input type="text" value={bitableTableId} onChange={(e) => setBitableTableId(e.target.value)} placeholder="tblXXXXXX" />
-                  </label>
-                </div>
-              ) : (
-                <label className="svc-field">
-                  <span>默认接收群 Chat ID</span>
-                  <input type="text" value={defaultChatId} onChange={(e) => setDefaultChatId(e.target.value)} placeholder="oc_xxxxxx" />
-                </label>
-              )}
-            </>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+      <Modal
+        overline="平台级飞书集成"
+        title="新建企业连接器（公域飞书）"
+        className="eco-modal"
+        onClose={() => setAddOpen(false)}
+        footer={
+          <>
             <button type="button" className="subtle-button" onClick={() => setAddOpen(false)}>取消</button>
             <button type="button" className="primary-button" disabled={saving || !name.trim()} onClick={() => void handleCreate()}>
               {saving ? '保存中…' : '保存连接器'}
             </button>
+          </>
+        }
+      >
+        <div className="eco-form">
+          <div className="eco-field">
+            <div className="eco-label-row">
+              <label>连接器名称</label>
+            </div>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：研发告警飞书群机器人" />
           </div>
+          <div className="eco-field">
+            <div className="eco-label-row">
+              <label>连接器类型</label>
+            </div>
+            <Select
+              ariaLabel="连接器类型"
+              className="field"
+              value={kind}
+              onChange={(v) => setKind(v)}
+              options={[
+                { value: 'feishu_bot', label: '飞书群自定义机器人', hint: 'feishu_bot' },
+                { value: 'feishu_bitable', label: '飞书多维表格', hint: 'feishu_bitable' },
+                { value: 'feishu_app', label: '飞书自建应用 IM', hint: 'feishu_app' },
+              ]}
+            />
+          </div>
+          {kind === 'feishu_bot' ? (
+            <div className="eco-fieldset">
+              <span className="eco-fieldset-title">机器人 Webhook 与签名校验</span>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>Webhook 地址</label>
+                  <span className="eco-label-badge">AES-256 加密</span>
+                </div>
+                <input
+                  type="text"
+                  className="is-mono"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                />
+              </div>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>签名校验密钥</label>
+                  <span className="eco-label-badge is-muted">可选 · 加密托管</span>
+                </div>
+                <input
+                  type="password"
+                  className="is-mono"
+                  value={webhookSignSecret}
+                  onChange={(e) => setWebhookSignSecret(e.target.value)}
+                  placeholder="飞书机器人安全设置中的签名密钥"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="eco-fieldset">
+              <span className="eco-fieldset-title">飞书自建应用凭证与目标资源</span>
+              <div className="eco-grid-2">
+                <div className="eco-field">
+                  <div className="eco-label-row">
+                    <label>飞书 App ID</label>
+                  </div>
+                  <input type="text" className="is-mono" value={appIdField} onChange={(e) => setAppIdField(e.target.value)} placeholder="cli_xxxxxx" />
+                </div>
+                <div className="eco-field">
+                  <div className="eco-label-row">
+                    <label>飞书 App Secret</label>
+                    <span className="eco-label-badge">加密存储</span>
+                  </div>
+                  <input type="password" className="is-mono" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} placeholder="填入 App Secret" />
+                </div>
+              </div>
+              {kind === 'feishu_bitable' ? (
+                <div className="eco-grid-2">
+                  <div className="eco-field">
+                    <div className="eco-label-row">
+                      <label>多维表格 App Token</label>
+                    </div>
+                    <input type="text" className="is-mono" value={bitableAppToken} onChange={(e) => setBitableAppToken(e.target.value)} placeholder="bascnXXXXXX" />
+                  </div>
+                  <div className="eco-field">
+                    <div className="eco-label-row">
+                      <label>数据表 Table ID</label>
+                    </div>
+                    <input type="text" className="is-mono" value={bitableTableId} onChange={(e) => setBitableTableId(e.target.value)} placeholder="tblXXXXXX" />
+                  </div>
+                </div>
+              ) : (
+                <div className="eco-field">
+                  <div className="eco-label-row">
+                    <label>默认接收群 Chat ID</label>
+                  </div>
+                  <input type="text" className="is-mono" value={defaultChatId} onChange={(e) => setDefaultChatId(e.target.value)} placeholder="oc_xxxxxx" />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Modal>
       ) : null}

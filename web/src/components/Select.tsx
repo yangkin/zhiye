@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useEscape } from './Modal';
 
 export interface SelectOption<T extends string> {
   value: T;
@@ -49,6 +50,7 @@ export function Select<T extends string>({ value, options, onChange, ariaLabel, 
     setOpen(false);
     if (focus) btn.current?.focus();
   };
+  useEscape(() => close(), open);
   const choose = (i: number) => {
     const o = options[i];
     if (o) onChange(o.value);
@@ -146,7 +148,7 @@ export function Select<T extends string>({ value, options, onChange, ariaLabel, 
               role="listbox"
               aria-label={ariaLabel}
               className={`zy-select-list ${pos.up ? 'up' : ''}`}
-              style={{ left: pos.left, top: pos.top, minWidth: Math.max(pos.width, 160) }}
+              style={{ left: pos.left, top: pos.top, minWidth: Math.max(pos.width, 160), maxWidth: 'min(420px, calc(100vw - 16px))' }}
             >
               {options.map((o, i) => (
                 <li

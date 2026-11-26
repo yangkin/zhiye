@@ -25,7 +25,28 @@ export function AdminLoginAllowlistPanel() {
   const list = useQuery({ queryKey: ['adminLoginAllowlist'], queryFn: api.adminLoginAllowlist, retry: false });
   const [filter, setFilter] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState<{ loginName: string; value: string } | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ['adminLoginAllowlist'] });
+
+  const saveNote = async (item: LoginAllowlistItem, raw: string) => {
+    const next = raw.trim();
+    if (next === (item.note ?? '').trim()) {
+      setEditingNote(null);
+      return;
+    }
+    setSavingNote(true);
+    try {
+      await api.adminLoginAllowlistUpdate(item.loginName, { note: next });
+      await refresh();
+      toast('已更新备注。');
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setSavingNote(false);
+      setEditingNote(null);
+    }
+  };
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -126,7 +147,39 @@ export function AdminLoginAllowlistPanel() {
                 <tr key={item.loginName}>
                   <td><code>{item.loginName}</code></td>
                   <td>{item.realName || '—'}</td>
-                  <td>{item.note || '—'}</td>
+                  <td>
+                    {editingNote?.loginName === item.loginName ? (
+                      <input
+                        className="access-note-inline"
+                        autoFocus
+                        maxLength={120}
+                        disabled={savingNote}
+                        placeholder="输入备注，回车保存"
+                        value={editingNote.value}
+                        onChange={(e) => setEditingNote({ loginName: item.loginName, value: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void saveNote(item, editingNote.value);
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setEditingNote(null);
+                          }
+                        }}
+                        onBlur={() => void saveNote(item, editingNote.value)}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className={`access-note-btn ${item.note ? '' : 'is-empty'}`}
+                        title="点击编辑备注"
+                        onClick={() => setEditingNote({ loginName: item.loginName, value: item.note ?? '' })}
+                      >
+                        <span>{item.note || '添加备注'}</span>
+                        <Icon name="edit" />
+                      </button>
+                    )}
+                  </td>
                   <td>
                     <button
                       type="button"
@@ -178,6 +231,7 @@ function AddPeopleModal({ existing, onClose, onAdded }: {
   const [searchError, setSearchError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [role, setRole] = useState<'user' | 'admin'>('user');
+  const [note, setNote] = useState('');
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -212,7 +266,7 @@ function AddPeopleModal({ existing, onClose, onAdded }: {
     if (!names.length || busy) return;
     setBusy(true);
     try {
-      const r = await api.adminLoginAllowlistAdd({ loginNames: names, role });
+      const r = await api.adminLoginAllowlistAdd({ loginNames: names, role, ...(note.trim() ? { note: note.trim() } : {}) });
       await onAdded();
       if (r.failed.length) toast(`已添加 ${r.added} 人；${r.failed.length} 个工号格式无效：${r.failed.join('、')}`, 'error');
       else toast(`已添加 ${r.added} 人${role === 'admin' ? '（管理员）' : ''}。`);
@@ -307,10 +361,27 @@ function AddPeopleModal({ existing, onClose, onAdded }: {
         />
       )}
 
-      <div className="access-role-row">
-        <span>添加为</span>
-        <button type="button" className={role === 'user' ? 'active' : ''} onClick={() => setRole('user')}>普通用户</button>
-        <button type="button" className={role === 'admin' ? 'active' : ''} onClick={() => setRole('admin')}>管理员</button>
+      <div className="access-meta-group">
+        <label className="access-note-field">
+          <span>
+            备注
+            <small>可选 · 将显示在人员管理列表中</small>
+          </span>
+          <input
+            type="text"
+            maxLength={120}
+            placeholder="例如：T11 厂制造部 / 权限申请单号"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </label>
+        <div className="access-role-row">
+          <span>分配角色</span>
+          <div className="access-role-seg" role="radiogroup" aria-label="分配角色">
+            <button type="button" role="radio" aria-checked={role === 'user'} className={role === 'user' ? 'active' : ''} onClick={() => setRole('user')}>普通用户</button>
+            <button type="button" role="radio" aria-checked={role === 'admin'} className={role === 'admin' ? 'active' : ''} onClick={() => setRole('admin')}>管理员</button>
+          </div>
+        </div>
       </div>
     </Modal>
   );

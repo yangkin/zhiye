@@ -9,6 +9,7 @@ import { toast, useUi } from '../lib/store';
 import { preloadRoute } from '../lib/routes';
 import { ErrorBoundary } from './ErrorBoundary';
 import { Modal } from './Modal';
+import { Select } from './Select';
 import { HelpPanel } from './HelpPanel';
 
 /** 延迟 150ms 再显字，本地/快网切换时绝不闪出「正在加载」文字 */
@@ -333,29 +334,19 @@ function WorkspaceModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <select
-            aria-label="记忆分类"
-            value={memCat}
-            onChange={(e) => setMemCat(e.target.value as typeof memCat)}
-            style={{
-              height: 36,
-              borderRadius: 10,
-              border: '1px solid #dfd8ee',
-              padding: '0 10px',
-              background: '#fff',
-              fontSize: 13,
-              color: '#2e2540',
-            }}
-          >
-            {MEMORY_CATS.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </select>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <div style={{ width: 156, flexShrink: 0 }}>
+            <Select
+              ariaLabel="记忆分类"
+              className="field"
+              value={memCat}
+              onChange={(v) => setMemCat(v)}
+              options={MEMORY_CATS.map((c) => ({ value: c.value, label: c.label }))}
+            />
+          </div>
           <input
             type="text"
+            className="ws-memory-input"
             value={memInput}
             maxLength={240}
             onChange={(e) => setMemInput(e.target.value)}
@@ -366,14 +357,6 @@ function WorkspaceModal({ onClose }: { onClose: () => void }) {
               }
             }}
             placeholder="例如：我在 T11 厂做 Array 良率，偏好浅色工业风 + Excel 导出"
-            style={{
-              flex: 1,
-              height: 36,
-              borderRadius: 10,
-              border: '1px solid #dfd8ee',
-              padding: '0 12px',
-              fontSize: 13,
-            }}
           />
           <button
             type="button"

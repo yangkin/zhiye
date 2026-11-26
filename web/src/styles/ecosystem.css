@@ -293,81 +293,181 @@
   max-width: 460px;
 }
 
+/* 生态弹窗表单（飞书连接器 / 知识库 / MCP）：宽裕舒适间距、等分分段切换、统一输入框质感 */
+.modal.eco-modal {
+  width: min(600px, calc(100vw - 32px));
+}
+.modal.eco-modal .modal-body {
+  padding: 20px 26px 24px;
+}
 .eco-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
-
+.eco-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f2eefb;
+  border: 1px solid #e7e1f6;
+}
+.eco-seg button {
+  border: none;
+  background: transparent;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #655d7d;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+}
+.eco-seg button:hover:not(.active) {
+  color: #2f2747;
+}
+.eco-seg button.active {
+  background: #fff;
+  color: #1c172e;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(31, 24, 58, 0.08);
+}
+.eco-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #faf9fd;
+  border: 1px solid #eeebf7;
+}
+.eco-fieldset-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a6182;
+  letter-spacing: 0.3px;
+  margin: -2px 0 -4px;
+}
 .eco-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
 }
-
-.eco-field > label {
-  font-size: 12.5px;
+.eco-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.eco-field label {
+  font-size: 13px;
   font-weight: 600;
-  color: #2c2640;
+  color: #262038;
+  line-height: 1.35;
 }
-
-/* 同一行两列字段：左侧标签一行、右侧可能两行，给标签预留两行高度让输入框对齐 */
+.eco-label-badge {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6b5fa0;
+  background: #f2eefb;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: none;
+}
+.eco-label-badge.is-muted {
+  color: #827a96;
+  background: #f3f2f7;
+}
 .eco-grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 14px;
   align-items: start;
-}
-.eco-field-pair > label {
-  min-height: 2.8em;
 }
 @media (max-width: 560px) {
   .eco-grid-2 {
     grid-template-columns: 1fr;
   }
-  .eco-field-pair > label {
-    min-height: 0;
-  }
 }
-
-.eco-field > input {
-  height: 38px;
+.eco-field input:not([type='checkbox']):not([type='radio']) {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
   border-radius: 10px;
   border: 1px solid #dfd9ef;
-  padding: 0 12px;
+  padding: 0 13px;
   font-size: 13px;
   background: #fff;
   color: #1f1b2e;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
-
-.eco-field > input:focus,
-.eco-field > textarea:focus {
+.eco-field input.is-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+}
+.eco-field input:disabled {
+  background: #f5f3fa;
+  color: #867e9c;
+  cursor: not-allowed;
+}
+.eco-field input:not([type='checkbox']):not([type='radio']):hover:not(:disabled),
+.eco-field textarea:hover:not(:disabled) {
+  border-color: #c8bce8;
+}
+.eco-field input:not([type='checkbox']):not([type='radio']):focus,
+.eco-field textarea:focus {
   border-color: #7657d9;
   box-shadow: 0 0 0 3px rgba(118, 87, 217, 0.12);
 }
-
-.eco-field > textarea {
+.eco-field textarea {
+  width: 100%;
+  min-width: 0;
   border-radius: 10px;
   border: 1px solid #dfd9ef;
-  padding: 10px 12px;
+  padding: 11px 13px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.65;
   background: #fff;
   color: #1f1b2e;
   outline: none;
   resize: vertical;
+  box-sizing: border-box;
   font-family: inherit;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-
-.eco-field > small {
+.eco-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eco-input-row input {
+  flex: 1;
+}
+.eco-input-row .subtle-button {
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex: none;
+}
+.eco-field > small,
+.eco-hint {
   font-size: 12px;
   color: #7b7490;
-  line-height: 1.5;
+  line-height: 1.55;
 }
-
 .eco-form-foot {
   display: flex;
   justify-content: flex-end;

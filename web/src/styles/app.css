@@ -650,13 +650,14 @@
 .svc-field input[type="number"],
 .svc-field input[type="password"],
 .svc-field select,
+.svc-field .zy-select,
 .svc-env-row input[type="text"],
 .svc-env-row input[type="password"] {
-  height: 36px;
+  height: 38px;
   padding: 0 12px;
-  border-radius: 9px;
-  border: 1px solid #e2dce9;
-  background: #fcfbfe;
+  border-radius: 10px;
+  border: 1px solid #dfd9ef;
+  background: #fff;
   color: #1c182e;
   font-size: 13px;
   min-width: 0;
@@ -666,11 +667,13 @@
 }
 .svc-field input:focus,
 .svc-field select:focus,
+.svc-field .zy-select:focus-visible,
+.svc-field .zy-select.open,
 .svc-env-row input:focus {
   outline: none;
   background: #fff;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+  border-color: #7657d9;
+  box-shadow: 0 0 0 3px rgba(118, 87, 217, 0.12);
 }
 .svc-field input.is-mono,
 .svc-env-row input.is-mono {
@@ -2107,7 +2110,8 @@ body.studio-mode,.studio-shell,.studio-main.main-workspace,.studio-header{backgr
 .zy-select.open .zy-select-caret{transform:rotate(180deg)}
 .zy-select.compact{border-color:transparent;background:transparent;height:28px;padding:0 6px 0 8px;color:#6b6679}
 .zy-select.compact:hover:not(:disabled){background:#f4f2f8;border-color:transparent}
-.zy-select.field{width:100%;height:38px;font-size:13px;background:#fcfaff;border-color:#e6deef}
+.zy-select.field{width:100%;height:38px;border-radius:10px;padding:0 12px;font-size:13px;background:#fff;border-color:#dfd9ef;color:#1c182e}
+.zy-select.field:hover:not(:disabled){border-color:#c4b8e6}
 .zy-select.block{display:flex;width:100%;margin-bottom:12px}
 .zy-select-list{position:fixed;z-index:400;list-style:none;margin:0;padding:6px;max-height:320px;overflow:auto;background:#fff;border:1px solid #efecf5;border-radius:12px;box-shadow:0 12px 40px #2a1d4a24,0 1px 3px #2a1d4a14;animation:rise .12s;font-size:13px;color:#33313f}
 .zy-select-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;white-space:nowrap}
@@ -2421,13 +2425,33 @@ a.skill-chip{text-decoration:none}
 .code-save-error.code-save-warn{color:var(--st-warn);background:var(--st-warn-soft)}
 
 /* 弹窗和说明文字统一用中性墨色（与工作台一致），替换早期原型的浅粉紫，保证对比度 */
-.modal{background:#fff;border-color:#e8e4f0;box-shadow:0 24px 80px #1f1c2924}
-.modal>header .overline{color:#8c859e}
-.modal h2{color:#1f1c29;font-weight:600}
-.modal>header>.icon-button{color:#8c859e}
-.modal>header>.icon-button:hover{color:#1f1c29;background:#f3f1f8}
-.modal>footer{background:#faf9fd;border-color:#ece8f4}
-.modal .field-label,.field-label{color:#5e586e;font-weight:500}
+.modal{background:#fff;border:1px solid #e8e4f0;border-radius:18px;box-shadow:0 24px 72px rgba(24,18,46,.16),0 2px 8px rgba(24,18,46,.05)}
+.modal>header{padding:20px 26px 16px;border-bottom:1px solid #f2eff8;align-items:center}
+.modal>header .overline{display:block;font-size:11px;font-weight:600;color:#7657d9;letter-spacing:.6px;margin-bottom:2px}
+.modal h2{color:#1b162c;font-size:17px;font-weight:650;margin:0;letter-spacing:-.2px;line-height:1.35}
+.modal>header>.icon-button{color:#8c859e;width:30px;height:30px;border-radius:9px;align-self:center;transition:background .15s,color .15s}
+.modal>header>.icon-button:hover{color:#1f1c29;background:#f3f0fa}
+.modal-body{padding:20px 26px 22px}
+.modal>footer{padding:14px 26px;background:#faf9fd;border-top:1px solid #efecf7;align-items:center;gap:10px}
+.modal>footer button{height:36px;padding:0 16px;font-size:13px;border-radius:10px}
+.modal.modal-form{width:min(580px,calc(100vw - 32px))}
+.modal .field-label,.field-label{color:#3c3550;font-weight:600;font-size:12.5px}
+.text-input{width:100%;min-height:38px;padding:8px 12px;border:1px solid #dfd9ef;border-radius:10px;background:#fff;color:#1f1b2e;font:inherit;font-size:13.5px;outline:none;transition:border-color .15s,box-shadow .15s}
+.text-input:hover:not(:disabled){border-color:#c7bce6}
+.text-input:focus{border-color:#7657d9;box-shadow:0 0 0 3px rgba(118,87,217,.12)}
+.text-input::placeholder{color:#a098b3;opacity:1}
+.ws-memory-input{flex:1;min-width:0;height:38px;border-radius:10px;border:1px solid #dfd9ef;padding:0 12px;font-size:13px;background:#fff;color:#1f1b2e;outline:none;transition:border-color .15s,box-shadow .15s}
+.ws-memory-input:hover{border-color:#c7bce6}
+.ws-memory-input:focus{border-color:#7657d9;box-shadow:0 0 0 3px rgba(118,87,217,.12)}
+.ws-memory-input::placeholder{color:#a098b3}
+.access-note-btn{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;margin:-4px -8px;border-radius:7px;font-size:12.5px;color:#3c3550;background:transparent;border:1px solid transparent;cursor:pointer;max-width:240px;transition:background .14s,border-color .14s,color .14s}
+.access-note-btn>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.access-note-btn>.icon{width:12px;height:12px;flex:none;opacity:0;color:#7657d9;transition:opacity .14s}
+.access-note-btn:hover{background:#f7f5fc;border-color:#e5dff5}
+.access-note-btn:hover>.icon{opacity:1}
+.access-note-btn.is-empty{color:#a098b3}
+.access-note-btn.is-empty:hover{color:#5e46bd}
+.access-note-inline{width:100%;min-width:140px;max-width:240px;height:30px;padding:0 9px;border-radius:8px;border:1px solid #7657d9;background:#fff;color:#1f1b2e;font-size:12.5px;outline:none;box-shadow:0 0 0 3px rgba(118,87,217,.12)}
 .copy-field>span{color:#5e586e}
 .modal-body>h3.center{color:#1f1c29}
 .muted-note,.modal .muted-note,.login-copy{color:#6c667d}
@@ -2544,29 +2568,38 @@ a.skill-chip{text-decoration:none}
 /* 人员管理（登录白名单）：过滤工具栏、添加弹窗、角色标记 */
 .access-toolbar{display:flex;align-items:center;gap:12px;margin:12px 0 14px}
 .access-filter{flex:1;max-width:420px}
-.access-filter-input,.access-search-input{height:36px;font-size:12px;padding:0 12px;color:#1f1c29;border:1px solid #e3e6eb;border-radius:9px;background:#fff}
+.access-filter-input,.access-search-input{height:38px;font-size:13px;padding:0 12px;color:#1f1b2e;border:1px solid #dfd9ef;border-radius:10px;background:#fff;outline:none;transition:border-color .15s,box-shadow .15s}
+.access-filter-input:hover,.access-search-input:hover{border-color:#c7bce6}
 .access-filter-input{min-width:240px}
-/* 输入框聚焦只把边框稍微加深，不用紫色 */
-.field:focus-visible,.field input:focus-visible{outline:none;box-shadow:none;border-color:#b49ce8}
-.access-filter-input:focus-visible,.access-search-input:focus-visible{border-color:#9aa3af;outline:none;box-shadow:none}
+.field:focus-visible,.field input:focus-visible,.access-filter-input:focus,.access-search-input:focus,.access-paste:focus{outline:none;border-color:#7657d9;box-shadow:0 0 0 3px rgba(118,87,217,.12)}
 .access-role.is-admin{color:#5a3fbf;border-color:#d3c6f5;background:#f4effe}
-.access-add-modal .modal-body{display:flex;flex-direction:column;gap:10px}
-.access-add-tabs{display:flex;gap:8px}
-.access-add-tabs>button{flex:1;padding:8px;border-radius:9px;background:#f6f3fb;color:#6f6885;font-size:12px;cursor:pointer}
-.access-add-tabs>button.active{background:#ece5fb;color:#5b3fc0;font-weight:600}
-.access-results{list-style:none;margin:0;padding:0;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:4px}
-.access-result{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;border:1px solid #efecf5;cursor:pointer;font-size:12px}
-.access-result.on{border-color:#c9b6f0;background:#f7f3fe}
-.access-result-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.access-add-modal{width:min(520px,calc(100vw - 32px))}
+.access-add-modal .modal-body{display:flex;flex-direction:column;gap:14px}
+.access-add-tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:12px;background:#f2eefb;border:1px solid #e7e1f6}
+.access-add-tabs>button{height:34px;padding:0 12px;border-radius:9px;background:transparent;color:#665e7e;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+.access-add-tabs>button.active{background:#fff;color:#1d1830;font-weight:600;box-shadow:0 1px 4px rgba(31,24,58,.08)}
+.access-results{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:5px}
+.access-result{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;border:1px solid #efecf5;cursor:pointer;font-size:12.5px;transition:border-color .15s,background .15s}
+.access-result:hover{border-color:#d8cdf4;background:#faf8ff}
+.access-result.on{border-color:#8b6be6;background:#f5f0ff}
+.access-result-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:#221c35}
 .access-result code{color:#6c667d;font-size:12px}
-.access-result input{accent-color:#6f52d4;width:14px;height:14px}
-.access-selected{font-size:12px;color:#5e586e;line-height:1.8;overflow-wrap:anywhere}
-.access-add-count{flex:1;font-size:12px;color:#6c667d;text-align:left}
-.access-role-row{display:flex;align-items:center;gap:8px;font-size:12px;color:#5e586e;border-top:1px solid #f0edf5;padding-top:12px}
-.access-role-row>button{padding:6px 14px;border-radius:8px;background:#f6f3fb;color:#6f6885;font-size:12px;cursor:pointer}
-.access-role-row>button.active{background:#ece5fb;color:#5b3fc0;font-weight:600}
-.access-paste{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.8;width:100%}
-.access-raw-add{align-self:flex-start;font-size:12px}
+.access-result input{accent-color:#6f52d4;width:15px;height:15px}
+.access-selected{font-size:12px;color:#5e586e;line-height:1.7;overflow-wrap:anywhere;margin:0;padding:8px 12px;border-radius:9px;background:#f7f4fd;border:1px solid #eae3fa}
+.access-add-count{flex:1;font-size:12.5px;color:#6c667d;text-align:left;font-weight:500}
+.access-meta-group{display:flex;flex-direction:column;gap:12px;border-top:1px solid #f0edf7;padding-top:14px}
+.access-note-field{display:flex;flex-direction:column;gap:6px}
+.access-note-field>span{font-size:12.5px;font-weight:600;color:#352e4a;display:flex;align-items:center;justify-content:space-between}
+.access-note-field>span small{font-weight:400;font-size:11.5px;color:#8a839e}
+.access-note-field>input{height:38px;border-radius:10px;border:1px solid #dfd9ef;padding:0 12px;font-size:13px;background:#fff;color:#1f1c29;outline:none;transition:border-color .15s,box-shadow .15s}
+.access-note-field>input:focus{border-color:#7657d9;box-shadow:0 0 0 3px rgba(118,87,217,.12)}
+.access-role-row{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12.5px;color:#352e4a;font-weight:600}
+.access-role-seg{display:inline-grid;grid-template-columns:1fr 1fr;gap:4px;padding:3px;border-radius:10px;background:#f2eefb;border:1px solid #e7e1f6}
+.access-role-seg>button{height:30px;padding:0 16px;border-radius:7px;background:transparent;color:#665e7e;font-size:12.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+.access-role-seg>button.active{background:#fff;color:#5a3fbf;font-weight:600;box-shadow:0 1px 3px rgba(31,24,58,.08)}
+.access-paste{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.7;width:100%;padding:10px 12px;border-radius:10px;border:1px solid #dfd9ef;background:#fff;color:#1f1c29}
+.access-paste:focus{border-color:#7657d9;box-shadow:0 0 0 3px rgba(118,87,217,.12);outline:none}
+.access-raw-add{align-self:flex-start;font-size:12.5px}
 
 /* 无平台权限的友好引导（分步提示，代替生硬的 403 错误文案） */
 .login-denied{margin:18px 0;padding:18px 20px;border:1px solid #e8e2f3;border-radius:14px;background:#faf8fd}

@@ -9,6 +9,7 @@ import { fmtDate, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { DashEmptyBox } from './DashboardCharts';
 import { Modal } from './Modal';
+import { Select } from './Select';
 
 const CATEGORIES = [
   { value: 'limits', label: '资源限制' },
@@ -193,20 +194,16 @@ export function AdminKnowledgePanel() {
                 placeholder="如：资源限制"
               />
             </label>
-            <label className="svc-field">
+            <div className="svc-field">
               <span>分类</span>
-              <select
+              <Select
+                ariaLabel="知识库文档分类"
+                className="field"
                 value={editing.category ?? 'guide'}
-                onChange={(e) => setEditing({ ...editing, category: e.target.value })}
-                style={{ height: 38, borderRadius: 10, border: '1px solid #e2dcf0', padding: '0 10px', background: '#fff' }}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(v) => setEditing({ ...editing, category: v })}
+                options={CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+              />
+            </div>
             <label className="svc-field">
               <span>标识 slug</span>
               <input
@@ -443,29 +440,20 @@ export function AdminKnowledgePanel() {
         </div>
       )}
 
-      {/* 快速预览弹窗 */}
+      {/* 快速预览弹窗（Editorial 无套框沉浸阅读体验） */}
       {previewing ? (
-        <Modal title={`文档预览 · ${previewing.title}`} onClose={() => setPreviewing(null)} wide>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, color: '#6b6380' }}>
-              <span className={`gov-kb-cat is-${previewing.category}`}>
-                {CATEGORIES.find((c) => c.value === previewing.category)?.label ?? previewing.category}
-              </span>
-              <code className="gov-kb-slug">{previewing.slug}</code>
-              <span>最近更新：{fmtShortStamp(previewing.updatedAt)}</span>
-              <span>操作人：{previewing.updatedBy || 'system'}</span>
-            </div>
-            {previewing.summary ? (
-              <p className="muted-note" style={{ margin: 0, background: '#f8f6fc', padding: '8px 12px', borderRadius: 8 }}>
-                {previewing.summary}
-              </p>
-            ) : null}
-            <div
-              className="gov-kb-preview-box"
-              style={{ maxHeight: 460 }}
-              dangerouslySetInnerHTML={{ __html: renderPreviewMd(previewing.contentMd) }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <Modal
+          overline="知识库文档预览"
+          title={previewing.title}
+          onClose={() => setPreviewing(null)}
+          wide
+          className="kb-preview-modal"
+          footer={
+            <>
+              <span className="kb-preview-foot-hint">编辑保存后实时同步「帮助文档」抽屉与「小织」知识上下文</span>
+              <button type="button" className="subtle-button" onClick={() => setPreviewing(null)}>
+                关闭
+              </button>
               <button
                 type="button"
                 className="primary-button"
@@ -475,9 +463,36 @@ export function AdminKnowledgePanel() {
                   setEditing(target);
                 }}
               >
-                编辑此条目
+                <Icon name="edit" /> 编辑此条目
               </button>
+            </>
+          }
+        >
+          <div className="kb-preview-meta-bar">
+            <div className="kb-preview-meta-left">
+              <span className={`gov-kb-cat is-${previewing.category}`}>
+                {CATEGORIES.find((c) => c.value === previewing.category)?.label ?? previewing.category}
+              </span>
+              <code className="gov-kb-slug">{previewing.slug}</code>
+              <span className="kb-preview-dot" aria-hidden="true">·</span>
+              <span>更新于 {fmtShortStamp(previewing.updatedAt)}</span>
+              <span className="kb-preview-dot" aria-hidden="true">·</span>
+              <span>维护人 {previewing.updatedBy || 'system'}</span>
             </div>
+            <div className="kb-preview-meta-right">
+              {previewing.forDocs ? <span className="gov-kb-chip is-doc on">帮助文档</span> : null}
+              {previewing.forBot ? <span className="gov-kb-chip is-bot on">小织知识</span> : null}
+              <span className={`gov-kb-chip is-live ${previewing.enabled ? 'on' : ''}`}>
+                {previewing.enabled ? '已启用' : '已停用'}
+              </span>
+            </div>
+          </div>
+          <div className="kb-preview-scroll">
+            {previewing.summary ? <p className="kb-preview-abstract">{previewing.summary}</p> : null}
+            <article
+              className="kb-preview-article"
+              dangerouslySetInnerHTML={{ __html: renderPreviewMd(previewing.contentMd) }}
+            />
           </div>
         </Modal>
       ) : null}

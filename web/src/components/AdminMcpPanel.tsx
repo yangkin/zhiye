@@ -228,6 +228,8 @@ export function AdminMcpPanel() {
       {addOpen ? (
         <Modal
           title="登记企业 MCP 服务"
+          overline="平台 MCP 治理"
+          className="eco-modal"
           onClose={() => setAddOpen(false)}
           footer={
             <>
@@ -243,21 +245,65 @@ export function AdminMcpPanel() {
             </>
           }
         >
-          <label className="field-label">服务标识（英文小写）</label>
-          <input className="text-input" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
-          <label className="field-label" style={{ marginTop: 10 }}>显示名称</label>
-          <input className="text-input" placeholder="如 华星 GitLab 研发知识 MCP" value={name} onChange={(e) => setName(e.target.value)} />
-          <label className="field-label" style={{ marginTop: 10 }}>服务地址（Streamable HTTP / JSON-RPC 2.0 Endpoint URL）</label>
-          <input className="text-input" placeholder="https://mcp.internal.example/mcp" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
-          <label className="field-label" style={{ marginTop: 10 }}>鉴权请求头 / 密钥（可选，AES-256-GCM 加密存储）</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input className="text-input" style={{ width: 150 }} value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
-            <input className="text-input" type="password" placeholder="Bearer xxx" value={secret} onChange={(e) => setSecret(e.target.value)} />
+          <div className="eco-form">
+            <div className="eco-grid-2">
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>服务标识 *</label>
+                  <span className="eco-label-badge">英文小写</span>
+                </div>
+                <input className="mono" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
+              </div>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>显示名称 *</label>
+                </div>
+                <input placeholder="如 华星 GitLab 研发知识 MCP" value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="eco-field">
+              <div className="eco-label-row">
+                <label>服务地址 *</label>
+                <span className="eco-label-badge">Streamable HTTP / JSON-RPC 2.0</span>
+              </div>
+              <input className="mono" placeholder="https://mcp.internal.example/mcp" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
+            </div>
+
+            <div className="eco-fieldset">
+              <div className="eco-fieldset-title">鉴权与工具暴露</div>
+              <div className="eco-grid-2">
+                <div className="eco-field">
+                  <div className="eco-label-row">
+                    <label>鉴权请求头</label>
+                    <span className="eco-label-badge">可选</span>
+                  </div>
+                  <input className="mono" placeholder="Authorization" value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
+                </div>
+                <div className="eco-field">
+                  <div className="eco-label-row">
+                    <label>鉴权密钥</label>
+                    <span className="eco-label-badge">AES-256-GCM 加密</span>
+                  </div>
+                  <input type="password" placeholder="Bearer xxx" value={secret} onChange={(e) => setSecret(e.target.value)} />
+                </div>
+              </div>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>服务说明</label>
+                  <span className="eco-label-badge">帮助 AI 判断调用时机</span>
+                </div>
+                <input placeholder="告诉编码智能体何时调用此 MCP" value={description} onChange={(e) => setDescription(e.target.value)} />
+              </div>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>开放工具列表</label>
+                  <span className="eco-label-badge">每行：工具名: 说明</span>
+                </div>
+                <textarea className="mono" rows={3} value={toolsText} onChange={(e) => setToolsText(e.target.value)} />
+              </div>
+            </div>
           </div>
-          <label className="field-label" style={{ marginTop: 10 }}>服务说明</label>
-          <input className="text-input" placeholder="告诉编码智能体何时调用此 MCP" value={description} onChange={(e) => setDescription(e.target.value)} />
-          <label className="field-label" style={{ marginTop: 10 }}>开放工具列表（每行格式：工具名: 说明）</label>
-          <textarea className="text-input" rows={3} value={toolsText} onChange={(e) => setToolsText(e.target.value)} />
         </Modal>
       ) : null}
     </div>

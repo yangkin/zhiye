@@ -529,19 +529,34 @@ function FeishuConnectorModal({
   };
 
   return (
-    <Modal title={isEdit ? '编辑飞书连接器' : '添加飞书连接器'} onClose={onClose}>
+    <Modal
+      overline="飞书生态连接器"
+      title={isEdit ? '编辑飞书连接器' : '添加飞书连接器'}
+      className="eco-modal"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="subtle-button" onClick={onClose}>取消</button>
+          <button type="button" className="primary-button" disabled={saving || !name.trim()} onClick={() => void handleSave()}>
+            {saving ? '保存中…' : isEdit ? '保存修改' : '保存连接器'}
+          </button>
+        </>
+      }
+    >
       <div className="eco-form">
-        <div className="svc-seg" role="tablist">
+        <div className="eco-seg" role="tablist" aria-label="飞书连接器类型">
           <button type="button" role="tab" aria-selected={kind === 'feishu_bot'} className={kind === 'feishu_bot' ? 'active' : ''} onClick={() => setKind('feishu_bot')}>
-            飞书群机器人（发卡片/告警）
+            飞书群机器人 · 发卡片 / 告警
           </button>
           <button type="button" role="tab" aria-selected={kind === 'feishu_bitable'} className={kind === 'feishu_bitable' ? 'active' : ''} onClick={() => setKind('feishu_bitable')}>
-            飞书多维表格（同步读写）
+            飞书多维表格 · 同步读写
           </button>
         </div>
 
         <div className="eco-field">
-          <label>连接器名称</label>
+          <div className="eco-label-row">
+            <label>连接器名称</label>
+          </div>
           <input
             type="text"
             placeholder={kind === 'feishu_bot' ? '例如：研发产线告警群机器人' : '例如：设备点检台账多维表格'}
@@ -551,72 +566,86 @@ function FeishuConnectorModal({
         </div>
 
         {kind === 'feishu_bot' ? (
-          <>
+          <div className="eco-fieldset">
+            <span className="eco-fieldset-title">机器人连接与安全校验</span>
             <div className="eco-field">
-              <label>飞书群机器人 Webhook 地址</label>
+              <div className="eco-label-row">
+                <label>Webhook 地址</label>
+                <span className="eco-label-badge">AES-256 加密托管</span>
+              </div>
               <input
                 type="text"
+                className="is-mono"
                 placeholder={
                   isEdit && existing?.hasSecrets
-                    ? '已加密保存，留空保持不变，粘贴新 Webhook 可替换'
+                    ? '已加密保存，留空保持不变，粘贴新地址可替换'
                     : 'https://open.feishu.cn/open-apis/bot/v2/hook/...'
                 }
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
               />
-              <small>在飞书群右上角「设置 → 群机器人 → 添加自定义机器人」中复制 Webhook 地址；密钥将使用 AES-256 加密托管在当前工作空间。</small>
+              <small>在飞书群右上角「设置 → 群机器人 → 添加自定义机器人」中复制 Webhook 地址。</small>
             </div>
             <div className="eco-field">
-              <label>签名校验 Secret（可选）</label>
+              <div className="eco-label-row">
+                <label>签名校验 Secret</label>
+                <span className="eco-label-badge is-muted">可选</span>
+              </div>
               <input
                 type="password"
+                className="is-mono"
                 placeholder={isEdit && existing?.hasSecrets ? '留空保持原有签名密钥不变' : '若飞书机器人开启了签名校验，请在此填入密钥'}
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
               />
             </div>
-          </>
+          </div>
         ) : (
-          <>
+          <div className="eco-fieldset">
+            <span className="eco-fieldset-title">多维表格地址与自建应用凭证</span>
             <div className="eco-field">
-              <label>飞书多维表格链接</label>
+              <div className="eco-label-row">
+                <label>飞书多维表格链接</label>
+                <span className="eco-label-badge">自动解析参数</span>
+              </div>
               <input
                 type="text"
-                placeholder="直接粘贴浏览器地址栏链接 https://xxx.feishu.cn/base/...?table=..."
+                className="is-mono"
+                placeholder="https://xxx.feishu.cn/base/...?table=..."
                 value={bitableUrl}
                 onChange={(e) => setBitableUrl(e.target.value)}
               />
-              <small>系统会自动从链接中解析 appToken 与 tableId，无需手动拆分参数。</small>
+              <small>直接粘贴浏览器地址栏链接，系统会自动解析 appToken 与 tableId。</small>
             </div>
             <div className="eco-grid-2">
-              <div className="eco-field eco-field-pair">
-                <label>飞书自建应用 App ID</label>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>飞书 App ID</label>
+                </div>
                 <input
                   type="text"
+                  className="is-mono"
                   placeholder="cli_xxxxxxxx"
                   value={appId}
                   onChange={(e) => setAppId(e.target.value)}
                 />
               </div>
-              <div className="eco-field eco-field-pair">
-                <label>飞书应用 App Secret（加密托管）</label>
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>飞书 App Secret</label>
+                  <span className="eco-label-badge">加密托管</span>
+                </div>
                 <input
                   type="password"
+                  className="is-mono"
                   placeholder={isEdit && existing?.hasSecrets ? '留空保持原有密钥不变' : '填入 App Secret'}
                   value={appSecret}
                   onChange={(e) => setAppSecret(e.target.value)}
                 />
               </div>
             </div>
-          </>
+          </div>
         )}
-
-        <div className="eco-form-foot">
-          <button type="button" className="subtle-button" onClick={onClose}>取消</button>
-          <button type="button" className="primary-button" disabled={saving || !name.trim()} onClick={() => void handleSave()}>
-            {saving ? '保存中…' : isEdit ? '保存修改' : '保存连接器'}
-          </button>
-        </div>
       </div>
     </Modal>
   );
@@ -709,12 +738,30 @@ function McpServerModal({
   };
 
   return (
-    <Modal title={isEdit ? '编辑知识库 / MCP 服务' : '添加知识库 / MCP 服务'} onClose={onClose}>
+    <Modal
+      overline="企业知识与工具扩展"
+      title={isEdit ? '编辑知识库 / MCP 服务' : '添加知识库 / MCP 服务'}
+      className="eco-modal"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="subtle-button" onClick={onClose}>取消</button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={saving || !name.trim() || (mode === 'knowledge' ? !knowledgeContent.trim() : !endpointUrl.trim())}
+            onClick={() => void handleSave()}
+          >
+            {saving ? '保存中…' : isEdit ? '保存修改' : mode === 'knowledge' ? '保存知识库' : '保存 MCP 服务'}
+          </button>
+        </>
+      }
+    >
       <div className="eco-form">
         {!isEdit ? (
-          <div className="svc-seg" role="tablist">
+          <div className="eco-seg" role="tablist" aria-label="知识库或 MCP 类型">
             <button type="button" role="tab" aria-selected={mode === 'knowledge'} className={mode === 'knowledge' ? 'active' : ''} onClick={() => setMode('knowledge')}>
-              团队知识库（粘贴规范 / 文档）
+              团队知识库 · 规范 / 文档
             </button>
             <button type="button" role="tab" aria-selected={mode === 'http'} className={mode === 'http' ? 'active' : ''} onClick={() => setMode('http')}>
               远端 HTTP MCP 服务
@@ -723,7 +770,9 @@ function McpServerModal({
         ) : null}
 
         <div className="eco-field">
-          <label>名称</label>
+          <div className="eco-label-row">
+            <label>名称</label>
+          </div>
           <input
             type="text"
             placeholder={mode === 'knowledge' ? '例如：产线良率指标口径与 8D 审批规范' : '例如：Context7 官方文档 MCP / DeepWiki MCP'}
@@ -733,7 +782,10 @@ function McpServerModal({
         </div>
 
         <div className="eco-field">
-          <label>一句话说明（可选，帮助 AI 判断何时查阅）</label>
+          <div className="eco-label-row">
+            <label>一句话说明</label>
+            <span className="eco-label-badge is-muted">可选 · 帮助 AI 判断查阅时机</span>
+          </div>
           <input
             type="text"
             placeholder={mode === 'knowledge' ? '例如：包含良率公式、告警阈值、审批角色与字段命名规范' : '例如：实时检索最新开源库文档与 GitHub 仓库源码解析'}
@@ -744,23 +796,30 @@ function McpServerModal({
 
         {mode === 'knowledge' ? (
           <div className="eco-field">
-            <label>知识库内容（支持 Markdown / 纯文本，按空行分段检索）</label>
+            <div className="eco-label-row">
+              <label>知识库内容</label>
+              <span className="eco-label-badge">Markdown / 按空行分段检索</span>
+            </div>
             <textarea
-              rows={7}
+              rows={8}
               placeholder="直接粘贴业务规则、接口字段字典、审批流转规则或设计规范，保存后会自动生成 search_knowledge 检索工具供 AI 编码时实时调用…"
               value={knowledgeContent}
               onChange={(e) => setKnowledgeContent(e.target.value)}
             />
           </div>
         ) : (
-          <>
+          <div className="eco-fieldset">
+            <span className="eco-fieldset-title">远端连接与工具发现</span>
             <div className="eco-field">
-              <label>MCP Endpoint 地址（支持标准 Streamable HTTP / JSON-RPC 2.0）</label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="eco-label-row">
+                <label>MCP Endpoint 地址</label>
+                <span className="eco-label-badge">Streamable HTTP / JSON-RPC 2.0</span>
+              </div>
+              <div className="eco-input-row">
                 <input
                   type="text"
-                  style={{ flex: 1 }}
-                  placeholder="https://mcp.context7.com/mcp 或 https://mcp.deepwiki.com/mcp"
+                  className="is-mono"
+                  placeholder="https://mcp.context7.com/mcp"
                   value={endpointUrl}
                   onChange={(e) => setEndpointUrl(e.target.value)}
                 />
@@ -768,23 +827,31 @@ function McpServerModal({
                   {discovering ? '探测中…' : '自动拉取工具'}
                 </button>
               </div>
-              <small>支持公开或内网 Streamable HTTP MCP（自动兼容 application/json 与 text/event-stream），点「自动拉取工具」可直连发现全部工具。</small>
+              <small>兼容 application/json 与 text/event-stream，点「自动拉取工具」可直连探测全部可用工具。</small>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="eco-grid-2">
               <div className="eco-field">
-                <label>服务标识（{isEdit ? '创建后不可改' : '可选，自动生成'}）</label>
+                <div className="eco-label-row">
+                  <label>服务标识</label>
+                  <span className="eco-label-badge is-muted">{isEdit ? '不可修改' : '可选'}</span>
+                </div>
                 <input
                   type="text"
+                  className="is-mono"
                   disabled={isEdit}
-                  placeholder="如 context7-mcp"
+                  placeholder="留空自动生成，如 context7-mcp"
                   value={serverKey}
                   onChange={(e) => setServerKey(e.target.value)}
                 />
               </div>
               <div className="eco-field">
-                <label>鉴权 Token（可选，加密保存）</label>
+                <div className="eco-label-row">
+                  <label>鉴权 Token</label>
+                  <span className="eco-label-badge">加密保存</span>
+                </div>
                 <input
                   type="password"
+                  className="is-mono"
                   placeholder={isEdit && existing?.hasSecret ? '留空保持原有密钥不变' : 'Bearer xxx（公开 MCP 留空）'}
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
@@ -792,28 +859,20 @@ function McpServerModal({
               </div>
             </div>
             <div className="eco-field">
-              <label>暴露工具名（逗号分隔；留空时保存会自动向远端拉取）</label>
+              <div className="eco-label-row">
+                <label>暴露工具名</label>
+                <span className="eco-label-badge is-muted">逗号分隔 · 留空保存时自动探测</span>
+              </div>
               <input
                 type="text"
-                placeholder="例如：resolve-library-id, query-docs（留空自动探测）"
+                className="is-mono"
+                placeholder="例如：resolve-library-id, query-docs"
                 value={toolNames}
                 onChange={(e) => setToolNames(e.target.value)}
               />
             </div>
-          </>
+          </div>
         )}
-
-        <div className="eco-form-foot">
-          <button type="button" className="subtle-button" onClick={onClose}>取消</button>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={saving || !name.trim() || (mode === 'knowledge' ? !knowledgeContent.trim() : !endpointUrl.trim())}
-            onClick={() => void handleSave()}
-          >
-            {saving ? '保存中…' : isEdit ? '保存修改' : mode === 'knowledge' ? '保存知识库' : '保存 MCP 服务'}
-          </button>
-        </div>
       </div>
     </Modal>
   );

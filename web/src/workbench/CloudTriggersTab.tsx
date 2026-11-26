@@ -4,6 +4,7 @@ import { api, errorMessage } from '../api/client';
 import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
+import { Select } from '../components/Select';
 
 const CRON_PRESETS: Array<{ label: string; expr: string }> = [
   { label: '每天早上 09:00', expr: '0 9 * * *' },
@@ -159,71 +160,86 @@ export function CloudTriggersTab({
       </div>
 
       {/* 新建触发器表单 */}
-      <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--line, #e2e8f0)', background: 'var(--bg-subtle, #f8fafc)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
+      <div style={{ padding: 16, borderRadius: 14, border: '1px solid #ece8f5', background: '#faf9fd', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 10 }}>
           <input
             type="text"
             placeholder="规则名称（如：异常工单飞书告警）"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}
+            style={{ width: '100%', minWidth: 0, height: 38, borderRadius: 10, padding: '0 12px', border: '1px solid #dfd9ef', background: '#fff', fontSize: 13, color: '#1f1b2e', boxSizing: 'border-box' }}
           />
-          <select value={kind} onChange={(e) => setKind(e.target.value as 'cron' | 'db_insert' | 'db_update' | 'webhook')} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}>
-            {!isService ? <option value="db_insert">有新记录提交时</option> : null}
-            {!isService ? <option value="db_update">记录状态更新时</option> : null}
-            <option value="cron">按定时周期触发</option>
-            <option value="webhook">外部系统 Webhook 触发</option>
-          </select>
+          <Select
+            ariaLabel="触发方式"
+            className="field"
+            value={kind}
+            onChange={(v) => setKind(v)}
+            options={[
+              ...(!isService ? [{ value: 'db_insert' as const, label: '有新记录提交时' }, { value: 'db_update' as const, label: '记录状态更新时' }] : []),
+              { value: 'cron' as const, label: '按定时周期触发' },
+              { value: 'webhook' as const, label: '外部系统 Webhook 触发' },
+            ]}
+          />
           {kind === 'cron' ? (
             <div style={{ display: 'flex', gap: 6, minWidth: 0 }}>
-              <select
-                value={cronPreset}
-                onChange={(e) => setCronPreset(e.target.value)}
-                style={{ flex: 1, minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}
-              >
-                {CRON_PRESETS.map((p) => (
-                  <option key={p.expr} value={p.expr}>{p.label}</option>
-                ))}
-              </select>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Select
+                  ariaLabel="定时周期"
+                  className="field"
+                  value={cronPreset}
+                  onChange={(v) => setCronPreset(v)}
+                  options={CRON_PRESETS.map((p) => ({ value: p.expr, label: p.label }))}
+                />
+              </div>
               {cronPreset === '__custom__' ? (
                 <input
                   type="text"
                   value={customCron}
                   onChange={(e) => setCustomCron(e.target.value)}
                   placeholder="0 9 * * *"
-                  style={{ width: 100, flexShrink: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontFamily: 'var(--font-mono, monospace)', fontSize: 12, boxSizing: 'border-box' }}
+                  style={{ width: 104, flexShrink: 0, height: 38, borderRadius: 10, padding: '0 10px', border: '1px solid #dfd9ef', background: '#fff', fontFamily: 'var(--font-mono, monospace)', fontSize: 12, boxSizing: 'border-box' }}
                 />
               ) : null}
             </div>
           ) : kind === 'db_insert' || kind === 'db_update' ? (
-            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
+            <input type="text" value={tableName} onChange={(e) => setTableName(e.target.value)} placeholder={tableNames[0] || '监听表名'} style={{ width: '100%', minWidth: 0, height: 38, borderRadius: 10, padding: '0 12px', border: '1px solid #dfd9ef', background: '#fff', fontSize: 13, color: '#1f1b2e', boxSizing: 'border-box' }} />
           ) : (
-            <span style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center', minWidth: 0 }}>自动签发 HMAC 签名密钥</span>
+            <span style={{ fontSize: 12, color: '#6b6380', alignSelf: 'center', minWidth: 0 }}>自动签发 HMAC 签名密钥</span>
           )}
           {!isService ? (
-            <select value={actionType} onChange={(e) => setActionType(e.target.value as 'feishu_card' | 'cloud_function')} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }}>
-              <option value="feishu_card">推送飞书交互卡片</option>
-              <option value="cloud_function">执行云函数</option>
-            </select>
+            <Select
+              ariaLabel="触发动作"
+              className="field"
+              value={actionType}
+              onChange={(v) => setActionType(v)}
+              options={[
+                { value: 'feishu_card', label: '推送飞书交互卡片' },
+                { value: 'cloud_function', label: '执行云函数' },
+              ]}
+            />
           ) : null}
         </div>
 
         {isService || actionType === 'feishu_card' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, alignItems: 'center' }}>
-            <select value={effectiveConnectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12, boxSizing: 'border-box' }}>
-              {connectors.length === 0 ? <option value="">请先在「生态」页添加飞书机器人</option> : null}
-              {connectors.map((c) => (
-                <option key={String(c.id)} value={String(c.id)}>
-                  {String(c.name)}
-                </option>
-              ))}
-            </select>
-            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
-            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="正文支持 {{event}} / {{table}} / {{payload}}" style={{ width: '100%', minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 10, alignItems: 'center' }}>
+            <Select
+              ariaLabel="飞书连接器"
+              className="field"
+              value={effectiveConnectorId}
+              onChange={(v) => setConnectorId(v)}
+              placeholder="请先在「生态」页添加飞书机器人"
+              options={
+                connectors.length === 0
+                  ? [{ value: '', label: '请先在「生态」页添加飞书机器人' }]
+                  : connectors.map((c) => ({ value: String(c.id), label: String(c.name) }))
+              }
+            />
+            <input type="text" value={cardTitle} onChange={(e) => setCardTitle(e.target.value)} placeholder="飞书卡片标题" style={{ width: '100%', minWidth: 0, height: 38, borderRadius: 10, padding: '0 12px', border: '1px solid #dfd9ef', background: '#fff', fontSize: 13, color: '#1f1b2e', boxSizing: 'border-box' }} />
+            <input type="text" value={cardContent} onChange={(e) => setCardContent(e.target.value)} placeholder="正文支持 {{event}} / {{table}} / {{payload}}" style={{ width: '100%', minWidth: 0, height: 38, borderRadius: 10, padding: '0 12px', border: '1px solid #dfd9ef', background: '#fff', fontSize: 13, color: '#1f1b2e', boxSizing: 'border-box' }} />
           </div>
         ) : (
           <div style={{ display: 'flex', gap: 8 }}>
-            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, minWidth: 0, height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12.5, boxSizing: 'border-box' }} />
+            <input type="text" value={functionName} onChange={(e) => setFunctionName(e.target.value)} placeholder="云函数名（不含 .ts，如 notify_feishu）" style={{ flex: 1, minWidth: 0, height: 38, borderRadius: 10, padding: '0 12px', border: '1px solid #dfd9ef', background: '#fff', fontSize: 13, color: '#1f1b2e', boxSizing: 'border-box' }} />
           </div>
         )}
 

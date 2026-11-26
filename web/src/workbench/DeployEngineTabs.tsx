@@ -5,6 +5,7 @@ import type { ServiceDbQueryResult } from '../api/types';
 import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
+import { Select } from '../components/Select';
 
 /** 在线 PostgreSQL 表浏览与受控 SQL 执行控制台（严格隔离至本应用专属 Schema 与最小权限角色）。 */
 export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: boolean }) {
@@ -271,24 +272,36 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
         </div>
 
         <div className="svc-grid-4">
-          <label className="svc-field">
+          <div className="svc-field">
             <span>代码托管平台</span>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-              <option value="gitlab">企业 GitLab</option>
-              <option value="github">GitHub</option>
-            </select>
-          </label>
+            <Select
+              ariaLabel="代码托管平台"
+              className="field"
+              value={provider}
+              onChange={(v) => setProvider(v)}
+              options={[
+                { value: 'gitlab', label: '企业 GitLab' },
+                { value: 'github', label: 'GitHub' },
+              ]}
+            />
+          </div>
           <label className="svc-field">
             <span>监听分支</span>
             <input type="text" className="is-mono" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
           </label>
-          <label className="svc-field">
+          <div className="svc-field">
             <span>目标部署槽位</span>
-            <select value={deploySlot} onChange={(e) => setDeploySlot(e.target.value)}>
-              <option value="preview">预览槽位（零影响线上）</option>
-              <option value="live">线上槽位（蓝绿零停机切流）</option>
-            </select>
-          </label>
+            <Select
+              ariaLabel="目标部署槽位"
+              className="field"
+              value={deploySlot}
+              onChange={(v) => setDeploySlot(v)}
+              options={[
+                { value: 'preview', label: '预览槽位', hint: '零影响线上' },
+                { value: 'live', label: '线上槽位', hint: '蓝绿零停机切流' },
+              ]}
+            />
+          </div>
           <label className="svc-field">
             <span>Webhook 密钥（留空自动生成）</span>
             <input
