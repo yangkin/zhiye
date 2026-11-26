@@ -78,7 +78,10 @@ public class ServiceDatabaseService {
                     jdbc.sql("alter role " + candidateRole + " with login password '" + candidatePass
                             + "' nosuperuser nocreatedb nocreaterole noinherit").update();
                 }
-                // 仅授予本应用专属 Schema 读写与建表权限，并隔离 search_path，阻止跨应用与平台库越权访问
+                // 仅授予本应用专属 Schema 读写与建表权限，显式回收 public Schema 权限并隔离 search_path，阻止跨应用与平台库越权访问
+                try {
+                    jdbc.sql("revoke all on schema public from " + candidateRole).update();
+                } catch (Exception ignored) {}
                 jdbc.sql("grant usage, create on schema " + schema + " to " + candidateRole).update();
                 jdbc.sql("alter default privileges in schema " + schema + " grant all on tables to " + candidateRole).update();
                 jdbc.sql("alter default privileges in schema " + schema + " grant all on sequences to " + candidateRole).update();
@@ -153,10 +156,84 @@ public class ServiceDatabaseService {
     }
 
     private static final Pattern DANGEROUS_SQL_RE = Pattern.compile(
-            "(?i)\\b(drop\\s+schema|create\\s+schema|alter\\s+role|create\\s+role|drop\\s+role|set\\s+role|reset\\s+role|set\\s+session|grant\\b|revoke\\b|copy\\b|pg_read_file|pg_ls_dir|lo_import|lo_export)\\b");
+            "(?i)\\b(drop\\s+schema|create\\s+schema|alter\\s+schema|alter\\s+role|create\\s+role|drop\\s+role|set\\s+role|reset\\s+role|set\\s+session|set\\s+local|set\\s+search_path|reset\\s+search_path|grant\\b|revoke\\b|copy\\b|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|pg_sleep|pg_terminate_backend|pg_cancel_backend|pg_shadow|pg_authid|pg_stat_activity|lo_import|lo_export|lo_unlink|dblink)\\b|(?i)\\bpg_catalog\\s*\\.");
+
+    /** 剥离 SQL 行注释 (-- ...) 与块注释 (/* ... *\/)，保留单引号字符串字面量，防止注释绕过只读/危险词检查。 */
+    static String stripSqlComments(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        StringBuilder out = new StringBuilder(raw.length());
+        int n = raw.length();
+        boolean inSingle = false;
+        for (int i = 0; i < n; i++) {
+            char c = raw.charAt(i);
+            if (inSingle) {
+                out.append(c);
+                if (c == '\'') {
+                    if (i + 1 < n && raw.charAt(i + 1) == '\'') {
+                        out.append(raw.charAt(++i));
+                    } else {
+                        inSingle = false;
+                    }
+                }
+                continue;
+            }
+            if (c == '\'') {
+                inSingle = true;
+                out.append(c);
+            } else if (c == '-' && i + 1 < n && raw.charAt(i + 1) == '-') {
+                i += 2;
+                while (i < n && raw.charAt(i) != '\n') i++;
+                out.append(' ');
+            } else if (c == '/' && i + 1 < n && raw.charAt(i + 1) == '*') {
+                i += 2;
+                int depth = 1;
+                while (i < n && depth > 0) {
+                    if (raw.charAt(i) == '/' && i + 1 < n && raw.charAt(i + 1) == '*') {
+                        depth++;
+                        i += 2;
+                    } else if (raw.charAt(i) == '*' && i + 1 < n && raw.charAt(i + 1) == '/') {
+                        depth--;
+                        i += 2;
+                    } else {
+                        i++;
+                    }
+                }
+                i--;
+                out.append(' ');
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString().trim();
+    }
+
+    /** 只读表数据安全预览（供应用创建者免写 SQL 查看表数据，校验表名归属当前 Schema，上限 50 行、5s 超时）。 */
+    public java.util.Map<String, Object> previewTable(String schema, String role, String passwordEnc,
+                                                      String tableName, int maxRows) {
+        if (schema == null || !SAFE_IDENT.matcher(schema).matches()) {
+            throw ApiException.validation("该应用尚未初始化托管 PostgreSQL Schema");
+        }
+        if (tableName == null || tableName.isBlank() || tableName.length() > 128) {
+            throw ApiException.validation("表名不能为空");
+        }
+        boolean exists = jdbc.sql("""
+                select exists(
+                  select 1 from information_schema.tables
+                   where table_schema = ? and table_name = ? and table_type in ('BASE TABLE', 'VIEW')
+                )
+                """).params(schema, tableName).query(Boolean.class).single();
+        if (!exists) {
+            throw ApiException.notFound("数据表");
+        }
+        int limit = Math.max(1, Math.min(maxRows <= 0 ? 50 : maxRows, 100));
+        String quotedSchema = "\"" + schema.replace("\"", "\"\"") + "\"";
+        String quotedTable = "\"" + tableName.replace("\"", "\"\"") + "\"";
+        String sql = "SELECT * FROM " + quotedSchema + "." + quotedTable + " LIMIT " + limit;
+        return executeScopedSql(schema, role, passwordEnc, sql, false, limit);
+    }
 
     /**
-     * 在应用专属最小权限 PG 角色与隔离 Schema 上执行受控 SQL（内置 5s 超时 + 单语句防护 + 权限内核级隔离）。
+     * 在应用专属最小权限 PG 角色与隔离 Schema 上执行受控 SQL（内置 5s 超时 + 单语句防护 + 注释剥离 + 权限内核级隔离）。
      */
     public java.util.Map<String, Object> executeScopedSql(String schema, String role, String passwordEnc,
                                                           String rawSql, boolean allowWrite, int maxRows) {
@@ -170,12 +247,15 @@ public class ServiceDatabaseService {
         while (sql.endsWith(";")) sql = sql.substring(0, sql.length() - 1).trim();
         if (sql.isEmpty()) throw ApiException.validation("SQL 语句不能为空");
         if (sql.length() > 8000) throw ApiException.validation("单次 SQL 长度不能超过 8000 字符");
-        if (sql.contains(";")) throw ApiException.validation("为保障安全，每次仅允许执行单条 SQL 语句");
-        if (DANGEROUS_SQL_RE.matcher(sql).find()) {
-            throw ApiException.validation("安全拦截：禁止执行跨 Schema、角色提权或文件读写语句");
+        String cleaned = stripSqlComments(sql);
+        while (cleaned.endsWith(";")) cleaned = cleaned.substring(0, cleaned.length() - 1).trim();
+        if (cleaned.isEmpty()) throw ApiException.validation("SQL 语句不能为空");
+        if (cleaned.contains(";")) throw ApiException.validation("为保障安全，每次仅允许执行单条 SQL 语句");
+        if (DANGEROUS_SQL_RE.matcher(cleaned).find()) {
+            throw ApiException.validation("安全拦截：禁止执行跨 Schema、角色提权、系统目录探测或文件读写语句");
         }
         if (!allowWrite) {
-            String upper = sql.toUpperCase(java.util.Locale.ROOT);
+            String upper = cleaned.toUpperCase(java.util.Locale.ROOT);
             if (!(upper.startsWith("SELECT") || upper.startsWith("WITH") || upper.startsWith("EXPLAIN") || upper.startsWith("SHOW"))) {
                 throw ApiException.validation("当前为只读查询模式，仅允许 SELECT / WITH / EXPLAIN；如需写入请勾选「允许写入」");
             }

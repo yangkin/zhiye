@@ -5,10 +5,10 @@ import type { AppDetail, MonolithEnvVar } from '../api/types';
 import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
-import { ServiceCicdTopologyTab, ServiceDbTab } from './DeployEngineTabs';
+import { ServiceDbTab } from './DeployEngineTabs';
 import { CloudTriggersTab } from './CloudTriggersTab';
 
-type SubTab = 'config' | 'env' | 'logs' | 'db' | 'triggers' | 'cicd' | 'dockerfile';
+type SubTab = 'config' | 'env' | 'logs' | 'db' | 'triggers' | 'dockerfile';
 type LogView = 'runtime' | 'build' | 'sse' | 'releases';
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
@@ -495,7 +495,6 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
             ['logs', '日志与发布回滚', 'terminal'],
             ['db', 'PostgreSQL 控制台', 'database'],
             ['triggers', '自动化与飞书通知', 'spark'],
-            ['cicd', 'CI/CD 与多服务拓扑', 'globe'],
             ['dockerfile', 'Dockerfile', 'code'],
           ] as const
         ).map(([k, label, icon]) => (
@@ -538,7 +537,11 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
                     />
                     <em>TCP</em>
                   </div>
-                  {portErr ? <small style={{ color: '#dc2626', fontSize: 11.5 }}>{portErr}</small> : null}
+                  {portErr ? (
+                    <small style={{ color: '#dc2626', fontSize: 11.5 }}>{portErr}</small>
+                  ) : (
+                    <small style={{ color: '#6b647d', fontSize: 11.5 }}>容器内独立端口，应用间隔离不冲突；本地托管自动分配空闲端口注入 PORT</small>
+                  )}
                 </label>
                 <label className="svc-field">
                   <span>健康检查路径</span>
@@ -1141,8 +1144,6 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
           <ServiceDbTab appId={app.id} pgEnabled={!!svc?.pgEnabled} />
         ) : sub === 'triggers' ? (
           <CloudTriggersTab appId={app.id} tableNames={[]} mode="service" />
-        ) : sub === 'cicd' ? (
-          <ServiceCicdTopologyTab appId={app.id} />
         ) : (
           <div className="svc-logs-shell">
             <div className="svc-code-window is-tall">

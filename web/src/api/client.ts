@@ -628,6 +628,10 @@ export const api = {
     request<import('./types').ServiceMetrics>(`/api/apps/${enc(appId)}/service/metrics`),
   serviceDbTables: (appId: string) =>
     request<import('./types').ServiceDbTables>(`/api/apps/${enc(appId)}/service/db/tables`),
+  serviceDbPreview: (appId: string, table: string, limit = 50) =>
+    request<import('./types').ServiceDbQueryResult>(
+      `/api/apps/${enc(appId)}/service/db/tables/${enc(table)}/preview?limit=${limit}`,
+    ),
   serviceDbQuery: (appId: string, sql: string, allowWrite = false, limit = 100) =>
     request<import('./types').ServiceDbQueryResult>(`/api/apps/${enc(appId)}/service/db/query`, {
       method: 'POST',

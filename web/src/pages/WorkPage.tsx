@@ -24,6 +24,7 @@ export function WorkPage() {
   const like = useLikeWork();
   const use = useUseWork();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [nudge, setNudge] = useState(false);
   const vp = usePreviewViewport('auto');
 
   if (isLoading) return <LoadingState label="正在打开作品…" />;
@@ -43,7 +44,7 @@ export function WorkPage() {
       toast(errorMessage(err), 'error');
     }
   };
-  const visit = t.siteUrl ?? t.previewUrl;
+  const liveSiteUrl = t.siteUrl || null;
 
   return (
     <div className="work-page">
@@ -53,7 +54,8 @@ export function WorkPage() {
             <i />
             <i />
             <i />
-            <span>{t.siteUrl ? t.siteUrl.replace(/^https?:\/\//, '') : '页面快照 · 不含真实数据'}</span>
+            <span>{liveSiteUrl ? liveSiteUrl.replace(/^https?:\/\//, '') : '只读演示快照 · 复刻后可交互'}</span>
+            {t.previewUrl ? <span className="work-readonly-pill">仅限预览</span> : null}
             {t.previewUrl ? (
               <div className="work-device-bar">
                 {vp.isScaled ? (
@@ -75,8 +77,8 @@ export function WorkPage() {
                 />
               </div>
             ) : null}
-            {t.previewUrl ? (
-              <a className="icon-button" href={t.previewUrl} target="_blank" rel="noreferrer" aria-label="新窗口打开预览" title="新窗口打开">
+            {liveSiteUrl ? (
+              <a className="icon-button" href={liveSiteUrl} target="_blank" rel="noreferrer" aria-label="新窗口打开已上线站点" title="新窗口打开已上线站点">
                 <Icon name="expand" />
               </a>
             ) : null}
@@ -86,8 +88,39 @@ export function WorkPage() {
               ref={vp.stageRef}
               className={`work-browser-stage ${vp.isConstrained ? 'is-constrained-desktop' : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
             >
-              <div className="preview-viewport-shell" style={vp.shellStyle}>
-                <iframe src={t.previewUrl} style={vp.frameStyle} title={`${t.name} 预览`} sandbox="allow-scripts allow-forms allow-popups" />
+              <div className="preview-viewport-shell work-preview-shell" style={vp.shellStyle}>
+                <iframe src={t.previewUrl} style={vp.frameStyle} title={`${t.name} 只读预览`} sandbox="allow-scripts" />
+                <div
+                  className="work-readonly-shield"
+                  role="button"
+                  tabIndex={0}
+                  aria-label="演示预览仅供查看，点击使用模板复刻到自己的应用"
+                  onClick={() => setNudge(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setNudge(true);
+                    }
+                  }}
+                >
+                  {nudge ? (
+                    <div className="work-readonly-toast" onClick={(e) => e.stopPropagation()}>
+                      <Icon name="lock" />
+                      <span>社区预览仅供查看效果，请先复刻到自己的应用后再交互使用</span>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={use.busy === t.id}
+                        onClick={() => void use.run(t)}
+                      >
+                        {use.busy === t.id ? '正在创建…' : '使用模板'}
+                      </button>
+                      <button type="button" className="icon-button" aria-label="关闭提示" onClick={() => setNudge(false)}>
+                        <Icon name="close" />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           ) : (
@@ -129,13 +162,14 @@ export function WorkPage() {
           <button className="primary-button" disabled={use.busy === t.id} onClick={() => void use.run(t)}>
             {use.busy === t.id ? '正在创建…' : '使用模板'}
           </button>
-          <button className="subtle-button" disabled={!visit} onClick={() => visit && window.open(visit, '_blank', 'noopener')}>
-            去访问
-          </button>
+          {liveSiteUrl ? (
+            <button className="subtle-button" onClick={() => window.open(liveSiteUrl, '_blank', 'noopener')}>
+              去访问线上站
+            </button>
+          ) : null}
         </div>
         <small className="work-note">
-          「使用模板」会复刻一份到你的应用里（含页面和表结构，不带作者的数据），之后随便改。
-          {t.siteUrl ? '' : ' 作者没有上线这个应用，「去访问」打开的是页面快照。'}
+          左侧预览为只读展示快照，不可直接操作；点击「使用模板」会复刻一份到你的应用里（含页面与表结构，不含作者数据），之后可完整体验与修改。
         </small>
         {t.mine ? (
           <button className="text-button danger work-remove" onClick={() => setConfirmDelete(true)}>

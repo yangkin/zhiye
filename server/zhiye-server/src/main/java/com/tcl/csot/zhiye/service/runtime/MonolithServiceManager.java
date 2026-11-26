@@ -924,6 +924,16 @@ public class MonolithServiceManager {
         return m;
     }
 
+    /** 只读数据表预览（仅允许本应用专属 Schema 下的真实表，上限 50 行，免写 SQL）。 */
+    public Map<String, Object> previewDbTable(String ws, String appId, String tableName, int limit) {
+        AppRow app = requireServiceApp(ws, appId);
+        ServiceRow s = find(app.id()).orElseThrow(() -> ApiException.notFound("单体服务配置"));
+        if (!s.pgEnabled()) {
+            throw ApiException.validation("请先在「运行与存储配置」开启并保存「托管 PostgreSQL Schema」");
+        }
+        return dbService.previewTable(s.pgSchema(), s.pgRole(), s.pgPasswordEnc(), tableName, limit);
+    }
+
     /** 在线 PostgreSQL 受控 SQL 查询（使用该应用专属最小权限 PG 角色执行，内核级隔离）。 */
     public Map<String, Object> queryDb(String ws, String appId, String sql, boolean allowWrite, int limit) {
         AppRow app = requireServiceApp(ws, appId);

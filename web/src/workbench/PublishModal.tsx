@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, errorMessage, type AccessLevel } from '../api/client';
@@ -14,37 +14,9 @@ import {
 } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText, fmtTime } from '../lib/format';
-import { encodeQrMatrix } from '../lib/qr';
 import { toast } from '../lib/store';
 import { Modal } from '../components/Modal';
 import { ACCESS_OPTIONS, AccessForm, type AccessFormState } from './CloudConsole';
-
-function QrPreview({ value, size = 104 }: { value: string; size?: number }) {
-  const matrix = useMemo(() => encodeQrMatrix(value), [value]);
-  if (!matrix) return null;
-  const n = matrix.length;
-  const quiet = 2;
-  const total = n + quiet * 2;
-  const cells: string[] = [];
-  for (let r = 0; r < n; r++) {
-    for (let c = 0; c < n; c++) {
-      if (matrix[r][c]) cells.push(`M${c + quiet},${r + quiet}h1v1h-1z`);
-    }
-  }
-  return (
-    <svg
-      className="publish-qr-svg"
-      width={size}
-      height={size}
-      viewBox={`0 0 ${total} ${total}`}
-      role="img"
-      aria-label="站点访问二维码"
-    >
-      <rect width={total} height={total} fill="#ffffff" rx="1.5" />
-      <path d={cells.join('')} fill="#1f1a2d" />
-    </svg>
-  );
-}
 
 export function formatChineseDate(iso: string | null | undefined): string {
   if (!iso) return '— 年 — 月 — 日';
@@ -358,9 +330,8 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
           </button>
         </div>
         <div className="publish-share-card">
-          <QrPreview value={siteUrl} size={92} />
           <div className="publish-share-info">
-            <b>直接发到飞书群或让同事扫码打开</b>
+            <b>直接发到飞书群分享给同事</b>
             <p>已附带应用名称、访问范围说明和直达链接，粘贴即用。</p>
             <button
               type="button"
@@ -758,11 +729,10 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
 
       {app.siteUrl ? (
         <div className="publish-share-card">
-          <QrPreview value={app.siteUrl} size={76} />
           <div className="publish-share-info">
             <b>当前已上线版本地址（审核期间线上保持可访问）</b>
-            <p>同事扫码或复制直达链接即可打开当前线上版本。</p>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <p>复制直达链接或飞书话术即可分享当前线上版本。</p>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="subtle-button"

@@ -72,5 +72,20 @@ class AskAttachmentsTest {
         assertThat(AskAttachments.extract("note.md", "text/markdown", "# 标题\n正文".getBytes(StandardCharsets.UTF_8))).contains("# 标题");
         // 读不了的格式返回 null，由调用方决定提示语
         assertThat(AskAttachments.extract("a.zip", "application/zip", "x".getBytes(StandardCharsets.UTF_8))).isNull();
+
+        // 结构化 Excel / CSV 数据画像验证
+        String csv = "\uFEFF厂区,产线,良率,产出片数\nT1,Array-1,98.5%,1200\nT1,Array-2,97.2%,1100\nT2,Cell-1,99.1%,1450\n";
+        String cp = AskAttachments.extract("fab_yield.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+        assertThat(cp).contains("数据行 3 行 × 4 列")
+                .contains("`厂区` [分类维度]").contains("T1(2)")
+                .contains("`产出片数` [数值]").contains("sum=3750.00")
+                .contains("T2\tCell-1\t99.1%\t1450");
+
+        byte[] multiSheetXlsx = zip(Map.of(
+                "xl/workbook.xml", "<workbook><sheets><sheet name=\"良率明细\" sheetId=\"1\"/></sheets></workbook>",
+                "xl/sharedStrings.xml", "<sst><si><t>产线</t></si><si><t>良率</t></si><si><t>T11-L1</t></si></sst>",
+                "xl/worksheets/sheet1.xml", "<sheetData><row><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row><row><c r=\"A2\" t=\"s\"><v>2</v></c><c r=\"B2\"><v>98.45</v></c></row></sheetData>"));
+        String xp = AskAttachments.extract("yield.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", multiSheetXlsx);
+        assertThat(xp).contains("工作表「良率明细」").contains("数据行 1 行 × 2 列").contains("`良率` [数值]").contains("T11-L1\t98.45");
     }
 }

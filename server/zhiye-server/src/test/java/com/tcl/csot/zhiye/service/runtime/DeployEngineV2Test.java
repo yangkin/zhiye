@@ -122,6 +122,10 @@ class DeployEngineV2Test {
         assertEquals("ENV_MISSING", diagnosisService.diagnose("connect ECONNREFUSED 127.0.0.1:5432 DATABASE_URL missing", "", "", "node", 8080, "/").category());
         assertEquals("BUILD_SYNTAX_ERROR", diagnosisService.diagnose("SyntaxError: Unexpected token '}'", "", "", "node", 8080, "/").category());
         assertEquals("PORT_BIND_ERROR", diagnosisService.diagnose("服务启动失败或监听端口超时（PORT=50123）", "", "", "node", 8080, "/health").category());
+        assertEquals("PORT_IN_USE", diagnosisService.diagnose("Error: listen EADDRINUSE: address already in use :::3000", "", "", "node", 8080, "/health").category());
+        // SQL 注释剥离防绕过验证
+        assertEquals("DELETE FROM t", ServiceDatabaseService.stripSqlComments("/* SELECT 1 */ -- SELECT\nDELETE FROM t"));
+        assertEquals("SELECT '-- not comment'", ServiceDatabaseService.stripSqlComments("SELECT '-- not comment' -- trailing"));
     }
 
     @Test

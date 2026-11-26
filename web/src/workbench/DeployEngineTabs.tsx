@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
+import { useMeta } from '../api/queries';
 import type { ServiceDbQueryResult } from '../api/types';
 import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
 import { Select } from '../components/Select';
 
-/** 在线 PostgreSQL 表浏览与受控 SQL 执行控制台（严格隔离至本应用专属 Schema 与最小权限角色）。 */
+/** 在线 PostgreSQL 表浏览、安全只读预览与管理员受控 SQL 控制台（严格隔离至本应用专属 Schema 与最小权限角色）。 */
 export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: boolean }) {
+  const { data: meta } = useMeta();
+  const isAdmin = Boolean(meta?.auth?.admin);
+  const [selectedTable, setSelectedTable] = useState<string>('');
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewErr, setPreviewErr] = useState('');
+  const [previewRes, setPreviewRes] = useState<ServiceDbQueryResult | null>(null);
+
   const [sql, setSql] = useState('SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position LIMIT 50');
   const [allowWrite, setAllowWrite] = useState(false);
   const [running, setRunning] = useState(false);
@@ -20,6 +28,22 @@ export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: b
     queryFn: () => api.serviceDbTables(appId),
   });
 
+  const loadPreview = async (tableName: string) => {
+    setSelectedTable(tableName);
+    setPreviewBusy(true);
+    setPreviewErr('');
+    if (isAdmin) setSql(`SELECT * FROM "${tableName}" LIMIT 50`);
+    try {
+      const r = await api.serviceDbPreview(appId, tableName, 50);
+      setPreviewRes(r);
+    } catch (e) {
+      setPreviewErr(errorMessage(e));
+      setPreviewRes(null);
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
   const runSql = async () => {
     if (!sql.trim() || running) return;
     setRunning(true);
@@ -27,7 +51,10 @@ export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: b
     try {
       const r = await api.serviceDbQuery(appId, sql, allowWrite, 100);
       setResult(r);
-      if (allowWrite) void tablesQ.refetch();
+      if (allowWrite) {
+        void tablesQ.refetch();
+        if (selectedTable) void loadPreview(selectedTable);
+      }
     } catch (e) {
       setErr(errorMessage(e));
       setResult(null);
@@ -51,15 +78,16 @@ export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: b
   }
 
   const tables = tablesQ.data?.tables ?? [];
+  const activeTableMeta = tables.find((t) => t.name === selectedTable) ?? null;
 
   return (
     <div className="svc-config-stack">
       <section className="svc-section-card">
         <div className="svc-section-head">
           <div>
-            <h4>隔离 PostgreSQL Schema 表浏览</h4>
+            <h4>隔离 PostgreSQL Schema 表浏览与只读预览</h4>
             <p>
-              当前 Schema：<code>{tablesQ.data?.schema || '初始化中'}</code> · 隔离角色：<code>{tablesQ.data?.role || '—'}</code>（内核级限制，无法访问平台其他库表）
+              当前 Schema：<code>{tablesQ.data?.schema || '初始化中'}</code> · 隔离角色：<code>{tablesQ.data?.role || '—'}</code>（内核级限制，无法访问平台其他库表与 public Schema）
             </p>
           </div>
           <button type="button" className="subtle-button" onClick={() => void tablesQ.refetch()}>
@@ -68,102 +96,165 @@ export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: b
         </div>
 
         {tables.length === 0 ? (
-          <p className="svc-footer-hint">当前 Schema 下暂无数据表；可在下方勾选「允许写入」执行 CREATE TABLE 或启动应用自动建表。</p>
+          <p className="svc-footer-hint">当前 Schema 下暂无数据表；应用首次启动后会自动建表并展示在此处。</p>
         ) : (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {tables.map((t) => (
-              <button
-                key={t.name}
-                type="button"
-                className="subtle-button"
-                style={{ fontSize: 12, padding: '6px 10px' }}
-                onClick={() => setSql(`SELECT * FROM "${t.name}" LIMIT 50`)}
-                title={`列：${t.columns.map((c) => `${c.name}:${c.type}`).join(', ')}`}
-              >
-                <Icon name="database" />
-                <span>{t.name}</span>
-                <span style={{ opacity: 0.65, fontSize: 11 }}>({t.columns.length}列 · ~{t.estimatedRows}行)</span>
-              </button>
-            ))}
+            {tables.map((t) => {
+              const active = selectedTable === t.name;
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  className={active ? 'primary-button' : 'subtle-button'}
+                  style={{ fontSize: 12, padding: '6px 12px', height: 32, borderRadius: 9 }}
+                  onClick={() => void loadPreview(t.name)}
+                  title={`点击只读预览数据 · 列：${t.columns.map((c) => `${c.name}:${c.type}`).join(', ')}`}
+                >
+                  <Icon name="database" />
+                  <span>{t.name}</span>
+                  <span style={{ opacity: 0.72, fontSize: 11 }}>({t.columns.length}列 · ~{t.estimatedRows}行)</span>
+                </button>
+              );
+            })}
           </div>
         )}
-      </section>
 
-      <section className="svc-section-card">
-        <div className="svc-section-head">
-          <div>
-            <h4>受控 SQL 控制台</h4>
-            <p>默认只读模式（5 秒查询超时，单次最多返回 100 行）；危险提权 / 跨 Schema 语句将被强拦截。</p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
-              <input type="checkbox" checked={allowWrite} onChange={(e) => setAllowWrite(e.target.checked)} />
-              允许写入 (DDL/DML)
-            </label>
-            <button type="button" className="primary-button" disabled={running || !sql.trim()} onClick={() => void runSql()}>
-              <Icon name="play" /> {running ? '执行中…' : '执行 SQL'}
-            </button>
-          </div>
-        </div>
-
-        <textarea
-          value={sql}
-          onChange={(e) => setSql(e.target.value)}
-          rows={4}
-          spellCheck={false}
-          style={{
-            width: '100%',
-            fontFamily: 'var(--font-mono, monospace)',
-            fontSize: 12.5,
-            padding: 10,
-            borderRadius: 8,
-            border: '1px solid var(--line, #e2e8f0)',
-            background: 'var(--bg-subtle, #f8fafc)',
-            color: 'var(--ink, #0f172a)',
-            resize: 'vertical',
-          }}
-        />
-
-        {err ? (
-          <div className="svc-error-banner" role="alert" style={{ marginTop: 10 }}>
-            <pre>{err}</pre>
-          </div>
-        ) : null}
-
-        {result ? (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-              {result.kind === 'query'
-                ? `返回 ${result.rowCount ?? result.rows.length} 行 · 耗时 ${result.durationMs} ms`
-                : `执行成功 · 影响 ${result.affectedRows ?? 0} 行 · 耗时 ${result.durationMs} ms`}
-            </div>
-            {result.columns.length > 0 ? (
-              <div className="svc-release-table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
-                <table className="svc-release-table">
-                  <thead>
-                    <tr>
-                      {result.columns.map((c) => (
-                        <th key={c}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.rows.map((row, ri) => (
-                      <tr key={ri}>
-                        {result.columns.map((c) => (
-                          <td key={c} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
-                            {row[c] === null || row[c] === undefined ? <span style={{ opacity: 0.45 }}>NULL</span> : String(row[c])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {activeTableMeta ? (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #efecf7' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 10 }}>
+              <div style={{ fontSize: 12.5, color: '#3c3550' }}>
+                <b>{activeTableMeta.name}</b> 表结构（{activeTableMeta.columns.length} 列）与只读数据预览（前 50 行）
               </div>
+              <button type="button" className="subtle-button" style={{ height: 28, fontSize: 12, padding: '0 10px' }} disabled={previewBusy} onClick={() => void loadPreview(activeTableMeta.name)}>
+                <Icon name="refresh" className={previewBusy ? 'spinning' : ''} /> 刷新预览
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {activeTableMeta.columns.map((col) => (
+                <span key={col.name} style={{ fontSize: 11.5, padding: '2px 8px', borderRadius: 6, background: '#f5f2fc', color: '#4c3a8a', border: '1px solid #e6dff7', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                  {col.name} <em style={{ fontStyle: 'normal', opacity: 0.7 }}>{col.type}{col.nullable ? '' : ' NOT NULL'}</em>
+                </span>
+              ))}
+            </div>
+            {previewErr ? (
+              <div className="svc-error-banner" role="alert"><pre>{previewErr}</pre></div>
+            ) : previewBusy ? (
+              <p className="svc-footer-hint">正在读取表数据预览…</p>
+            ) : previewRes ? (
+              previewRes.rows.length === 0 ? (
+                <p className="svc-footer-hint">该表暂无数据记录（耗时 {previewRes.durationMs} ms）。</p>
+              ) : (
+                <div className="svc-release-table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
+                  <table className="svc-release-table">
+                    <thead>
+                      <tr>{previewRes.columns.map((c) => <th key={c}>{c}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {previewRes.rows.map((row, ri) => (
+                        <tr key={ri}>
+                          {previewRes.columns.map((c) => (
+                            <td key={c} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
+                              {row[c] === null || row[c] === undefined ? <span style={{ opacity: 0.45 }}>NULL</span> : String(row[c])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
             ) : null}
           </div>
         ) : null}
       </section>
+
+      {isAdmin ? (
+        <section className="svc-section-card">
+          <div className="svc-section-head">
+            <div>
+              <h4>受控 SQL 控制台 <span className="eco-label-badge" style={{ marginLeft: 6 }}>仅平台管理员可见 · 全程审计留痕</span></h4>
+              <p>默认只读模式（5 秒查询超时，单次最多返回 100 行）；所有执行均记录平台安全审计日志，危险提权 / 跨 Schema / 注释绕过语句将被强拦截。</p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={allowWrite} onChange={(e) => setAllowWrite(e.target.checked)} />
+                允许写入 (DDL/DML)
+              </label>
+              <button type="button" className="primary-button" disabled={running || !sql.trim()} onClick={() => void runSql()}>
+                <Icon name="play" /> {running ? '执行中…' : '执行 SQL'}
+              </button>
+            </div>
+          </div>
+
+          <textarea
+            value={sql}
+            onChange={(e) => setSql(e.target.value)}
+            rows={4}
+            spellCheck={false}
+            style={{
+              width: '100%',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: 12.5,
+              padding: 12,
+              borderRadius: 10,
+              border: '1px solid #dfd9ef',
+              background: '#ffffff',
+              color: '#1f1b2e',
+              resize: 'vertical',
+              outline: 'none',
+            }}
+          />
+
+          {err ? (
+            <div className="svc-error-banner" role="alert" style={{ marginTop: 10 }}>
+              <pre>{err}</pre>
+            </div>
+          ) : null}
+
+          {result ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
+                {result.kind === 'query'
+                  ? `返回 ${result.rowCount ?? result.rows.length} 行 · 耗时 ${result.durationMs} ms`
+                  : `执行成功 · 影响 ${result.affectedRows ?? 0} 行 · 耗时 ${result.durationMs} ms`}
+              </div>
+              {result.columns.length > 0 ? (
+                <div className="svc-release-table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
+                  <table className="svc-release-table">
+                    <thead>
+                      <tr>
+                        {result.columns.map((c) => (
+                          <th key={c}>{c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.rows.map((row, ri) => (
+                        <tr key={ri}>
+                          {result.columns.map((c) => (
+                            <td key={c} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>
+                              {row[c] === null || row[c] === undefined ? <span style={{ opacity: 0.45 }}>NULL</span> : String(row[c])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className="svc-section-card">
+          <div className="svc-section-head">
+            <div>
+              <h4>安全管控说明</h4>
+              <p>为保障共享数据库实例稳定性与数据安全，自由 SQL 执行（含写入模式）仅向平台管理员开放并全程记录审计日志。你可以点击上方任意数据表查看完整字段定义与只读数据预览。</p>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

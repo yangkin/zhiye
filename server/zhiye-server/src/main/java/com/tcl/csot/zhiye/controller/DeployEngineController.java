@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.tcl.csot.zhiye.entity.AppRow;
 import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.repository.AppRepository;
+import com.tcl.csot.zhiye.service.admin.AdminAuthService;
+import com.tcl.csot.zhiye.service.ops.OpsLogService;
 import com.tcl.csot.zhiye.service.runtime.DeployLogBroadcaster;
 import com.tcl.csot.zhiye.service.runtime.DeployOpsService;
 import com.tcl.csot.zhiye.service.runtime.MonolithServiceManager;
 import com.tcl.csot.zhiye.util.CurrentPrincipal;
 import com.tcl.csot.zhiye.util.Json;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -38,17 +41,23 @@ public class DeployEngineController {
     private final AppRepository apps;
     private final CurrentPrincipal principal;
     private final com.tcl.csot.zhiye.config.ZhiyeProperties props;
+    private final AdminAuthService adminAuth;
+    private final OpsLogService opsLogs;
 
     public DeployEngineController(MonolithServiceManager manager, DeployOpsService ops,
                                   DeployLogBroadcaster broadcaster, AppRepository apps,
                                   CurrentPrincipal principal,
-                                  com.tcl.csot.zhiye.config.ZhiyeProperties props) {
+                                  com.tcl.csot.zhiye.config.ZhiyeProperties props,
+                                  @org.springframework.beans.factory.annotation.Autowired(required = false) AdminAuthService adminAuth,
+                                  @org.springframework.beans.factory.annotation.Autowired(required = false) OpsLogService opsLogs) {
         this.manager = manager;
         this.ops = ops;
         this.broadcaster = broadcaster;
         this.apps = apps;
         this.principal = principal;
         this.props = props;
+        this.adminAuth = adminAuth;
+        this.opsLogs = opsLogs;
     }
 
     private String ws() { return principal.workspaceId(); }
@@ -97,19 +106,56 @@ public class DeployEngineController {
         return manager.metricsView(ws(), appId);
     }
 
-    // ---------- 在线 PostgreSQL SQL 控制台 ----------
+    // ---------- 在线 PostgreSQL 表浏览 / 只读预览 / 管理员受控 SQL 控制台 ----------
 
     @GetMapping("/api/apps/{appId}/service/db/tables")
     public Map<String, Object> dbTables(@PathVariable String appId) {
         return manager.listDbTables(ws(), appId);
     }
 
+    @GetMapping("/api/apps/{appId}/service/db/tables/{table}/preview")
+    public Map<String, Object> dbTablePreview(@PathVariable String appId,
+                                              @PathVariable String table,
+                                              @RequestParam(defaultValue = "50") int limit) {
+        return manager.previewDbTable(ws(), appId, table, limit);
+    }
+
     @PostMapping("/api/apps/{appId}/service/db/query")
-    public Map<String, Object> dbQuery(@PathVariable String appId, @RequestBody JsonNode body) {
+    public Map<String, Object> dbQuery(@PathVariable String appId,
+                                       @RequestBody JsonNode body,
+                                       HttpServletRequest req) {
+        if (adminAuth == null || !adminAuth.isAdmin(req, ws())) {
+            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "ADMIN_ONLY",
+                    "为保障共享数据库安全，自由 SQL 执行仅限平台管理员使用；普通用户请通过上方数据表进行结构浏览与只读预览");
+        }
+        String actor = adminAuth.requireAdminActor(req, ws());
         String sql = body == null ? "" : body.path("sql").asText("");
         boolean allowWrite = body != null && body.path("allowWrite").asBoolean(false);
         int limit = body == null ? 100 : body.path("limit").asInt(100);
-        return manager.queryDb(ws(), appId, sql, allowWrite, limit);
+        String sqlExcerpt = sql.length() > 500 ? sql.substring(0, 500) + "…" : sql;
+        try {
+            Map<String, Object> res = manager.queryDb(ws(), appId, sql, allowWrite, limit);
+            if (opsLogs != null) {
+                opsLogs.recordOpsAudit(actor, "SERVICE_DB_SQL", "app", appId, Map.of(
+                        "ok", true,
+                        "allowWrite", allowWrite,
+                        "schema", String.valueOf(res.getOrDefault("schema", "")),
+                        "durationMs", res.getOrDefault("durationMs", 0),
+                        "sql", sqlExcerpt
+                ));
+            }
+            return res;
+        } catch (RuntimeException e) {
+            if (opsLogs != null) {
+                opsLogs.recordOpsAudit(actor, "SERVICE_DB_SQL", "app", appId, Map.of(
+                        "ok", false,
+                        "allowWrite", allowWrite,
+                        "error", String.valueOf(e.getMessage()),
+                        "sql", sqlExcerpt
+                ));
+            }
+            throw e;
+        }
     }
 
     // ---------- 多服务声明式拓扑 zhiye.yaml ----------

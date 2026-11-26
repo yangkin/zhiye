@@ -236,16 +236,35 @@ public class ConversationService {
         List<JsonNode> history = requestedHistory(body);
         if (history == null) history = storedHistory(id);
 
-        // 消息里附带的素材：图片走视觉、文档提取文本，问答时能读
+        // 消息里附带的素材：本轮图片走视觉、文档提取文本；前序轮次上传的文档/表格保留结构化摘要持续有效
         List<String> assetIds = AskService.assetIds(body);
+        Set<String> currentAssetSet = new LinkedHashSet<>(assetIds);
+        List<String> earlierAssetIds = new ArrayList<>();
+        List<ConversationRepository.MessageRow> prevMessages = repo.messages(id);
+        for (int i = prevMessages.size() - 1; i >= 0; i--) {
+            JsonNode aids = prevMessages.get(i).assetIds();
+            if (aids != null && aids.isArray()) {
+                for (JsonNode n : aids) {
+                    if (n.isTextual()) {
+                        String aid = n.asText();
+                        if (!aid.isBlank() && !currentAssetSet.contains(aid) && !earlierAssetIds.contains(aid)) {
+                            earlierAssetIds.add(aid);
+                        }
+                    }
+                }
+            }
+        }
+        String historicalAssetsCtx = attachments.historicalContext(ws, earlierAssetIds);
         List<AskAttachments.Attached> attached = attachments.load(ws, assetIds);
         boolean firstUser = repo.userMessageCount(id) == 0;
         repo.insert(id, "user", content, null, assetIds);
         if (firstUser) repo.titleFromFirstUser(id, title(content));
         repo.touch(id);
         String type = body == null ? "" : body.path("type").asText("");
+        String sourceSummary = dataSources.conversationSummary(ws, sourceIds(conversation.sourceIds()));
+        String combinedContext = (sourceSummary == null ? "" : sourceSummary) + historicalAssetsCtx;
         return new Prepared(ws, id, content, skillAppIds, history, Catalog.TYPES.contains(type) ? type : null, attached,
-                dataSources.conversationSummary(ws, sourceIds(conversation.sourceIds())));
+                combinedContext);
     }
 
     /** 只有回答完整产生后才保存 assistant；会话已被删除时不写回。 */

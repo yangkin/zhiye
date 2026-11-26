@@ -10,6 +10,21 @@ import java.util.List;
 public final class Prompts {
     private Prompts() {}
 
+    private static void appendAssetSection(StringBuilder sb, List<String> assetPaths) {
+        if (assetPaths == null || assetPaths.isEmpty()) return;
+        sb.append("## 用户上传的素材（已放进项目）\n");
+        boolean hasSpreadsheet = false;
+        for (String p : assetPaths) {
+            sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
+            String lower = p.toLowerCase();
+            if (lower.endsWith(".xlsx") || lower.endsWith(".csv")) hasSpreadsheet = true;
+        }
+        if (hasSpreadsheet) {
+            sb.append("- **表格数据专项要求**：检测到用户上传了真实 `.xlsx`/`.csv` 数据文件，请先阅读内置技能 `excel-csv-to-dashboard`，全量解析 `public/assets/` 里的真实数据生成交互式看板（严禁用编造的假数据替换真实表格行），并在页面顶栏保留「导入新 Excel / CSV 刷新看板」入口。\n");
+        }
+        sb.append('\n');
+    }
+
     static String generate(AppRow app, List<String> assetPaths) {
         if (app.isSkill()) return generateSkill(app, assetPaths);
         if (app.isService()) return generateService(app, assetPaths);
@@ -23,11 +38,7 @@ public final class Prompts {
         if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
         sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
                 .append("。主色 ").append(st.accent()).append("，浅色背景 ").append(st.light()).append("。\n\n");
-        if (!assetPaths.isEmpty()) {
-            sb.append("## 用户上传的素材（已放进项目）\n");
-            for (String p : assetPaths) sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
-            sb.append('\n');
-        }
+        appendAssetSection(sb, assetPaths);
         sb.append(vue ? """
                 ## 交付要求
                 - 入口是 `src/App.vue`（`<script setup lang="ts">`），组件放在 `src/components/`；只修改 `src/`、`public/`、`index.html` 及需要的 `docs/`
@@ -63,11 +74,7 @@ public final class Prompts {
         if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
         sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
                 .append("。主色 ").append(st.accent()).append("，浅色背景 ").append(st.light()).append("。\n\n");
-        if (!assetPaths.isEmpty()) {
-            sb.append("## 用户上传的素材（已放进项目）\n");
-            for (String p : assetPaths) sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
-            sb.append('\n');
-        }
+        appendAssetSection(sb, assetPaths);
         sb.append("""
                 ## 工程交付原则（自主决策架构与流程）
                 - **先看工作区再决策**：先用 `find_files` 确认当前目录内容，按实际业务复杂度自主划分模块、API 契约与持久化方案（不要把业务数据只写死在前端内存里）。

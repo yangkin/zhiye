@@ -18,6 +18,7 @@ import { toast, useUi } from '../lib/store';
 import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
 import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt, useModelList } from '../components/ComposerPopovers';
 import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
+import { Modal } from '../components/Modal';
 import { loadDraft, saveDraft } from '../lib/drafts';
 
 interface CreateForm {
@@ -232,6 +233,10 @@ export function CreatePage() {
   const helpOpen = useUi((st) => st.helpOpen);
   const [domain, setDomain] = useState('全部');
   const [templateQuery, setTemplateQuery] = useState('');
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryDomain, setGalleryDomain] = useState('全部');
+  const [galleryType, setGalleryType] = useState<'全部' | AppType>('全部');
+  const [galleryQuery, setGalleryQuery] = useState('');
   useEffect(() => setDomain('全部'), [f.type, typeChosen]);
 
   const activeTemplates = useMemo(
@@ -246,6 +251,15 @@ export function CreatePage() {
     }
     return [...map.entries()].sort((a, b) => b[1] - a[1]);
   }, [activeTemplates]);
+  const allDomainCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of TEMPLATES) {
+      if (galleryType !== '全部' && t.type !== galleryType) continue;
+      const d = domainOf(t);
+      map.set(d, (map.get(d) ?? 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [galleryType]);
   const shownTemplates = useMemo(() => {
     const q = templateQuery.trim().toLowerCase();
     return activeTemplates.filter((t) => {
@@ -259,6 +273,38 @@ export function CreatePage() {
       );
     });
   }, [activeTemplates, domain, templateQuery]);
+  // 首页精选：默认只展示 8 张高价值卡片（2×4 网格），完整 60+ 模板收口进宽幅分类抽屉，保持首页清爽与社区曝光
+  const HOME_TEMPLATE_LIMIT = 8;
+  const homeTemplates = useMemo(() => {
+    if (domain === '全部' && !templateQuery.trim() && !typeChosen) {
+      const picks = featuredTemplates();
+      const pickedIds = new Set(picks.map((p) => p.id));
+      const rest = shownTemplates.filter((t) => !pickedIds.has(t.id));
+      return [...picks, ...rest].slice(0, HOME_TEMPLATE_LIMIT);
+    }
+    return shownTemplates.slice(0, HOME_TEMPLATE_LIMIT);
+  }, [shownTemplates, domain, templateQuery, typeChosen]);
+  const hiddenCount = Math.max(0, shownTemplates.length - homeTemplates.length);
+  const galleryTemplates = useMemo(() => {
+    const q = galleryQuery.trim().toLowerCase();
+    return TEMPLATES.filter((t) => {
+      if (galleryType !== '全部' && t.type !== galleryType) return false;
+      if (galleryDomain !== '全部' && domainOf(t) !== galleryDomain) return false;
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        t.desc.toLowerCase().includes(q) ||
+        t.scene.toLowerCase().includes(q) ||
+        t.type.toLowerCase().includes(q)
+      );
+    });
+  }, [galleryDomain, galleryType, galleryQuery]);
+  const openGallery = (initDomain?: string) => {
+    setGalleryDomain(initDomain ?? (domain !== '全部' ? domain : '全部'));
+    setGalleryType(typeChosen ? f.type : '全部');
+    setGalleryQuery(templateQuery);
+    setGalleryOpen(true);
+  };
   const quickChips = useMemo(
     () => (typeChosen ? templatesOf(f.type).slice(0, 4) : featuredTemplates()),
     [typeChosen, f.type],
@@ -516,14 +562,14 @@ export function CreatePage() {
           <div className="template-section-meta">
             {typeChosen ? (
               <button type="button" className="template-show-all" onClick={() => setTypeChosen(false)}>
-                查看全部 {TEMPLATES.length} 个
+                切换全部类型
               </button>
             ) : null}
-            <span className="quiet-label">
-              {shownTemplates.length === activeTemplates.length
-                ? `共 ${activeTemplates.length} 个`
-                : `已筛出 ${shownTemplates.length} / ${activeTemplates.length} 个`}
-            </span>
+            <button type="button" className="template-gallery-trigger" onClick={() => openGallery()}>
+              <Icon name="grid" />
+              <span>浏览全部 {TEMPLATES.length} 个模板</span>
+              <Icon name="arrow" />
+            </button>
           </div>
         </div>
         <div className="template-filter-bar">
@@ -534,7 +580,7 @@ export function CreatePage() {
               className={domain === '全部' ? 'active' : ''}
               onClick={() => setDomain('全部')}
             >
-              全部 <em>{activeTemplates.length}</em>
+              精选推荐 <em>{activeTemplates.length}</em>
             </button>
             {domainCounts.map(([d, count]) => (
               <button
@@ -563,23 +609,36 @@ export function CreatePage() {
             ) : null}
           </label>
         </div>
-        {shownTemplates.length > 0 ? (
-          <div className="inspiration-grid">
-            {shownTemplates.map((x) => (
-              <button key={x.id} className="inspiration-card" onClick={() => fill(x)}>
-                <SceneThumb t={x} />
-                <div className="inspiration-info">
-                  <div className="inspiration-tags">
-                    <span className="scene-tag">{x.scene}</span>
-                    {!typeChosen ? <span className="type-tag">{x.type}</span> : null}
+        {homeTemplates.length > 0 ? (
+          <>
+            <div className="inspiration-grid inspiration-grid-curated">
+              {homeTemplates.map((x) => (
+                <button key={x.id} className="inspiration-card" onClick={() => fill(x)}>
+                  <SceneThumb t={x} />
+                  <div className="inspiration-info">
+                    <div className="inspiration-tags">
+                      <span className="scene-tag">{x.scene}</span>
+                      {!typeChosen ? <span className="type-tag">{x.type}</span> : null}
+                    </div>
+                    <b className="sr-only">{x.title}</b>
+                    <Icon name="arrow" />
+                    <p>{x.desc}</p>
                   </div>
-                  <b className="sr-only">{x.title}</b>
+                </button>
+              ))}
+            </div>
+            {hiddenCount > 0 ? (
+              <div className="template-more-bar">
+                <span>
+                  当前展示精选 {homeTemplates.length} 个，还有 <b>{hiddenCount}</b> 个同类别模板
+                </span>
+                <button type="button" className="template-more-btn" onClick={() => openGallery()}>
+                  打开完整模板库（共 {TEMPLATES.length} 个）
                   <Icon name="arrow" />
-                  <p>{x.desc}</p>
-                </div>
-              </button>
-            ))}
-          </div>
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : (
           <div className="template-empty">
             <span>没有匹配「{templateQuery}」的模板</span>
@@ -596,6 +655,127 @@ export function CreatePage() {
           </div>
         )}
       </div>
+      {galleryOpen ? (
+        <Modal
+          title={`场景模板库（共 ${TEMPLATES.length} 个）`}
+          overline="按行业与业务场景探索 · 一键带入输入框"
+          className="template-gallery-modal"
+          onClose={() => setGalleryOpen(false)}
+        >
+          <div className="tpl-gal-shell">
+            <aside className="tpl-gal-nav" aria-label="模板行业分类">
+              <div className="tpl-gal-nav-title">业务领域</div>
+              <button
+                type="button"
+                className={galleryDomain === '全部' ? 'active' : ''}
+                onClick={() => setGalleryDomain('全部')}
+              >
+                <span>全部领域</span>
+                <em>{galleryType === '全部' ? TEMPLATES.length : templatesOf(galleryType).length}</em>
+              </button>
+              {allDomainCounts.map(([d, count]) => (
+                <button
+                  key={d}
+                  type="button"
+                  className={galleryDomain === d ? 'active' : ''}
+                  onClick={() => setGalleryDomain(d)}
+                >
+                  <span>{d}</span>
+                  <em>{count}</em>
+                </button>
+              ))}
+              <div className="tpl-gal-nav-title" style={{ marginTop: 14 }}>应用形态</div>
+              <div className="tpl-gal-types">
+                <button
+                  type="button"
+                  className={galleryType === '全部' ? 'active' : ''}
+                  onClick={() => {
+                    setGalleryType('全部');
+                    setGalleryDomain('全部');
+                  }}
+                >
+                  全部
+                </button>
+                {APP_TYPES.map((tp) => (
+                  <button
+                    key={tp}
+                    type="button"
+                    className={galleryType === tp ? 'active' : ''}
+                    onClick={() => {
+                      setGalleryType(tp);
+                      setGalleryDomain('全部');
+                    }}
+                  >
+                    {tp}
+                  </button>
+                ))}
+              </div>
+            </aside>
+            <section className="tpl-gal-main">
+              <div className="tpl-gal-toolbar">
+                <label className="template-search tpl-gal-search" aria-label="在模板库中搜索">
+                  <Icon name="search" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={galleryQuery}
+                    onChange={(e) => setGalleryQuery(e.target.value)}
+                    placeholder="搜索模板标题、行业场景或能力关键词（如 良率、飞书、Excel、审批）…"
+                  />
+                  {galleryQuery ? (
+                    <button type="button" className="template-search-clear" aria-label="清空搜索" onClick={() => setGalleryQuery('')}>
+                      <Icon name="close" />
+                    </button>
+                  ) : null}
+                </label>
+                <span className="tpl-gal-count">匹配 {galleryTemplates.length} 个模板</span>
+              </div>
+              {galleryTemplates.length > 0 ? (
+                <div className="tpl-gal-scroll">
+                  <div className="tpl-gal-grid">
+                    {galleryTemplates.map((x) => (
+                      <button
+                        key={x.id}
+                        type="button"
+                        className="inspiration-card tpl-gal-card"
+                        onClick={() => {
+                          setGalleryOpen(false);
+                          fill(x);
+                        }}
+                      >
+                        <SceneThumb t={x} />
+                        <div className="inspiration-info">
+                          <div className="inspiration-tags">
+                            <span className="scene-tag">{x.scene}</span>
+                            <span className="type-tag">{x.type}</span>
+                          </div>
+                          <b className="sr-only">{x.title}</b>
+                          <Icon name="arrow" />
+                          <p>{x.desc}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="template-empty">
+                  <span>当前筛选条件下暂无匹配模板</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGalleryDomain('全部');
+                      setGalleryType('全部');
+                      setGalleryQuery('');
+                    }}
+                  >
+                    查看全部 {TEMPLATES.length} 个
+                  </button>
+                </div>
+              )}
+            </section>
+          </div>
+        </Modal>
+      ) : null}
       {works.data && works.data.length > 0 ? (
         <div className="inspiration-section community-teaser">
           <div className="section-title">

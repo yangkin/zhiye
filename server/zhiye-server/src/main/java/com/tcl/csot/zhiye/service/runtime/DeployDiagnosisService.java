@@ -140,9 +140,22 @@ public class DeployDiagnosisService {
                     missingMods, envHints, true, excerpt);
         }
 
-        // 6. 端口绑定 / 启动监听超时
-        if (lower.contains("eaddrinuse") || lower.contains("address already in use")
-                || lower.contains("监听端口超时") || lower.contains("启动就绪超时") || lower.contains("readiness probe failed")) {
+        // 6a. 端口冲突（代码硬编码了已被占用的宿主机端口）
+        if (lower.contains("eaddrinuse") || lower.contains("address already in use") || lower.contains("bindexception")) {
+            return new Diagnosis(
+                    "PORT_IN_USE", "high", "端口已被占用（代码未读取平台注入的 PORT）",
+                    "应用尝试监听固定端口时发生端口冲突（Address already in use）。",
+                    "平台在 K8s 生产环境为每个应用提供独立网络命名空间（不会跨应用撞端口），本地托管会自动分配空闲端口并注入 PORT / SERVER_PORT 环境变量；发生冲突通常是因为导入代码写死了固定端口。",
+                    List.of(
+                            "将代码中的硬编码端口改为读取环境变量 process.env.PORT / os.environ.get('PORT') / ${PORT:8080}",
+                            "避免在应用内部另起额外固定端口子服务",
+                            "点击「AI 一键自愈修复」让编码智能体自动改写端口监听逻辑"
+                    ),
+                    missingMods, envHints, true, excerpt);
+        }
+
+        // 6b. 启动监听 / 健康检查超时
+        if (lower.contains("监听端口超时") || lower.contains("启动就绪超时") || lower.contains("readiness probe failed")) {
             return new Diagnosis(
                     "PORT_BIND_ERROR", "high", "端口监听异常或健康检查超时",
                     "服务未能在限定时间内监听平台注入的 PORT（或健康检查路径 " + (healthPath == null ? "/" : healthPath) + " 未返回 2xx）。",

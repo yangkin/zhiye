@@ -633,13 +633,22 @@ public class TaskExecutor {
                 events.emit(ctx.id(), "tool", Map.of("id", "fn-logs", "name", "read", "summary", "读取云函数报错日志", "state", "end", "ok", true));
             }
         }
-        if (app.isTemplateLike() || app.isService()) {
+        if (app.isTemplateLike() || app.isService() || app.isScript()) {
             Set<String> taken = new HashSet<>();
             for (com.tcl.csot.zhiye.service.skillhub.SkillRefs.Placed s : skills) taken.add(s.name());
-            // React / Vue / 全栈按项目形态过滤不相关的内置技能，避免误导
-            if (app.isVue()) taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app"));
-            else if (app.isService()) taken.addAll(List.of("cloud-functions", "app-ai", "data-sources"));
-            else taken.add("fullstack-app");
+            // 按项目形态过滤不相关的内置技能，让编码智能体只看到高相关精品技能
+            if (app.isScript()) {
+                taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app", "cloud-functions",
+                        "app-ai", "data-sources", "forms-and-tables", "enterprise-ui-craft",
+                        "vue-springboot-enterprise", "zhiye-deploy-preflight"));
+            } else if (app.isVue()) {
+                taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app",
+                        "vue-springboot-enterprise", "python-js-automation-scripts"));
+            } else if (app.isService()) {
+                taken.addAll(List.of("cloud-functions", "app-ai", "data-sources", "python-js-automation-scripts"));
+            } else {
+                taken.addAll(List.of("fullstack-app", "vue-springboot-enterprise", "python-js-automation-scripts"));
+            }
             instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.catalogInstruction(skillRefs.placeBuiltin(ctx.agentDir, taken));
         }
         if (memories != null) {

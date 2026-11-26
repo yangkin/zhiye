@@ -134,7 +134,9 @@ export function AccessForm({
           );
         })}
       </div>
-      {!a.ssoAvailable && !compact ? <p className="cc-hint">当前环境还没有接入公司统一登录，暂时只能选「内网公开」。</p> : null}
+      {!a.ssoAvailable ? (
+        <p className="cc-hint">当前环境尚未接入公司统一登录（SSO），暂仅支持「内网公开」；接入公司 SSO 后可自由选择「员工登录」或「指定人员」。</p>
+      ) : null}
       {level === 'members' ? (
         <label className="cc-field">
           <span>可以打开的人（公司登录名，一行一个或用逗号分隔）</span>
