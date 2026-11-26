@@ -44,10 +44,16 @@
 .xz-row.user { justify-content: flex-end; }
 .xz-avatar { flex: none; width: 34px; height: 34px; border-radius: 50%; background: #f3f0fd; border: 1px solid #e4def7; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; overflow: hidden; }
 .xz-avatar img { display: block; width: 30px; height: 30px; }
-.xz-bubble { font-size: 13.5px; line-height: 1.7; min-width: 0; word-break: break-word; }
+.xz-bubble { font-size: 13.5px; line-height: 1.7; min-width: 0; word-break: break-word; user-select: text; -webkit-user-select: text; touch-action: auto; cursor: text; }
 .xz-bubble.user { max-width: 82%; padding: 9px 14px; border-radius: 18px 18px 4px 18px; background: #7953dc; color: #fff; }
-.xz-bubble.user .xz-text { white-space: pre-wrap; }
+.xz-bubble.user .xz-text { white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
 .xz-bubble.bot { max-width: calc(100% - 44px); padding: 9px 14px; border-radius: 4px 18px 18px 18px; background: #f6f3fb; color: #3a3048; }
+.xz-md, .xz-md *, .xz-doc-md, .xz-doc-md *, .xz-faq-a, .xz-faq-a * { user-select: text; -webkit-user-select: text; }
+.xz-msg-actions { display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 6px; border-top: 1px solid #eae3f6; user-select: none; }
+.xz-copy-btn { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 7px; border: 1px solid #e4dcf4; background: #fff; color: #675b80; font-size: 11.5px; line-height: 1; cursor: pointer; transition: background .14s, color .14s, border-color .14s; }
+.xz-copy-btn:hover { background: #f1ecfc; border-color: #cfc0f2; color: #5638b5; }
+.xz-copy-btn.is-copied { background: #eaf8f0; border-color: #bfe6d0; color: #197a49; }
+.xz-copy-btn .icon { width: 12px; height: 12px; flex: none; }
 .xz-shots { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 6px; }
 .xz-shots:last-child { margin-bottom: 2px; }
 .xz-shots img { display: block; width: 88px; height: 88px; object-fit: cover; border-radius: 10px; border: 1px solid #ffffff55; background: #fff; }

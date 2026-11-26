@@ -7,8 +7,8 @@ import { qk } from '../api/queries';
 import { HelpError, helpApi, streamHelp, type HelpAsset, type HelpConversation, type HelpMessage } from '../api/help';
 import { Icon } from '../lib/icons';
 import { HELP, HELP_CHIPS, HELP_DOC_CHAPTERS, offlineAnswer, type HelpChip, type HelpDocChapter } from '../lib/helpFaq';
-import { fmtDate, fmtTime, isToday, isYesterday } from '../lib/format';
-import { useUi } from '../lib/store';
+import { copyText, fmtDate, fmtTime, isToday, isYesterday } from '../lib/format';
+import { toast, useUi } from '../lib/store';
 import { Pet } from './Pet';
 import '../styles/help.css';
 
@@ -78,6 +78,7 @@ function PetFace() {
 
 function AssistantBody({ msg }: { msg: UiMsg }) {
   const html = useMemo(() => (msg.content ? renderMarkdown(msg.content) : ''), [msg.content]);
+  const [copied, setCopied] = useState(false);
   if (msg.status === 'pending' || (msg.status === 'streaming' && !msg.content)) {
     return (
       <div className="xz-typing" role="status">
@@ -88,12 +89,31 @@ function AssistantBody({ msg }: { msg: UiMsg }) {
       </div>
     );
   }
+  const canCopy = Boolean(msg.content) && msg.status !== 'streaming';
+  const onCopy = async () => {
+    const ok = await copyText(msg.content);
+    if (ok) {
+      setCopied(true);
+      toast('已复制到剪贴板', 'ok');
+      window.setTimeout(() => setCopied(false), 1800);
+    } else {
+      toast('复制未成功，请直接选中文字按 Ctrl/⌘+C 复制', 'error');
+    }
+  };
   return (
     <>
       <div className="xz-md" dangerouslySetInnerHTML={{ __html: html }} />
       {msg.status === 'streaming' ? <span className="xz-caret" aria-hidden="true" /> : null}
       {msg.status === 'stopped' ? <small className="xz-note">已停止回答</small> : null}
       {msg.status === 'error' ? <small className="xz-note err">回答中断了</small> : null}
+      {canCopy ? (
+        <div className="xz-msg-actions">
+          <button type="button" className={`xz-copy-btn${copied ? ' is-copied' : ''}`} onClick={() => void onCopy()} aria-label="复制这条回答">
+            <Icon name={copied ? 'check' : 'copy'} />
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+        </div>
+      ) : null}
     </>
   );
 }

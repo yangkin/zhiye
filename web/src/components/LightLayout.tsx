@@ -100,8 +100,10 @@ function Sidebar({ page, onHelp, onWorkspace }: { page: string; onHelp: () => vo
           >
             <span className="rail-icon">
               <Icon name={i} />
-              {p === 'apps' && apps?.length ? <small>{apps.length > 99 ? '99+' : apps.length}</small> : null}
             </span>
+            {p === 'apps' && apps?.length ? (
+              <small className="rail-badge">{apps.length > 99 ? '99+' : apps.length}</small>
+            ) : null}
             <span>{t}</span>
           </NavLink>
         ))}
