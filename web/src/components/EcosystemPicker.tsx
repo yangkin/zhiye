@@ -188,7 +188,7 @@ export function EcosystemPickerModal({
                   <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
                   <span>
                     <b>{name}</b>
-                    <small>{kind === 'feishu_bitable' ? '飞书多维表格 · 公域直连' : '飞书群机器人 · 公域直连'}</small>
+                    <small>{kind === 'feishu_bitable' ? '飞书多维表格' : '飞书群机器人'}</small>
                   </span>
                   {on ? <Icon name="check" /> : null}
                 </li>

@@ -354,7 +354,7 @@ function AddPeopleModal({ existing, onClose, onAdded }: {
         <textarea
           className="field access-paste"
           rows={8}
-          placeholder="每行一个工号（或用逗号/空格分隔），例如：&#10;zhangsan01&#10;lisi02&#10;wangwu03"
+          placeholder="每行一个工号（支持逗号或空格分隔）"
           aria-label="批量粘贴工号"
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}

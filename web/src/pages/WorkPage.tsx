@@ -54,7 +54,7 @@ export function WorkPage() {
             <i />
             <i />
             <i />
-            <span>{liveSiteUrl ? liveSiteUrl.replace(/^https?:\/\//, '') : '只读演示快照 · 复刻后可交互'}</span>
+            <span>{liveSiteUrl ? liveSiteUrl.replace(/^https?:\/\//, '') : '只读预览快照 · 复刻后可交互'}</span>
             {t.previewUrl ? <span className="work-readonly-pill">仅限预览</span> : null}
             {t.previewUrl ? (
               <div className="work-device-bar">
@@ -94,7 +94,7 @@ export function WorkPage() {
                   className="work-readonly-shield"
                   role="button"
                   tabIndex={0}
-                  aria-label="演示预览仅供查看，点击使用模板复刻到自己的应用"
+                  aria-label="预览仅供查看，点击使用模板复刻到自己的应用"
                   onClick={() => setNudge(true)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {

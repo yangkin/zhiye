@@ -661,7 +661,7 @@ export const api = {
   serviceExportBundleUrl: (appId: string) => `/api/apps/${enc(appId)}/service/export-bundle`,
   serviceDeployLogStreamUrl: (appId: string) => `/api/apps/${enc(appId)}/service/deploy-logs/stream`,
 
-  // Phase 4: 企业连接器中心 & 自动化触发器 & 公域飞书控制面
+  // 企业连接器中心 & 自动化触发器 & 飞书事件控制面
   connectorsList: () => request<Record<string, unknown>[]>('/api/connectors'),
   connectorSave: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/connectors', { method: 'POST', body: input }),
@@ -897,7 +897,7 @@ export const api = {
     request<{ ok: boolean }>(`/api/workspace/memories/${enc(id)}`, { method: 'DELETE' }),
   workspaceMemoryClearAll: () =>
     request<{ ok: boolean; deleted: number }>('/api/workspace/memories', { method: 'DELETE' }),
-  // ---- Harness V2：检查点时间旅行 & 独立 QA 验收报告 ----
+  // ---- 检查点时间旅行 & 独立 QA 验收报告 ----
   listCheckpoints: (appId: string) =>
     request<Array<{
       id: string;
@@ -924,7 +924,7 @@ export const api = {
       `/api/apps/${enc(appId)}/checkpoints/${enc(checkpointId)}/restore`,
       { method: 'POST', body: {} },
     ),
-  // ---- Harness V2：企业受控 MCP 注册中心 ----
+  // ---- 企业受控 MCP 注册中心 ----
   adminMcpList: () =>
     request<{
       servers: Array<{
@@ -932,7 +932,7 @@ export const api = {
         serverKey: string;
         name: string;
         description: string;
-        transport: 'http' | 'mock';
+        transport: 'http' | 'knowledge';
         endpointUrl: string;
         authHeader: string;
         hasSecret: boolean;
@@ -959,7 +959,7 @@ export const api = {
     serverKey: string;
     name: string;
     description?: string;
-    transport: 'http' | 'mock';
+    transport: 'http' | 'knowledge';
     endpointUrl: string;
     authHeader?: string;
     secret?: string;

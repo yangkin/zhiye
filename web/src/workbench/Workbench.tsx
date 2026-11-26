@@ -196,7 +196,7 @@ function Workbench({ id }: { id: string }) {
   const cloudOn = cloudQ.data?.enabled ?? false;
   const baseFrameSrc = previewVersion ? previewVersion.previewUrl : (app?.previewUrl ?? null);
   const frameSrc = baseFrameSrc && cloudOn && previewAs !== 'admin' ? `${baseFrameSrc}?__as=${previewAs}` : baseFrameSrc;
-  // Harness V2：支持同一工作空间跨应用并行任务（默认上限 3，由服务端 QuotaService 兜底），单应用仍串行防冲突
+  // 支持同一工作空间跨应用并行任务（默认上限由服务端 QuotaService 兜底），单应用仍串行防冲突
   const lockedEarly = !!app?.activeTask && !isTerminal(app.activeTask.status);
   const vp = usePreviewViewport('auto');
   const openTab = (value: Tab) => {
@@ -406,7 +406,7 @@ function Workbench({ id }: { id: string }) {
     );
 
   const ready = app.phase === 'ready' && !!app.currentVersion;
-  // Harness V2：支持跨应用并行（工作空间并发上限由服务端控制），仅锁定本应用的进行中任务
+  // 支持跨应用并行（工作空间并发上限由服务端控制），仅锁定本应用的进行中任务
   const busyHere = !!app.activeTask && !isTerminal(app.activeTask.status);
   const blocked: BusyInfo = { busy: busyHere, otherApp: null };
   const goApp = (appId: string) => navigate('/apps/' + appId);
@@ -797,8 +797,8 @@ function Workbench({ id }: { id: string }) {
                       value={previewAs}
                       options={[
                         { value: 'admin', label: '作者', hint: '以管理员身份预览' },
-                        { value: 'member', label: '员工', hint: '模拟一位普通员工，试「只看自己的」等权限' },
-                        { value: 'anon', label: '未登录', hint: '模拟没有登录的访问者' },
+                        { value: 'member', label: '员工', hint: '以普通员工视角预览数据权限效果' },
+                        { value: 'anon', label: '未登录', hint: '以未登录访客视角预览' },
                       ]}
                       onChange={setPreviewAs}
                     />

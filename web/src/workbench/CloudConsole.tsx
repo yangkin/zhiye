@@ -140,7 +140,7 @@ export function AccessForm({
       {level === 'members' ? (
         <label className="cc-field">
           <span>可以打开的人（公司登录名，一行一个或用逗号分隔）</span>
-          <textarea rows={compact ? 2 : 3} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="zhangsan&#10;lisi" />
+          <textarea rows={compact ? 2 : 3} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="每行一个员工登录名或工号" />
         </label>
       ) : null}
       {mismatch && !compact ? (

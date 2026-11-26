@@ -900,7 +900,7 @@ export function AdminGovernancePanel({
                   <OwnerPicker
                     ariaLabel="选择交出方人员或工作空间"
                     value={handoverFromWs}
-                    placeholder="搜姓名、账号（如 yangkai37）或空间…"
+                    placeholder="搜姓名、工号或空间…"
                     options={workspacePickerOptions}
                     onChange={setHandoverFromWs}
                   />
@@ -1008,7 +1008,7 @@ export function AdminGovernancePanel({
                   <OwnerPicker
                     ariaLabel="选择接收方人员或工作空间"
                     value={handoverToWs}
-                    placeholder="搜接手人姓名、账号（如 yangkai37）或空间…"
+                    placeholder="搜接手人姓名、工号或空间…"
                     options={receiverPickerOptions.filter((w) => w.value !== handoverFromWs)}
                     onChange={setHandoverToWs}
                   />
@@ -1047,7 +1047,7 @@ export function AdminGovernancePanel({
                       type="text"
                       className="gov-note-input"
                       maxLength={200}
-                      placeholder="交接说明 / 工单备注（如：张三离职应用交接给李四，写入审计台账）"
+                      placeholder="交接说明 / 工单备注（如：负责人变更移交维护，写入审计台账）"
                       value={handoverNote}
                       onChange={(e) => setHandoverNote(e.target.value)}
                     />
@@ -1132,7 +1132,7 @@ export function AdminGovernancePanel({
                     <Icon name="search" />
                     <input
                       aria-label="搜索人员或工作空间"
-                      placeholder="搜姓名、账号（如 yangkai37）或应用名…"
+                      placeholder="搜姓名、工号或应用名…"
                       value={ownerQuery}
                       onChange={(e) => setOwnerQuery(e.target.value)}
                     />
@@ -2654,7 +2654,7 @@ export function AdminGovernancePanel({
               <OwnerPicker
                 ariaLabel="选择接收方人员或工作空间"
                 value={transferToWs}
-                placeholder="搜接手人姓名、账号（如 yangkai37）或空间…"
+                placeholder="搜接手人姓名、工号或空间…"
                 options={receiverPickerOptions.filter((w) => w.value !== transferTarget.workspaceId)}
                 onChange={setTransferToWs}
               />

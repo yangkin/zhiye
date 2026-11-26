@@ -9,9 +9,9 @@ import { Select } from './Select';
 import { confirmDialog } from './ConfirmDialog';
 
 /**
- * 平台级「公域飞书控制面 & 企业连接器中心」面板（嵌入 /admin?tab=ops）：
- * - 连接器中心：统一托管公域飞书群机器人、飞书自建应用、飞书多维表格（Bitable）连接器（live 直连 open.feishu.cn / sandbox 本地验证）
- * - 飞书控制面：查看事件订阅与卡片回调地址，支持本地模拟 @织页 指令并直接点击交互卡片「批准上线 / 驳回」
+ * 平台级「飞书连接器与事件控制中心」面板（嵌入 /admin?tab=ops）：
+ * - 连接器中心：统一托管飞书群机器人、飞书自建应用、飞书多维表格（Bitable）连接器
+ * - 事件控制面：查看事件订阅与卡片回调地址、真实会话审批记录及管理员指令调试
  */
 export function AdminFeishuConnectorPanel() {
   const qc = useQueryClient();
@@ -31,7 +31,7 @@ export function AdminFeishuConnectorPanel() {
   const [defaultChatId, setDefaultChatId] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // 公域飞书控制面模拟器
+  // 管理员指令调试
   const [simCommand, setSimCommand] = useState('@织页 状态');
   const [simBusy, setSimBusy] = useState(false);
 
@@ -90,8 +90,8 @@ export function AdminFeishuConnectorPanel() {
   const handleTest = async (id: string) => {
     setBusyId(id);
     try {
-      const res = await api.adminConnectorTest(id);
-      toast(`连接器自检通过（mode=${String(res.mode ?? 'ok')}）。`);
+      await api.adminConnectorTest(id);
+      toast('连接器连通性自检通过。');
       await refreshAll();
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -104,8 +104,8 @@ export function AdminFeishuConnectorPanel() {
     if (!simCommand.trim() || simBusy) return;
     setSimBusy(true);
     try {
-      const res = await api.adminFeishuSimulate({ text: simCommand.trim(), userName: '管理员模拟' });
-      toast(`飞书控制面已响应（意图：${String(res.intent ?? 'ok')}）。`);
+      const res = await api.adminFeishuSimulate({ text: simCommand.trim(), userName: '平台管理员' });
+      toast(`飞书事件控制面已响应（意图：${String(res.intent ?? 'ok')}）。`);
       await refreshAll();
     } catch (e) {
       toast(errorMessage(e), 'error');
@@ -140,7 +140,7 @@ export function AdminFeishuConnectorPanel() {
         <div>
           <h3 style={{ margin: 0, fontSize: 15, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Icon name="globe" />
-            公域飞书控制面 &amp; 企业连接器中心（open.feishu.cn）
+            飞书连接器与事件控制中心
           </h3>
           <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--muted)' }}>
             统一托管飞书机器人 / 多维表格凭据（AES-256-GCM 加密 + SSRF 白名单），支持云函数 <code>ctx.feishu</code> / <code>ctx.bitable</code> 与群聊 <code>@织页</code> 卡片审批上线。
@@ -152,7 +152,7 @@ export function AdminFeishuConnectorPanel() {
               企业连接器 ({connectors.length})
             </button>
             <button type="button" className={tab === 'control-plane' ? 'active' : ''} onClick={() => setTab('control-plane')}>
-              公域飞书控制面 ({sessions.length})
+              飞书事件控制面 ({sessions.length})
             </button>
           </div>
           {tab === 'connectors' ? (
@@ -189,7 +189,7 @@ export function AdminFeishuConnectorPanel() {
                         <span className="svc-chip">{String(c.kind ?? '')}</span>
                       </td>
                       <td>
-                        <span className="svc-chip is-accent">Live · open.feishu.cn</span>
+                        <span className="svc-chip is-accent">飞书开放平台</span>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--muted)' }}>
                         {c.hasSecrets ? '已加密存密' : '未配密钥'} · {String(c.rateLimitPerMin ?? 60)}/min
@@ -277,22 +277,27 @@ export function AdminFeishuConnectorPanel() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="text"
-              value={simCommand}
-              onChange={(e) => setSimCommand(e.target.value)}
-              placeholder="输入模拟飞书群指令，例如：@织页 状态 / @织页 诊断 TaskFlow / @织页 发布 TaskFlow"
-              style={{ flex: 1, height: 36, borderRadius: 8, padding: '0 12px', border: '1px solid var(--line, #e2e8f0)', fontSize: 13 }}
-            />
-            <button type="button" className="primary-button dash-compact-btn" disabled={simBusy} onClick={() => void handleSimulate()}>
-              <Icon name="send" /> {simBusy ? '执行中…' : '模拟飞书 @织页 指令'}
-            </button>
-          </div>
+          <details style={{ borderRadius: 8, border: '1px solid var(--line, #e2e8f0)', padding: '8px 12px', background: 'var(--bg-subtle, #faf9fc)' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 12.5, fontWeight: 500, color: 'var(--muted)' }}>
+              管理员指令调试（验证事件回调与审批卡片链路）
+            </summary>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+              <input
+                type="text"
+                value={simCommand}
+                onChange={(e) => setSimCommand(e.target.value)}
+                placeholder="输入飞书群指令，例如：@织页 状态 / @织页 诊断 <应用名> / @织页 发布 <应用名>"
+                style={{ flex: 1, height: 36, borderRadius: 8, padding: '0 12px', border: '1px solid var(--line, #e2e8f0)', fontSize: 13, background: '#fff' }}
+              />
+              <button type="button" className="primary-button dash-compact-btn" disabled={simBusy} onClick={() => void handleSimulate()}>
+                <Icon name="send" /> {simBusy ? '执行中…' : '发送调试指令'}
+              </button>
+            </div>
+          </details>
 
           {sessions.length === 0 ? (
             <p style={{ fontSize: 12.5, color: 'var(--muted)', margin: 0 }}>
-              暂无飞书控制面会话；可在上方输入 <code>@织页 状态</code> 或 <code>@织页 发布 &lt;应用名&gt;</code> 立即体验完整交互卡片审批流。
+              暂无飞书事件会话记录；在飞书开放平台配置上述事件订阅与卡片回调地址后，群内 <code>@织页</code> 指令与审批记录将自动同步至此。
             </p>
           ) : (
             <div className="dash-table-wrap">
@@ -362,7 +367,7 @@ export function AdminFeishuConnectorPanel() {
       {addOpen ? (
       <Modal
         overline="平台级飞书集成"
-        title="新建企业连接器（公域飞书）"
+        title="新建企业飞书连接器"
         className="eco-modal"
         onClose={() => setAddOpen(false)}
         footer={

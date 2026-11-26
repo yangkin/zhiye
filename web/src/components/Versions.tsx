@@ -470,7 +470,7 @@ export function VersionSheet({
             {!cpQ.isLoading && !checkpoints.length ? (
               <div className="empty-state">
                 <h3>暂无检查点</h3>
-                <p>从 Harness V2 起，每次生成与修改前后都会自动保存代码与 Schema 检查点及独立 QA 验收报告。</p>
+                <p>每次生成与修改前后都会自动保存代码与数据表检查点及质量检查报告。</p>
               </div>
             ) : null}
           </div>

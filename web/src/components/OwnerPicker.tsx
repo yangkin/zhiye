@@ -15,7 +15,7 @@ export interface OwnerPickerOption {
   unprovisioned?: boolean;
 }
 
-/** 统一按「姓名 (账号)」格式化人员归属，例如：杨凯 (yangkai37) */
+/** 统一按「姓名 (工号)」格式化人员归属 */
 export function formatOwnerIdentity(opts: {
   ownerRealName?: string | null;
   ownerLogin?: string | null;
@@ -266,7 +266,7 @@ export function OwnerPicker({
                   ref={inputRef}
                   type="text"
                   value={query}
-                  placeholder="搜姓名、账号（如 yangkai37）、空间或应用名…"
+                  placeholder="搜姓名、工号、空间或应用名…"
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onInputKeyDown}
                 />

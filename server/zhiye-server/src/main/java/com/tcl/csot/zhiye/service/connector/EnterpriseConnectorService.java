@@ -306,7 +306,7 @@ public class EnterpriseConnectorService {
         }
         return sendFeishuCard(conn.id(), null,
                 "织页 AI 连接器连通性自检",
-                "连接器「" + conn.name() + "」（模式：" + conn.mode() + "）连通性验证通过。",
+                "连接器「" + conn.name() + "」连通性验证通过。",
                 "blue",
                 List.of(Map.of("label", "连接器 ID", "value", conn.id()), Map.of("label", "时间", "value", Instant.now().toString())),
                 List.of());
@@ -623,7 +623,7 @@ public class EnterpriseConnectorService {
         String appId = conn.config().path("appId").asText(secrets.path("appId").asText("")).trim();
         String appSecret = secrets.path("appSecret").asText("").trim();
         if (appId.isEmpty() || appSecret.isEmpty()) {
-            throw ApiException.validation("生产模式（live）调用公域飞书需配置 appId 与 appSecret");
+            throw ApiException.validation("调用飞书开放平台需配置 App ID 与 App Secret");
         }
         String url = apiBase + "/open-apis/auth/v3/tenant_access_token/internal";
         validateOutboundUrl(url, conn.config());

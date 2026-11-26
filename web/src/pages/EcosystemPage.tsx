@@ -48,8 +48,8 @@ export function EcosystemPage() {
   const handleTestConnector = async (id: string) => {
     setTestingId(id);
     try {
-      const r = await api.connectorTest(id);
-      const text = `连通正常（mode=${String(r.mode ?? 'ok')}）`;
+      await api.connectorTest(id);
+      const text = '连通正常，已连接飞书开放平台';
       setTestResults((prev) => ({ ...prev, [id]: { ok: true, text } }));
       toast(`连接器${text}`);
     } catch (e) {
@@ -229,7 +229,7 @@ export function EcosystemPage() {
                       <h3>{name}</h3>
                       <div className="eco-badges">
                         <span className="eco-pill">{isBitable ? '飞书多维表格' : '飞书群机器人'}</span>
-                        <span className="eco-pill is-live">公域直连</span>
+                        <span className="eco-pill is-live">飞书直连</span>
                         <span className={`eco-pill ${owned ? 'is-owned' : ''}`}>
                           {owned ? '我添加的' : '平台托管'}
                         </span>

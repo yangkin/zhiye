@@ -65,10 +65,10 @@ public class FeishuControlPlaneService {
             return Map.of("challenge", payload.path("challenge").asText(""));
         }
 
-        // 2. 解析飞书 2.0 事件体或控制面模拟器简化载荷
+        // 2. 解析飞书 2.0 事件体或控制面调试载荷
         JsonNode event = payload.has("event") ? payload.get("event") : payload;
-        String chatId = event.path("message").path("chat_id").asText(event.path("chatId").asText("oc_zhiye_demo_group"));
-        String openId = event.path("sender").path("sender_id").path("open_id").asText(event.path("openId").asText("ou_demo_user"));
+        String chatId = event.path("message").path("chat_id").asText(event.path("chatId").asText(""));
+        String openId = event.path("sender").path("sender_id").path("open_id").asText(event.path("openId").asText(""));
         String userName = event.path("userName").asText("飞书用户");
         String connectorId = event.path("connectorId").asText("");
         String ws = event.path("workspaceId").asText(fallbackWorkspaceId == null ? "" : fallbackWorkspaceId).trim();
@@ -134,7 +134,7 @@ public class FeishuControlPlaneService {
         String instruction = command.replaceFirst("^(?:修改|modify|发布|publish)\\s*", "").trim();
         if (!directPublishRequest && app.currentVersionId() != null && !app.currentVersionId().isBlank()) {
             ObjectNode input = Json.obj();
-            input.put("instruction", "【来自公域飞书控制面 " + userName + "】" + instruction);
+            input.put("instruction", "【来自飞书群指令 " + userName + "】" + instruction);
             input.put("source", "feishu_control_plane");
             input.put("feishuSessionId", sessionId);
             String idemKey = "feishu-" + sessionId;
@@ -151,7 +151,7 @@ public class FeishuControlPlaneService {
         String md = "**应用**：" + app.name() + " (`" + app.id() + "`)\n"
                 + "**发起人**：" + userName + "\n"
                 + "**指令内容**：" + instruction + "\n"
-                + (taskId != null ? "**编码任务 ID**：`" + taskId + "`（Harness V2 执行中）\n" : "")
+                + (taskId != null ? "**编码任务 ID**：`" + taskId + "`（任务执行中）\n" : "")
                 + "**待发布版本**：`" + (app.currentVersionId() == null ? "最新版本" : app.currentVersionId()) + "`\n"
                 + "确认预览与 QA 检查通过后，点击下方按钮即可直接在飞书群内触发蓝绿切流上线：";
 
