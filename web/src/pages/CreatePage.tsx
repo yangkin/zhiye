@@ -142,6 +142,7 @@ export function CreatePage() {
   const typeChosen = f.typeChosen;
   const setTypeChosen = (typeChosen: boolean) => f.set({ typeChosen });
   const skillBtn = useRef<HTMLButtonElement>(null);
+  const ecoBtn = useRef<HTMLButtonElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [errorKind, setErrorKind] = useState('');
@@ -448,11 +449,13 @@ export function CreatePage() {
               技能
             </button>
             <button
+              ref={ecoBtn}
               type="button"
               className={`skill-button${ecosystems.length ? ' on' : ''}`}
               aria-label="选择企业生态能力"
+              aria-expanded={ecoOpen}
               title="一键接入飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
-              onClick={() => setEcoOpen(true)}
+              onClick={() => setEcoOpen((v) => !v)}
             >
               <Icon name="globe" />
               {ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}
@@ -634,6 +637,7 @@ export function CreatePage() {
       />
       <EcosystemPickerModal
         open={ecoOpen}
+        anchor={ecoBtn}
         onClose={() => setEcoOpen(false)}
         selected={ecosystems}
         onToggle={toggleEco}

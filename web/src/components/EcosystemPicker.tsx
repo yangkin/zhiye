@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import { Icon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
-import { Modal } from './Modal';
+import { useAnchoredPosition, useOutside } from './ComposerPopovers';
 import { useSources } from './DataSourceDialog';
 import type { DataSourceInfo } from '../api/types';
 
@@ -64,13 +65,13 @@ export function EcosystemChips({
 }
 
 /**
- * 统一「生态」选择器（首页创造页与工作台对话栏平级入口）：
- * - 飞书群机器人 & 多维表格：一键勾选即绑定 + 普通用户自助添加自己的 Webhook/多维表格链接 + 在线测试连通
- * - 企业知识与工具 (MCP)：可视化浏览已授权企业 MCP 及工具列表，一键勾选接入
- * - AGW 企业数据源：一键勾选并快捷跳转 AGW 接口目录
+ * 扁平轻量「生态」浮层（与「技能」弹层完全同款交互：无全屏遮罩、无多余 Tab、无弹窗套弹窗）。
+ * 1) 扁平分组列表：飞书连接器 / 企业知识 MCP / AGW 接口，点一下即勾选生效；
+ * 2) 底部「＋ 添加我的飞书」原地切换极简 3 行表单，保存后自动勾选并回到列表。
  */
 export function EcosystemPickerModal({
   open,
+  anchor,
   onClose,
   selected,
   onToggle,
@@ -78,6 +79,7 @@ export function EcosystemPickerModal({
   onPickSource,
 }: {
   open: boolean;
+  anchor: RefObject<HTMLElement | null>;
   onClose: () => void;
   selected: EcosystemItem[];
   onToggle: (item: EcosystemItem) => void;
@@ -86,19 +88,30 @@ export function EcosystemPickerModal({
 }) {
   const qc = useQueryClient();
   const setSourcesOpen = useUi((s) => s.setSourcesOpen);
-  const [tab, setTab] = useState<'feishu' | 'mcp' | 'agw'>('feishu');
-  const [showAdd, setShowAdd] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [q, setQ] = useState('');
+  const [adding, setAdding] = useState(false);
 
-  // 普通用户自助添加飞书连接器表单
-  const [newName, setNewName] = useState('');
+  // 极简原地添加飞书表单
   const [newKind, setNewKind] = useState<'feishu_bot' | 'feishu_bitable'>('feishu_bot');
-  const [webhookUrl, setWebhookUrl] = useState('');
-  const [webhookSecret, setWebhookSecret] = useState('');
-  const [bitableUrl, setBitableUrl] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newUrl, setNewUrl] = useState('');
   const [saving, setSaving] = useState(false);
-
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const [testedOk, setTestedOk] = useState<Record<string, boolean>>({});
+
+  const pos = useAnchoredPosition(anchor, open, 356, 340);
+  useOutside(open, [box, anchor], onClose);
+
+  useEffect(() => {
+    if (!open) {
+      setAdding(false);
+      setQ('');
+      return;
+    }
+    requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open]);
 
   const connQ = useQuery({
     queryKey: ['workspace-connectors'],
@@ -114,11 +127,22 @@ export function EcosystemPickerModal({
   });
   const sourcesQ = useSources(open);
 
+  const kw = q.trim().toLowerCase();
+  const connectors = useMemo(
+    () => (connQ.data ?? []).filter((c) => !kw || `${String(c.name ?? '')} ${String(c.id ?? '')}`.toLowerCase().includes(kw)),
+    [connQ.data, kw],
+  );
+  const mcpServers = useMemo(
+    () => (mcpQ.data ?? []).filter((s) => !kw || `${String(s.name ?? '')} ${String(s.serverKey ?? '')} ${String(s.description ?? '')}`.toLowerCase().includes(kw)),
+    [mcpQ.data, kw],
+  );
+  const sources = useMemo(
+    () => (sourcesQ.data ?? []).filter((s) => !kw || `${s.name} ${s.description ?? ''}`.toLowerCase().includes(kw)),
+    [sourcesQ.data, kw],
+  );
+
   if (!open) return null;
 
-  const connectors = connQ.data ?? [];
-  const mcpServers = mcpQ.data ?? [];
-  const sources = sourcesQ.data ?? [];
   const selectedIds = new Set(selected.map((x) => x.id));
   const pickedSrcSet = new Set(pickedSourceIds ?? []);
 
@@ -126,33 +150,27 @@ export function EcosystemPickerModal({
     setTestingId(id);
     try {
       const r = await api.connectorTest(id);
-      const text = `自检通过（mode=${String(r.mode ?? 'ok')}）`;
-      setTestResults((prev) => ({ ...prev, [id]: { ok: true, text } }));
-      toast(`连接器${text}。`);
+      setTestedOk((prev) => ({ ...prev, [id]: true }));
+      toast(`连通正常（${String(r.mode ?? 'ok')}）`);
     } catch (e) {
-      const msg = errorMessage(e);
-      setTestResults((prev) => ({ ...prev, [id]: { ok: false, text: msg } }));
-      toast(msg, 'error');
+      toast(errorMessage(e), 'error');
     } finally {
       setTestingId(null);
     }
   };
 
-  const handleCreateOwn = async () => {
-    if (!newName.trim()) return toast('请填写连接器名称（如：产线告警群机器人）。', 'error');
+  const handleSaveFeishu = async () => {
+    if (!newName.trim()) return toast('请填写名称（如：产线告警群机器人）', 'error');
     setSaving(true);
     try {
-      const isLive = newKind === 'feishu_bot' ? !!webhookUrl.trim() : !!bitableUrl.trim();
+      const url = newUrl.trim();
       const saved = await api.connectorSave({
         name: newName.trim(),
         kind: newKind,
-        mode: isLive ? 'live' : 'sandbox',
+        mode: url ? 'live' : 'sandbox',
         enabled: true,
-        ...(newKind === 'feishu_bitable' && bitableUrl.trim() ? { bitableUrl: bitableUrl.trim() } : {}),
-        secrets:
-          newKind === 'feishu_bot' && webhookUrl.trim()
-            ? { webhookUrl: webhookUrl.trim(), ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}) }
-            : {},
+        ...(newKind === 'feishu_bitable' && url ? { bitableUrl: url } : {}),
+        secrets: newKind === 'feishu_bot' && url ? { webhookUrl: url } : {},
       });
       await qc.invalidateQueries({ queryKey: ['workspace-connectors'] });
       const savedId = String(saved.id ?? '');
@@ -160,11 +178,9 @@ export function EcosystemPickerModal({
         onToggle({ id: savedId, category: newKind, name: String(saved.name ?? newName.trim()) });
       }
       setNewName('');
-      setWebhookUrl('');
-      setWebhookSecret('');
-      setBitableUrl('');
-      setShowAdd(false);
-      toast('已保存并为你自动勾选，可直接点「测试连通」验证！');
+      setNewUrl('');
+      setAdding(false);
+      toast('已添加并勾选');
     } catch (e) {
       toast(errorMessage(e), 'error');
     } finally {
@@ -180,272 +196,279 @@ export function EcosystemPickerModal({
         if (cur) onToggle(cur);
       }
       await qc.invalidateQueries({ queryKey: ['workspace-connectors'] });
-      toast(`已移除「${name}」。`);
+      toast(`已删除「${name}」`);
     } catch (e) {
       toast(errorMessage(e), 'error');
     }
   };
 
-  return (
-    <Modal title="接入企业生态能力（勾选即用，免配密钥）" onClose={onClose} className="source-modal">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <div className="svc-seg" role="tablist">
-          <button type="button" role="tab" aria-selected={tab === 'feishu'} className={tab === 'feishu' ? 'active' : ''} onClick={() => setTab('feishu')}>
-            飞书与多维表格 ({connectors.length})
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'mcp'} className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>
-            企业知识 / MCP ({mcpServers.length})
-          </button>
-          <button type="button" role="tab" aria-selected={tab === 'agw'} className={tab === 'agw' ? 'active' : ''} onClick={() => setTab('agw')}>
-            AGW 接口 ({sources.length})
-          </button>
+  const groupHeadStyle = {
+    fontSize: 11,
+    fontWeight: 600,
+    color: 'var(--st-faint, #8b86a0)',
+    padding: '8px 10px 4px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  } as const;
+
+  return createPortal(
+    <div
+      className="skill-picker"
+      role="dialog"
+      aria-label="生态"
+      ref={box}
+      style={{ ...pos, width: 356, maxHeight: 340 }}
+    >
+      {adding ? (
+        <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <b style={{ fontSize: 13 }}>添加我的飞书</b>
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              style={{ border: 0, background: 'transparent', color: '#6b7280', fontSize: 12, cursor: 'pointer' }}
+            >
+              返回列表
+            </button>
+          </div>
+          <select
+            value={newKind}
+            onChange={(e) => setNewKind(e.target.value as 'feishu_bot' | 'feishu_bitable')}
+            style={{ height: 32, borderRadius: 8, padding: '0 8px', border: '1px solid #ded9ee', background: '#fff', fontSize: 12.5 }}
+          >
+            <option value="feishu_bot">飞书群机器人（Webhook 推卡片）</option>
+            <option value="feishu_bitable">飞书多维表格（同步读写）</option>
+          </select>
+          <input
+            type="text"
+            placeholder="名称（如：研发告警群机器人）"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            style={{ height: 32, borderRadius: 8, padding: '0 10px', border: '1px solid #ded9ee', fontSize: 12.5 }}
+          />
+          <input
+            type="text"
+            placeholder={
+              newKind === 'feishu_bot'
+                ? '飞书群 Webhook 地址（留空则建沙箱演示）'
+                : '粘贴多维表格链接（留空则建沙箱演示）'
+            }
+            value={newUrl}
+            onChange={(e) => setNewUrl(e.target.value)}
+            style={{ height: 32, borderRadius: 8, padding: '0 10px', border: '1px solid #ded9ee', fontSize: 12 }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
+            <button type="button" className="subtle-button" style={{ height: 30, fontSize: 12 }} onClick={() => setAdding(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              style={{ height: 30, padding: '0 12px', fontSize: 12 }}
+              disabled={saving || !newName.trim()}
+              onClick={() => void handleSaveFeishu()}
+            >
+              {saving ? '保存中…' : '保存并勾选'}
+            </button>
+          </div>
         </div>
-        {tab === 'feishu' ? (
-          <button type="button" className="subtle-button" style={{ height: 32, fontSize: 12.5 }} onClick={() => setShowAdd((v) => !v)}>
-            <Icon name={showAdd ? 'close' : 'plus'} /> {showAdd ? '收起添加' : '添加我的飞书'}
-          </button>
-        ) : null}
-      </div>
+      ) : (
+        <>
+          <label className="skill-picker-search">
+            <Icon name="search" />
+            <input
+              ref={searchRef}
+              placeholder="搜索飞书、知识库 MCP 或数据源"
+              aria-label="搜索生态能力"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </label>
 
-      {tab === 'feishu' ? (
-        <div className="source-list">
-          {showAdd ? (
-            <div style={{ padding: 14, borderRadius: 12, border: '1px solid #ddd6fe', background: '#faf8ff', marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <b style={{ fontSize: 13 }}>自助接入我的飞书群机器人 / 多维表格（无需找管理员）</b>
-                <small style={{ color: '#6b7280', fontSize: 11.5 }}>密钥 AES-256 加密保存在当前工作空间</small>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: 8 }}>
-                <select
-                  value={newKind}
-                  onChange={(e) => setNewKind(e.target.value as 'feishu_bot' | 'feishu_bitable')}
-                  style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid #d8d4e8', background: '#fff', fontSize: 12.5 }}
-                >
-                  <option value="feishu_bot">飞书群自定义机器人（发卡片/告警）</option>
-                  <option value="feishu_bitable">飞书多维表格（同步读写数据）</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="起个好记的名字（如：研发告警群机器人）"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid #d8d4e8', background: '#fff', fontSize: 12.5 }}
-                />
-              </div>
-              {newKind === 'feishu_bot' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: 8 }}>
-                  <input
-                    type="text"
-                    placeholder="粘贴飞书群机器人 Webhook（https://open.feishu.cn/open-apis/bot/v2/hook/...，留空则先建沙箱演示）"
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid #d8d4e8', background: '#fff', fontSize: 12 }}
-                  />
-                  <input
-                    type="password"
-                    placeholder="签名校验 Secret（可选）"
-                    value={webhookSecret}
-                    onChange={(e) => setWebhookSecret(e.target.value)}
-                    style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid #d8d4e8', background: '#fff', fontSize: 12 }}
-                  />
-                </div>
-              ) : (
-                <input
-                  type="text"
-                  placeholder="直接粘贴飞书多维表格浏览器链接（https://xxx.feishu.cn/base/... ?table=...，留空则建沙箱演示表）"
-                  value={bitableUrl}
-                  onChange={(e) => setBitableUrl(e.target.value)}
-                  style={{ height: 34, borderRadius: 8, padding: '0 10px', border: '1px solid #d8d4e8', background: '#fff', fontSize: 12 }}
-                />
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <small style={{ color: '#6b7280', fontSize: 11.5 }}>
-                  {newKind === 'feishu_bot'
-                    ? '获取方式：飞书群右上角「设置 → 群机器人 → 添加自定义机器人」复制 Webhook 即可。'
-                    : '自动从链接提取 appToken 与 tableId，无需手动拆参数。'}
-                </small>
-                <button type="button" className="primary-button" style={{ height: 32, padding: '0 14px', fontSize: 12.5 }} disabled={saving || !newName.trim()} onClick={() => void handleCreateOwn()}>
-                  {saving ? '保存中…' : '保存并勾选'}
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <p className="source-intro">
-            勾选后直接挂在输入框上方，发送需求时 <b>AI 会自动把对应飞书卡片推送或多维表格读写接入应用</b>，无需复制指令或手写密钥。
-          </p>
-
-          {connQ.isLoading ? <p className="muted-note">正在读取飞书连接器…</p> : null}
-          <ul>
+          <ul className="skill-picker-list" role="listbox" aria-label="企业生态能力" style={{ maxHeight: 245 }}>
+            {/* 分组 1：飞书机器人与多维表格 */}
+            <li style={groupHeadStyle} role="presentation">
+              <span>飞书机器人 &amp; 多维表格</span>
+              <span>点即勾选</span>
+            </li>
+            {connQ.isLoading ? <li className="skill-picker-empty">读取中…</li> : null}
+            {!connQ.isLoading && connectors.length === 0 ? (
+              <li className="skill-picker-empty">暂无匹配的飞书连接器</li>
+            ) : null}
             {connectors.map((c) => {
               const id = String(c.id ?? '');
               const name = String(c.name ?? id);
               const kind = String(c.kind ?? 'feishu_bot') === 'feishu_bitable' ? 'feishu_bitable' : 'feishu_bot';
               const mode = String(c.mode ?? 'sandbox');
               const owned = Boolean(c.owned);
-              const picked = selectedIds.has(id);
-              const tr = testResults[id];
+              const on = selectedIds.has(id);
               return (
-                <li key={id} className="source-row" style={picked ? { borderColor: '#7657d9', background: '#f8f5ff' } : undefined}>
-                  <span className="source-row-icon">
-                    <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
-                  </span>
-                  <span className="source-row-main">
-                    <b>
-                      {name}
-                      <em className="source-badge">{kind === 'feishu_bitable' ? '多维表格' : '飞书机器人'}</em>
-                      <em className="source-badge">{mode === 'live' ? '公域直连' : '沙箱可测'}</em>
-                      {owned ? <em className="source-badge" style={{ background: '#ede9fe', color: '#5b21b6' }}>我添加的</em> : null}
-                    </b>
+                <li
+                  key={id}
+                  role="option"
+                  aria-selected={on}
+                  className={on ? 'picked' : ''}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onToggle({ id, category: kind, name })}
+                >
+                  <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
+                  <span>
+                    <b>{name}</b>
                     <small>
-                      <code>{id}</code> · {c.hasSecrets ? '密钥已加密托管' : '沙箱免密即测即用'}
+                      {kind === 'feishu_bitable' ? '多维表格' : '飞书机器人'} · {mode === 'live' ? '公域直连' : '沙箱'}
+                      {testedOk[id] ? ' · ✓ 连通' : ''}
                     </small>
-                    {tr ? (
-                      <small style={{ display: 'block', marginTop: 3, color: tr.ok ? '#059669' : '#dc2626', fontWeight: 500 }}>
-                        {tr.ok ? '✓ ' : '✗ '}{tr.text}
-                      </small>
-                    ) : null}
                   </span>
-                  <span className="source-row-actions">
-                    <button type="button" className="subtle-button" disabled={testingId === id} onClick={() => void handleTest(id)}>
-                      {testingId === id ? '测试中…' : '测试连通'}
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      title="测试连通"
+                      disabled={testingId === id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleTest(id);
+                      }}
+                      style={{
+                        border: '1px solid #e2ddf1',
+                        background: testedOk[id] ? '#ecfdf5' : '#fff',
+                        color: testedOk[id] ? '#059669' : '#6b6580',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        padding: '2px 6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {testingId === id ? '…' : testedOk[id] ? '✓' : '测'}
                     </button>
                     {owned ? (
-                      <button type="button" className="subtle-button" style={{ color: '#dc2626' }} onClick={() => void handleDeleteOwn(id, name)}>
-                        删除
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className={picked ? 'subtle-button' : 'primary-button'}
-                      style={{ height: 30, padding: '0 12px', fontSize: 12 }}
-                      onClick={() => onToggle({ id, category: kind, name })}
-                    >
-                      {picked ? '✓ 已勾选' : '勾选使用'}
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : tab === 'mcp' ? (
-        <div className="source-list">
-          <p className="source-intro">
-            勾选企业 MCP 后，AI 编码智能体会在开发时按需调用对应的内部知识库与工具（凭据由平台代理，绝不泄露到代码里）。
-          </p>
-          {mcpQ.isLoading ? <p className="muted-note">正在读取已授权企业 MCP…</p> : null}
-          {!mcpQ.isLoading && mcpServers.length === 0 ? (
-            <div className="source-empty">
-              <Icon name="spark" />
-              <b>暂未启用企业 MCP 服务</b>
-              <p>管理员可在「管理 → 配额与运行 → 企业 MCP 注册中心」登记公司内部知识库、文档或接口 MCP。</p>
-            </div>
-          ) : null}
-          <ul>
-            {mcpServers.map((s) => {
-              const key = String(s.serverKey ?? s.id ?? '');
-              const name = String(s.name ?? key);
-              const desc = String(s.description ?? '');
-              const tools = Array.isArray(s.tools) ? (s.tools as Array<Record<string, unknown>>) : [];
-              const picked = selectedIds.has(key);
-              return (
-                <li key={key} className="source-row" style={picked ? { borderColor: '#7657d9', background: '#f8f5ff' } : undefined}>
-                  <span className="source-row-icon">
-                    <Icon name="spark" />
-                  </span>
-                  <span className="source-row-main">
-                    <b>
-                      {name}
-                      <em className="source-badge">{key}</em>
-                      {tools.length > 0 ? <em className="source-badge">{tools.length} 个工具</em> : null}
-                    </b>
-                    <small>{desc || '企业内部受控 MCP 工具服务'}</small>
-                  </span>
-                  <span className="source-row-actions">
-                    <button
-                      type="button"
-                      className={picked ? 'subtle-button' : 'primary-button'}
-                      style={{ height: 30, padding: '0 12px', fontSize: 12 }}
-                      onClick={() => onToggle({ id: key, category: 'mcp', name, subtitle: desc })}
-                    >
-                      {picked ? '✓ 已勾选' : '勾选使用'}
-                    </button>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : (
-        <div className="source-list">
-          <p className="source-intro">
-            选择当前账号有权调用的 AGW 企业业务接口（MES / 设备 / 经营数据），应用生成后会自动通过平台代理安全调用。
-          </p>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-            <button
-              type="button"
-              className="subtle-button"
-              style={{ height: 30, fontSize: 12 }}
-              onClick={() => {
-                onClose();
-                setSourcesOpen(true);
-              }}
-            >
-              <Icon name="plus" /> 去 AGW 目录添加 / 管理接口
-            </button>
-          </div>
-          {sourcesQ.isLoading ? <p className="muted-note">正在读取 AGW 数据源…</p> : null}
-          {!sourcesQ.isLoading && sources.length === 0 ? (
-            <div className="source-empty">
-              <Icon name="database" />
-              <b>还没有添加 AGW 数据源</b>
-              <p>点右上角「去 AGW 目录添加 / 管理接口」挑选当前账号有权限的接口。</p>
-            </div>
-          ) : null}
-          <ul>
-            {sources.map((s) => {
-              const picked = pickedSrcSet.has(s.id);
-              return (
-                <li key={s.id} className="source-row" style={picked ? { borderColor: '#7657d9', background: '#f8f5ff' } : undefined}>
-                  <span className="source-row-icon">
-                    <Icon name="database" />
-                  </span>
-                  <span className="source-row-main">
-                    <b>
-                      {s.name}
-                      <em className="source-badge">{s.provider || 'API'}</em>
-                    </b>
-                    <small>{s.description || s.url || '企业受控数据源'}</small>
-                  </span>
-                  <span className="source-row-actions">
-                    {onPickSource ? (
                       <button
                         type="button"
-                        className={picked ? 'subtle-button' : 'primary-button'}
-                        style={{ height: 30, padding: '0 12px', fontSize: 12 }}
-                        disabled={picked}
-                        onClick={() => onPickSource(s)}
+                        title="删除我添加的连接器"
+                        aria-label={`删除 ${name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteOwn(id, name);
+                        }}
+                        style={{
+                          border: 0,
+                          background: 'transparent',
+                          color: '#dc2626',
+                          fontSize: 12,
+                          padding: '2px 4px',
+                          cursor: 'pointer',
+                        }}
                       >
-                        {picked ? '✓ 已绑定' : '绑定使用'}
+                        ×
                       </button>
                     ) : null}
-                  </span>
+                    {on ? <Icon name="check" /> : null}
+                  </div>
                 </li>
               );
             })}
-          </ul>
-        </div>
-      )}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 10, borderTop: '1px solid #eeeaf6' }}>
-        <small style={{ color: '#6b7280', fontSize: 12 }}>
-          已勾选 <b>{selected.length}</b> 项生态能力{pickedSrcSet.size ? ` · 已绑定 ${pickedSrcSet.size} 个 AGW 数据源` : ''}
-        </small>
-        <button type="button" className="primary-button" style={{ height: 32, padding: '0 16px', fontSize: 12.5 }} onClick={onClose}>
-          完成
-        </button>
-      </div>
-    </Modal>
+            {/* 分组 2：企业知识与工具 MCP */}
+            {mcpServers.length > 0 ? (
+              <>
+                <li style={groupHeadStyle} role="presentation">
+                  <span>企业知识与工具 (MCP)</span>
+                </li>
+                {mcpServers.map((s) => {
+                  const key = String(s.serverKey ?? s.id ?? '');
+                  const name = String(s.name ?? key);
+                  const desc = String(s.description ?? '');
+                  const on = selectedIds.has(key);
+                  return (
+                    <li
+                      key={key}
+                      role="option"
+                      aria-selected={on}
+                      className={on ? 'picked' : ''}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => onToggle({ id: key, category: 'mcp', name, subtitle: desc })}
+                    >
+                      <Icon name="spark" />
+                      <span>
+                        <b>{name}</b>
+                        {desc ? <small>{desc}</small> : null}
+                      </span>
+                      {on ? <Icon name="check" /> : null}
+                    </li>
+                  );
+                })}
+              </>
+            ) : null}
+
+            {/* 分组 3：AGW 企业接口 */}
+            {onPickSource ? (
+              <>
+                <li style={groupHeadStyle} role="presentation">
+                  <span>企业接口 (AGW)</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      setSourcesOpen(true);
+                    }}
+                    style={{ border: 0, background: 'transparent', color: '#7657d9', fontSize: 11, cursor: 'pointer', padding: 0 }}
+                  >
+                    管理接口
+                  </button>
+                </li>
+                {sources.length === 0 ? (
+                  <li
+                    role="option"
+                    aria-selected={false}
+                    onClick={() => {
+                      onClose();
+                      setSourcesOpen(true);
+                    }}
+                  >
+                    <Icon name="plus" />
+                    <span>
+                      <b>从 AGW 目录添加接口</b>
+                      <small>暂未添加，点此挑选有权限的业务 API</small>
+                    </span>
+                  </li>
+                ) : (
+                  sources.map((s) => {
+                    const on = pickedSrcSet.has(s.id);
+                    return (
+                      <li
+                        key={s.id}
+                        role="option"
+                        aria-selected={on}
+                        className={on ? 'picked' : ''}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          if (!on) onPickSource(s);
+                        }}
+                      >
+                        <Icon name="database" />
+                        <span>
+                          <b>{s.name}</b>
+                          {s.description ? <small>{s.description}</small> : null}
+                        </span>
+                        {on ? <Icon name="check" /> : null}
+                      </li>
+                    );
+                  })
+                )}
+              </>
+            ) : null}
+          </ul>
+
+          <button
+            type="button"
+            className="skill-picker-more"
+            onClick={() => setAdding(true)}
+          >
+            ＋ 添加我的飞书机器人 / 多维表格
+          </button>
+        </>
+      )}
+    </div>,
+    document.body,
   );
 }

@@ -37,7 +37,7 @@ export function mentionAt(text: string, caret: number): { start: number; query: 
   return { start: before.length - m[2].length - 1, query: m[2] };
 }
 
-function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open: boolean, width: number, height: number) {
+export function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open: boolean, width: number, height: number) {
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   useLayoutEffect(() => {
     if (!open) return;
@@ -62,7 +62,7 @@ function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open: boolea
   return pos;
 }
 
-function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
+export function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
   const cb = useRef(onClose);
   cb.current = onClose;
   useEffect(() => {
