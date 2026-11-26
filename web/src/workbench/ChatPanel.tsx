@@ -860,7 +860,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               </p>
             ) : null}
             <div className="composer-bottom workbench-composer-bottom">
-              <div className="composer-tools composer-tools-primary">
+              <div className="composer-tools">
                 <AddMenuButton
                   variant="workbench"
                   buttonClassName="icon-button"
@@ -882,14 +882,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   onModel={(m) => void patchModel({ model: m })}
                   onMode={(m) => void patchModel({ mode: m })}
                 />
-              </div>
-              <div className="composer-tools composer-tools-chips">
                 <button
                   ref={skillBtn}
                   type="button"
                   className="skill-button"
                   aria-label="选择技能"
                   title="技能"
+                  data-tip="技能"
                   aria-expanded={picker !== null}
                   onClick={() => setPicker(picker ? null : { via: 'button' })}
                 >
@@ -900,14 +899,16 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   <button
                     ref={ecoBtn}
                     type="button"
-                    className={`skill-button${ecosystems.length ? ' on' : ''}`}
+                    className={`skill-button eco-chip${ecosystems.length ? ' on' : ''}`}
                     aria-label="选择企业生态能力"
                     aria-expanded={ecoOpen}
                     title="一键勾选飞书机器人、多维表格、企业知识 MCP 或 AGW 接口"
+                    data-tip={ecosystems.length ? `生态 · 已选 ${ecosystems.length} 项` : '生态能力'}
                     onClick={() => setEcoOpen((v) => !v)}
                   >
                     <Icon name="globe" />
                     <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
+                    {ecosystems.length ? <span className="chip-badge">{ecosystems.length}</span> : null}
                   </button>
                 ) : null}
                 <EcosystemPickerModal
@@ -952,11 +953,11 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                           ? '当前任务完成后启用；在「待发送消息」里撤回就不会启用'
                           : '让 AI 设计表结构并启用云服务（会先请你确认）'
                     }
+                    data-tip={cloudEnabled ? '云服务已启用' : cloudQueued ? '云服务排队中' : '共享云服务'}
                     onClick={() => (cloudEnabled ? onOpenCloud?.() : cloudQueued ? setQueueOpen(true) : onEnableCloud?.())}
                   >
                     <Icon name="cloud" />
-                    <span className="chip-label chip-label-full">{cloudEnabled ? '云服务已启用' : cloudQueued ? '云服务排队中' : '共享云服务'}</span>
-                    <span className="chip-label chip-label-short">{cloudQueued ? '排队中' : '云服务'}</span>
+                    <span className="chip-label">{cloudEnabled ? '云服务已启用' : cloudQueued ? '云服务排队中' : '共享云服务'}</span>
                   </button>
                 )}
               </div>

@@ -2414,8 +2414,8 @@ a.skill-chip{text-decoration:none}
 .skill-button.cloud-chip .icon{width:13px;height:13px}
 .skill-button.cloud-chip.on{border-color:#d9ccf3;background:#f6f1ff;color:#6b45c4}
 .skill-button.cloud-chip.queued{border-style:dashed;border-color:#d9ccf3;color:#8a6fc9}
-.skill-button.cloud-chip .chip-label-short{display:none}
-/* 工作台左栏输入框按容器宽度自适应（详细规则见下方工作台底部工具栏） */
+.skill-button .chip-badge{display:none;font-size:10px;font-weight:600;line-height:1;padding:1px 4px;border-radius:999px;background:#ece4fb;color:#5a3fbf}
+/* 工作台左栏输入框按容器宽度单行自适应（详细规则见下方工作台底部工具栏） */
 .studio-main .chat-composer{container-type:inline-size;max-width:100%;box-sizing:border-box}
 
 /* 错误边界：只替换出错的那一块 */
@@ -2550,35 +2550,36 @@ a.skill-chip{text-decoration:none}
 .model-button,.model-button *{white-space:nowrap}.model-button{flex:none}
 .model-button .model-label{max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .skill-chip .chip-label{max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-/* 工作台分栏输入框工具栏：宽态（预览收起）单行排布；窄态（右侧预览展开挤压左栏）自动切换为双层结构，模型独享上层不截断，技能/生态/云服务与发送停止按钮稳固留在框内绝不溢出 */
-.studio-main .chat-composer .composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px;width:100%;min-width:0}
-.studio-main .chat-composer .composer-tools{display:flex;align-items:center;gap:4px;flex:1 1 0;min-width:0;max-width:100%}
-.studio-main .chat-composer .composer-tools-primary{flex:0 1 auto;min-width:0;max-width:100%}
-.studio-main .chat-composer .composer-tools-chips{flex:1 1 auto;min-width:0;flex-wrap:wrap}
-.studio-main .chat-composer .composer-actions{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto}
+/* 工作台分栏输入框工具栏：始终保持简洁单行；空间充裕时显示完整文字，分栏偏窄时次级按钮渐进折叠为图标（悬停立显提示气泡），模型名自动省略号收缩，发送/停止按钮始终稳固在框内右端 */
+.studio-main .chat-composer .composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px;width:100%;min-width:0;flex-wrap:nowrap}
+.studio-main .chat-composer .composer-tools{display:flex;align-items:center;gap:4px;flex:1 1 0;min-width:0;max-width:100%;flex-wrap:nowrap}
+.studio-main .chat-composer .composer-tools>.add-menu-wrap,
+.studio-main .chat-composer .composer-tools>.skill-button,
+.studio-main .chat-composer .composer-tools>.plan-jump-btn{flex:none}
+.studio-main .chat-composer .composer-actions{display:inline-flex;align-items:center;gap:5px;flex:none;margin-left:auto}
 .studio-main .chat-composer .composer-actions .send-button{margin-left:0;width:30px;height:30px;min-width:30px;flex:none}
-.studio-main .chat-composer .model-button-inline{flex:0 1 auto;min-width:0;max-width:100%;padding:0 7px;overflow:hidden}
+.studio-main .chat-composer .model-button-inline{flex:0 1 auto;min-width:52px;max-width:180px;padding:0 6px;overflow:hidden}
 .studio-main .chat-composer .model-button-inline .model-orb,
 .studio-main .chat-composer .model-button-inline>.icon{flex:none}
-.studio-main .chat-composer .model-button-inline .model-label{flex:0 1 auto;min-width:0;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-main .chat-composer .model-button-inline .model-label{flex:0 1 auto;min-width:0;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-main .chat-composer .skill-button.cloud-chip.on{position:relative}
 @container (max-width:480px){
-  .studio-main .chat-composer .workbench-composer-bottom{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:center;column-gap:6px;row-gap:7px}
-  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-primary{grid-column:1 / -1;grid-row:1;width:100%;padding-bottom:6px;border-bottom:1px solid color-mix(in srgb,var(--st-line,#e8e4f2) 70%,transparent)}
-  .studio-main .chat-composer .workbench-composer-bottom .model-button-inline{max-width:calc(100% - 34px);padding:0 6px}
-  .studio-main .chat-composer .workbench-composer-bottom .model-button-inline .model-label{max-width:100%}
-  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-chips{grid-column:1;grid-row:2;flex-wrap:wrap;gap:4px}
-  .studio-main .chat-composer .workbench-composer-bottom .composer-tools-chips .skill-button{height:28px;min-height:28px;padding:0 8px;font-size:11.5px;gap:4px}
-  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-full{display:none}
-  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-short{display:inline}
-  .studio-main .chat-composer .workbench-composer-bottom .composer-actions{grid-column:2;grid-row:2;margin-left:0;align-self:end}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip{width:30px;min-width:30px;padding:0;justify-content:center;position:relative}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label{display:none}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip.on::after{content:'';position:absolute;top:4px;right:4px;width:5px;height:5px;border-radius:50%;background:#18a058;box-shadow:0 0 0 1.5px #f6f1ff}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip[data-tip]:hover::before{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);padding:4px 8px;border-radius:7px;background:#242033;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;pointer-events:none;z-index:20;box-shadow:0 4px 12px rgba(20,16,40,.18)}
 }
-@container (max-width:260px){
-  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip{padding:0 7px}
-  .studio-main .chat-composer .workbench-composer-bottom .skill-button.cloud-chip .chip-label-short{display:none}
-}
-@container (max-width:220px){
-  .studio-main .chat-composer .workbench-composer-bottom .skill-button{padding:0 7px}
+@container (max-width:350px){
+  .studio-main .chat-composer .workbench-composer-bottom{gap:5px}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-tools{gap:3px}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-tools>.add-menu-wrap>button{width:28px;min-width:28px;height:28px;min-height:28px}
+  .studio-main .chat-composer .workbench-composer-bottom .model-button-inline{height:28px;min-height:28px;padding:0 5px;gap:4px}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button{width:28px;min-width:28px;height:28px;min-height:28px;padding:0;justify-content:center;position:relative}
   .studio-main .chat-composer .workbench-composer-bottom .skill-button .chip-label{display:none}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.eco-chip.on{width:auto;padding:0 6px;gap:3px}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button.eco-chip.on .chip-badge{display:inline-flex;align-items:center;justify-content:center}
+  .studio-main .chat-composer .workbench-composer-bottom .skill-button[data-tip]:hover::before{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);padding:4px 8px;border-radius:7px;background:#242033;color:#fff;font-size:11px;line-height:1.2;white-space:nowrap;pointer-events:none;z-index:20;box-shadow:0 4px 12px rgba(20,16,40,.18)}
+  .studio-main .chat-composer .workbench-composer-bottom .composer-actions .send-button{width:28px;min-width:28px;height:28px;border-radius:9px}
 }
 .confirm-input{width:100%;margin-top:12px;padding:10px 12px;border:1px solid #e2dcea;border-radius:9px;font:inherit;font-size:13px;color:#1f1c29;background:#fff;outline:none}.confirm-input:focus{border-color:#8b62be;box-shadow:0 0 0 3px #8b62be22}
 
