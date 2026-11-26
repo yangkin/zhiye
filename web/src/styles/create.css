@@ -2,32 +2,84 @@
    织页 · 创造页新布局（参考简洁的单屏创作布局）+ 图标侧栏 + 小织帮助
    ========================================================================== */
 
-/* ---------- 图标侧栏 ---------- */
+/* ---------- 图标侧栏（顶部品牌固定 + 中间导航支持平滑上下滑动 + 底部帮助/空间常驻） ---------- */
 @media (min-width: 761px) {
   :root { --sidebar: 76px !important; }
-  .sidebar.rail { width: var(--sidebar); padding: 18px 8px 16px; align-items: center; background: #f7f6fb; }
+  .sidebar.rail { width: var(--sidebar); padding: 14px 6px 12px; align-items: center; background: #f7f6fb; overflow: hidden; }
 }
-.sidebar.rail { gap: 6px; }
-.rail-brand { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 20px; text-decoration: none; color: #3d2f55; }
-.rail-brand .brand-logo { width: 36px; height: 36px; }
+.sidebar.rail { gap: 4px; overflow: hidden; }
+.rail-brand { flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; margin-bottom: 10px; text-decoration: none; color: #3d2f55; }
+.rail-brand .brand-logo { width: 34px; height: 34px; }
 .rail-brand b { font-size: 11px; letter-spacing: 1px; font-weight: 600; }
-.rail-nav { display: flex; flex-direction: column; gap: 6px; width: 100%; margin: 0 !important; }
+.rail-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin: 0 !important;
+  padding: 2px 2px 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.rail-nav:hover { scrollbar-color: #d4cae8 transparent; }
+.rail-nav::-webkit-scrollbar { width: 3px; }
+.rail-nav::-webkit-scrollbar-track { background: transparent; }
+.rail-nav::-webkit-scrollbar-thumb { background: transparent; border-radius: 999px; }
+.rail-nav:hover::-webkit-scrollbar-thumb { background: #d4cae8; }
 .rail-nav a, .rail-item {
-  display: flex !important; flex-direction: column; align-items: center; gap: 4px;
-  width: 100%; padding: 9px 0 !important; border-radius: 12px; border: 0; background: transparent;
-  color: #85799a; font-size: 11px !important; text-decoration: none; cursor: pointer;
+  flex: none;
+  display: flex !important; flex-direction: column; align-items: center; gap: 3px;
+  width: 100%; padding: 7px 0 !important; border-radius: 12px; border: 0; background: transparent;
+  color: #85799a; font-size: 11px !important; line-height: 1.25; text-decoration: none; cursor: pointer;
 }
 .rail-nav a:hover, .rail-item:hover { background: #efeaf8; color: #6b4fc0; }
 .rail-nav a.active { background: #ece4fb; color: #6b4fc0; }
-.rail-icon { position: relative; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; }
+.rail-icon { position: relative; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; }
 .rail-nav a.active .rail-icon { background: #fff; box-shadow: 0 3px 10px #6b4fc01f; }
-.rail-icon .icon, .rail-item .icon { width: 18px; height: 18px; }
-.rail-icon small { position: absolute; top: -4px; right: -9px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #fff; border: 1px solid #e6def3; color: #795fc0; font-size: 11px; line-height: 15px; text-align: center; }
-.rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; padding: 0 !important; border: 0 !important; }
-.rail-profile { display: flex !important; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 !important; width: 100%; background: transparent !important; border: 0 !important; }
-.rail-profile small { font-size:12px; color: #a497b3; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-icon .icon, .rail-item .icon { width: 17px; height: 17px; }
+.rail-icon small { position: absolute; top: -4px; right: -9px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #fff; border: 1px solid #e6def3; color: #795fc0; font-size: 10.5px; line-height: 15px; text-align: center; }
+.rail-bottom {
+  flex: none;
+  margin-top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 2px 0 !important;
+  border: 0 !important;
+  border-top: 1px solid #eae4f4 !important;
+}
+.rail-profile { display: flex !important; flex-direction: column; align-items: center; gap: 3px; padding: 5px 0 !important; width: 100%; background: transparent !important; border: 0 !important; }
+.rail-profile .avatar { width: 30px; height: 30px; font-size: 12px; }
+.rail-profile small { font-size: 11px; color: #8c7fa0; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 适配笔记本 1920×1080（Windows 125%≈1536×750 / 150%≈1280×620）与较矮桌面视口：收紧纵距 + 导航区平滑滚动 */
+@media (min-width: 761px) and (max-height: 780px) {
+  .sidebar.rail { padding: 10px 6px 8px; gap: 2px; }
+  .rail-brand { margin-bottom: 4px; gap: 2px; }
+  .rail-brand .brand-logo { width: 28px; height: 28px; }
+  .rail-brand b { font-size: 10.5px; }
+  .rail-nav { gap: 2px; padding: 1px 2px 4px; }
+  .rail-nav a, .rail-item { padding: 5px 0 !important; gap: 2px; border-radius: 10px; font-size: 10.5px !important; }
+  .rail-icon { width: 25px; height: 25px; border-radius: 8px; }
+  .rail-icon .icon, .rail-item .icon { width: 16px; height: 16px; }
+  .rail-icon small { top: -3px; right: -8px; min-width: 15px; height: 15px; font-size: 10px; line-height: 13px; }
+  .rail-bottom { padding-top: 6px !important; gap: 2px; }
+  .rail-profile { padding: 3px 0 !important; gap: 2px; }
+  .rail-profile .avatar { width: 26px; height: 26px; font-size: 11px; }
+  .rail-profile small { font-size: 10.5px; }
+  .create-page.cp, .create-page { padding-top: clamp(16px, 3.5vh, 36px); }
+  .cp-title { margin-bottom: 22px; font-size: clamp(26px, 3.4vw, 38px); }
+}
+
 @media (max-width: 760px) {
-  .sidebar.rail { width: 96px; align-items: center; padding: 22px 10px 18px; }
+  .sidebar.rail { width: 96px; align-items: center; padding: 18px 10px 14px; }
   .sidebar.rail:not(.visible) { transform: translateX(-100%); visibility: hidden; pointer-events: none; }
   .sidebar.rail.visible { transform: translateX(0); visibility: visible; pointer-events: auto; }
 }

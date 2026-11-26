@@ -3678,10 +3678,16 @@
 
 /* 侧栏管理员菜单分隔线 */
 .rail-divider {
+  flex: none;
   width: 28px;
   height: 1px;
   background: #e6e0f2;
-  margin: 6px auto;
+  margin: 4px auto;
+}
+@media (min-width: 761px) and (max-height: 780px) {
+  .rail-divider {
+    margin: 2px auto;
+  }
 }
 
 /* 资产交接与离职批量划转工作台 */
