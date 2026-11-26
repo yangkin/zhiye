@@ -111,7 +111,7 @@ public class EnterpriseConnectorService {
                 .toList();
         if (enabled.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("\n\n## 平台已托管企业连接器（免密直连，严禁在源码硬编码飞书密钥或前端直连 open.feishu.cn）\n");
-        sb.append("当前可用连接器清单（详单见 `.zhiye/connectors.json`）：\n");
+        sb.append("当前可用连接器清单：\n");
         for (Map<String, Object> c : enabled) {
             sb.append("- `").append(c.get("id")).append("` — **").append(c.get("name")).append("**")
                     .append("（类型：`").append(c.get("kind")).append("`，模式：`").append(c.get("mode")).append("`）\n");
@@ -120,7 +120,7 @@ public class EnterpriseConnectorService {
             sb.append("""
                     - **单体全栈后端调用方式（已自动注入环境变量 `ZHIYE_CONNECTOR_API` 与 `ZHIYE_CONNECTOR_TOKEN`，无需用户手动配密钥）**：
                       - 发飞书卡片：`POST ${ZHIYE_CONNECTOR_API}/feishu/send-card`，Header `Authorization: Bearer ${ZHIYE_CONNECTOR_TOKEN}`，Body `{ connectorId, title, content, templateColor: "blue"|"green"|"orange"|"red", fields: [{label, value}] }`
-                      - 飞书多维表格 CRUD：`POST ${ZHIYE_CONNECTOR_API}/bitable/list`、`.../bitable/create`（`{ connectorId, fields }`）、`.../bitable/update`（`{ connectorId, recordId, fields }`）
+                      - 飞书多维表格 CRUD：`POST ${ZHIYE_CONNECTOR_API}/bitable/list`（返回 `{ ok, total, items, data }`）、`.../bitable/create`（Body `{ connectorId, fields }`，返回 `{ ok, record_id, fields, data }`）、`.../bitable/update`（Body `{ connectorId, recordId, fields }`，返回 `{ ok, record_id, fields, data }`）
                       - 查企业员工目录：`POST ${ZHIYE_CONNECTOR_API}/org/employees`（`{ q }`）
                     """);
         }
@@ -378,8 +378,17 @@ public class EnterpriseConnectorService {
             if (resp.statusCode() >= 400 || (parsed != null && parsed.path("code").asInt(0) != 0)) {
                 throw new IllegalStateException("多维表格查询失败: " + truncate(resp.body(), 300));
             }
-            recordAudit(conn.id(), appId, "bitable.list", "ok", System.currentTimeMillis() - t0, "appToken=" + appToken, "total=" + parsed.path("data").path("total").asInt(0), null);
-            return Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "data", parsed.path("data"));
+            JsonNode dataNode = parsed.path("data");
+            int total = dataNode.path("total").asInt(dataNode.path("items").isArray() ? dataNode.path("items").size() : 0);
+            recordAudit(conn.id(), appId, "bitable.list", "ok", System.currentTimeMillis() - t0, "appToken=" + appToken, "total=" + total, null);
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ok", true);
+            out.put("mode", "live");
+            out.put("connectorId", conn.id());
+            out.put("total", total);
+            out.put("items", dataNode.path("items"));
+            out.put("data", dataNode);
+            return out;
         } catch (Exception e) {
             recordAudit(conn.id(), appId, "bitable.list", "error", System.currentTimeMillis() - t0, "list", null, e.getMessage());
             throw e instanceof ApiException ae ? ae : new ApiException(HttpStatus.BAD_GATEWAY, "BITABLE_FAILED", e.getMessage());
@@ -403,8 +412,19 @@ public class EnterpriseConnectorService {
             if (resp.statusCode() >= 400 || (parsed != null && parsed.path("code").asInt(0) != 0)) {
                 throw new IllegalStateException("多维表格写入失败: " + truncate(resp.body(), 300));
             }
+            JsonNode dataNode = parsed.path("data");
+            JsonNode recNode = dataNode.path("record");
+            String recId = recNode.path("record_id").asText(recNode.path("id").asText(dataNode.path("record_id").asText("")));
             recordAudit(conn.id(), appId, "bitable.create", "ok", System.currentTimeMillis() - t0, "create", truncate(resp.body(), 200), null);
-            return Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "data", parsed.path("data"));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ok", true);
+            out.put("mode", "live");
+            out.put("connectorId", conn.id());
+            out.put("record_id", recId);
+            out.put("recordId", recId);
+            out.put("fields", recNode.path("fields"));
+            out.put("data", dataNode);
+            return out;
         } catch (Exception e) {
             recordAudit(conn.id(), appId, "bitable.create", "error", System.currentTimeMillis() - t0, "create", null, e.getMessage());
             throw e instanceof ApiException ae ? ae : new ApiException(HttpStatus.BAD_GATEWAY, "BITABLE_FAILED", e.getMessage());
@@ -433,8 +453,19 @@ public class EnterpriseConnectorService {
             if (resp.statusCode() >= 400 || (parsed != null && parsed.path("code").asInt(0) != 0)) {
                 throw new IllegalStateException("多维表格更新失败: " + truncate(resp.body(), 300));
             }
+            JsonNode dataNode = parsed.path("data");
+            JsonNode recNode = dataNode.path("record");
+            String recId = recNode.path("record_id").asText(recordId);
             recordAudit(conn.id(), appId, "bitable.update", "ok", System.currentTimeMillis() - t0, "recordId=" + recordId, "ok", null);
-            return Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "data", parsed.path("data"));
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ok", true);
+            out.put("mode", "live");
+            out.put("connectorId", conn.id());
+            out.put("record_id", recId);
+            out.put("recordId", recId);
+            out.put("fields", recNode.path("fields"));
+            out.put("data", dataNode);
+            return out;
         } catch (Exception e) {
             recordAudit(conn.id(), appId, "bitable.update", "error", System.currentTimeMillis() - t0, "update", null, e.getMessage());
             throw e instanceof ApiException ae ? ae : new ApiException(HttpStatus.BAD_GATEWAY, "BITABLE_FAILED", e.getMessage());
