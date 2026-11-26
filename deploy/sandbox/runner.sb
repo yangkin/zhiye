@@ -52,6 +52,9 @@
   (subpath (string-append (param "ZHIYE_ROOT") "/packages"))
   (subpath (string-append (param "ZHIYE_ROOT") "/runtime/template-cache"))
   (subpath (string-append (param "ZHIYE_ROOT") "/runtime/vue-template-cache"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runtime/fullstack-template-cache"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runtime/vue-springboot-template-cache"))
+  (subpath (string-append (param "ZHIYE_ROOT") "/runtime/deno-cache"))
   ;; 读目录列表时会读 /Users 本身
   (literal "/Users"))
 
