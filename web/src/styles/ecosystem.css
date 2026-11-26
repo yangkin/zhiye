@@ -323,9 +323,24 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.eco-field > input:focus {
+.eco-field > input:focus,
+.eco-field > textarea:focus {
   border-color: #7657d9;
   box-shadow: 0 0 0 3px rgba(118, 87, 217, 0.12);
+}
+
+.eco-field > textarea {
+  border-radius: 10px;
+  border: 1px solid #dfd9ef;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  background: #fff;
+  color: #1f1b2e;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .eco-field > small {

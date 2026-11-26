@@ -46,12 +46,27 @@ class PolyglotAndEcosystemClosingTest {
             assertThrows(ApiException.class, () -> connectors.deleteForWorkspace("ws_other", id));
             assertThrows(ApiException.class, () -> connectors.deleteForWorkspace(ws, "conn_feishu_bot_sandbox"));
 
-            // 普通用户可见脱敏 MCP 列表（不含密钥/内部地址）
-            var mcps = mcp.listEnabledForWorkspace();
-            assertNotNull(mcps);
-            for (var m : mcps) {
-                assertFalse(m.containsKey("secretEnc"));
-                assertFalse(m.containsKey("authHeader"));
+            // 普通用户可见脱敏 MCP 列表（不含密钥/内部地址）且可自助新建/检索/删除自己的知识库
+            var kbCreated = mcp.createForWorkspace(ws, Json.obj()
+                    .put("mode", "knowledge")
+                    .put("name", "T9 产线点检规范")
+                    .put("description", "日常设备点检口径")
+                    .put("knowledgeContent", "关键规则：良率低于 97.5% 必须触发红色飞书告警。"));
+            String kbId = String.valueOf(kbCreated.get("id"));
+            String kbKey = String.valueOf(kbCreated.get("serverKey"));
+            try {
+                var callRes = mcp.callTool(kbKey, "search_knowledge", Json.obj().put("query", "良率"), "test", null);
+                assertEquals(true, callRes.get("ok"));
+                assertTrue(String.valueOf(callRes.get("content")).contains("97.5%"));
+                assertThrows(ApiException.class, () -> mcp.deleteForWorkspace("ws_other", kbId));
+                var mcps = mcp.listEnabledForWorkspace(ws);
+                assertTrue(mcps.stream().anyMatch(m -> kbKey.equals(m.get("serverKey")) && Boolean.TRUE.equals(m.get("owned"))));
+                for (var m : mcps) {
+                    assertFalse(m.containsKey("secretEnc"));
+                    assertFalse(m.containsKey("authHeader"));
+                }
+            } finally {
+                mcp.deleteForWorkspace(ws, kbId);
             }
         } finally {
             connectors.deleteForWorkspace(ws, id);

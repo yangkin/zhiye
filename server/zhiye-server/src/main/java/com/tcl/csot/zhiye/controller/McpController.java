@@ -39,11 +39,31 @@ public class McpController {
         this.tasks = tasks;
     }
 
-    /** 普通用户工作台/首页「生态」选择器读取已启用的企业知识与工具 MCP 列表（脱敏，无密钥）。 */
+    /** 普通用户生态管理页/聊天栏读取已启用的企业知识库与 MCP 列表（脱敏，无密钥）。 */
     @GetMapping("/api/mcp-servers")
     public List<Map<String, Object>> listForWorkspace() {
+        return mcp.listEnabledForWorkspace(principal.workspaceId());
+    }
+
+    /** 普通用户自助新增本地知识库或 HTTP MCP 服务（仅归属当前工作空间，免找管理员）。 */
+    @PostMapping("/api/mcp-servers")
+    public Map<String, Object> createForWorkspace(@RequestBody JsonNode body) {
+        return mcp.createForWorkspace(principal.workspaceId(), body);
+    }
+
+    @DeleteMapping("/api/mcp-servers/{id}")
+    public Map<String, Object> deleteForWorkspace(@PathVariable String id) {
+        mcp.deleteForWorkspace(principal.workspaceId(), id);
+        return Map.of("ok", true);
+    }
+
+    @PostMapping("/api/mcp-servers/{key}/test")
+    public Map<String, Object> testForWorkspace(@PathVariable String key, @RequestBody(required = false) JsonNode body) {
         principal.workspaceId();
-        return mcp.listEnabledForWorkspace();
+        String tool = body == null ? "" : body.path("tool").asText("").trim();
+        if (tool.isEmpty()) tool = "search_knowledge";
+        JsonNode args = body == null ? null : body.get("arguments");
+        return mcp.callTool(key, tool, args, "ws-test", null);
     }
 
     @GetMapping("/api/admin/mcp-servers")

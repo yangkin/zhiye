@@ -74,8 +74,9 @@ public class McpRegistryService {
                 .query(ServerRow::map).list().stream().map(this::view).toList();
     }
 
-    /** 面向普通工作空间用户的已启用企业 MCP 目录（完全脱敏，不含内部地址与鉴权头）。 */
-    public List<Map<String, Object>> listEnabledForWorkspace() {
+    /** 面向普通工作空间用户的已启用企业 MCP / 知识库目录（完全脱敏，不含内部地址与鉴权头）。 */
+    public List<Map<String, Object>> listEnabledForWorkspace(String ws) {
+        String ownerTag = ws != null && !ws.isBlank() ? "ws:" + ws : "";
         return jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
                 .query(ServerRow::map).list().stream().map(r -> {
                     Map<String, Object> m = new LinkedHashMap<>();
@@ -85,9 +86,68 @@ public class McpRegistryService {
                     m.put("description", r.description());
                     m.put("transport", r.transport());
                     m.put("builtin", r.builtin());
+                    m.put("owned", !ownerTag.isEmpty() && ownerTag.equals(r.createdBy()));
+                    m.put("isKnowledgeBase", "mock".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:"));
                     m.put("tools", r.toolsJson());
                     return m;
                 }).toList();
+    }
+
+    /** 普通工作空间用户自助新增「本地知识库」或「远端 HTTP MCP 服务」。 */
+    public Map<String, Object> createForWorkspace(String ws, JsonNode body) {
+        if (ws == null || ws.isBlank()) throw ApiException.validation("缺少工作空间上下文");
+        ObjectNode norm = body != null && body.isObject() ? (ObjectNode) body.deepCopy() : Json.obj();
+        String name = norm.path("name").asText("").trim();
+        if (name.isEmpty()) throw ApiException.validation("名称不能为空");
+
+        // 自动生成合法 serverKey（用户不想手动想英文标识时免填）
+        String key = norm.path("serverKey").asText("").trim().toLowerCase(Locale.ROOT);
+        if (key.isEmpty()) {
+            String slug = name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+            if (slug.isEmpty() || !Character.isLetter(slug.charAt(0))) slug = "kb";
+            key = (slug.length() > 28 ? slug.substring(0, 28) : slug) + "-" + Ids.newId("m").substring(2, 8);
+            norm.put("serverKey", key);
+        }
+
+        String mode = norm.path("mode").asText("").trim().toLowerCase(Locale.ROOT);
+        String kbContent = norm.path("knowledgeContent").asText("").trim();
+        if ("knowledge".equals(mode) || !kbContent.isEmpty()) {
+            if (kbContent.isEmpty()) throw ApiException.validation("请填写知识库内容（如业务规范、字段字典、SOP 说明等）");
+            if (kbContent.length() > 60_000) throw ApiException.validation("单条知识库内容最多 60,000 字");
+            norm.put("transport", "mock");
+            norm.put("endpointUrl", "kb:" + kbContent);
+            if (!norm.has("tools") || !norm.get("tools").isArray() || norm.get("tools").isEmpty()) {
+                ArrayNode tools = Json.M.createArrayNode();
+                tools.addObject().put("name", "search_knowledge").put("description", "按关键词检索知识库「" + name + "」的内容与规范");
+                norm.set("tools", tools);
+            }
+        } else {
+            norm.put("transport", "http");
+            String toolNames = norm.path("toolNames").asText("").trim();
+            if ((!norm.has("tools") || !norm.get("tools").isArray() || norm.get("tools").isEmpty()) && !toolNames.isEmpty()) {
+                ArrayNode tools = Json.M.createArrayNode();
+                for (String t : toolNames.split("[,，\\s]+")) {
+                    String clean = t.trim();
+                    if (!clean.isEmpty()) tools.addObject().put("name", clean).put("description", "调用 MCP 工具 " + clean);
+                }
+                norm.set("tools", tools);
+            }
+        }
+        Map<String, Object> created = new LinkedHashMap<>(create(norm, "ws:" + ws));
+        created.put("owned", true);
+        created.remove("secretEnc");
+        created.remove("authHeader");
+        created.remove("endpointUrl");
+        return created;
+    }
+
+    /** 普通工作空间用户删除自己创建的知识库 / MCP（内置或他人的不可删）。 */
+    public void deleteForWorkspace(String ws, String id) {
+        ServerRow cur = findById(id);
+        if (cur.builtin() || ws == null || !("ws:" + ws).equals(cur.createdBy())) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_READONLY", "平台内置或管理员托管的 MCP 服务不可删除");
+        }
+        delete(id);
     }
 
     public List<Map<String, Object>> recentAudits(int limit) {
@@ -306,6 +366,21 @@ public class McpRegistryService {
                     - GET /api/eap/equipment/status?fab=T1 -> { items: [{ eqpId, line, status, uptimePct, alarmCount, lastAlarmAt }] }
                     - GET /api/itsm/tickets/mine?loginName=xxx -> { items: [{ ticketNo, title, priority, status, assignee, slaDueAt }] }
                     """.trim();
+        }
+        if (srv.endpointUrl() != null && srv.endpointUrl().startsWith("kb:")) {
+            String body = srv.endpointUrl().substring(3).trim();
+            String query = args != null ? args.path("query").asText(args.path("q").asText("")).trim().toLowerCase(Locale.ROOT) : "";
+            if (!query.isEmpty() && body.length() > 1500) {
+                StringBuilder matched = new StringBuilder();
+                for (String para : body.split("\\r?\\n\\s*\\r?\\n")) {
+                    if (para.toLowerCase(Locale.ROOT).contains(query)) {
+                        if (!matched.isEmpty()) matched.append("\n\n");
+                        matched.append(para.trim());
+                    }
+                }
+                if (!matched.isEmpty()) return "【知识库：" + srv.name() + "】\n" + matched;
+            }
+            return "【知识库：" + srv.name() + "】\n" + (body.length() > 4000 ? body.substring(0, 4000) + "\n…(已截断)" : body);
         }
         return "Mock MCP [" + srv.serverKey() + "/" + tool + "] 调用成功，参数：" + (args == null ? "{}" : Json.write(args));
     }

@@ -655,6 +655,15 @@ export const api = {
   connectorTest: (id: string) =>
     request<Record<string, unknown>>(`/api/connectors/${enc(id)}/test`, { method: 'POST' }),
   mcpServersList: () => request<Record<string, unknown>[]>('/api/mcp-servers'),
+  mcpServerCreate: (input: Record<string, unknown>) =>
+    request<Record<string, unknown>>('/api/mcp-servers', { method: 'POST', body: input }),
+  mcpServerDelete: (id: string) =>
+    request<{ ok: boolean }>(`/api/mcp-servers/${enc(id)}`, { method: 'DELETE' }),
+  mcpServerTest: (key: string, tool?: string, args?: Record<string, unknown>) =>
+    request<Record<string, unknown>>(`/api/mcp-servers/${enc(key)}/test`, {
+      method: 'POST',
+      body: { ...(tool ? { tool } : {}), ...(args ? { arguments: args } : {}) },
+    }),
   adminConnectorsList: () => request<Record<string, unknown>[]>('/api/admin/connectors'),
   adminConnectorSave: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/admin/connectors', { method: 'POST', body: input }),
