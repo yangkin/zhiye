@@ -47,9 +47,16 @@ public final class Prompts {
 
     static String generateService(AppRow app, List<String> assetPaths) {
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
+        boolean vueSpring = (app.framework() != null && app.framework().toLowerCase().contains("spring"))
+                || Catalog.looksLikeVueSpringBoot(app.prompt());
         StringBuilder sb = new StringBuilder();
-        sb.append("请在当前全栈项目骨架（前端 `src/` React 19 + Vite + TypeScript + Tailwind，后端 `server/index.mjs` Express）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
-        sb.append("## 应用类型与指引\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+        if (vueSpring) {
+            sb.append("请在当前全栈项目骨架（前端 `frontend/` Vue 3 + Vite + TypeScript + Tailwind，后端 `backend/` Spring Boot 3.5 + Java 17 Maven）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
+            sb.append("## 应用类型与指引\n").append(Catalog.VUE_SPRINGBOOT_HINT).append("\n\n");
+        } else {
+            sb.append("请在当前全栈项目骨架（前端 `src/` React 19 + Vite + TypeScript + Tailwind，后端 `server/index.mjs` Express）中实现下面这个前后端一体应用，替换掉骨架占位代码。\n\n");
+            sb.append("## 应用类型与指引\n").append(Catalog.FULLSTACK_HINT).append("\n\n");
+        }
         sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
         if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
         sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
@@ -59,7 +66,12 @@ public final class Prompts {
             for (String p : assetPaths) sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
             sb.append('\n');
         }
-        sb.append("""
+        sb.append(vueSpring ? """
+                ## Vue + Spring Boot 全栈交付要求
+                - **同时实现前后端**：前端在 `frontend/src/`（Vue 3 `<script setup lang="ts">` + Tailwind），后端在 `backend/src/main/java/com/zhiye/app/`（Spring Boot `@RestController`）；不要把业务数据只写死在前端，必须通过真实 `/api/...` 接口持久化
+                - **离线构建约束**：`backend/pom.xml` 已预装 `spring-boot-starter-web`、`spring-boot-starter-jdbc`、`postgresql`（本地 `.m2` 已预热），**不要往 `pom.xml` 添加离线仓库不存在的冷门依赖**；数据默认用 `DATA_DIR` 原子 JSON 文件持久化并在 `JDBC_DATABASE_URL` 存在时切换 PostgreSQL；飞书/多维表格/员工目录直接注入内置 `ConnectorClient` 调用
+                - **自检闭环**：改完核心代码后调用 `typecheck_diagnostics`（自动跑 `mvn -B -o test-compile` + `vue-tsc`），收尾前务必调用 `verify_app`（自动构建 Vue 前端、Maven 打包 Spring Boot JAR、启动服务并验证 `/api/health` 200 与页面冒烟）及 `test_endpoint` 实测核心 CRUD 接口
+                """ : """
                 ## 全栈交付要求
                 - **同时实现前后端**：前端在 `src/`，后端在 `server/`（入口 `server/index.mjs`）；不要把业务数据只写死在前端内存或 localStorage 里，必须通过真实 `/api/...` 接口读写持久化数据
                 - **接口与持久化规范**：前端统一请求相对路径 `/api/...`（禁止硬编码 `localhost`）；后端监听 `0.0.0.0:${PORT || 8080}`，保留 `GET /api/health` 返回 200 JSON，数据写入 `process.env.DATA_DIR || '.data'`（原子落盘 `tmp -> rename`）并在检测到 `DATABASE_URL` 时支持 PostgreSQL，静态托管 `dist/` 与 SPA 回退

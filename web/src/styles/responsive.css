@@ -334,11 +334,11 @@
 /* 5. 工作台（/apps/:id）：锁定对话栏黄金宽度区间，防止 4K 屏对话栏过肥，同时给 1280px 笔记本更多预览空间 */
 @media (min-width: 971px) {
   .studio-body.workspace-body {
-    grid-template-columns: clamp(300px, 26%, 460px) minmax(0, 1fr);
+    grid-template-columns: clamp(300px, 26%, 460px) 6px minmax(0, 1fr);
   }
 
   .studio-body.workspace-body.chat-collapsed {
-    grid-template-columns: 0 minmax(0, 1fr);
+    grid-template-columns: 0 0 minmax(0, 1fr);
   }
 
   .studio-body.workspace-body.preview-collapsed {

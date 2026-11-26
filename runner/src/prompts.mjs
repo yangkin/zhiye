@@ -137,8 +137,11 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
   - 除 shared、anon_submit、function_write 外的预设都需要员工登录，在总结里提醒用户发布时把访问设置改成「员工登录」
 - 表名/字段名只用小写字母、数字、下划线。未知字段、类型不符、违反规则的写入会被拒绝（返回中文说明，错误对象有 code 和 status），页面要把 error.message 提示给用户；
   status 为 401 表示需要登录，403 表示没有权限。
-- 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），
-  页面**必须真实通过 \`await window.zhiye.fn.call('name', { ... })\` 调用它们**，不能只写云函数文件却在前端算完直写 db；简单增删改查才直接用 zhiye.cloud.db。函数只能用 ctx（db/storage/source/ai/log/user），不能读写文件、读环境变量、访问外网，10 秒超时。
+- 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源或企业飞书连接器时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），
+  页面**必须真实通过 \`await window.zhiye.fn.call('name', { ... })\` 调用它们**，不能只写云函数文件却在前端算完直写 db；简单增删改查才直接用 zhiye.cloud.db。函数可使用 \`ctx\` 全部平台能力（\`ctx.db\` / \`ctx.storage\` / \`ctx.source\` / \`ctx.ai\` / \`ctx.feishu.sendCard\` / \`ctx.bitable.list|create|update\` / \`ctx.org.searchEmployees\` / \`ctx.log\` / \`ctx.user\`），密钥由平台托管、不进沙箱，10 秒超时。
+  - 发公域飞书卡片：\`await ctx.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\`
+  - 飞书多维表格 CRUD：\`await ctx.bitable.list(connectorId)\` / \`await ctx.bitable.create(connectorId, fields)\` / \`await ctx.bitable.update(connectorId, recordId, fields)\`
+  - 组织员工检索：\`await ctx.org.searchEmployees(keyword)\`（查看 \`.zhiye/connectors.json\` 获取已启用连接器 ID）
   云函数里不要假设 \`ctx.user.loginName\` 有特定前缀（预览身份下为 author），若演示角色切换需要做角色校验，请结合 \`ctx.user.admin\` 与显式传入的角色参数判断。
   只允许函数做的状态变更在 policies.json 的 transitions 里写 \`"by": "function"\`，这样页面绕过函数直接改会被拒绝。写函数前先读内置技能 cloud-functions。
 - 首次演示数据播种（seed）必须幂等并覆盖全部主表与关联业务表（或放在初始化云函数里按表补齐），不要只判断某一张表为空就跳过其余表，避免半途失败后页面长期空白。`
@@ -167,13 +170,18 @@ export const APP_AI = `
 - 先用 \`window.zhiye?.ai\` 判断是否可用（本地直接打开 dist 时没有），不可用时给出提示而不是报错。需要时用 read 读取内置技能 app-ai 的说明。`
 
 const SERVICE = `
-## 项目形态（单体后端 / 前后端全栈应用）
-- 这是运行在织页容器托管环境中的单体后端或前后端一体全栈项目（单应用上限 1C 1G，支持 Python / Node.js / Java / Go）。详细规范可随时用 \`read\` 查看内置技能 \`fullstack-app\`。
-- 全栈骨架约定（\`package.json\` + \`server/index.mjs\` + \`src/\`）：
+## 项目形态（单体后端 / 多语言前后端全栈应用）
+- 这是运行在织页容器托管环境中的单体后端或前后端一体全栈项目（支持 **Node.js + React**、**Spring Boot + Vue 3**、**Python FastAPI/Flask + Vue/React**、**Go HTTP**）。详细规范可随时用 \`read\` 查看内置技能 \`fullstack-app\` 与 \`feishu-ecosystem\`。
+- **Node + React 全栈骨架（\`package.json\` + \`server/index.mjs\` + \`src/\`）**：
   - 前端在 \`src/\`，所有接口请求**一律用相对路径 \`/api/...\`**，严禁写死 \`http://localhost:xxxx\`；
-  - 后端在 \`server/index.mjs\`，绑定 \`0.0.0.0\` 与 \`process.env.PORT || 8080\`，保留 \`GET /api/health\`，业务数据原子持久化到 \`process.env.DATA_DIR || '.data'\`（或在检测到 \`DATABASE_URL\` 时走 PostgreSQL），并静态托管 \`dist/\`（缺失静态资源返回 404，SPA 路由回退 \`dist/index.html\`）。
+  - 后端在 \`server/index.mjs\`，绑定 \`0.0.0.0\` 与 \`process.env.PORT || 8080\`，保留 \`GET /api/health\`，业务数据原子持久化到 \`process.env.DATA_DIR || '.data'\`（或在检测到 \`DATABASE_URL\` 时走 PostgreSQL），并静态托管 \`dist/\`（SPA 路由回退 \`dist/index.html\`）。
+- **Vue 3 + Spring Boot 全栈骨架（\`frontend/\` + \`backend/pom.xml\`）**：
+  - 前端在 \`frontend/\`（Vue 3 + Vite + TypeScript），请求相对路径 \`/api/...\`，构建产物输出到 \`frontend/dist\`（或 \`backend/src/main/resources/static\`）；
+  - 后端在 \`backend/\`（Spring Boot 3 + Java），保留 \`GET /api/health\`，通过 \`server.port=\${PORT:8080}\` 监听端口，优先使用 \`JDBC_DATABASE_URL\`（托管 PG）并保留本地 H2/文件兜底；**不要随意往 \`pom.xml\` 添加离线缓存之外的冷门依赖**，改完调用 \`typecheck_diagnostics\`（执行 \`mvn -o test-compile\` + \`vue-tsc\`）与 \`verify_app\` 验证。
+- **企业连接器免密直连（全栈后端已自动注入 \`ZHIYE_CONNECTOR_API\` 与 \`ZHIYE_CONNECTOR_TOKEN\`）**：
+  - 查看 \`.zhiye/connectors.json\` 获取连接器 ID；后端直接 \`POST \${ZHIYE_CONNECTOR_API}/feishu/send-card\`、\`/bitable/list|create|update\`、\`/org/employees\`（带 \`Authorization: Bearer \${ZHIYE_CONNECTOR_TOKEN}\`），无需硬编码飞书密钥。
 - 平台网关已透传华星 SSO 请求头（\`X-Zhiye-User-Id/Login/Name/Admin\`）；数据库与环境变量由「服务托管」提供（不要调用静态站点的 \`cloud/schema.sql\`、\`window.zhiye\` 或 \`request_confirm(cloud)\`）。
-- 排查运行态异常、表结构或环境变量时，先调用 \`service_runtime_inspect\` 查看真实日志与配置；改完后务必调用 \`verify_app\` 确认语法、类型、构建与临时起服 \`/api/health\` 全部通过。`
+- 排查运行态异常、表结构或环境变量时，先调用 \`service_runtime_inspect\` 查看真实日志与配置；改完后务必调用 \`verify_app\` 确认编译、构建与真实接口探活全部通过。`
 
 export function systemPrompt(projectKind, cloudEnabled = false) {
   if (projectKind === 'skill') return SKILL

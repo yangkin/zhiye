@@ -25,7 +25,10 @@ if [ ! -d "runtime/fullstack-template-cache/node_modules" ] || ! cmp -s "package
   mkdir -p "runtime/fullstack-template-cache" && cp "packages/fullstack-template/package.json" "runtime/fullstack-template-cache/"
   (cd "runtime/fullstack-template-cache" && npm install --no-audit --no-fund)
 fi
-echo "✓ 模板依赖缓存"
+if [ -f "packages/vue-springboot-template/backend/pom.xml" ]; then
+  (mvn -B -q -o -f "packages/vue-springboot-template/backend/pom.xml" test-compile >/dev/null 2>&1 || mvn -B -q -f "packages/vue-springboot-template/backend/pom.xml" dependency:go-offline >/dev/null 2>&1 || true)
+fi
+echo "✓ 模板依赖缓存（含 Vue + Spring Boot 离线 Maven 依赖）"
 
 # 3. 前端
 if [ "${SKIP_WEB_BUILD:-0}" != "1" ]; then (npm run build -w web >runtime/logs/web-build.log 2>&1) && echo "✓ 前端已构建" || { echo "✗ 前端构建失败，见 runtime/logs/web-build.log"; exit 1; }; fi

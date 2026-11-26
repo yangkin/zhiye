@@ -286,7 +286,10 @@ public final class ServiceRuntimeDetector {
     private static boolean hasJavaEntry(String dir, Set<String> files) {
         String prefix = dir.isEmpty() ? "" : dir + "/";
         for (String f : files) {
-            if (f.startsWith(prefix) && f.endsWith(".java")) return true;
+            if (!f.startsWith(prefix) || !f.endsWith(".java")) continue;
+            String rel = f.substring(prefix.length());
+            // 仅匹配当前目录直属的 *.java 或 src/ 下的 *.java，避免根目录误命中 backend/src/... 导致跳过 backend/pom.xml
+            if (!rel.contains("/") || rel.startsWith("src/")) return true;
         }
         return false;
     }

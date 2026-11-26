@@ -46,25 +46,34 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
   const diagnostics = []
   const notes = []
 
-  const runTs = async (binRel) => {
-    const bin = path.join(cwd, binRel)
-    if (!existsSync(bin) || !existsSync(path.join(cwd, 'tsconfig.json'))) return
-    const r = await run(process.execPath, [bin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd, env: buildEnv(env), timeoutMs: 60_000 })
+  const runTs = async (baseDir, binRel) => {
+    const bin = path.join(baseDir, binRel)
+    if (!existsSync(bin) || !existsSync(path.join(baseDir, 'tsconfig.json'))) return
+    const r = await run(process.execPath, [bin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd: baseDir, env: buildEnv(env), timeoutMs: 60_000 })
     if (r.code !== 0) {
       const parsed = parseTscLines(r.out)
       if (parsed.length) diagnostics.push(...parsed)
-      else if (r.out.trim()) diagnostics.push({ file: 'tsconfig.json', line: 1, col: 1, severity: 'error', code: 'TSC', message: r.out.trim().slice(0, 600) })
+      else if (r.out.trim()) diagnostics.push({ file: path.relative(cwd, path.join(baseDir, 'tsconfig.json')) || 'tsconfig.json', line: 1, col: 1, severity: 'error', code: 'TSC', message: r.out.trim().slice(0, 600) })
     }
   }
 
   if (projectKind === 'vue') {
-    await runTs('node_modules/vue-tsc/bin/vue-tsc.js')
+    await runTs(cwd, 'node_modules/vue-tsc/bin/vue-tsc.js')
     for (const p of vueLint(cwd)) diagnostics.push({ file: p.split('：')[0], line: 1, col: 1, severity: 'error', code: 'VUE_LINT', message: p })
   } else if (projectKind === 'template' || projectKind === 'vite') {
-    await runTs('node_modules/typescript/bin/tsc')
+    await runTs(cwd, 'node_modules/typescript/bin/tsc')
     for (const p of templateLint(cwd)) diagnostics.push({ file: p.split('：')[0], line: 1, col: 1, severity: 'error', code: 'TEMPLATE_LINT', message: p })
   } else if (projectKind === 'service') {
-    await runTs('node_modules/typescript/bin/tsc')
+    await runTs(cwd, 'node_modules/typescript/bin/tsc')
+    // 前后端分目录全栈（如 Vue + Spring Boot / React + FastAPI）：检查 frontend/ 类型
+    const frontDir = path.join(cwd, 'frontend')
+    if (existsSync(path.join(frontDir, 'tsconfig.json'))) {
+      if (existsSync(path.join(frontDir, 'node_modules/vue-tsc/bin/vue-tsc.js'))) {
+        await runTs(frontDir, 'node_modules/vue-tsc/bin/vue-tsc.js')
+      } else {
+        await runTs(frontDir, 'node_modules/typescript/bin/tsc')
+      }
+    }
     const files = walkCodeFiles(cwd)
     for (const rel of files.filter((f) => /\.(mjs|cjs|js)$/.test(f) && /^(server|backend|api)\//.test(f)).slice(0, 30)) {
       const r = await run(process.execPath, ['--check', rel], { cwd, env: buildEnv(env), timeoutMs: 10_000 })
@@ -74,6 +83,37 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
     if (pyFiles.length) {
       const r = await run('python3', ['-m', 'py_compile', ...pyFiles], { cwd, env: buildEnv(env), timeoutMs: 15_000 })
       if (r.code !== 0) diagnostics.push({ file: pyFiles[0], line: 1, col: 1, severity: 'error', code: 'PY_SYNTAX', message: (r.out || 'Python 语法错误').trim().slice(0, 400) })
+    }
+    // Java / Spring Boot 离线增量编译检查（mvn -B -o test-compile）
+    for (const relPomDir of ['', 'backend', 'server']) {
+      const pomDir = relPomDir ? path.join(cwd, relPomDir) : cwd
+      if (!existsSync(path.join(pomDir, 'pom.xml'))) continue
+      const r = await run('mvn', ['-B', '-o', 'test-compile'], { cwd: pomDir, env: buildEnv(env), timeoutMs: 90_000 })
+      if (r.code !== 0) {
+        const errLines = String(r.out || '').split(/\r?\n/).filter((l) => l.startsWith('[ERROR]'))
+        let matched = 0
+        for (const l of errLines) {
+          const m = /\[ERROR\]\s+(.+\.java):\[(\d+),(\d+)\]\s*(.+)/.exec(l)
+          if (m) {
+            diagnostics.push({ file: path.relative(cwd, m[1]) || m[1], line: Number(m[2]), col: Number(m[3]), severity: 'error', code: 'JAVAC', message: m[4].trim() })
+            matched++
+          }
+        }
+        if (matched === 0) {
+          diagnostics.push({ file: path.join(relPomDir, 'pom.xml'), line: 1, col: 1, severity: 'error', code: 'MAVEN', message: errLines.slice(0, 8).join('\n').slice(0, 600) || `mvn test-compile exit=${r.code}` })
+        }
+      }
+      break
+    }
+    // Go 静态诊断（go vet ./...）
+    for (const relGoDir of ['', 'backend', 'server']) {
+      const goDir = relGoDir ? path.join(cwd, relGoDir) : cwd
+      if (!existsSync(path.join(goDir, 'go.mod'))) continue
+      const r = await run('go', ['vet', './...'], { cwd: goDir, env: buildEnv(env), timeoutMs: 60_000 })
+      if (r.code !== 0) {
+        diagnostics.push({ file: path.join(relGoDir, 'go.mod'), line: 1, col: 1, severity: 'error', code: 'GO_VET', message: String(r.out || `go vet exit=${r.code}`).trim().slice(0, 600) })
+      }
+      break
     }
   } else if (projectKind === 'script') {
     const files = walkCodeFiles(cwd)

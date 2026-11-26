@@ -505,11 +505,96 @@ export async function serviceLiveSmoke(cwd, env = process.env) {
 
 async function verifyService(cwd, env) {
   const checks = []
+  const bEnv = buildEnv(env)
+  // 1. 检测是否为 Java/Spring Boot 或 Go 多语言全栈项目（含前后端分目录 frontend/ + backend/）
+  const javaDir = existsSync(path.join(cwd, 'backend', 'pom.xml')) ? path.join(cwd, 'backend')
+    : existsSync(path.join(cwd, 'pom.xml')) ? cwd : null
+  const goDir = !javaDir && existsSync(path.join(cwd, 'backend', 'go.mod')) ? path.join(cwd, 'backend')
+    : !javaDir && existsSync(path.join(cwd, 'go.mod')) ? cwd : null
+  const frontSubDir = existsSync(path.join(cwd, 'frontend', 'package.json')) ? path.join(cwd, 'frontend') : null
+
+  if (frontSubDir) {
+    const vueTsc = path.join(frontSubDir, 'node_modules', 'vue-tsc', 'bin', 'vue-tsc.js')
+    const tscBin = path.join(frontSubDir, 'node_modules', 'typescript', 'bin', 'tsc')
+    const chosenBin = existsSync(vueTsc) ? vueTsc : existsSync(tscBin) ? tscBin : null
+    if (existsSync(path.join(frontSubDir, 'tsconfig.json')) && chosenBin) {
+      checks.push(await step('前端类型检查', async () => {
+        const r = await run(process.execPath, [chosenBin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd: frontSubDir, env: bEnv, timeoutMs: 120_000 })
+        if (r.timedOut) return { ok: false, detail: '前端类型检查超时' }
+        if (r.code !== 0) return { ok: false, detail: tscSummary(r.out) || `类型检查退出码 ${r.code}` }
+        return { ok: true, detail: '' }
+      }))
+    }
+    if (existsSync(path.join(frontSubDir, 'node_modules')) && viteBin(frontSubDir)) {
+      checks.push(await step('前端构建', () => viteBuild(frontSubDir, bEnv, { outDir: 'dist' })))
+    }
+  }
+
+  if (javaDir) {
+    checks.push(await step('Spring Boot 离线编译打包', async () => {
+      if (frontSubDir && existsSync(path.join(frontSubDir, 'dist', 'index.html'))) {
+        const staticTarget = path.join(javaDir, 'src', 'main', 'resources', 'static')
+        rmSync(staticTarget, { recursive: true, force: true })
+        mkdirSync(staticTarget, { recursive: true })
+        cpSync(path.join(frontSubDir, 'dist'), staticTarget, { recursive: true })
+      }
+      const r = await run('mvn', ['-B', '-o', '-DskipTests', 'package'], { cwd: javaDir, env: bEnv, timeoutMs: 180_000 })
+      if (r.timedOut) return { ok: false, detail: 'Maven 构建超时' }
+      if (r.code !== 0) {
+        const errs = String(r.out || '').split(/\r?\n/).filter((l) => l.includes('[ERROR]')).slice(0, 15).join('\n')
+        return { ok: false, detail: errs || String(r.out || '').slice(-1500) }
+      }
+      return { ok: true, detail: 'mvn -B -o -DskipTests package 构建通过' }
+    }))
+    const prevOk = checks.every((c) => c.ok)
+    checks.push(prevOk
+      ? await step('Spring Boot 启动与探活', async () => {
+          const { startTempServiceServer } = await import('./endpoint-test.mjs')
+          let srv
+          try {
+            srv = await startTempServiceServer(cwd, bEnv, { healthPath: '/api/health', startupTimeoutMs: 45_000 })
+            return { ok: true, detail: `Spring Boot (${srv.label}) 启动正常，/api/health 返回 200` }
+          } catch (e) {
+            return { ok: false, detail: String(e?.message || e) }
+          } finally {
+            if (srv) await srv.close()
+          }
+        })
+      : { name: 'Spring Boot 启动与探活', ok: false, skipped: true, detail: SKIPPED })
+    return { checks, editable: false, noDist: true }
+  }
+
+  if (goDir) {
+    checks.push(await step('Go 编译构建', async () => {
+      const r = await run('go', ['build', '-o', 'app', '.'], { cwd: goDir, env: bEnv, timeoutMs: 120_000 })
+      if (r.timedOut) return { ok: false, detail: 'go build 超时' }
+      if (r.code !== 0) return { ok: false, detail: String(r.out || `go build exit=${r.code}`).slice(-1200) }
+      return { ok: true, detail: 'go build 编译通过' }
+    }))
+    const prevOk = checks.every((c) => c.ok)
+    checks.push(prevOk
+      ? await step('Go 服务启动与探活', async () => {
+          const { startTempServiceServer } = await import('./endpoint-test.mjs')
+          let srv
+          try {
+            srv = await startTempServiceServer(cwd, bEnv, { healthPath: '/api/health', startupTimeoutMs: 15_000 })
+            return { ok: true, detail: `Go 服务 (${srv.label}) 启动正常，/api/health 返回 200` }
+          } catch (e) {
+            return { ok: false, detail: String(e?.message || e) }
+          } finally {
+            if (srv) await srv.close()
+          }
+        })
+      : { name: 'Go 服务启动与探活', ok: false, skipped: true, detail: SKIPPED })
+    return { checks, editable: false, noDist: true }
+  }
+
+  // 默认：Node.js / Python 全栈服务校验
   checks.push(await step('脚本语法', () => checkScripts(cwd, env)))
   const tscBin = path.join(cwd, 'node_modules', 'typescript', 'bin', 'tsc')
   if (existsSync(path.join(cwd, 'tsconfig.json')) && existsSync(tscBin)) {
     checks.push(await step('类型检查', async () => {
-      const r = await run(process.execPath, [tscBin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd, env: buildEnv(env), timeoutMs: 120_000 })
+      const r = await run(process.execPath, [tscBin, '--noEmit', '-p', 'tsconfig.json', '--pretty', 'false'], { cwd, env: bEnv, timeoutMs: 120_000 })
       if (r.timedOut) return { ok: false, detail: '类型检查超时' }
       if (r.code !== 0) return { ok: false, detail: tscSummary(r.out) || `tsc 退出码 ${r.code}` }
       return { ok: true, detail: '' }
@@ -517,7 +602,7 @@ async function verifyService(cwd, env) {
   }
   const hasFrontend = existsSync(path.join(cwd, 'package.json')) && existsSync(path.join(cwd, 'node_modules')) && viteBin(cwd)
   if (hasFrontend) {
-    checks.push(await step('前端构建', () => viteBuild(cwd, buildEnv(env), { outDir: 'dist' })))
+    checks.push(await step('前端构建', () => viteBuild(cwd, bEnv, { outDir: 'dist' })))
   }
   const prevOk = checks.every((c) => c.ok)
   checks.push(prevOk

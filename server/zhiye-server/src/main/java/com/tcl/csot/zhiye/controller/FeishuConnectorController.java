@@ -50,6 +50,70 @@ public class FeishuConnectorController {
         return connectors.list(ws());
     }
 
+    /** 普通工作空间用户也可以在工作台「数据源与连接器」弹窗里直接自检连接器连通性。 */
+    @PostMapping("/api/connectors/{id}/test")
+    public Map<String, Object> testForWorkspace(@PathVariable String id) {
+        return connectors.testConnector(id);
+    }
+
+    // ==================== 单体全栈应用受控连接器网关（ZHIYE_CONNECTOR_API + ZHIYE_CONNECTOR_TOKEN） ====================
+
+    @GetMapping("/internal/app-connectors/list")
+    public Map<String, Object> internalList(@RequestHeader(value = "Authorization", required = false) String auth) {
+        connectors.verifyAppConnectorToken(auth);
+        return Map.of("ok", true, "connectors", connectors.list(null));
+    }
+
+    @PostMapping("/internal/app-connectors/feishu/send-card")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> internalSendCard(@RequestHeader(value = "Authorization", required = false) String auth,
+                                                @RequestBody JsonNode b) {
+        String appId = connectors.verifyAppConnectorToken(auth);
+        List<Map<String, String>> fields = new java.util.ArrayList<>();
+        if (b != null && b.has("fields") && b.get("fields").isArray()) {
+            b.get("fields").forEach(n -> fields.add(Map.of("label", n.path("label").asText(""), "value", n.path("value").asText(""))));
+        }
+        List<Map<String, Object>> buttons = new java.util.ArrayList<>();
+        if (b != null && b.has("buttons") && b.get("buttons").isArray()) {
+            b.get("buttons").forEach(n -> buttons.add(Json.convert(n, Map.class)));
+        }
+        return connectors.sendFeishuCard(
+                b == null ? "" : b.path("connectorId").asText(""),
+                appId,
+                b == null ? "织页应用通知" : b.path("title").asText("织页应用通知"),
+                b == null ? "" : b.path("content").asText(""),
+                b == null ? "blue" : b.path("templateColor").asText("blue"),
+                fields, buttons);
+    }
+
+    @PostMapping("/internal/app-connectors/bitable/{op}")
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> internalBitable(@RequestHeader(value = "Authorization", required = false) String auth,
+                                               @PathVariable String op,
+                                               @RequestBody(required = false) JsonNode b) {
+        String appId = connectors.verifyAppConnectorToken(auth);
+        String connId = b == null ? "" : b.path("connectorId").asText("");
+        Map<String, Object> opts = new java.util.LinkedHashMap<>();
+        if (b != null && b.has("appToken")) opts.put("appToken", b.path("appToken").asText(""));
+        if (b != null && b.has("tableId")) opts.put("tableId", b.path("tableId").asText(""));
+        if (b != null && b.has("pageSize")) opts.put("pageSize", b.path("pageSize").asInt(20));
+        return switch (op) {
+            case "list" -> connectors.bitableList(connId, appId, opts);
+            case "create" -> connectors.bitableCreate(connId, appId,
+                    b != null && b.has("fields") ? Json.convert(b.get("fields"), Map.class) : Map.of(), opts);
+            case "update" -> connectors.bitableUpdate(connId, appId, b == null ? "" : b.path("recordId").asText(""),
+                    b != null && b.has("fields") ? Json.convert(b.get("fields"), Map.class) : Map.of(), opts);
+            default -> throw com.tcl.csot.zhiye.exception.ApiException.notFound("多维表格操作");
+        };
+    }
+
+    @PostMapping("/internal/app-connectors/org/employees")
+    public Map<String, Object> internalOrgEmployees(@RequestHeader(value = "Authorization", required = false) String auth,
+                                                    @RequestBody(required = false) JsonNode b) {
+        connectors.verifyAppConnectorToken(auth);
+        return Map.of("ok", true, "employees", connectors.searchOrgEmployees(b == null ? "" : b.path("q").asText("")));
+    }
+
     @GetMapping("/api/admin/connectors")
     public List<Map<String, Object>> listAdmin(HttpServletRequest req) {
         admin.requireActor(req, ws());
