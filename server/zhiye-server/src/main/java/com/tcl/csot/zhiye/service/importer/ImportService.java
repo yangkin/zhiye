@@ -125,8 +125,16 @@ public class ImportService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "IMPORT_UNSUPPORTED",
                     manifest.path("unsupportedReason").asText("暂不支持部署这个项目"));
         String rootDir = body.hasNonNull("rootDir") ? body.path("rootDir").asText() : manifest.path("rootDir").asText("");
+        String reqKind = body.path("projectKind").asText("").trim();
         JsonNode candidate = null;
-        for (JsonNode c : manifest.path("candidates")) if (rootDir.equals(c.path("dir").asText())) candidate = c;
+        for (JsonNode c : manifest.path("candidates")) {
+            if (!rootDir.equals(c.path("dir").asText())) continue;
+            if (!reqKind.isEmpty()) {
+                if (reqKind.equals(c.path("kind").asText())) { candidate = c; break; }
+            } else if (candidate == null) {
+                candidate = c;
+            }
+        }
         if (candidate == null && !manifest.has("candidates") && rootDir.isEmpty())
             candidate = Json.obj().put("dir", "").put("kind", manifest.path("projectKind").asText("static")).put("framework", manifest.path("framework").asText());
         if (candidate == null) throw ApiException.validation("选择的部署目录不在可部署的候选列表里");

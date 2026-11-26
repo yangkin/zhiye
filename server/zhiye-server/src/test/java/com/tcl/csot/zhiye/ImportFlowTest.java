@@ -111,6 +111,34 @@ class ImportFlowTest extends IntegrationTest {
     }
 
     @Test
+    void rootFullStackNodeVitePreservesServiceCandidate() throws Exception {
+        Client c = client();
+        byte[] data = zip(Map.of(
+                "hub/package.json", "{\"name\":\"hub\",\"type\":\"module\",\"scripts\":{\"build\":\"vite build\",\"start\":\"node server/index.mjs\"},\"dependencies\":{\"express\":\"4\",\"pg\":\"8\",\"react\":\"19\"},\"devDependencies\":{\"vite\":\"7\"}}",
+                "hub/server/index.mjs", "import express from 'express'; express().listen(process.env.PORT || 3000);",
+                "hub/index.html", GARDEN,
+                "hub/src/main.tsx", "console.log('ok')"
+        ));
+        JsonNode m = c.ok(c.upload("/api/imports/upload", "hub.zip", "application/zip", data, Map.of()));
+        assertThat(m.path("deployable").asBoolean()).isTrue();
+        assertThat(m.path("rootDir").asText()).isEmpty();
+        assertThat(m.path("projectKind").asText()).isEqualTo("service");
+        assertThat(m.path("candidates").findValuesAsText("kind")).containsExactly("service", "vite");
+        // 未传 projectKind 且同为根目录 "" 时，必须优先保留排序第一的 service 候选，不能被后出现的 vite 覆盖
+        JsonNode r1 = c.ok(c.post("/api/imports", Map.of("uploadId", m.path("uploadId").asText(), "name", "默认全栈导入", "type", "全栈应用", "rootDir", "")));
+        assertThat(r1.path("app").path("projectKind").asText()).isEqualTo("service");
+        assertThat(c.waitTask(r1.path("task").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        // 显式选择 vite 候选时，按用户选择导入为 vite
+        JsonNode m2 = c.ok(c.upload("/api/imports/upload", "hub2.zip", "application/zip", data, Map.of()));
+        JsonNode r2 = c.ok(c.post("/api/imports", Map.of("uploadId", m2.path("uploadId").asText(), "name", "仅前端导入", "rootDir", "", "projectKind", "vite")));
+        assertThat(r2.path("app").path("projectKind").asText()).isEqualTo("vite");
+        assertThat(c.waitTask(r2.path("task").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        // 不存在的 projectKind 返回 400
+        var badKind = c.post("/api/imports", Map.of("uploadId", m2.path("uploadId").asText(), "name", "非法类型", "rootDir", "", "projectKind", "unknown"));
+        assertThat(badKind.status()).isEqualTo(400);
+    }
+
+    @Test
     void invalidAndUnsupported() throws Exception {
         Client c = client();
         var bad = c.upload("/api/imports/upload", "坏文件.zip", "application/zip", "这不是 zip".getBytes(StandardCharsets.UTF_8), Map.of());

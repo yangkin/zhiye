@@ -292,6 +292,7 @@ export interface ImportManifest {
   name: string;
   format: 'html' | 'zip';
   framework: string;
+  projectKind?: 'static' | 'vite' | 'service' | null;
   deployable: boolean;
   unsupportedReason: string | null;
   fileCount: number;

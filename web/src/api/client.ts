@@ -709,7 +709,7 @@ export const api = {
     if (folderName) form.append('folderName', folderName);
     return request<ImportManifest>('/api/imports/upload', { method: 'POST', form, signal });
   },
-  createImport: (input: { uploadId: string; name: string; type?: AppType; rootDir?: string }, idempotencyKey?: string) =>
+  createImport: (input: { uploadId: string; name: string; type?: AppType; rootDir?: string; projectKind?: string }, idempotencyKey?: string) =>
     request<{ app: AppSummary; task: Task }>('/api/imports', { method: 'POST', body: input, idempotencyKey }),
 
   // 素材

@@ -39,46 +39,66 @@ const FolderArt = () => (
   </svg>
 );
 
-const chosen = (m: ImportManifest, dir: string): ImportCandidate | undefined => m.candidates?.find((c) => c.dir === dir);
+const candidateKey = (c: Pick<ImportCandidate, 'dir' | 'kind' | 'prebuilt'>) =>
+  `${c.dir}::${c.kind}::${c.prebuilt ? '1' : '0'}`;
+const primaryKey = (m: ImportManifest): string => {
+  const first =
+    m.candidates?.find((c) => c.dir === (m.rootDir ?? '') && (!m.projectKind || c.kind === m.projectKind)) ??
+    m.candidates?.[0];
+  return first ? candidateKey(first) : `${m.rootDir ?? ''}::${m.projectKind ?? ''}::0`;
+};
+const chosen = (m: ImportManifest, key: string): ImportCandidate | undefined =>
+  m.candidates?.find((c) => candidateKey(c) === key) ?? m.candidates?.[0];
 const dirLabel = (dir: string) => (dir ? dir + '/' : '根目录');
 
-function footerText(m: ImportManifest, dir: string) {
+function footerText(m: ImportManifest, selectedKey: string) {
   if (!m.deployable) return m.unsupportedReason || '这个项目暂时无法部署。';
-  const c = chosen(m, dir);
-  const risks = dir === (m.rootDir ?? '') ? (m.warnings ?? []).filter((w) => w.level === 'risk').length : 0;
+  const c = chosen(m, selectedKey);
+  const risks = selectedKey === primaryKey(m) ? (m.warnings ?? []).filter((w) => w.level === 'risk').length : 0;
   const what =
     c?.kind === 'service' ? '自动构建并启动单体服务托管' : c?.kind === 'vite' ? '安装依赖、构建并部署' : '保存文件并部署';
   return `确认后会${what}${c && c.dir ? ` ${dirLabel(c.dir)}` : ''}，完成后进入应用工作台。${risks ? `体检发现 ${risks} 项风险，部署后部分功能可能不可用。` : ''}`;
 }
 
-function ImportReport({ manifest, rootDir, onRootDir }: { manifest: ImportManifest; rootDir: string; onRootDir: (d: string) => void }) {
+function ImportReport({
+  manifest,
+  selectedKey,
+  onSelect,
+}: {
+  manifest: ImportManifest;
+  selectedKey: string;
+  onSelect: (c: ImportCandidate) => void;
+}) {
   if (!manifest.deployable) return null;
   const candidates = manifest.candidates ?? [];
-  const primary = rootDir === (manifest.rootDir ?? '');
-  const c = chosen(manifest, rootDir);
+  const primary = selectedKey === primaryKey(manifest);
+  const c = chosen(manifest, selectedKey);
   const warnings = primary ? [...(manifest.warnings ?? [])].sort((a, b) => (a.level === b.level ? 0 : a.level === 'risk' ? -1 : 1)) : [];
   return (
     <section className="code-import-report" aria-label="导入体检">
       {candidates.length > 1 ? (
         <fieldset className="code-root-choice">
           <legend>部署内容</legend>
-          {candidates.map((x) => (
-            <label key={x.dir} className={x.dir === rootDir ? 'selected' : ''}>
-              <input type="radio" name="import-root" checked={x.dir === rootDir} onChange={() => onRootDir(x.dir)} />
-              <span>
-                <b>{dirLabel(x.dir)}</b>
-                <small>
-                  {x.prebuilt
-                    ? '已构建产物，直接部署，不安装依赖'
-                    : x.kind === 'service'
-                      ? `${x.framework} · 单体后端/全栈托管`
-                      : x.kind === 'vite'
-                        ? `${x.framework} · 从源码构建`
-                        : x.framework}
-                </small>
-              </span>
-            </label>
-          ))}
+          {candidates.map((x) => {
+            const key = candidateKey(x);
+            return (
+              <label key={key} className={key === selectedKey ? 'selected' : ''}>
+                <input type="radio" name="import-root" checked={key === selectedKey} onChange={() => onSelect(x)} />
+                <span>
+                  <b>{dirLabel(x.dir)}</b>
+                  <small>
+                    {x.prebuilt
+                      ? '已构建产物，直接部署，不安装依赖'
+                      : x.kind === 'service'
+                        ? `${x.framework} · 单体后端/全栈托管`
+                        : x.kind === 'vite'
+                          ? `${x.framework} · 从源码构建`
+                          : x.framework}
+                  </small>
+                </span>
+              </label>
+            );
+          })}
         </fieldset>
       ) : null}
       <h4>
@@ -111,16 +131,16 @@ function ImportReport({ manifest, rootDir, onRootDir }: { manifest: ImportManife
         </ul>
       ) : (
         <>
-          <p className="code-report-ok">{primary ? '没有发现会影响部署的问题。' : `将部署 ${dirLabel(rootDir)}。`}</p>
-          {!primary && c?.kind !== 'service' && (manifest.candidates ?? []).some((x) => x.dir !== rootDir && x.kind === 'service') ? (
+          <p className="code-report-ok">{primary ? '没有发现会影响部署的问题。' : `将部署 ${dirLabel(c?.dir ?? '')}。`}</p>
+          {!primary && c?.kind !== 'service' && (manifest.candidates ?? []).some((x) => candidateKey(x) !== selectedKey && x.kind === 'service') ? (
             <ul>
               <li className="risk">
                 <strong>
                   <i aria-hidden="true">!</i>
-                  仅部署前端子目录，同仓库后端不会启动
+                  仅部署前端，同仓库后端服务不会启动
                 </strong>
                 <p>
-                  你选择了仅部署 {dirLabel(rootDir)}，压缩包里的后端服务目录不会被构建和运行；若前端请求了 <code>localhost</code> 或该后端的 <code>/api/*</code> 接口，上线后将无法访问。如需前后端一起运行，请选择根目录或后端服务目录。
+                  你选择了仅部署前端{c?.dir ? ` ${dirLabel(c.dir)}` : ''}，压缩包里的后端服务不会被构建和运行；若前端请求了 <code>localhost</code> 或该后端的 <code>/api/*</code> 接口，上线后将无法访问。如需前后端一起运行，请选择「单体后端/全栈托管」。
                 </p>
               </li>
             </ul>
@@ -157,7 +177,7 @@ function Dialog() {
   const [manifest, setManifest] = useState<ImportManifest | null>(null);
   const [name, setName] = useState('');
   const [type, setType] = useState<AppType>('开发网站');
-  const [rootDir, setRootDir] = useState('');
+  const [selectedKey, setSelectedKey] = useState('');
   const [dragging, setDragging] = useState(false);
   const [task, setTask] = useState<{ id: string; appId: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -231,8 +251,11 @@ function Dialog() {
       abort.current = new AbortController();
       const m = await api.uploadImport(upload.blob, upload.fileName, upload.folderName, abort.current.signal);
       if (my !== token.current) return;
+      const initKey = primaryKey(m);
+      const initCandidate = chosen(m, initKey);
       setManifest(m);
-      setRootDir(m.rootDir ?? '');
+      setSelectedKey(initKey);
+      setType(initCandidate?.kind === 'service' || m.projectKind === 'service' ? '全栈应用' : '开发网站');
       setName((m.name || checked.name).slice(0, 40));
       keyRef.current = null;
       setPhase('review');
@@ -253,8 +276,21 @@ function Dialog() {
     setError('');
     setErrorKind('');
     keyRef.current ??= newIdempotencyKey();
+    const selected = chosen(manifest, selectedKey);
     try {
-      const res = await api.createImport({ uploadId: manifest.uploadId, name: n, type, ...(manifest.candidates ? { rootDir } : {}) }, keyRef.current);
+      const res = await api.createImport(
+        {
+          uploadId: manifest.uploadId,
+          name: n,
+          type,
+          ...(selected
+            ? { rootDir: selected.dir, projectKind: selected.kind }
+            : manifest.candidates
+              ? { rootDir: manifest.rootDir ?? '' }
+              : {}),
+        },
+        keyRef.current,
+      );
       keyRef.current = null;
       setTask({ id: res.task.id, appId: res.app.id });
       setPhase('deploying');
@@ -379,7 +415,7 @@ function Dialog() {
               <section className="code-import-review">
                 <div className="code-import-review-head">
                   <div>
-                    <span className="code-project-badge">{chosen(manifest, rootDir)?.framework ?? manifest.framework}</span>
+                    <span className="code-project-badge">{chosen(manifest, selectedKey)?.framework ?? manifest.framework}</span>
                     <h3>{name || manifest.name}</h3>
                     <p>
                       {manifest.fileCount} 个文件 · {sizeLabel(manifest.totalSize)} · {manifest.format === 'zip' ? 'ZIP / 项目文件夹' : 'HTML 页面'}
@@ -407,7 +443,15 @@ function Dialog() {
                     <Select ariaLabel="导入应用类型" className="field" value={type} onChange={(v) => setType(v as AppType)} options={APP_TYPES.map((t) => ({ value: t, label: t }))} />
                   </label>
                 </div>
-                <ImportReport manifest={manifest} rootDir={rootDir} onRootDir={(d) => { setRootDir(d); keyRef.current = null; }} />
+                <ImportReport
+                  manifest={manifest}
+                  selectedKey={selectedKey}
+                  onSelect={(c) => {
+                    setSelectedKey(candidateKey(c));
+                    setType(c.kind === 'service' ? '全栈应用' : '开发网站');
+                    keyRef.current = null;
+                  }}
+                />
                 <details className="code-file-list">
                   <summary>
                     查看项目文件 <span>{manifest.fileCount}</span>
@@ -425,7 +469,7 @@ function Dialog() {
                   </ul>
                 </details>
                 <div className="code-deploy-footer">
-                  <p>{footerText(manifest, rootDir)}</p>
+                  <p>{footerText(manifest, selectedKey)}</p>
                   <button
                     type="button"
                     className="code-deploy-button"
