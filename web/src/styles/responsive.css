@@ -411,6 +411,39 @@
   background: var(--st-accent-softer);
 }
 
+/* 1280px–1420px 分栏工作台下收紧预览工具栏间距，避免右侧「手动微调」按钮被裁切 */
+@media (max-width: 1420px) {
+  .studio-preview-tools {
+    gap: 8px;
+    padding: 0 10px;
+  }
+  .studio-device-tools {
+    gap: 6px;
+  }
+  .studio-res-picker.zy-select {
+    min-width: 72px;
+    padding: 0 20px 0 8px;
+  }
+  .studio-route-bar {
+    min-width: 112px;
+    max-width: 240px;
+    flex: 1 1 112px;
+    padding: 0 4px;
+    gap: 3px;
+  }
+  .studio-edit-tools {
+    gap: 5px;
+    flex: none;
+  }
+  .studio-edit-tools .studio-dialog-modify,
+  .studio-edit-tools .studio-edit-toggle {
+    min-width: 0;
+    padding: 0 8px;
+    gap: 4px;
+    font-size: 12px;
+  }
+}
+
 .studio-main .preview-stage {
   display: flex;
   align-items: stretch;

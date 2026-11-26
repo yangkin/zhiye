@@ -23,7 +23,7 @@ ${TODO_RULES}
 - 界面全部中文，严格按需求实现（不要擅自增加多余弹窗/二次确认；禁用按钮用原生 \`disabled\`）。
 - 仅面向电脑桌面端（无需手机端适配），兼容 1280px / 1440px / 1920×1080 / 2K / 4K：
   - **全宽流式布局**：后台、台账、看板的外层布局壳用 \`w-full min-h-screen flex\`，右侧主区用 \`flex-1 min-w-0 w-full\`，**严禁**在外层或 \`<main>\` 内部套 \`max-w-4xl/5xl/6xl/7xl/max-w-[1280px]/max-w-[1440px]\` + \`mx-auto\`（仅登录框/弹窗/纯文章卡片限宽）。
-  - **防折行防溢出**：表格外包 \`overflow-x-auto w-full\`，表头/状态胶囊/单号/日期/操作列加 \`whitespace-nowrap\`；筛选栏 \`flex-wrap gap-2\`。
+  - **防折行防溢出**：表格外包 \`overflow-x-auto w-full\`，表头/状态胶囊/单号/日期/操作列加 \`whitespace-nowrap\`；8 列及以上的业务宽表将最后一列「操作」设为 \`sticky right-0 bg-white shadow-[-6px_0_12px_-6px_rgba(15,23,42,0.08)]\`（表头同步固定），确保 1280px 屏下操作按钮始终清晰可见不折行；筛选栏 \`flex-wrap gap-2\`。
 - 若消息附带「选中元素」（\`loc = 文件:行:列\`）优先修改该处；附带校验报错时先修复报错；最后按任务要求输出简洁中文总结（不贴大段代码）。`
 
 const TEMPLATE = `
