@@ -16,6 +16,7 @@ import { Icon } from '../lib/icons';
 import { copyText, fmtTime } from '../lib/format';
 import { toast } from '../lib/store';
 import { Modal } from '../components/Modal';
+import { Select } from '../components/Select';
 import { ACCESS_OPTIONS, AccessForm, type AccessFormState } from './CloudConsole';
 
 export function formatChineseDate(iso: string | null | undefined): string {
@@ -80,8 +81,26 @@ function formatEffectiveAccess(level: AccessLevel, membersCount: number): string
   return label;
 }
 
-const TARGET_USER_CHIPS = ['个人使用', '科室使用', '部门或中心'];
-const DEPLOY_MODE_CHIPS = ['托管部署', '本地部署', '私有化部署'];
+const TARGET_USER_OPTIONS = [
+  { value: '个人使用', label: '个人使用', hint: '本人自用提效' },
+  { value: '科室使用', label: '科室使用', hint: '本科室 / 小组共用' },
+  { value: '部门或中心', label: '部门或中心', hint: '跨科室或全中心推广' },
+];
+const DEPLOY_MODE_OPTIONS = [
+  { value: '托管部署', label: '托管部署', hint: '由织页平台统一托管运行（推荐）' },
+  { value: '本地部署', label: '本地部署', hint: '导出源码后在本地环境运行' },
+  { value: '私有化部署', label: '私有化部署', hint: '部署到部门或产线独立服务器' },
+];
+
+function normalizeSelectOption(raw: string | undefined, options: { value: string }[], fallback: string): string {
+  const s = (raw ?? '').trim();
+  if (options.some((o) => o.value === s)) return s;
+  if (s) {
+    const partial = options.find((o) => s.includes(o.value) || o.value.includes(s));
+    if (partial) return partial.value;
+  }
+  return fallback;
+}
 
 const EMPTY_FORM: PublishRegistrationForm = {
   appName: '',
@@ -147,8 +166,8 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
       painPoints: d.painPoints || '',
       solution: d.solution || '',
       expectedBenefit: d.expectedBenefit || '',
-      targetUsers: d.targetUsers || '个人使用',
-      deployMode: d.deployMode || '托管部署',
+      targetUsers: normalizeSelectOption(d.targetUsers, TARGET_USER_OPTIONS, '个人使用'),
+      deployMode: normalizeSelectOption(d.deployMode, DEPLOY_MODE_OPTIONS, '托管部署'),
       contacts: d.contacts || meta?.auth?.user?.realName || meta?.auth?.user?.loginName || '',
       expectedUntil: d.expectedUntil || '',
       techAndData: d.techAndData || '',
@@ -189,8 +208,8 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
     if (!form.businessBg.trim()) return '请填写必填项「业务背景」。';
     if (!form.solution.trim()) return '请填写必填项「解决方案」。';
     if (!form.expectedBenefit.trim()) return '请填写必填项「预期收益」。';
-    if (!form.targetUsers.trim()) return '请填写必填项「预期用户与范围」。';
-    if (!form.deployMode.trim()) return '请填写必填项「部署方式」。';
+    if (!form.targetUsers.trim()) return '请选择必填项「预期用户与范围」。';
+    if (!form.deployMode.trim()) return '请选择必填项「部署方式」。';
     if (!form.contacts.trim()) return '请填写必填项「主备联系人」。';
     if (!form.expectedUntil.trim()) return '请选择必填项「预计使用周期」。';
     return null;
@@ -604,27 +623,13 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
                   <div className="vibe-th-sub">本人 / 科室 / 部门或中心</div>
                 </th>
                 <td>
-                  <div className="vibe-chip-input">
-                    <input
-                      aria-label="登记表-预期用户与范围"
-                      maxLength={200}
-                      placeholder="个人使用 / 科室使用 / 部门或中心"
-                      value={form.targetUsers}
-                      onChange={(e) => setField('targetUsers', e.target.value)}
-                    />
-                    <div className="vibe-quick-chips">
-                      {TARGET_USER_CHIPS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className={form.targetUsers === c ? 'active' : ''}
-                          onClick={() => setField('targetUsers', c)}
-                        >
-                          {c}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <Select
+                    className="vibe-reg-select"
+                    ariaLabel="登记表-预期用户与范围"
+                    value={form.targetUsers}
+                    options={TARGET_USER_OPTIONS}
+                    onChange={(v) => setField('targetUsers', v)}
+                  />
                 </td>
               </tr>
               <tr>
@@ -635,27 +640,13 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
                   </div>
                 </th>
                 <td>
-                  <div className="vibe-chip-input">
-                    <input
-                      aria-label="登记表-部署方式"
-                      maxLength={100}
-                      placeholder="托管部署"
-                      value={form.deployMode}
-                      onChange={(e) => setField('deployMode', e.target.value)}
-                    />
-                    <div className="vibe-quick-chips">
-                      {DEPLOY_MODE_CHIPS.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className={form.deployMode === c ? 'active' : ''}
-                          onClick={() => setField('deployMode', c)}
-                        >
-                          {c}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  <Select
+                    className="vibe-reg-select"
+                    ariaLabel="登记表-部署方式"
+                    value={form.deployMode}
+                    options={DEPLOY_MODE_OPTIONS}
+                    onChange={(v) => setField('deployMode', v)}
+                  />
                 </td>
               </tr>
               <tr>
@@ -762,7 +753,7 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
           <Icon name="alert" />
           {blocked.sso
             ? `表 ${blocked.tables.join('、')} 需要登录身份，请改成「员工登录」后再提交。`
-            : `表 ${blocked.tables.join('、')} 需要登录身份，暂时不能公开发布。可在「云服务 → 访问与权限」把它改成「所有人可看可改」。`}
+            : `表 ${blocked.tables.join('、')} 需要登录身份，暂时不能公开发布。请在左侧对话让织页调整表的数据权限，或接入统一登录后改为「员工登录」。`}
         </p>
       ) : needsSave ? (
         <p className="notice-box">有未保存的编辑，提交审核前会先存成新版本。</p>

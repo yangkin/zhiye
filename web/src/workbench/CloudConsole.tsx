@@ -230,10 +230,18 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
               <div className="cc-section">
                 <div className="cc-presets">
                   {tables.map((t) => (
-                    <PresetRow key={t.name} appId={appId} table={t} presets={ov.data!.presets} />
+                    <PresetRow key={t.name} table={t} presets={ov.data!.presets} />
                   ))}
                 </div>
-                <p className="cc-hint">权限由平台在接口层执行，页面代码绕不过去。</p>
+                <div className="cc-policy-note">
+                  <Icon name="lock" />
+                  <div>
+                    <b>平台接口层强制执行（页面代码绕不过去）</b>
+                    <p>
+                      为避免手动切换导致页面按钮与接口权限不一致，数据表权限统一由织页按业务需求自动维护。如需调整（例如改为「员工仅看自己提交的数据，管理员可看全部」），直接在左侧对话告诉织页即可；整站访问门禁与管理员名单请在左侧「访问与登录」中配置。
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </>
@@ -254,26 +262,22 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
   );
 }
 
-function PresetRow({ appId, table, presets }: { appId: string; table: CloudTableInfo; presets: { id: string; label: string; needsLogin: boolean }[] }) {
-  const qc = useQueryClient();
+function PresetRow({ table, presets }: { table: CloudTableInfo; presets: { id: string; label: string; needsLogin: boolean }[] }) {
   const value = table.policy?.preset ?? 'shared';
+  const cur = presets.find((p) => p.id === value);
+  const label = cur?.label ?? '所有人可看可改';
+  const needsLogin = cur?.needsLogin ?? false;
   return (
-    <div className="cc-preset-row">
-      <code>{table.name}</code>
-      <Select
-        ariaLabel={`${table.name} 的数据权限`}
-        value={value}
-        options={presets.map((p) => ({ value: p.id, label: p.label, hint: p.needsLogin ? '需要员工登录' : '不需要登录' }))}
-        onChange={async (preset) => {
-          try {
-            qc.setQueryData(consoleKey(appId), await api.consolePreset(appId, table.name, preset));
-            void qc.invalidateQueries({ queryKey: accessKey(appId) });
-            toast('数据权限已更新。');
-          } catch (e) {
-            toast(errorMessage(e));
-          }
-        }}
-      />
+    <div className="cc-preset-row is-readonly">
+      <div className="cc-preset-name">
+        <code>{table.name}</code>
+        {table.description ? <span>{table.description}</span> : null}
+      </div>
+      <div className="cc-preset-badge" aria-label={`${table.name} 的当前数据权限：${label}`}>
+        <Icon name="lock" />
+        <b>{label}</b>
+        <small className={needsLogin ? 'needs-login' : ''}>{needsLogin ? '需要员工登录' : '免登录可访问'}</small>
+      </div>
     </div>
   );
 }
@@ -401,7 +405,7 @@ function TableView({
       </div>
       <div className="cc-meta">
         {table.description ? <span>描述：{table.description}</span> : <span>{userCols.length} 个字段</span>}
-        <span className="cc-preset-tag" title="数据权限，可在「权限」里修改">
+        <span className="cc-preset-tag" title="当前数据表权限（平台接口层强制执行，如需调整请在左侧对话告诉织页）">
           <Icon name="lock" />
           {preset?.label ?? '所有人可看可改'}
         </span>

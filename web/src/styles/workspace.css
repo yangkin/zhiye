@@ -324,10 +324,20 @@ body.is-resizing-h iframe,body.is-resizing-v iframe{pointer-events:none!importan
 .cc-field small{color:var(--st-faint);font-family:var(--mono,ui-monospace,monospace);font-size:12px}
 .cc-field input,.cc-field textarea{border:1px solid var(--st-line);border-radius:8px;padding:7px 10px;font-size:12px;background:var(--st-raised);color:var(--st-ink);outline:0;resize:vertical;font-family:inherit}
 .cc-field input:focus,.cc-field textarea:focus{border-color:var(--st-accent-line)}
-.cc-presets{display:flex;flex-direction:column;gap:6px}
-.cc-preset-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--st-line);border-radius:8px;padding:6px 6px 6px 12px;background:var(--st-raised)}
-.cc-preset-row code{font-size:12px;color:var(--st-ink-2)}
-.cc-preset-row .zy-select{min-width:200px;font-size:12px}
+.cc-presets{display:flex;flex-direction:column;gap:8px}
+.cc-preset-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--st-line);border-radius:10px;padding:10px 14px;background:var(--st-raised)}
+.cc-preset-row code{font-size:12.5px;font-weight:600;color:var(--st-ink)}
+.cc-preset-name{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.cc-preset-name span{font-size:12px;color:var(--st-muted)}
+.cc-preset-badge{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:8px;background:var(--st-bg);border:1px solid var(--st-line);font-size:12px;color:var(--st-ink-2);flex-shrink:0}
+.cc-preset-badge .icon{width:13px;height:13px;color:var(--st-accent)}
+.cc-preset-badge b{font-weight:500;color:var(--st-ink)}
+.cc-preset-badge small{font-size:11px;padding:1px 6px;border-radius:999px;background:#f3f1f9;color:var(--st-muted)}
+.cc-preset-badge small.needs-login{background:#efeafc;color:var(--st-accent-ink)}
+.cc-policy-note{display:flex;align-items:flex-start;gap:10px;margin-top:10px;padding:12px 14px;border-radius:10px;border:1px solid #e7e1f7;background:#faf8ff;color:#4f4466}
+.cc-policy-note .icon{width:15px;height:15px;color:var(--st-accent);flex:none;margin-top:2px}
+.cc-policy-note b{display:block;font-size:12.5px;font-weight:600;color:#2c2240;margin-bottom:4px}
+.cc-policy-note p{margin:0;font-size:12px;line-height:1.65;color:#5f5578}
 .cc-form{display:flex;flex-direction:column;gap:10px}
 .cc-mapping{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin:12px 0}
 .cc-files{display:flex;flex-direction:column;border:1px solid var(--st-line);border-radius:10px;background:var(--st-raised)}

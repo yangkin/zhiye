@@ -2777,6 +2777,25 @@ a.skill-chip{text-decoration:none}
   border-color: #6d5ce7;
   box-shadow: 0 0 0 3px rgba(109, 92, 231, 0.12);
 }
+.vibe-reg-table td .vibe-reg-select.zy-select {
+  width: 100%;
+  height: 36px;
+  border: 1px solid #e2e4ec;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: #18181b;
+  background: #ffffff;
+  justify-content: space-between;
+}
+.vibe-reg-table td .vibe-reg-select.zy-select:hover {
+  border-color: #c8c1e6;
+}
+.vibe-reg-table td .vibe-reg-select.zy-select.open,
+.vibe-reg-table td .vibe-reg-select.zy-select:focus-visible {
+  border-color: #6d5ce7;
+  box-shadow: 0 0 0 3px rgba(109, 92, 231, 0.12);
+}
 .vibe-td-text {
   white-space: pre-wrap;
   word-break: break-word;
