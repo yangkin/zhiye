@@ -46,7 +46,7 @@ export function CloudTriggersTab({
   const [customCron, setCustomCron] = useState('0 9 * * 1-5');
   const [tableName, setTableName] = useState(tableNames[0] || '');
   const [actionType, setActionType] = useState<'feishu_card' | 'cloud_function'>('feishu_card');
-  const [connectorId, setConnectorId] = useState('conn_feishu_bot_sandbox');
+  const [connectorId, setConnectorId] = useState('');
   const [cardTitle, setCardTitle] = useState(isService ? '应用运行日报提醒' : '织页自动化提醒：{{table}} 有新记录');
   const [cardContent, setCardContent] = useState(isService ? '触发事件：`{{event}}`\n摘要：`{{payload}}`' : '触发事件：`{{event}}`\n数据摘要：`{{payload}}`');
   const [functionName, setFunctionName] = useState('');
@@ -56,6 +56,7 @@ export function CloudTriggersTab({
   const triggers = listQ.data ?? [];
   const runs = runsQ.data ?? [];
   const connectors = (connQ.data ?? []).filter((c) => c.kind === 'feishu_bot' || c.kind === 'feishu_app');
+  const effectiveConnectorId = connectorId || String(connectors[0]?.id ?? '');
   const effectiveCron = cronPreset === '__custom__' ? customCron.trim() : cronPreset;
 
   const refresh = () =>
@@ -108,7 +109,7 @@ export function CloudTriggersTab({
         actionType: isService ? 'feishu_card' : actionType,
         actionConfig:
           isService || actionType === 'feishu_card'
-            ? { connectorId, title: cardTitle, content: cardContent, templateColor: 'blue' }
+            ? { connectorId: effectiveConnectorId, title: cardTitle, content: cardContent, templateColor: 'blue' }
             : { functionName: functionName.trim() },
       });
       if (res.generatedWebhookSecret) setNewSecret(String(res.generatedWebhookSecret));
@@ -209,11 +210,11 @@ export function CloudTriggersTab({
 
         {isService || actionType === 'feishu_card' ? (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.5fr auto', gap: 8, alignItems: 'center' }}>
-            <select value={connectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12 }}>
-              {connectors.length === 0 ? <option value="conn_feishu_bot_sandbox">公域飞书沙箱机器人</option> : null}
+            <select value={effectiveConnectorId} onChange={(e) => setConnectorId(e.target.value)} style={{ height: 34, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)', background: '#fff', fontSize: 12 }}>
+              {connectors.length === 0 ? <option value="">请先在「生态」页添加飞书机器人</option> : null}
               {connectors.map((c) => (
                 <option key={String(c.id)} value={String(c.id)}>
-                  {String(c.name)} ({String(c.mode) === 'live' ? '公域直连' : '沙箱'})
+                  {String(c.name)}
                 </option>
               ))}
             </select>

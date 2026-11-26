@@ -21,7 +21,6 @@ export function AdminFeishuConnectorPanel() {
   // 新建/编辑连接器表单
   const [name, setName] = useState('');
   const [kind, setKind] = useState<'feishu_bot' | 'feishu_bitable' | 'feishu_app'>('feishu_bot');
-  const [mode, setMode] = useState<'sandbox' | 'live'>('sandbox');
   const [appIdField, setAppIdField] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -56,7 +55,7 @@ export function AdminFeishuConnectorPanel() {
       await api.adminConnectorSave({
         name: name.trim(),
         kind,
-        mode,
+        mode: 'live',
         platformWide: true,
         enabled: true,
         config: {
@@ -179,7 +178,6 @@ export function AdminFeishuConnectorPanel() {
               <tbody>
                 {connectors.map((c) => {
                   const id = String(c.id ?? '');
-                  const modeVal = String(c.mode ?? 'sandbox');
                   return (
                     <tr key={id}>
                       <td>
@@ -190,32 +188,28 @@ export function AdminFeishuConnectorPanel() {
                         <span className="svc-chip">{String(c.kind ?? '')}</span>
                       </td>
                       <td>
-                        <span className={`svc-chip ${modeVal === 'live' ? 'is-accent' : ''}`}>
-                          {modeVal === 'live' ? 'Live · open.feishu.cn' : 'Sandbox · 本地验证'}
-                        </span>
+                        <span className="svc-chip is-accent">Live · open.feishu.cn</span>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--muted)' }}>
-                        {c.hasSecrets ? '已加密存密' : '沙箱免密'} · {String(c.rateLimitPerMin ?? 60)}/min
+                        {c.hasSecrets ? '已加密存密' : '未配密钥'} · {String(c.rateLimitPerMin ?? 60)}/min
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button type="button" className="subtle-button dash-compact-btn" disabled={busyId === id} onClick={() => void handleTest(id)}>
                             {busyId === id ? '测试中…' : '测试连通'}
                           </button>
-                          {!id.endsWith('_sandbox') ? (
-                            <button
-                              type="button"
-                              className="subtle-button dash-compact-btn"
-                              onClick={async () => {
-                                if (!(await confirmDialog({ title: `删除连接器 ${String(c.name ?? id)}？`, confirmLabel: '删除', danger: true }))) return;
-                                await api.adminConnectorDelete(id);
-                                toast('连接器已删除。');
-                                await refreshAll();
-                              }}
-                            >
-                              删除
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            className="subtle-button dash-compact-btn"
+                            onClick={async () => {
+                              if (!(await confirmDialog({ title: `删除连接器 ${String(c.name ?? id)}？`, confirmLabel: '删除', danger: true }))) return;
+                              await api.adminConnectorDelete(id);
+                              toast('连接器已删除。');
+                              await refreshAll();
+                            }}
+                          >
+                            删除
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -371,23 +365,14 @@ export function AdminFeishuConnectorPanel() {
             <span>连接器名称</span>
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="如：研发告警飞书群机器人" />
           </label>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <label className="svc-field">
-              <span>连接器类型</span>
-              <select value={kind} onChange={(e) => setKind(e.target.value as 'feishu_bot' | 'feishu_bitable' | 'feishu_app')} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
-                <option value="feishu_bot">飞书群自定义机器人 (feishu_bot)</option>
-                <option value="feishu_bitable">飞书多维表格 (feishu_bitable)</option>
-                <option value="feishu_app">飞书自建应用 IM (feishu_app)</option>
-              </select>
-            </label>
-            <label className="svc-field">
-              <span>运行模式</span>
-              <select value={mode} onChange={(e) => setMode(e.target.value as 'sandbox' | 'live')} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
-                <option value="sandbox">沙箱模拟（免外部凭证即可验证）</option>
-                <option value="live">生产直连（open.feishu.cn）</option>
-              </select>
-            </label>
-          </div>
+          <label className="svc-field">
+            <span>连接器类型</span>
+            <select value={kind} onChange={(e) => setKind(e.target.value as 'feishu_bot' | 'feishu_bitable' | 'feishu_app')} style={{ height: 36, borderRadius: 8, padding: '0 8px', border: '1px solid var(--line, #e2e8f0)' }}>
+              <option value="feishu_bot">飞书群自定义机器人 (feishu_bot)</option>
+              <option value="feishu_bitable">飞书多维表格 (feishu_bitable)</option>
+              <option value="feishu_app">飞书自建应用 IM (feishu_app)</option>
+            </select>
+          </label>
           {kind === 'feishu_bot' ? (
             <>
               <label className="svc-field">

@@ -70,7 +70,7 @@ public class FeishuControlPlaneService {
         String chatId = event.path("message").path("chat_id").asText(event.path("chatId").asText("oc_zhiye_demo_group"));
         String openId = event.path("sender").path("sender_id").path("open_id").asText(event.path("openId").asText("ou_demo_user"));
         String userName = event.path("userName").asText("飞书用户");
-        String connectorId = event.path("connectorId").asText("conn_feishu_bot_sandbox");
+        String connectorId = event.path("connectorId").asText("");
         String ws = event.path("workspaceId").asText(fallbackWorkspaceId == null ? "" : fallbackWorkspaceId).trim();
 
         String rawText = extractMessageText(event);

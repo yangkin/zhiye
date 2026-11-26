@@ -621,7 +621,7 @@ public class TaskExecutor {
             instruction += sb;
         }
         instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.instruction(skills);
-        if (!bound.isEmpty()) instruction += dataSources.instruction(app.id());
+        if (!bound.isEmpty()) instruction += dataSources.instruction(app.id(), app.isService());
         if (modify && !app.isSkill()) {
             String repoMap = RepoMap.build(ctx.workspace, app.projectKind(), recentVersions(app.id()));
             if (!repoMap.isEmpty()) instruction += repoMap;

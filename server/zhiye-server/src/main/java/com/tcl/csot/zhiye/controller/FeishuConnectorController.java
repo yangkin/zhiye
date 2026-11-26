@@ -5,6 +5,7 @@ import com.tcl.csot.zhiye.service.admin.AdminService;
 import com.tcl.csot.zhiye.service.connector.AutomationTriggerService;
 import com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService;
 import com.tcl.csot.zhiye.service.connector.FeishuControlPlaneService;
+import com.tcl.csot.zhiye.service.source.DataSourceService;
 import com.tcl.csot.zhiye.util.CurrentPrincipal;
 import com.tcl.csot.zhiye.util.Json;
 import jakarta.servlet.http.HttpServletRequest;
@@ -26,17 +27,20 @@ public class FeishuConnectorController {
     private final EnterpriseConnectorService connectors;
     private final AutomationTriggerService triggers;
     private final FeishuControlPlaneService feishu;
+    private final DataSourceService sources;
     private final AdminService admin;
     private final CurrentPrincipal principal;
 
     public FeishuConnectorController(EnterpriseConnectorService connectors,
                                      AutomationTriggerService triggers,
                                      FeishuControlPlaneService feishu,
+                                     DataSourceService sources,
                                      AdminService admin,
                                      CurrentPrincipal principal) {
         this.connectors = connectors;
         this.triggers = triggers;
         this.feishu = feishu;
+        this.sources = sources;
         this.admin = admin;
         this.principal = principal;
     }
@@ -141,6 +145,15 @@ public class FeishuConnectorController {
                                                     @RequestBody(required = false) JsonNode b) {
         connectors.verifyAppConnectorToken(auth);
         return Map.of("ok", true, "employees", connectors.searchOrgEmployees(b == null ? "" : b.path("q").asText("")));
+    }
+
+    @PostMapping("/internal/app-connectors/source/query")
+    public Map<String, Object> internalSourceQuery(@RequestHeader(value = "Authorization", required = false) String auth,
+                                                   @RequestBody(required = false) JsonNode b) {
+        String appId = connectors.verifyAppConnectorToken(auth);
+        String key = b == null ? "" : b.path("key").asText(b.path("name").asText("")).trim();
+        JsonNode params = b == null ? null : b.get("params");
+        return sources.query(appId, key, params, "service");
     }
 
     @GetMapping("/api/admin/connectors")

@@ -42,9 +42,8 @@ class PolyglotAndEcosystemClosingTest {
             assertEquals("bascnAuto999", cfg.path("appToken").asText());
             assertEquals("tblAuto888", cfg.path("tableId").asText());
 
-            // 其他工作空间或平台全局连接器不能被普通工作空间删除
+            // 其他工作空间不能删除当前工作空间的连接器
             assertThrows(ApiException.class, () -> connectors.deleteForWorkspace("ws_other", id));
-            assertThrows(ApiException.class, () -> connectors.deleteForWorkspace(ws, "conn_feishu_bot_sandbox"));
 
             // 普通用户可见脱敏 MCP 列表（不含密钥/内部地址）且可自助新建/检索/删除自己的知识库
             var kbCreated = mcp.createForWorkspace(ws, Json.obj()
@@ -90,22 +89,28 @@ class PolyglotAndEcosystemClosingTest {
         assertEquals("app_demo_123", connectors.verifyAppConnectorToken("Bearer " + tok));
         assertThrows(ApiException.class, () -> connectors.verifyAppConnectorToken("Bearer zct1.app_demo_123.tampered"));
 
+        String ws = "ws_prompt_guide_test";
+        var saved = connectors.upsertForWorkspace(ws, Json.obj()
+                .put("name", "真实产线飞书多维表格")
+                .put("kind", "feishu_bitable")
+                .put("bitableUrl", "https://demo.feishu.cn/base/bascnLive1?table=tblLive2"));
+        String cid = String.valueOf(saved.get("id"));
         Path tmp = Files.createTempDirectory("zhiye-conn-agent-");
         try {
-            connectors.writeConnectorsCatalogForAgent(tmp, null);
+            connectors.writeConnectorsCatalogForAgent(tmp, ws);
             String json = Files.readString(tmp.resolve("connectors.json"), StandardCharsets.UTF_8);
-            assertTrue(json.contains("conn_feishu_bot_sandbox"));
-            assertTrue(json.contains("conn_feishu_bitable_sandbox"));
+            assertTrue(json.contains(cid));
+
+            String svcGuide = connectors.promptGuideForAgent(ws, true, false);
+            assertTrue(svcGuide.contains("ZHIYE_CONNECTOR_API"));
+            assertTrue(svcGuide.contains(cid));
+            String cloudGuide = connectors.promptGuideForAgent(ws, false, true);
+            assertTrue(cloudGuide.contains("ctx.feishu.sendCard"));
+            assertTrue(cloudGuide.contains("ctx.bitable.create"));
         } finally {
+            connectors.deleteForWorkspace(ws, cid);
             com.tcl.csot.zhiye.service.repo.GitService.deleteRecursively(tmp);
         }
-
-        String svcGuide = connectors.promptGuideForAgent(null, true, false);
-        assertTrue(svcGuide.contains("ZHIYE_CONNECTOR_API"));
-        assertTrue(svcGuide.contains("conn_feishu_bot_sandbox"));
-        String cloudGuide = connectors.promptGuideForAgent(null, false, true);
-        assertTrue(cloudGuide.contains("ctx.feishu.sendCard"));
-        assertTrue(cloudGuide.contains("ctx.bitable.create"));
     }
 
     @Test

@@ -217,7 +217,6 @@ export function EcosystemPage() {
               const id = String(c.id ?? '');
               const name = String(c.name ?? id);
               const isBitable = String(c.kind ?? '') === 'feishu_bitable';
-              const mode = String(c.mode ?? 'sandbox');
               const owned = Boolean(c.owned);
               const tr = testResults[id];
               return (
@@ -230,9 +229,7 @@ export function EcosystemPage() {
                       <h3>{name}</h3>
                       <div className="eco-badges">
                         <span className="eco-pill">{isBitable ? '飞书多维表格' : '飞书群机器人'}</span>
-                        <span className={`eco-pill ${mode === 'live' ? 'is-live' : 'is-sandbox'}`}>
-                          {mode === 'live' ? '公域直连' : '沙箱可测'}
-                        </span>
+                        <span className="eco-pill is-live">公域直连</span>
                         <span className={`eco-pill ${owned ? 'is-owned' : ''}`}>
                           {owned ? '我添加的' : '平台托管'}
                         </span>
@@ -484,17 +481,20 @@ function FeishuConnectorModal({
 
   const handleSave = async () => {
     if (!name.trim()) return toast('请填写连接器名称', 'error');
+    if (kind === 'feishu_bot' && !webhookUrl.trim() && !(isEdit && existing?.hasSecrets)) {
+      return toast('请填写飞书群机器人 Webhook 地址', 'error');
+    }
+    if (kind === 'feishu_bitable') {
+      if (!bitableUrl.trim()) return toast('请粘贴飞书多维表格链接', 'error');
+      if (!appId.trim() && !existingCfg.appId) return toast('请填写飞书自建应用 App ID', 'error');
+      if (!appSecret.trim() && !(isEdit && existing?.hasSecrets)) return toast('请填写飞书应用 App Secret', 'error');
+    }
     setSaving(true);
     try {
-      const hasNewLive =
-        kind === 'feishu_bot'
-          ? !!webhookUrl.trim()
-          : !!(bitableUrl.trim() && (appId.trim() || existingCfg.appId) && (appSecret.trim() || existing?.hasSecrets));
-      const effectiveMode = hasNewLive ? 'live' : String(existing?.mode ?? 'sandbox');
       const payload: Record<string, unknown> = {
         name: name.trim(),
         kind,
-        mode: effectiveMode,
+        mode: 'live',
         enabled: true,
         ...(kind === 'feishu_bitable'
           ? {
@@ -559,7 +559,7 @@ function FeishuConnectorModal({
                 placeholder={
                   isEdit && existing?.hasSecrets
                     ? '已加密保存，留空保持不变，粘贴新 Webhook 可替换'
-                    : 'https://open.feishu.cn/open-apis/bot/v2/hook/...（留空则先建沙箱演示）'
+                    : 'https://open.feishu.cn/open-apis/bot/v2/hook/...'
                 }
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
@@ -582,7 +582,7 @@ function FeishuConnectorModal({
               <label>飞书多维表格链接</label>
               <input
                 type="text"
-                placeholder="直接粘贴浏览器地址栏链接 https://xxx.feishu.cn/base/... ?table=...（留空建沙箱表）"
+                placeholder="直接粘贴浏览器地址栏链接 https://xxx.feishu.cn/base/...?table=..."
                 value={bitableUrl}
                 onChange={(e) => setBitableUrl(e.target.value)}
               />
@@ -590,10 +590,10 @@ function FeishuConnectorModal({
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               <div className="eco-field">
-                <label>飞书自建应用 App ID（直连真实表格必填）</label>
+                <label>飞书自建应用 App ID</label>
                 <input
                   type="text"
-                  placeholder="cli_xxxxxxxx（留空则走沙箱模式）"
+                  placeholder="cli_xxxxxxxx"
                   value={appId}
                   onChange={(e) => setAppId(e.target.value)}
                 />

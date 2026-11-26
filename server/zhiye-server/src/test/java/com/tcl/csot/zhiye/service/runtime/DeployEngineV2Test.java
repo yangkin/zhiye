@@ -207,7 +207,7 @@ class DeployEngineV2Test {
 
         // 7. Git CI/CD 配置 + Webhook 严格验签 + 自动部署触发
         Map<String, Object> savedCicd = ops.saveGitCicd(ws.id(), appId, Json.read("""
-                {"provider":"mock","branch":"main","deploySlot":"preview","autoDeploy":true,"webhookSecret":"test-gitlab-secret-999"}
+                {"provider":"gitlab","repoUrl":"https://gitlab.example.local/team/demo.git","branch":"main","deploySlot":"preview","autoDeploy":true,"webhookSecret":"test-gitlab-secret-999"}
                 """));
         assertEquals(true, savedCicd.get("configured"));
         assertThrows(ApiException.class, () -> ops.handleGitWebhook(appId, "wrong-token", null, "{}", Json.obj()));

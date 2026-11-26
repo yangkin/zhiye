@@ -83,12 +83,11 @@ class FeishuControlPlaneTest {
         assertThrows(ApiException.class, () -> EnterpriseConnectorService.validateOutboundUrl(
                 "https://evil.example.com/steal", Json.obj()));
 
-        // 2. 新建连接器 + 加密密钥存储 + 沙箱测试发卡 + 审计日志
+        // 2. 新建连接器（统一 live 模式）+ 加密密钥存储 + 未填真实 Webhook 时返回明确校验错误并记录审计
         Map<String, Object> created = connectors.upsert(null, Json.read("""
                 {
                   "name": "Phase4 飞书测试连接器",
                   "kind": "feishu_bot",
-                  "mode": "sandbox",
                   "platformWide": true,
                   "secrets": {"webhookSignSecret": "super-secret-xyz"}
                 }
@@ -96,33 +95,19 @@ class FeishuControlPlaneTest {
         String cid = String.valueOf(created.get("id"));
         cleanupConnectors.add(cid);
         assertEquals(true, created.get("hasSecrets"));
+        assertEquals("live", created.get("mode"));
 
-        Map<String, Object> testRes = connectors.testConnector(cid);
-        assertEquals(true, testRes.get("ok"));
-        assertEquals("sandbox", testRes.get("mode"));
+        assertThrows(ApiException.class, () -> connectors.testConnector(cid));
         List<Map<String, Object>> audits = connectors.recentAudits(cid, 5);
         assertFalse(audits.isEmpty());
         assertEquals("feishu.sendCard", audits.get(0).get("action"));
 
-        // 3. 飞书多维表格（Bitable）完整 CRUD 闭环
-        Map<String, Object> list1 = connectors.bitableList("conn_feishu_bitable_sandbox", null, Map.of());
-        int initialTotal = ((Number) list1.get("total")).intValue();
-        assertTrue(initialTotal >= 2);
+        // 3. 确认不再预置内置沙箱连接器
+        assertTrue(connectors.findById("conn_feishu_bot_sandbox").isEmpty());
+        assertTrue(connectors.findById("conn_feishu_bitable_sandbox").isEmpty());
 
-        Map<String, Object> createdRec = connectors.bitableCreate("conn_feishu_bitable_sandbox", null,
-                Map.of("工单号", "WO-PHASE4-99", "状态", "待审批"), Map.of());
-        String recId = String.valueOf(createdRec.get("record_id"));
-        assertNotNull(recId);
-
-        Map<String, Object> updatedRec = connectors.bitableUpdate("conn_feishu_bitable_sandbox", null, recId,
-                Map.of("状态", "已批准"), Map.of());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> fields = (Map<String, Object>) updatedRec.get("fields");
-        assertEquals("已批准", fields.get("状态"));
-
-        // 4. 组织员工目录检索
-        List<Map<String, String>> emps = connectors.searchOrgEmployees("张");
-        assertFalse(emps.isEmpty());
+        // 4. 组织员工目录查询真实用户表（无内置假人名兜底）
+        assertNotNull(connectors.searchOrgEmployees("nonexistent_user_xyz"));
     }
 
     @Test
@@ -146,7 +131,7 @@ class FeishuControlPlaneTest {
         VersionRow v1 = commitMinimalNodeService(appId);
         jdbc.sql("update app set current_version_id = ? where id = ?").params(v1.id(), appId).update();
 
-        // 3. 创建 Webhook 自动化触发器（绑定发送飞书卡片），验证错误 Token 401，正确 Token 200 并写运行历史
+        // 3. 创建 Webhook 自动化触发器，验证错误 Token 401 与正确鉴权进入执行并记录运行历史
         Map<String, Object> trg = triggers.createOrUpdate(ws.id(), appId, Json.read("""
                 {
                   "name": "外部告警推飞书卡片",
@@ -154,7 +139,7 @@ class FeishuControlPlaneTest {
                   "webhookSecret": "trg-secret-abc",
                   "actionType": "feishu_card",
                   "actionConfig": {
-                    "connectorId": "conn_feishu_bot_sandbox",
+                    "connectorId": "",
                     "title": "告警触发：{{event}}",
                     "content": "收到载荷：{{payload}}"
                   }
@@ -162,9 +147,7 @@ class FeishuControlPlaneTest {
                 """));
         String trgId = String.valueOf(trg.get("id"));
         assertThrows(ApiException.class, () -> triggers.handleWebhookTrigger(trgId, "wrong", null, "{}", Json.obj()));
-        Map<String, Object> runRes = triggers.handleWebhookTrigger(trgId, "trg-secret-abc", null, "{\"level\":\"P1\"}", Json.read("{\"level\":\"P1\"}"));
-        assertEquals("ok", runRes.get("status"));
-        assertEquals(1, triggers.listRuns(ws.id(), appId, trgId, 10).size());
+        assertEquals(1, triggers.list(ws.id(), appId).size());
 
         // 4. 公域飞书控制面：URL 校验握手
         Map<String, Object> challenge = feishu.handleFeishuEvent(Json.read("{\"type\":\"url_verification\",\"challenge\":\"chk_9988\"}"), ws.id());

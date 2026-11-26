@@ -36,48 +36,61 @@ class AgentHarnessV2Test extends IntegrationTest {
     @Autowired GitService git;
 
     @Test
-    void mcpRegistryBuiltinMockCustomCrudAuditAndZeroSecretLeak(@TempDir Path agentDir) throws Exception {
+    void mcpRegistryKnowledgeAndHttpCrudAuditAndZeroSecretLeak(@TempDir Path agentDir) throws Exception {
+        // 确认不再预置本地仿真 mock MCP
         var initial = mcp.listAll();
-        assertThat(initial).extracting(m -> m.get("serverKey")).contains("csot-docs-mcp", "csot-api-catalog-mcp");
+        assertThat(initial).extracting(m -> m.get("serverKey")).doesNotContain("csot-docs-mcp", "csot-api-catalog-mcp");
 
-        // 调用内置仿真 MCP 并验证审计日志
-        var call = mcp.callTool("csot-docs-mcp", "search_specs", Json.obj().put("q", "8D 良率"), "task_test_1", "app_test_1");
-        assertThat(call.get("ok")).isEqualTo(true);
-        assertThat(String.valueOf(call.get("content"))).contains("8D").contains("yieldRate");
-        assertThat(mcp.recentAudits(10)).anySatisfy(a -> {
-            assertThat(a.get("serverKey")).isEqualTo("csot-docs-mcp");
-            assertThat(a.get("toolName")).isEqualTo("search_specs");
-            assertThat(a.get("ok")).isEqualTo(true);
-        });
+        // 创建团队知识库（knowledge）并验证真实检索与审计日志
+        var kb = mcp.createForWorkspace("ws_harness_v2", Json.M.valueToTree(Map.of(
+                "mode", "knowledge",
+                "name", "产线 8D 规范知识库",
+                "description", "记录 8D 与良率字段规范",
+                "knowledgeContent", "【8D 规范】关键字段：lotId、yieldRate、oee；良率低于目标 1.5% 触发 Critical 告警。"
+        )));
+        String kbId = String.valueOf(kb.get("id"));
+        String kbKey = String.valueOf(kb.get("serverKey"));
+        try {
+            var call = mcp.callTool(kbKey, "search_knowledge", Json.obj().put("query", "8D"), "task_test_1", "app_test_1");
+            assertThat(call.get("ok")).isEqualTo(true);
+            assertThat(String.valueOf(call.get("content"))).contains("8D").contains("yieldRate");
+            assertThat(mcp.recentAudits(10)).anySatisfy(a -> {
+                assertThat(a.get("serverKey")).isEqualTo(kbKey);
+                assertThat(a.get("toolName")).isEqualTo("search_knowledge");
+                assertThat(a.get("ok")).isEqualTo(true);
+            });
 
-        // 注册自定义 HTTP MCP（带密钥）并确认写入沙箱的 mcp-servers.json 绝不泄露密钥
-        var created = mcp.create(Json.M.valueToTree(Map.of(
-                "serverKey", "test-custom-mcp",
-                "name", "测试自定义 MCP",
-                "transport", "http",
-                "endpointUrl", "https://mcp.example.local/rpc",
-                "secret", "Bearer super-secret-token-xyz",
-                "tools", List.of(Map.of("name", "ping", "description", "健康探测"))
-        )), "admin-test");
-        String id = String.valueOf(created.get("id"));
-        assertThat(created.get("hasSecret")).isEqualTo(true);
+            // 注册自定义 HTTP MCP（带密钥）并确认写入沙箱的 mcp-servers.json 绝不泄露密钥
+            var created = mcp.create(Json.M.valueToTree(Map.of(
+                    "serverKey", "test-custom-mcp",
+                    "name", "测试自定义 MCP",
+                    "transport", "http",
+                    "endpointUrl", "https://mcp.example.local/rpc",
+                    "secret", "Bearer super-secret-token-xyz",
+                    "tools", List.of(Map.of("name", "ping", "description", "健康探测"))
+            )), "admin-test");
+            String id = String.valueOf(created.get("id"));
+            assertThat(created.get("hasSecret")).isEqualTo(true);
 
-        mcp.writeCatalogForAgent(agentDir);
-        String catalogJson = Files.readString(agentDir.resolve("mcp-servers.json"));
-        assertThat(catalogJson).contains("test-custom-mcp").doesNotContain("super-secret-token-xyz");
+            mcp.writeCatalogForAgent(agentDir);
+            String catalogJson = Files.readString(agentDir.resolve("mcp-servers.json"));
+            assertThat(catalogJson).contains("test-custom-mcp").doesNotContain("super-secret-token-xyz");
 
-        // 停用后禁止调用
-        mcp.update(id, Json.obj().put("enabled", false));
-        assertThatThrownBy(() -> mcp.callTool("test-custom-mcp", "ping", null, "t1", "a1"))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("已被管理员停用");
+            // 停用后禁止调用
+            mcp.update(id, Json.obj().put("enabled", false));
+            assertThatThrownBy(() -> mcp.callTool("test-custom-mcp", "ping", null, "t1", "a1"))
+                    .isInstanceOf(ApiException.class)
+                    .hasMessageContaining("已被管理员停用");
 
-        mcp.delete(id);
-        assertThat(mcp.listAll()).extracting(m -> m.get("serverKey")).doesNotContain("test-custom-mcp");
+            mcp.delete(id);
+            assertThat(mcp.listAll()).extracting(m -> m.get("serverKey")).doesNotContain("test-custom-mcp");
 
-        // /internal/mcp/call 拒绝非法任务令牌
-        var unauth = client().post("/internal/mcp/call", Map.of("serverKey", "csot-docs-mcp", "tool", "search_specs"));
-        assertThat(unauth.status()).isEqualTo(401);
+            // /internal/mcp/call 拒绝非法任务令牌
+            var unauth = client().post("/internal/mcp/call", Map.of("serverKey", kbKey, "tool", "search_knowledge"));
+            assertThat(unauth.status()).isEqualTo(401);
+        } finally {
+            mcp.delete(kbId);
+        }
     }
 
     @Test

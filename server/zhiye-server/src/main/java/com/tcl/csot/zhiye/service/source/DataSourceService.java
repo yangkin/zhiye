@@ -458,11 +458,20 @@ public class DataSourceService {
 
     /** 编码指令：已绑定数据源的调用名、参数、返回示例 */
     public String instruction(String appId) {
+        return instruction(appId, false);
+    }
+
+    public String instruction(String appId, boolean isService) {
         List<Source> list = boundSources(appId);
         if (list.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder("\n\n## 已绑定的数据源（只读，真实数据）\n")
-                .append("用 `await window.zhiye.source.query('调用名', { 参数 })` 取数，返回接口原始 JSON；平台代理请求并注入凭证，")
-                .append("**不要在代码里写接口地址或凭证，也不要用 fetch 直连**。要处理加载中、失败（显示 error.message）和空数据三种状态；`window.zhiye?.source` 不存在时（本地构建自测）显示「数据源只在预览和发布页面可用」，不要报错。有内置技能 data-sources 时先读它。\n");
+        StringBuilder sb = new StringBuilder("\n\n## 已绑定的数据源（只读，真实数据）\n");
+        if (isService) {
+            sb.append("本应用为全栈后端服务：**服务端**直接用已注入的环境变量调用 `POST ${ZHIYE_CONNECTOR_API}/source/query`（Header `Authorization: Bearer ${ZHIYE_CONNECTOR_TOKEN}`，Body `{ \"key\": \"调用名\", \"params\": { ... } }`，返回 `{ \"data\": <上游原始JSON>, \"status\": 200 }`），由平台代发请求并注入凭证与审计；")
+              .append("严禁在代码里写死上游地址或凭证，也不要绕过代理直连。后端封装成自己的 `/api/...` 接口给前端消费，并处理加载中、错误（返回可读 message）和空数据状态。\n");
+        } else {
+            sb.append("用 `await window.zhiye.source.query('调用名', { 参数 })` 取数，返回接口原始 JSON；平台代理请求并注入凭证，")
+              .append("**不要在代码里写接口地址或凭证，也不要用 fetch 直连**。要处理加载中、失败（显示 error.message）和空数据三种状态；`window.zhiye?.source` 不存在时（本地构建自测）显示「数据源只在预览和发布页面可用」，不要报错。有内置技能 data-sources 时先读它。\n");
+        }
         int budget = 12000;
         for (Source s : list) {
             sb.append("\n### ").append(s.name()).append("（调用名 `").append(s.key()).append("`）\n");

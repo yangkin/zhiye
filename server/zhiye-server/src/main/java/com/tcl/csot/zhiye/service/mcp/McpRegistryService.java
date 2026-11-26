@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
 
 /**
  * 企业受控 MCP 注册中心与代理执行服务：
- * - 管理员统一登记/启停企业 MCP 服务（支持生产标准 JSON-RPC 2.0 HTTP MCP 与本地仿真 mock MCP）
+ * - 管理员与工作空间可登记真实 Streamable HTTP / JSON-RPC 2.0 MCP 服务，以及团队知识库（knowledge）
  * - 认证凭据使用 AES-256-GCM 密文落库，永不进入沙箱
  * - 沙箱 Runner 通过 ZHIYE_TASK_TOKEN 经由 /internal/mcp/call 代理调用，全部写入 mcp_call_audit 审计日志
  */
@@ -80,7 +80,7 @@ public class McpRegistryService {
         return jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
                 .query(ServerRow::map).list().stream().map(r -> {
                     boolean owned = !ownerTag.isEmpty() && ownerTag.equals(r.createdBy());
-                    boolean isKb = "mock".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:");
+                    boolean isKb = "knowledge".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:");
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("id", r.id());
                     m.put("serverKey", r.serverKey());
@@ -121,7 +121,7 @@ public class McpRegistryService {
         if ("knowledge".equals(mode) || !kbContent.isEmpty()) {
             if (kbContent.isEmpty()) throw ApiException.validation("请填写知识库内容（如业务规范、字段字典、SOP 说明等）");
             if (kbContent.length() > 60_000) throw ApiException.validation("单条知识库内容最多 60,000 字");
-            norm.put("transport", "mock");
+            norm.put("transport", "knowledge");
             norm.put("endpointUrl", "kb:" + kbContent);
             if (!norm.has("tools") || !norm.get("tools").isArray() || norm.get("tools").isEmpty()) {
                 ArrayNode tools = Json.M.createArrayNode();
@@ -171,7 +171,7 @@ public class McpRegistryService {
         String mode = norm.path("mode").asText("").trim().toLowerCase(Locale.ROOT);
         boolean isKb = "knowledge".equals(mode)
                 || norm.has("knowledgeContent")
-                || ("mock".equals(cur.transport()) && cur.endpointUrl() != null && cur.endpointUrl().startsWith("kb:"));
+                || ("knowledge".equals(cur.transport()) && cur.endpointUrl() != null && cur.endpointUrl().startsWith("kb:"));
         if (isKb) {
             String kbContent = norm.path("knowledgeContent").asText("").trim();
             if (kbContent.isEmpty() && cur.endpointUrl() != null && cur.endpointUrl().startsWith("kb:")) {
@@ -179,7 +179,7 @@ public class McpRegistryService {
             }
             if (kbContent.isEmpty()) throw ApiException.validation("知识库内容不能为空");
             if (kbContent.length() > 60_000) throw ApiException.validation("单条知识库内容最多 60,000 字");
-            norm.put("transport", "mock");
+            norm.put("transport", "knowledge");
             norm.put("endpointUrl", "kb:" + kbContent);
         } else {
             norm.put("transport", "http");
@@ -234,7 +234,7 @@ public class McpRegistryService {
         String name = body.path("name").asText("").trim();
         if (name.isEmpty() || name.length() > 80) throw ApiException.validation("服务名称长度需在 1~80 字之间");
         String transport = body.path("transport").asText("http").trim().toLowerCase(Locale.ROOT);
-        if (!Set.of("http", "mock").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 mock");
+        if (!Set.of("http", "knowledge").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 knowledge");
         String url = body.path("endpointUrl").asText("").trim();
         if ("http".equals(transport) && !url.startsWith("http://") && !url.startsWith("https://")) {
             throw ApiException.validation("HTTP MCP 服务必须提供合法的 http:// 或 https:// 地址");
@@ -265,7 +265,7 @@ public class McpRegistryService {
         if (name.isEmpty() || name.length() > 80) throw ApiException.validation("服务名称长度需在 1~80 字之间");
         String desc = body.has("description") ? body.path("description").asText("").trim() : cur.description();
         String transport = body.has("transport") ? body.path("transport").asText(cur.transport()).trim().toLowerCase(Locale.ROOT) : cur.transport();
-        if (!Set.of("http", "mock").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 mock");
+        if (!Set.of("http", "knowledge").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 knowledge");
         String url = body.has("endpointUrl") ? body.path("endpointUrl").asText("").trim() : cur.endpointUrl();
         String authHeader = body.has("authHeader") ? body.path("authHeader").asText("Authorization").trim() : cur.authHeader();
         String secretEnc = cur.secretEnc();
@@ -285,8 +285,7 @@ public class McpRegistryService {
     }
 
     public void delete(String id) {
-        ServerRow cur = findById(id);
-        if (cur.builtin()) throw ApiException.validation("内置仿真 MCP 服务不支持删除，可以点击停用");
+        findById(id);
         jdbc.sql("delete from enterprise_mcp_server where id = ?").param(id).update();
     }
 
@@ -325,8 +324,8 @@ public class McpRegistryService {
         if (!srv.enabled()) throw new ApiException(HttpStatus.FORBIDDEN, "MCP_DISABLED", "MCP 服务「" + key + "」已被管理员停用");
 
         try {
-            String content = "mock".equals(srv.transport())
-                    ? executeMock(srv, tool, arguments)
+            String content = "knowledge".equals(srv.transport())
+                    ? executeKnowledgeBase(srv, tool, arguments)
                     : executeHttpJsonRpc(srv, tool, arguments);
             int ms = (int) (System.currentTimeMillis() - t0);
             audit(key, tool, taskId, appId, true, ms, null);
@@ -512,64 +511,24 @@ public class McpRegistryService {
         return Json.write(result);
     }
 
-    /** 内置本地仿真 MCP：零外网凭据即可在本地端到端验证编码智能体调用 MCP 获取企业文档/接口契约。 */
-    private String executeMock(ServerRow srv, String tool, JsonNode args) {
-        String q = args == null ? "" : args.toString().toLowerCase(Locale.ROOT);
-        if ("csot-docs-mcp".equals(srv.serverKey())) {
-            if ("get_design_tokens".equals(tool)) {
-                return """
-                        华星内网业务工作台视觉规范（仿真知识库）：
-                        - 主色：#6941D8（品牌紫），浅底：#F7F4FE，深墨：#1F1C29
-                        - 状态语义：正常/已闭环 #15803D（底 #ECFDF5）、预警/跟进中 #B45309（底 #FFFBEB）、严重/阻断 #DC2626（底 #FEF2F2）
-                        - 桌面端规范：全宽流式铺展（禁止外层 max-w-6xl mx-auto），表格包 overflow-x-auto，状态胶囊与操作列加 whitespace-nowrap
-                        """.trim();
-            }
-            if (q.contains("8d") || q.contains("良率") || q.contains("spc")) {
-                return """
-                        【华星产线良率与 8D 异常闭环规范】
-                        1. 关键字段：lotId（批次号）、fab（厂别：T1/T2/T6/T7/T9）、stage（工序：Array/Cell/Module）、yieldRate（良率%）、oee（设备综合效率%）、defectTop（缺陷帕累托分类）
-                        2. 8D 流程节点：D1组建小组 → D2问题描述 → D3临时围堵(ICA) → D4根因分析(RCA) → D5永久措施(PCA) → D6验证效果 → D7防再发 → D8结案
-                        3. 告警红线：Critical（良率低于目标 1.5% 以上需 2h 内响应该产线责任人）；Warning（连续 3 批下降）
-                        """.trim();
-            }
-            return """
-                    【华星企业研发规范摘要（csot-docs-mcp 本地仿真）】
-                    - 身份透传：后端服务统一读取网关头 X-Zhiye-User-Id / X-Zhiye-User-Login / X-Zhiye-User-Name / X-Zhiye-User-Admin
-                    - 外部接口：只读查询走 AGW 网关（数据源调用名），飞书通知走平台托管 Webhook/OpenAPI 代理
-                    - 可用查询关键字：8D、良率、SPC、SSO、AGW、飞书
-                    """.trim();
+    /** 检索团队私有知识库（真实用户录入的 Markdown / 文档内容，按空行分段匹配）。 */
+    private String executeKnowledgeBase(ServerRow srv, String tool, JsonNode args) {
+        if (srv.endpointUrl() == null || !srv.endpointUrl().startsWith("kb:")) {
+            throw ApiException.validation("知识库「" + srv.name() + "」尚未录入正文内容");
         }
-        if ("csot-api-catalog-mcp".equals(srv.serverKey())) {
-            if (q.contains("feishu") || q.contains("飞书")) {
-                return """
-                        飞书开放平台标准契约（公域 open.feishu.cn）：
-                        - 群机器人交互卡片：POST https://open.feishu.cn/open-apis/bot/v2/hook/{token}，msg_type="interactive"，加签字段 timestamp + sign(HMAC-SHA256)
-                        - 多维表格读写：GET/POST /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records
-                        """.trim();
-            }
-            return """
-                    华星 MES/EAP 标准接口契约（csot-api-catalog-mcp 本地仿真）：
-                    - GET /api/mes/yield/daily?fab=T1&days=7 -> { items: [{ date, fab, stage, inputQty, outputQty, yieldRate, oee }] }
-                    - GET /api/eap/equipment/status?fab=T1 -> { items: [{ eqpId, line, status, uptimePct, alarmCount, lastAlarmAt }] }
-                    - GET /api/itsm/tickets/mine?loginName=xxx -> { items: [{ ticketNo, title, priority, status, assignee, slaDueAt }] }
-                    """.trim();
-        }
-        if (srv.endpointUrl() != null && srv.endpointUrl().startsWith("kb:")) {
-            String body = srv.endpointUrl().substring(3).trim();
-            String query = args != null ? args.path("query").asText(args.path("q").asText("")).trim().toLowerCase(Locale.ROOT) : "";
-            if (!query.isEmpty() && body.length() > 1500) {
-                StringBuilder matched = new StringBuilder();
-                for (String para : body.split("\\r?\\n\\s*\\r?\\n")) {
-                    if (para.toLowerCase(Locale.ROOT).contains(query)) {
-                        if (!matched.isEmpty()) matched.append("\n\n");
-                        matched.append(para.trim());
-                    }
+        String body = srv.endpointUrl().substring(3).trim();
+        String query = args != null ? args.path("query").asText(args.path("q").asText("")).trim().toLowerCase(Locale.ROOT) : "";
+        if (!query.isEmpty() && body.length() > 1500) {
+            StringBuilder matched = new StringBuilder();
+            for (String para : body.split("\\r?\\n\\s*\\r?\\n")) {
+                if (para.toLowerCase(Locale.ROOT).contains(query)) {
+                    if (!matched.isEmpty()) matched.append("\n\n");
+                    matched.append(para.trim());
                 }
-                if (!matched.isEmpty()) return "【知识库：" + srv.name() + "】\n" + matched;
             }
-            return "【知识库：" + srv.name() + "】\n" + (body.length() > 4000 ? body.substring(0, 4000) + "\n…(已截断)" : body);
+            if (!matched.isEmpty()) return "【知识库：" + srv.name() + "】\n" + matched;
         }
-        return "Mock MCP [" + srv.serverKey() + "/" + tool + "] 调用成功，参数：" + (args == null ? "{}" : Json.write(args));
+        return "【知识库：" + srv.name() + "】\n" + (body.length() > 4000 ? body.substring(0, 4000) + "\n…(已截断)" : body);
     }
 
     private void audit(String serverKey, String tool, String taskId, String appId, boolean ok, int durationMs, String err) {

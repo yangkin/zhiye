@@ -345,15 +345,12 @@ public class DeployOpsService {
     public Map<String, Object> saveGitCicd(String ws, String appId, JsonNode body) {
         AppRow app = requireServiceApp(ws, appId);
         String provider = body.path("provider").asText("gitlab").trim().toLowerCase(Locale.ROOT);
-        if (!Set.of("gitlab", "github", "mock").contains(provider)) {
-            throw ApiException.validation("provider 仅支持 gitlab / github / mock");
+        if (!Set.of("gitlab", "github").contains(provider)) {
+            throw ApiException.validation("provider 仅支持 gitlab / github");
         }
         String repoUrl = body.path("repoUrl").asText("").trim();
-        if (!"mock".equals(provider) && repoUrl.isEmpty()) {
-            throw ApiException.validation("请填写 Git 仓库地址（如 https://gitlab.csot.tcl.com/team/app.git），或选择「本地模拟仓库」");
-        }
-        if ("mock".equals(provider) && repoUrl.isEmpty()) {
-            repoUrl = "mock://zhiye-git/" + app.slug() + ".git";
+        if (repoUrl.isEmpty()) {
+            throw ApiException.validation("请填写 Git 仓库地址（如 https://gitlab.csot.tcl.com/team/app.git）");
         }
         String branch = body.path("branch").asText("main").trim();
         if (branch.isEmpty()) branch = "main";
@@ -406,7 +403,7 @@ public class DeployOpsService {
         RepoRow repo = jdbc.sql("select provider, branch, deploy_slot from app_git_repo where app_id = ?")
                 .param(app.id())
                 .query((rs, i) -> new RepoRow(rs.getString(1), rs.getString(2), rs.getString(3)))
-                .optional().orElse(new RepoRow("mock", "main", "preview"));
+                .optional().orElse(new RepoRow("gitlab", "main", "preview"));
 
         String branch = (branchOverride != null && !branchOverride.isBlank()) ? branchOverride.trim() : repo.branch();
         String sha = UUID.randomUUID().toString().replace("-", "").substring(0, 12);

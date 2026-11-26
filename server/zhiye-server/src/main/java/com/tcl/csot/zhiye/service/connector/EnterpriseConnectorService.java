@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * 企业连接器中心 & 公域飞书（open.feishu.cn）生产级运行时客户端：
  * - 支持 feishu_bot（群机器人 Webhook + 签名）、feishu_app（开放平台 IM 交互卡片）、feishu_bitable（多维表格 CRUD）、webhook_http
- * - 支持 live（直连公域 open.feishu.cn / 企内白名单主机）与 sandbox（本地完整模拟闭环，免外部凭证即可全链路验证）
+ * - 全部走真实公域 open.feishu.cn / 白名单主机直连（无本地沙箱 mock 伪造）
  * - 所有密钥均经 AES-256-GCM 加密存储，绝不进入前端、云函数或 Runner 沙箱
  * - 内置 SSRF 主机校验、每分钟限流与全量调用审计日志
  */
@@ -53,8 +53,6 @@ public class EnterpriseConnectorService {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
     private final ConcurrentHashMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
-    // 本地沙箱模式下的多维表格模拟存储（connectorId -> recordId -> fields）
-    private final ConcurrentHashMap<String, LinkedHashMap<String, Map<String, Object>>> sandboxBitables = new ConcurrentHashMap<>();
     private final String appTokenSigningKey;
 
     public EnterpriseConnectorService(JdbcClient jdbc, ServiceCrypto crypto) {
@@ -62,7 +60,6 @@ public class EnterpriseConnectorService {
         this.crypto = crypto;
         String envKey = System.getenv("ZHIYE_CONNECTOR_TOKEN_SECRET");
         this.appTokenSigningKey = (envKey != null && !envKey.isBlank()) ? envKey : "zhiye-app-connector-bridge-v1-dev";
-        seedSandboxBitable();
     }
 
     /** 为单体全栈应用签发受控连接器网关令牌（仅标识 appId，不含任何飞书真实密钥）。 */
@@ -138,15 +135,6 @@ public class EnterpriseConnectorService {
         return sb.toString();
     }
 
-    private void seedSandboxBitable() {
-        LinkedHashMap<String, Map<String, Object>> init = new LinkedHashMap<>();
-        init.put("rec_demo_001", new LinkedHashMap<>(Map.of(
-                "工单号", "WO-2026-001", "产线", "T9-Array", "状态", "待处理", "负责人", "张工", "良率(%)", 98.4)));
-        init.put("rec_demo_002", new LinkedHashMap<>(Map.of(
-                "工单号", "WO-2026-002", "产线", "T9-Cell", "状态", "处理中", "负责人", "李工", "良率(%)", 99.2)));
-        sandboxBitables.put("conn_feishu_bitable_sandbox", init);
-    }
-
     // ==================== CRUD 管理 ====================
 
     public List<Map<String, Object>> list(String ws) {
@@ -177,8 +165,7 @@ public class EnterpriseConnectorService {
         if (!ALLOWED_KINDS.contains(kind)) {
             throw ApiException.validation("连接器类型不支持：" + kind + "，允许：" + ALLOWED_KINDS);
         }
-        String mode = body.path("mode").asText("sandbox").trim().toLowerCase(Locale.ROOT);
-        if (!Set.of("live", "sandbox").contains(mode)) mode = "sandbox";
+        String mode = "live";
         boolean enabled = body.path("enabled").asBoolean(true);
         int rateLimit = Math.max(5, Math.min(600, body.path("rateLimitPerMin").asInt(60)));
         JsonNode config = body.has("config") && body.get("config").isObject() ? body.get("config") : Json.obj();
@@ -251,14 +238,12 @@ public class EnterpriseConnectorService {
             }
             normalized.set("config", cfg);
         }
-        // 若用户填写了真实的公域飞书 Webhook URL，自动切换为 live 模式；否则允许 sandbox 模式先演练
+        // 统一使用真实公域飞书直连模式（live），若填写了 Webhook URL 则立即做 SSRF 白名单校验
         String wh = normalized.path("secrets").path("webhookUrl").asText("").trim();
         if (!wh.isEmpty()) {
             validateOutboundUrl(wh, normalized.path("config"));
-            if (!normalized.has("mode") || normalized.path("mode").asText("").isBlank()) {
-                normalized.put("mode", "live");
-            }
         }
+        normalized.put("mode", "live");
         return upsert(ws, normalized);
     }
 
@@ -314,21 +299,12 @@ public class EnterpriseConnectorService {
         String reqSummary = "title=" + truncate(title, 80) + " mode=" + conn.mode();
 
         try {
-            if ("sandbox".equals(conn.mode())) {
-                String msgId = "om_sandbox_" + Ids.newId("msg").replace("msg_", "");
-                Map<String, Object> res = new LinkedHashMap<>();
-                res.put("ok", true);
-                res.put("mode", "sandbox");
-                res.put("connectorId", conn.id());
-                res.put("messageId", msgId);
-                res.put("card", card);
-                recordAudit(conn.id(), appId, "feishu.sendCard", "ok", System.currentTimeMillis() - t0, reqSummary, "sandbox messageId=" + msgId, null);
-                return res;
-            }
-
             JsonNode secrets = decryptSecrets(conn);
             String webhookUrl = secrets.path("webhookUrl").asText(conn.config().path("webhookUrl").asText("")).trim();
-            if ("feishu_bot".equals(conn.kind()) && !webhookUrl.isEmpty()) {
+            if ("feishu_bot".equals(conn.kind())) {
+                if (webhookUrl.isEmpty()) {
+                    throw ApiException.validation("飞书群机器人未配置 Webhook 地址，请在「生态」页编辑并填写 https://open.feishu.cn/open-apis/bot/v2/hook/...");
+                }
                 validateOutboundUrl(webhookUrl, conn.config());
                 Map<String, Object> payload = new LinkedHashMap<>();
                 String signSecret = secrets.path("webhookSignSecret").asText(secrets.path("webhookSecret").asText("")).trim();
@@ -386,16 +362,6 @@ public class EnterpriseConnectorService {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
-            if ("sandbox".equals(conn.mode())) {
-                var store = sandboxBitables.computeIfAbsent(conn.id(), k -> new LinkedHashMap<>());
-                List<Map<String, Object>> items = new ArrayList<>();
-                synchronized (store) {
-                    store.forEach((recId, fields) -> items.add(Map.of("record_id", recId, "fields", new LinkedHashMap<>(fields))));
-                }
-                recordAudit(conn.id(), appId, "bitable.list", "ok", System.currentTimeMillis() - t0, "sandbox list", "count=" + items.size(), null);
-                return Map.of("ok", true, "mode", "sandbox", "connectorId", conn.id(), "total", items.size(), "items", items);
-            }
-
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
@@ -425,17 +391,6 @@ public class EnterpriseConnectorService {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
-            if ("sandbox".equals(conn.mode())) {
-                var store = sandboxBitables.computeIfAbsent(conn.id(), k -> new LinkedHashMap<>());
-                String recId = "rec_" + Ids.newId("bt").replace("bt_", "");
-                Map<String, Object> copy = new LinkedHashMap<>(fields == null ? Map.of() : fields);
-                synchronized (store) {
-                    store.put(recId, copy);
-                }
-                recordAudit(conn.id(), appId, "bitable.create", "ok", System.currentTimeMillis() - t0, "fields=" + copy.keySet(), "record_id=" + recId, null);
-                return Map.of("ok", true, "mode", "sandbox", "connectorId", conn.id(), "record_id", recId, "fields", copy);
-            }
-
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
@@ -461,19 +416,6 @@ public class EnterpriseConnectorService {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
-            if ("sandbox".equals(conn.mode())) {
-                var store = sandboxBitables.computeIfAbsent(conn.id(), k -> new LinkedHashMap<>());
-                Map<String, Object> updated;
-                synchronized (store) {
-                    Map<String, Object> cur = store.get(recordId);
-                    if (cur == null) throw ApiException.notFound("多维表格记录 " + recordId);
-                    if (fields != null) cur.putAll(fields);
-                    updated = new LinkedHashMap<>(cur);
-                }
-                recordAudit(conn.id(), appId, "bitable.update", "ok", System.currentTimeMillis() - t0, "recordId=" + recordId, "updated", null);
-                return Map.of("ok", true, "mode", "sandbox", "connectorId", conn.id(), "record_id", recordId, "fields", updated);
-            }
-
             JsonNode secrets = decryptSecrets(conn);
             String apiBase = apiBaseOf(conn);
             String token = getTenantAccessToken(conn, apiBase, secrets);
@@ -503,13 +445,13 @@ public class EnterpriseConnectorService {
 
     public List<Map<String, String>> searchOrgEmployees(String query) {
         String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-        // 优先查询平台已登录过的真实 SSO 用户表，再辅以示例工号兜底（免登录开发模式亦可用）
+        // 查询平台已登录过的真实用户表（无内置假人名兜底）
         List<Map<String, String>> out = new ArrayList<>();
         try {
             jdbc.sql("""
                     select login_name, coalesce(nullif(display_name, ''), login_name) as name,
                            coalesce(department, '研发中心') as dept
-                      from sso_user
+                      from app_user
                      where lower(login_name) like ? or lower(coalesce(display_name, '')) like ?
                      limit 20
                     """).params("%" + q + "%", "%" + q + "%").query(rs -> {
@@ -520,20 +462,6 @@ public class EnterpriseConnectorService {
                 ));
             });
         } catch (Exception ignored) {}
-        if (out.isEmpty()) {
-            List<Map<String, String>> fallback = List.of(
-                    Map.of("loginName", "zhangwei", "realName", "张伟", "department", "制造信息化部"),
-                    Map.of("loginName", "lina", "realName", "李娜", "department", "Array 工艺工程部"),
-                    Map.of("loginName", "wangqiang", "realName", "王强", "department", "平台运维组")
-            );
-            for (var e : fallback) {
-                if (q.isEmpty() || e.get("loginName").toLowerCase(Locale.ROOT).contains(q)
-                        || e.get("realName").toLowerCase(Locale.ROOT).contains(q)
-                        || e.get("department").toLowerCase(Locale.ROOT).contains(q)) {
-                    out.add(e);
-                }
-            }
-        }
         return out;
     }
 

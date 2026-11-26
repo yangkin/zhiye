@@ -17,7 +17,6 @@ export function AdminMcpPanel() {
   const [serverKey, setServerKey] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [transport, setTransport] = useState<'http' | 'mock'>('http');
   const [endpointUrl, setEndpointUrl] = useState('');
   const [authHeader, setAuthHeader] = useState('Authorization');
   const [secret, setSecret] = useState('');
@@ -47,8 +46,8 @@ export function AdminMcpPanel() {
         serverKey: serverKey.trim(),
         name: name.trim(),
         description: description.trim(),
-        transport,
-        endpointUrl: transport === 'mock' ? `mock://${serverKey.trim()}` : endpointUrl.trim(),
+        transport: 'http',
+        endpointUrl: endpointUrl.trim(),
         authHeader: authHeader.trim() || 'Authorization',
         secret: secret.trim() || undefined,
         tools: parseTools(toolsText),
@@ -144,7 +143,6 @@ export function AdminMcpPanel() {
                     <b>{s.name}</b>
                     <div>
                       <code>{s.serverKey}</code>
-                      {s.builtin ? <span className="dash-pill" style={{ marginLeft: 6 }}>内置仿真</span> : null}
                     </div>
                   </td>
                   <td>
@@ -176,11 +174,9 @@ export function AdminMcpPanel() {
                       <button type="button" className="dash-link" onClick={() => void handleToggle(s.id, s.enabled)}>
                         {s.enabled ? '停用' : '启用'}
                       </button>
-                      {!s.builtin ? (
-                        <button type="button" className="dash-link danger" onClick={() => void handleDelete(s.id, s.name)}>
-                          删除
-                        </button>
-                      ) : null}
+                      <button type="button" className="dash-link danger" onClick={() => void handleDelete(s.id, s.name)}>
+                        删除
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -239,7 +235,7 @@ export function AdminMcpPanel() {
               <button
                 type="button"
                 className="primary-button"
-                disabled={saving || !serverKey.trim() || !name.trim() || (transport === 'http' && !endpointUrl.trim())}
+                disabled={saving || !serverKey.trim() || !name.trim() || !endpointUrl.trim()}
                 onClick={() => void handleCreate()}
               >
                 {saving ? '保存中…' : '保存并启用'}
@@ -251,22 +247,13 @@ export function AdminMcpPanel() {
           <input className="text-input" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
           <label className="field-label" style={{ marginTop: 10 }}>显示名称</label>
           <input className="text-input" placeholder="如 华星 GitLab 研发知识 MCP" value={name} onChange={(e) => setName(e.target.value)} />
-          <label className="field-label" style={{ marginTop: 10 }}>传输协议</label>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <button type="button" className={transport === 'http' ? 'primary-button' : 'subtle-button'} onClick={() => setTransport('http')}>HTTP JSON-RPC（生产）</button>
-            <button type="button" className={transport === 'mock' ? 'primary-button' : 'subtle-button'} onClick={() => setTransport('mock')}>Mock（本地仿真）</button>
+          <label className="field-label" style={{ marginTop: 10 }}>服务地址（Streamable HTTP / JSON-RPC 2.0 Endpoint URL）</label>
+          <input className="text-input" placeholder="https://mcp.internal.example/mcp" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
+          <label className="field-label" style={{ marginTop: 10 }}>鉴权请求头 / 密钥（可选，AES-256-GCM 加密存储）</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input className="text-input" style={{ width: 150 }} value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
+            <input className="text-input" type="password" placeholder="Bearer xxx" value={secret} onChange={(e) => setSecret(e.target.value)} />
           </div>
-          {transport === 'http' ? (
-            <>
-              <label className="field-label">服务地址（Endpoint URL）</label>
-              <input className="text-input" placeholder="https://mcp.internal.example/rpc" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
-              <label className="field-label" style={{ marginTop: 10 }}>鉴权请求头 / 密钥（可选，AES-256-GCM 加密存储）</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="text-input" style={{ width: 150 }} value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
-                <input className="text-input" type="password" placeholder="Bearer xxx" value={secret} onChange={(e) => setSecret(e.target.value)} />
-              </div>
-            </>
-          ) : null}
           <label className="field-label" style={{ marginTop: 10 }}>服务说明</label>
           <input className="text-input" placeholder="告诉编码智能体何时调用此 MCP" value={description} onChange={(e) => setDescription(e.target.value)} />
           <label className="field-label" style={{ marginTop: 10 }}>开放工具列表（每行格式：工具名: 说明）</label>

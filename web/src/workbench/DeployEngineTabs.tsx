@@ -167,7 +167,7 @@ export function ServiceDbTab({ appId, pgEnabled }: { appId: string; pgEnabled: b
   );
 }
 
-/** GitLab / GitHub / 本地模拟 CI/CD + 声明式多服务拓扑（zhiye.yaml）+ 标准 Docker/Helm 部署包导出。 */
+/** GitLab / GitHub CI/CD + 声明式多服务拓扑（zhiye.yaml）+ 标准 Docker/Helm 部署包导出。 */
 export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
   const qc = useQueryClient();
   const cicdQ = useQuery({ queryKey: ['service-git-cicd', appId], queryFn: () => api.serviceGitCicd(appId) });
@@ -258,7 +258,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
         <div className="svc-section-head">
           <div>
             <h4>GitLab / GitHub CI/CD 自动部署</h4>
-            <p>绑定企业内网 GitLab 或本地模拟仓库，通过签名校验 Webhook（<code>X-Gitlab-Token</code> / <code>X-Hub-Signature-256</code>）自动触发蓝绿部署。</p>
+            <p>绑定企业内网 GitLab 或 GitHub 仓库，通过签名校验 Webhook（<code>X-Gitlab-Token</code> / <code>X-Hub-Signature-256</code>）自动触发蓝绿部署。</p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <button type="button" className="subtle-button" disabled={!!busy} onClick={() => void triggerCicd()}>
@@ -276,7 +276,6 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
             <select value={provider} onChange={(e) => setProvider(e.target.value)}>
               <option value="gitlab">企业 GitLab</option>
               <option value="github">GitHub</option>
-              <option value="mock">本地模拟仓库（免外部凭证验证）</option>
             </select>
           </label>
           <label className="svc-field">
@@ -310,7 +309,7 @@ export function ServiceCicdTopologyTab({ appId }: { appId: string }) {
               className="is-mono"
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
-              placeholder={provider === 'mock' ? '留空自动生成 mock://zhiye-git/... 地址' : 'https://gitlab.csot.tcl.com/team/project.git'}
+              placeholder="https://gitlab.csot.tcl.com/team/project.git"
             />
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, paddingTop: 18, cursor: 'pointer' }}>

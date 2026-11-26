@@ -520,7 +520,7 @@ export interface ServiceTopology {
 
 export interface ServiceGitCicd {
   configured: boolean;
-  provider: 'gitlab' | 'github' | 'mock' | string;
+  provider: 'gitlab' | 'github' | string;
   repoUrl: string;
   branch: string;
   hasWebhookSecret: boolean;

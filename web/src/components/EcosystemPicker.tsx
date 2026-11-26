@@ -175,7 +175,6 @@ export function EcosystemPickerModal({
               const id = String(c.id ?? '');
               const name = String(c.name ?? id);
               const kind = String(c.kind ?? 'feishu_bot') === 'feishu_bitable' ? 'feishu_bitable' : 'feishu_bot';
-              const mode = String(c.mode ?? 'sandbox');
               const on = selectedIds.has(id);
               return (
                 <li
@@ -189,7 +188,7 @@ export function EcosystemPickerModal({
                   <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
                   <span>
                     <b>{name}</b>
-                    <small>{kind === 'feishu_bitable' ? '多维表格' : '飞书机器人'} · {mode === 'live' ? '公域直连' : '沙箱'}</small>
+                    <small>{kind === 'feishu_bitable' ? '飞书多维表格 · 公域直连' : '飞书群机器人 · 公域直连'}</small>
                   </span>
                   {on ? <Icon name="check" /> : null}
                 </li>
