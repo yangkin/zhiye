@@ -46,6 +46,8 @@ public class CloudService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     @org.springframework.context.annotation.Lazy
     private com.tcl.csot.zhiye.service.connector.AutomationTriggerService automationTriggers;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private DatabaseQuotaService dbQuota;
 
     public CloudService(JdbcClient jdbc, ObjectStore store, AppRepository apps, VersionRepository versions, GitService git) {
         this.jdbc = jdbc;
@@ -756,16 +758,21 @@ public class CloudService {
     }
 
     public Map<String, Object> insert(Cloud c, String table, JsonNode body, CloudPolicy.Who who) {
+        if (dbQuota != null) dbQuota.checkCloudWriteRateLimit(c.appId());
         var t = table(c.appId(), table);
         JsonNode policy = policyOf(t);
         CloudPolicy.checkInsert(CloudPolicy.preset(policy), who);
-        return insertChecked(c, table, t, policy, body, who);
+        return insertChecked(c, table, t, policy, body, who, false);
     }
 
-    private Map<String, Object> insertChecked(Cloud c, String table, Map<String, Object> t, JsonNode policy, JsonNode body, CloudPolicy.Who who) {
+    private Map<String, Object> insertChecked(Cloud c, String table, Map<String, Object> t, JsonNode policy, JsonNode body, CloudPolicy.Who who, boolean batchPrechecked) {
         Map<String, Object> data = cleanData(t, body);
         Map<String, String> types = columnTypes(t);
         if (data.isEmpty()) throw ApiException.validation("没有要写入的字段");
+        long rowBytes = dbQuota != null ? dbQuota.checkRowPayloadSize(body, data) : 0L;
+        if (dbQuota != null && !batchPrechecked) {
+            dbQuota.checkCloudWriteAllowed(c.appId(), c.schema(), table, 1L, rowBytes);
+        }
         CloudPolicy.checkFields(policy, data, true);
         CloudPolicy.checkInitialState(policy, data);
         checkUnique(c, table, policy, data, types, null);
@@ -810,12 +817,17 @@ public class CloudService {
     public int insertMany(Cloud c, String table, JsonNode rows, CloudPolicy.Who who) {
         if (rows == null || !rows.isArray() || rows.isEmpty()) throw ApiException.validation("没有要导入的数据");
         if (rows.size() > 5000) throw ApiException.validation("一次最多导入 5000 行");
+        if (dbQuota != null) dbQuota.checkCloudWriteRateLimit(c.appId());
         var t = table(c.appId(), table);
         JsonNode policy = policyOf(t);
+        if (dbQuota != null) {
+            long estBatchBytes = Json.write(rows).getBytes(StandardCharsets.UTF_8).length;
+            dbQuota.checkCloudWriteAllowed(c.appId(), c.schema(), table, rows.size(), estBatchBytes);
+        }
         int n = 0;
         for (JsonNode r : rows) {
             try {
-                insertChecked(c, table, t, policy, r, who);
+                insertChecked(c, table, t, policy, r, who, true);
             } catch (ApiException e) {
                 throw ApiException.validation("第 " + (n + 1) + " 行：" + e.getMessage());
             } catch (org.springframework.dao.DataAccessException e) {
@@ -829,12 +841,17 @@ public class CloudService {
     }
 
     public Map<String, Object> update(Cloud c, String table, long id, JsonNode body, CloudPolicy.Who who) {
+        if (dbQuota != null) dbQuota.checkCloudWriteRateLimit(c.appId());
         var t = table(c.appId(), table);
         JsonNode policy = policyOf(t);
         String filter = CloudPolicy.writeFilter(CloudPolicy.preset(policy), who);
         Map<String, Object> data = cleanData(t, body);
         Map<String, String> types = columnTypes(t);
         if (data.isEmpty()) throw ApiException.validation("没有要更新的字段");
+        if (dbQuota != null) {
+            long rowBytes = dbQuota.checkRowPayloadSize(body, data);
+            dbQuota.checkCloudWriteAllowed(c.appId(), c.schema(), table, 0L, rowBytes);
+        }
         Map<String, Object> before = row(c, table, id).orElseThrow(() -> ApiException.notFound("这条记录"));
         if (filter != null && !Objects.equals(before.get("created_by"), who.userId())) throw CloudPolicy.denied("只能修改自己创建的记录");
         CloudPolicy.checkFields(policy, data, false);
@@ -864,6 +881,7 @@ public class CloudService {
         Map<String, Object> before = row(c, table, id).orElseThrow(() -> ApiException.notFound("这条记录"));
         if (filter != null && !Objects.equals(before.get("created_by"), who.userId())) throw CloudPolicy.denied("只能删除自己创建的记录");
         jdbc.sql("delete from " + qt(c, table) + " where id = ?").params(id).update();
+        if (dbQuota != null) dbQuota.onCloudDataDeleted(c.appId(), c.schema(), table);
     }
 
     /** 原子加减：set col = col + delta，可选 min / max，越界时不改并报错（库存扣减不会扣成负数） */
@@ -938,10 +956,14 @@ public class CloudService {
         }
     }
 
-    /** 控制台「清空数据」 */
+    /** 控制台「清空数据」：使用 TRUNCATE 立刻释放底层磁盘页并触发容量缓存刷新，便于超限应用自助恢复 */
     public long clear(Cloud c, String table) {
         table(c.appId(), table);
-        return jdbc.sql("delete from " + qt(c, table)).update();
+        Long cnt = jdbc.sql("select count(*) from " + qt(c, table)).query(Long.class).single();
+        long deleted = cnt == null ? 0L : cnt;
+        jdbc.sql("truncate table " + qt(c, table)).update();
+        if (dbQuota != null) dbQuota.onCloudDataDeleted(c.appId(), c.schema(), table);
+        return deleted;
     }
 
     /** 控制台切换预设（之后 AI 改 policies.json 里同一张表的预设时才会被覆盖） */

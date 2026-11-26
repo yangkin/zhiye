@@ -8,7 +8,6 @@ import { Modal } from '../components/Modal';
 import { Select } from '../components/Select';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { confirmDialog } from '../components/ConfirmDialog';
-import { CloudTriggersTab } from './CloudTriggersTab';
 
 const SYSTEM = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at', 'updated_by'];
 const SYSTEM_LABEL: Record<string, string> = { id: 'ID', created_by_name: '提交人', created_at: '创建时间', updated_at: '更新时间' };
@@ -177,14 +176,19 @@ function BlockedReport({ tables, sso, onBlocked }: { tables: string[]; sso: bool
   return null;
 }
 
-type Section = 'db' | 'files' | 'functions' | 'triggers' | 'access';
+type Section = 'db' | 'files' | 'functions' | 'access';
 const NAV: [Section, string, IconName][] = [
   ['db', '数据库', 'database'],
   ['files', '文件存储', 'folder'],
   ['functions', '云函数', 'code'],
-  ['triggers', '自动化触发器', 'spark'],
   ['access', '访问与登录', 'lock'],
 ];
+
+function fmtDbBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes >= 100 * 1024 ? 0 : 1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 1 : 2)} MB`;
+}
 
 /** 数据控制台（云服务已启用时，对照 WorkBuddy）：左侧分区导航；数据库下分「数据 / 权限」 */
 export function CloudConsole({ appId, onDisable, disabling }: { appId: string; onDisable: () => void; disabling: boolean }) {
@@ -193,6 +197,7 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
   const ov = useQuery({ queryKey: consoleKey(appId), queryFn: () => api.consoleOverview(appId) });
   const [table, setTable] = useState<string | null>(null);
   const tables = ov.data?.tables ?? [];
+  const dbQuota = ov.data?.dbQuota;
   const current = tables.find((t) => t.name === table) ?? tables[0] ?? null;
   return (
     <div className="cc cc-layout">
@@ -221,7 +226,39 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
                   {label}
                 </button>
               ))}
+              {dbQuota ? (
+                <div className={`cc-db-quota is-${dbQuota.status}`} title={`单表上限 ${dbQuota.maxRowsPerTable.toLocaleString()} 行，单条记录上限 ${Math.round(dbQuota.maxRowBytes / 1024)} KB`}>
+                  <span className="cc-db-quota-text">
+                    容量 {fmtDbBytes(dbQuota.usedBytes)} / {dbQuota.quotaMb} MB
+                  </span>
+                  <span className="cc-db-quota-track" aria-hidden="true">
+                    <i style={{ width: `${Math.min(100, Math.max(dbQuota.usedBytes > 0 ? 2 : 0, dbQuota.usagePercent))}%` }} />
+                  </span>
+                  <span className="cc-db-quota-meta">
+                    单表上限 {dbQuota.maxRowsPerTable.toLocaleString()} 行 · 单行 ≤ {Math.round(dbQuota.maxRowBytes / 1024)} KB
+                  </span>
+                </div>
+              ) : null}
             </div>
+            {dbQuota?.writeBlocked ? (
+              <div className="cc-db-quota-alert is-blocked" role="alert">
+                <Icon name="alert" />
+                <div>
+                  <b>{dbQuota.blockedByAdmin ? '数据库写入已被管理员限制' : '数据库容量已达上限，写入已自动暂停'}</b>
+                  <p>
+                    {dbQuota.blockedReason || '当前应用暂不允许新增或修改记录。'}
+                    {dbQuota.blockedByAdmin ? ' 如需恢复请联系平台管理员。' : ' 删除无用记录或点击「清空数据」降至 90% 以下后将自动恢复写入，也可联系管理员扩容。'}
+                  </p>
+                </div>
+              </div>
+            ) : dbQuota?.status === 'warning' ? (
+              <div className="cc-db-quota-alert is-warn" role="status">
+                <Icon name="alert" />
+                <span>
+                  当前数据库占用已达 {dbQuota.usagePercent}%（{fmtDbBytes(dbQuota.usedBytes)} / {dbQuota.quotaMb} MB），建议及时清理历史测试数据或联系管理员扩容。
+                </span>
+              </div>
+            ) : null}
             {!tables.length ? (
               <EmptyState icon="database" title="还没有数据表" desc="让 AI 按应用设计表结构，任务成功后会自动建表。" />
             ) : dbTab === 'data' && current ? (
@@ -249,8 +286,6 @@ export function CloudConsole({ appId, onDisable, disabling }: { appId: string; o
           <FilesView appId={appId} />
         ) : section === 'functions' ? (
           <FunctionsView appId={appId} />
-        ) : section === 'triggers' ? (
-          <CloudTriggersTab appId={appId} tableNames={tables.map((t) => t.name)} />
         ) : (
           <div className="cc-section">
             <h3>谁能打开这个应用</h3>

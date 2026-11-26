@@ -33,6 +33,8 @@ public class AdminController {
     private ClusterSandboxService clusterSandbox;
     @Autowired(required = false)
     private com.tcl.csot.zhiye.service.app.PublishReviewService publishReviews;
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.cloud.DatabaseQuotaService dbQuota;
 
     public AdminController(AdminService admin, CurrentPrincipal principal) {
         this.admin = admin;
@@ -152,6 +154,32 @@ public class AdminController {
     public Map<String, Object> clearRateLimits(@RequestBody(required = false) JsonNode body, HttpServletRequest req) {
         String actor = admin.requireActor(req, principal.workspaceId());
         return admin.clearRateLimits(body == null ? Json.obj() : body, actor);
+    }
+
+    // ---------- 数据库容量监控、扩容与一键限写治理 ----------
+    @GetMapping("/database-usage")
+    public Map<String, Object> databaseUsage(@RequestParam(defaultValue = "false") boolean scan, HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return dbQuota == null ? Map.of("items", java.util.List.of(), "summary", Map.of(), "defaults", Map.of())
+                : dbQuota.adminDatabaseUsage(scan);
+    }
+
+    @PostMapping("/database-usage/scan")
+    public Map<String, Object> scanDatabaseUsage(HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        if (dbQuota == null) return Map.of("items", java.util.List.of(), "summary", Map.of(), "defaults", Map.of());
+        Map<String, Object> scanResult = dbQuota.scanAllSchemas();
+        Map<String, Object> usage = new java.util.LinkedHashMap<>(dbQuota.adminDatabaseUsage(false));
+        usage.put("scanResult", scanResult);
+        return usage;
+    }
+
+    @PutMapping("/apps/{id}/db-quota")
+    public Map<String, Object> updateAppDbQuota(@PathVariable String id,
+                                                @RequestBody(required = false) JsonNode body,
+                                                HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        return admin.updateAppDbQuota(id, body == null ? Json.obj() : body, actor);
     }
 
     @GetMapping("/cluster")

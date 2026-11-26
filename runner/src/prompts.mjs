@@ -128,7 +128,7 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
   - 统计用聚合，不要把全表拉到前端算：\`await window.zhiye.cloud.db.aggregate('表名', { groupBy: ['line'], count: true, sum: ['qty'] })\` → \`[{ line, count, sum_qty }]\`
   - 每张表自动带 id、created_by（提交人 id）、created_by_name（提交人姓名）、created_at、updated_at、updated_by，不用自己声明，也不要让用户填「提交人」。
 - 当前用户：\`window.zhiye.user\` = \`{ id, loginName, name, email, admin }\`，没登录时是 null。登录由平台按发布设置处理，页面只负责显示（例如右上角显示姓名，admin 为 true 时显示管理入口）。
-- 上传文件：\`await window.zhiye.cloud.storage.upload('docs/xxx.png', blob)\`；读取用 \`storage.download(path)\` 得到 blob URL。
+- 上传文件：\`await window.zhiye.cloud.storage.upload('docs/xxx.png', blob)\`；读取用 \`storage.download(path)\` 得到 blob URL。**严禁把图片 Base64、PDF 或大段二进制内容直接存入数据库 text/jsonb 字段**（单条记录上限 256 KB、单字段上限 128 KB、单表上限 5 万行、单应用默认 200 MB），图片/附件必须上传到 \`/storage\` 后仅在数据库里保存文件路径。
 - 表在 cloud/schema.sql 里声明（只允许 create table / alter table add column / create index；类型用 text/int/bigint/real/numeric/boolean/date/timestamp/timestamptz/jsonb，varchar 等会按 text 处理）。每个 create table 上面紧挨着写一行 \`-- 中文说明\`（这张表存什么，20 字以内），数据控制台会显示成表的描述。
   改了这个文件后，任务成功时平台会自动补建新表和新列；已有的列不会被删除或改类型。
 - 谁能看、谁能改写在 cloud/policies.json，由平台在接口层执行（页面只做提示，不要自己在前端过滤别人的数据）：
@@ -140,7 +140,7 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
   status 为 401 表示需要登录，403 表示没有权限。
 - 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源或企业飞书连接器时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），
   页面**必须真实通过 \`await window.zhiye.fn.call('name', { ... })\` 调用它们**，不能只写云函数文件却在前端算完直写 db；简单增删改查才直接用 zhiye.cloud.db。函数可使用 \`ctx\` 全部平台能力（\`ctx.db\` / \`ctx.storage\` / \`ctx.source\` / \`ctx.ai\` / \`ctx.feishu.sendCard\` / \`ctx.bitable.list|create|update\` / \`ctx.org.searchEmployees\` / \`ctx.log\` / \`ctx.user\`），密钥由平台托管、不进沙箱，10 秒超时。
-  - 发公域飞书卡片：\`await ctx.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\`
+  - 发飞书卡片：\`await ctx.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\`
   - 飞书多维表格 CRUD：\`await ctx.bitable.list(connectorId)\` / \`await ctx.bitable.create(connectorId, fields)\` / \`await ctx.bitable.update(connectorId, recordId, fields)\`
   - 组织员工检索：\`await ctx.org.searchEmployees(keyword)\`（查看 \`.zhiye/connectors.json\` 获取已启用连接器 ID）
   云函数里不要假设 \`ctx.user.loginName\` 有特定前缀（预览身份下为 author），若演示角色切换需要做角色校验，请结合 \`ctx.user.admin\` 与显式传入的角色参数判断。

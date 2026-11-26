@@ -6,9 +6,8 @@ import { copyText, fmtTime } from '../lib/format';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
 import { ServiceDbTab } from './DeployEngineTabs';
-import { CloudTriggersTab } from './CloudTriggersTab';
 
-type SubTab = 'config' | 'env' | 'logs' | 'db' | 'triggers' | 'dockerfile';
+type SubTab = 'config' | 'env' | 'logs' | 'db' | 'dockerfile';
 type LogView = 'runtime' | 'build' | 'sse' | 'releases';
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
@@ -494,7 +493,6 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
             ['env', `环境变量 (${svc?.envVars?.length ?? 0})`, 'lock'],
             ['logs', '日志与发布回滚', 'terminal'],
             ['db', 'PostgreSQL 控制台', 'database'],
-            ['triggers', '自动化与飞书通知', 'spark'],
             ['dockerfile', 'Dockerfile', 'code'],
           ] as const
         ).map(([k, label, icon]) => (
@@ -1142,8 +1140,6 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
           </div>
         ) : sub === 'db' ? (
           <ServiceDbTab appId={app.id} pgEnabled={!!svc?.pgEnabled} />
-        ) : sub === 'triggers' ? (
-          <CloudTriggersTab appId={app.id} tableNames={[]} mode="service" />
         ) : (
           <div className="svc-logs-shell">
             <div className="svc-code-window is-tall">

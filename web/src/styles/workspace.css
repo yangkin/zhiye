@@ -371,10 +371,25 @@ body.is-resizing-h iframe,body.is-resizing-v iframe{pointer-events:none!importan
 .cc-nav .icon{width:15px;height:15px;flex:none}
 .cc-nav .cc-link{align-self:flex-start;margin-left:4px}
 .cc-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px;padding:12px 22px 20px;overflow:auto}
-.cc-subtabs{display:flex;gap:22px;border-bottom:1px solid var(--st-line)}
+.cc-subtabs{display:flex;align-items:center;flex-wrap:wrap;gap:14px 22px;border-bottom:1px solid var(--st-line)}
 .cc-subtabs>button{position:relative;padding:8px 0 10px;font-size:13px;color:var(--st-muted)}
 .cc-subtabs>button.active{color:var(--st-ink);font-weight:600}
 .cc-subtabs>button.active:after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:var(--st-ink)}
+.cc-db-quota{margin-left:auto;display:inline-flex;align-items:center;gap:8px;padding:4px 10px;border-radius:999px;background:#f7f5fc;border:1px solid #e8e2f6;font-size:11.5px;color:#554c6b;margin-bottom:4px}
+.cc-db-quota.is-warning{background:#fff9ed;border-color:#f4d49c;color:#9a580a}
+.cc-db-quota.is-exceeded,.cc-db-quota.is-manual_blocked{background:#fff3f5;border-color:#f3c0c8;color:#b82d40}
+.cc-db-quota-text{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cc-db-quota-track{width:54px;height:5px;border-radius:999px;background:#e6dff4;overflow:hidden;flex:none}
+.cc-db-quota-track i{display:block;height:100%;border-radius:999px;background:#7953dc}
+.cc-db-quota.is-warning .cc-db-quota-track i{background:#d9822b}
+.cc-db-quota.is-exceeded .cc-db-quota-track i,.cc-db-quota.is-manual_blocked .cc-db-quota-track i{background:#d13d50}
+.cc-db-quota-meta{color:#867e9c;font-size:11px;white-space:nowrap}
+.cc-db-quota-alert{display:flex;align-items:flex-start;gap:9px;padding:10px 13px;border-radius:10px;font-size:12px;line-height:1.6}
+.cc-db-quota-alert .icon{width:15px;height:15px;flex:none;margin-top:2px}
+.cc-db-quota-alert b{display:block;font-size:12.5px;margin-bottom:2px}
+.cc-db-quota-alert p{margin:0}
+.cc-db-quota-alert.is-warn{background:#fff9ed;border:1px solid #f4d49c;color:#8c4f08}
+.cc-db-quota-alert.is-blocked{background:#fff3f5;border:1px solid #f2bcc5;color:#a82436}
 .cc-table-select{min-width:180px;height:32px;font-size:12.5px}
 .cc-icon{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--st-line);border-radius:8px;background:var(--st-raised);color:var(--st-muted)}
 .cc-icon:hover:not(:disabled){color:var(--st-ink);border-color:var(--st-line-strong)}

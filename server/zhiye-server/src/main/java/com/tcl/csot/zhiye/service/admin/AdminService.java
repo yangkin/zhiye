@@ -72,6 +72,9 @@ public class AdminService {
     @Autowired(required = false)
     private com.tcl.csot.zhiye.service.app.PublishReviewService publishReviews;
 
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.cloud.DatabaseQuotaService dbQuota;
+
     @Autowired
     public AdminService(JdbcClient jdbc,
                         QuotaService quota,
@@ -136,7 +139,9 @@ public class AdminService {
         out.put("defaultQuota", Map.of(
                 "maxApps", props.workspace().maxApps(),
                 "dailyTaskLimit", props.workspace().dailyTaskLimit(),
-                "maxConcurrentTasks", props.workspace().maxConcurrentTasks()));
+                "maxConcurrentTasks", props.workspace().maxConcurrentTasks(),
+                "cloudDbQuotaMb", props.databaseQuota().cloudDefaultQuotaMb(),
+                "serviceDbQuotaMb", props.databaseQuota().serviceDefaultQuotaMb()));
 
         out.put("customQuotas", queryCustomQuotas());
         out.put("users", queryUsers(currentUserId));
@@ -160,6 +165,7 @@ public class AdminService {
     private List<Map<String, Object>> queryCustomQuotas() {
         return jdbc.sql("""
                 select q.workspace_id, q.max_apps, q.daily_task_limit, q.max_concurrent_tasks,
+                       q.cloud_db_quota_mb, q.service_db_quota_mb,
                        q.note, q.updated_by, q.updated_at,
                        u.login_name, u.real_name,
                        (select count(*) from app a where a.workspace_id = q.workspace_id and a.deleted_at is null) as app_count,
@@ -183,6 +189,8 @@ public class AdminService {
             m.put("maxApps", rs.getObject("max_apps", Integer.class));
             m.put("dailyTaskLimit", rs.getObject("daily_task_limit", Integer.class));
             m.put("maxConcurrentTasks", rs.getObject("max_concurrent_tasks", Integer.class));
+            m.put("cloudDbQuotaMb", rs.getObject("cloud_db_quota_mb", Integer.class));
+            m.put("serviceDbQuotaMb", rs.getObject("service_db_quota_mb", Integer.class));
             m.put("note", rs.getString("note"));
             m.put("updatedBy", rs.getString("updated_by"));
             m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
@@ -696,29 +704,37 @@ public class AdminService {
         Integer maxApps = optInt(body, "maxApps", 1, 500, "应用数量上限");
         Integer dailyTaskLimit = optInt(body, "dailyTaskLimit", 1, 5000, "每日任务上限");
         Integer maxConcurrentTasks = optInt(body, "maxConcurrentTasks", 1, 50, "同时运行任务上限");
+        Integer cloudDbQuotaMb = optInt(body, "cloudDbQuotaMb", 10, 10240, "共享云库容量上限(MB)");
+        Integer serviceDbQuotaMb = optInt(body, "serviceDbQuotaMb", 10, 51200, "托管数据库容量上限(MB)");
         String note = clip(body.path("note").asText("").trim(), 200);
         if (note.isEmpty()) note = null;
 
-        if (reset || (maxApps == null && dailyTaskLimit == null && maxConcurrentTasks == null)) {
+        if (reset || (maxApps == null && dailyTaskLimit == null && maxConcurrentTasks == null
+                && cloudDbQuotaMb == null && serviceDbQuotaMb == null)) {
             jdbc.sql("delete from workspace_quota where workspace_id = ?").param(wsId).update();
             audit(actor, "QUOTA_RESET", "workspace", wsId, Map.of("reset", true));
         } else {
             jdbc.sql("""
-                    insert into workspace_quota (workspace_id, max_apps, daily_task_limit, max_concurrent_tasks, note, updated_by, updated_at)
-                    values (?, ?, ?, ?, ?, ?, now())
+                    insert into workspace_quota (workspace_id, max_apps, daily_task_limit, max_concurrent_tasks,
+                                                 cloud_db_quota_mb, service_db_quota_mb, note, updated_by, updated_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, now())
                     on conflict (workspace_id) do update set
                       max_apps = excluded.max_apps,
                       daily_task_limit = excluded.daily_task_limit,
                       max_concurrent_tasks = excluded.max_concurrent_tasks,
+                      cloud_db_quota_mb = excluded.cloud_db_quota_mb,
+                      service_db_quota_mb = excluded.service_db_quota_mb,
                       note = excluded.note,
                       updated_by = excluded.updated_by,
                       updated_at = now()
-                    """).params(wsId, maxApps, dailyTaskLimit, maxConcurrentTasks, note, actor).update();
+                    """).params(wsId, maxApps, dailyTaskLimit, maxConcurrentTasks, cloudDbQuotaMb, serviceDbQuotaMb, note, actor).update();
 
             Map<String, Object> detail = new LinkedHashMap<>();
             if (maxApps != null) detail.put("maxApps", maxApps);
             if (dailyTaskLimit != null) detail.put("dailyTaskLimit", dailyTaskLimit);
             if (maxConcurrentTasks != null) detail.put("maxConcurrentTasks", maxConcurrentTasks);
+            if (cloudDbQuotaMb != null) detail.put("cloudDbQuotaMb", cloudDbQuotaMb);
+            if (serviceDbQuotaMb != null) detail.put("serviceDbQuotaMb", serviceDbQuotaMb);
             if (note != null) detail.put("note", note);
             audit(actor, "QUOTA_UPDATE", "workspace", wsId, detail);
         }
@@ -729,6 +745,8 @@ public class AdminService {
         out.put("maxApps", lim.maxApps());
         out.put("dailyTaskLimit", lim.dailyTaskLimit());
         out.put("maxConcurrentTasks", lim.maxConcurrentTasks());
+        out.put("cloudDbQuotaMb", lim.cloudDbQuotaMb());
+        out.put("serviceDbQuotaMb", lim.serviceDbQuotaMb());
         out.put("custom", lim.custom());
         out.put("note", lim.note());
         return out;
@@ -931,11 +949,36 @@ public class AdminService {
         int cleared;
         if (bucket.isEmpty()) {
             cleared = jdbc.sql("delete from rate_limit_hit").update();
+            if (dbQuota != null) dbQuota.clearWriteRateLimits(null);
         } else {
             cleared = jdbc.sql("delete from rate_limit_hit where bucket = ?").param(bucket).update();
         }
         audit(actor, "RATE_LIMIT_CLEAR", "rate_limit", bucket.isEmpty() ? "all" : bucket, Map.of("clearedCount", cleared));
         return Map.of("clearedCount", cleared, "bucket", bucket.isEmpty() ? "all" : bucket);
+    }
+
+    /** 管理员单应用数据库配额更新 / 手动限写与解封（含审计日志） */
+    public Map<String, Object> updateAppDbQuota(String appId, JsonNode body, String actor) {
+        if (dbQuota == null) throw ApiException.validation("数据库配额服务未就绪");
+        boolean resetQuota = body.path("resetQuota").asBoolean(false);
+        Integer quotaMb = optInt(body, "quotaMb", 10, 51200, "单应用数据库容量上限(MB)");
+        Boolean writeBlocked = body.has("writeBlocked") && !body.get("writeBlocked").isNull()
+                ? body.get("writeBlocked").asBoolean()
+                : null;
+        String reason = clip(body.path("reason").asText("").trim(), 200);
+        if (reason.isEmpty()) reason = null;
+
+        Map<String, Object> res = dbQuota.adminUpdateAppDbQuota(appId, quotaMb, resetQuota, writeBlocked, reason, actor);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("appName", res.get("appName"));
+        if (quotaMb != null) detail.put("quotaMb", quotaMb);
+        if (resetQuota) detail.put("resetQuota", true);
+        if (writeBlocked != null) detail.put("writeBlocked", writeBlocked);
+        if (reason != null) detail.put("reason", reason);
+        String action = writeBlocked == null ? "DB_QUOTA_UPDATE"
+                : (writeBlocked ? "DB_WRITE_BLOCK" : "DB_WRITE_UNBLOCK");
+        audit(actor, action, "app", appId, detail);
+        return res;
     }
 
     /** 授予或撤销 SSO 用户的平台管理员权限（禁止降级当前操作者本人或固定白名单账号） */

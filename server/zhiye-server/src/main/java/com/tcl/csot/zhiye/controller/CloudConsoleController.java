@@ -41,6 +41,8 @@ public class CloudConsoleController {
     private final CurrentPrincipal principal;
     @org.springframework.beans.factory.annotation.Autowired
     private FunctionService fns;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.cloud.DatabaseQuotaService dbQuota;
 
     public CloudConsoleController(CloudService cloud, AccessService access, AppRepository apps, CurrentPrincipal principal) {
         this.cloud = cloud;
@@ -80,6 +82,7 @@ public class CloudConsoleController {
         m.put("counts", cloud.rowCounts(cl));
         m.put("presets", CloudPolicy.presetViews());
         m.put("access", access.get(appId).level());
+        if (dbQuota != null) m.put("dbQuota", dbQuota.cloudAppQuotaView(appId, cl.schema()));
         return m;
     }
 

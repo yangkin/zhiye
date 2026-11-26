@@ -73,6 +73,21 @@ zhiye:
     daily-task-limit: 200
     max-concurrent-tasks: ${ZHIYE_WORKSPACE_MAX_CONCURRENT:1}
     max-apps: 10
+  database-quota:
+    cloud-max-row-bytes: ${ZHIYE_DB_CLOUD_MAX_ROW_BYTES:262144}
+    cloud-max-field-bytes: ${ZHIYE_DB_CLOUD_MAX_FIELD_BYTES:131072}
+    cloud-max-rows-per-table: ${ZHIYE_DB_CLOUD_MAX_ROWS_PER_TABLE:50000}
+    cloud-default-quota-mb: ${ZHIYE_DB_CLOUD_DEFAULT_QUOTA_MB:200}
+    cloud-writes-per-second: ${ZHIYE_DB_CLOUD_WRITES_PER_SECOND:30}
+    cloud-writes-per-minute: ${ZHIYE_DB_CLOUD_WRITES_PER_MINUTE:600}
+    service-default-quota-mb: ${ZHIYE_DB_SERVICE_DEFAULT_QUOTA_MB:500}
+    service-role-connection-limit: ${ZHIYE_DB_SERVICE_CONN_LIMIT:10}
+    service-statement-timeout-ms: ${ZHIYE_DB_SERVICE_STATEMENT_TIMEOUT_MS:15000}
+    service-idle-tx-timeout-ms: ${ZHIYE_DB_SERVICE_IDLE_TX_TIMEOUT_MS:30000}
+    service-temp-file-limit-mb: ${ZHIYE_DB_SERVICE_TEMP_FILE_LIMIT_MB:64}
+    warn-threshold-percent: ${ZHIYE_DB_WARN_THRESHOLD_PCT:80}
+    recover-threshold-percent: ${ZHIYE_DB_RECOVER_THRESHOLD_PCT:90}
+    size-cache-seconds: ${ZHIYE_DB_SIZE_CACHE_SECONDS:20}
   sandbox:
     provider: local
     seatbelt: ${ZHIYE_SEATBELT:true}

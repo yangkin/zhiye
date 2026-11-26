@@ -32,15 +32,18 @@ public class QuotaService {
         try { return body.get(); } finally { lock.unlock(); }
     }
 
-    public record Limits(int maxApps, int dailyTaskLimit, int maxConcurrentTasks, boolean custom, String note) {}
+    public record Limits(int maxApps, int dailyTaskLimit, int maxConcurrentTasks,
+                         int cloudDbQuotaMb, int serviceDbQuotaMb, boolean custom, String note) {}
 
     /** 查询指定工作空间生效的配额上限（优先读取 workspace_quota 覆盖值，缺省字段回落系统默认配额） */
     public Limits effectiveLimits(String ws) {
         int defApps = props.workspace().maxApps();
         int defDaily = props.workspace().dailyTaskLimit();
         int defConcurrent = props.workspace().maxConcurrentTasks();
+        int defCloudDb = props.databaseQuota().cloudDefaultQuotaMb();
+        int defSvcDb = props.databaseQuota().serviceDefaultQuotaMb();
         return jdbc.sql("""
-                select max_apps, daily_task_limit, max_concurrent_tasks, note
+                select max_apps, daily_task_limit, max_concurrent_tasks, cloud_db_quota_mb, service_db_quota_mb, note
                 from workspace_quota where workspace_id = ?
                 """)
                 .param(ws)
@@ -48,17 +51,21 @@ public class QuotaService {
                     Integer ma = rs.getObject("max_apps", Integer.class);
                     Integer dt = rs.getObject("daily_task_limit", Integer.class);
                     Integer mc = rs.getObject("max_concurrent_tasks", Integer.class);
+                    Integer cd = rs.getObject("cloud_db_quota_mb", Integer.class);
+                    Integer sd = rs.getObject("service_db_quota_mb", Integer.class);
                     String note = rs.getString("note");
-                    boolean custom = ma != null || dt != null || mc != null;
+                    boolean custom = ma != null || dt != null || mc != null || cd != null || sd != null;
                     return new Limits(
                             ma != null ? ma : defApps,
                             dt != null ? dt : defDaily,
                             mc != null ? mc : defConcurrent,
+                            cd != null ? cd : defCloudDb,
+                            sd != null ? sd : defSvcDb,
                             custom,
                             note);
                 })
                 .optional()
-                .orElse(new Limits(defApps, defDaily, defConcurrent, false, null));
+                .orElse(new Limits(defApps, defDaily, defConcurrent, defCloudDb, defSvcDb, false, null));
     }
 
     /** 创建或导入应用前检查数量上限。导入中（尚未显示）的应用也计入，失败或取消的导入会被删除、不计入。 */

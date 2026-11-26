@@ -27,6 +27,7 @@ import { AdminLoginAllowlistPanel } from './AdminLoginAllowlistPanel';
 import { AdminMcpPanel } from './AdminMcpPanel';
 import { AdminFeishuConnectorPanel } from './AdminFeishuConnectorPanel';
 import { AdminPublishReviewPanel } from './AdminPublishReviewPanel';
+import { AdminDatabaseQuotaPanel } from './AdminDatabaseQuotaPanel';
 
 export type GovTab = 'reviews' | 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
 
@@ -107,6 +108,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   WORKSPACE_HANDOVER: '离职/空间批量交接',
   QUOTA_UPDATE: '调整配额',
   QUOTA_RESET: '恢复默认配额',
+  DB_QUOTA_UPDATE: '调整应用数据库容量',
+  DB_WRITE_BLOCK: '限制应用数据库写入',
+  DB_WRITE_UNBLOCK: '恢复应用数据库写入',
   ADMIN_ROLE_UPDATE: '变更管理员角色',
   SITE_ACCESS_UPDATE: '调整站点访问权限',
   APP_UNPUBLISH: '强行下线站点',
@@ -2148,12 +2152,14 @@ export function AdminGovernancePanel({
          ==================================================================== */}
       {govTab === 'ops' ? (
         <div className="gov-stack">
+          <AdminDatabaseQuotaPanel />
+
           <div className="dash-panel">
             <DashPanelHead
               icon="settings"
               tone="violet"
               title={`自定义配额（${customQuotaCount}）`}
-              sub="为指定空间单独设置应用数、每日任务与并发上限"
+              sub="为指定空间单独设置应用数、每日任务、并发与数据库容量上限"
               right={
                 <div className="dash-admin-inline-form">
                   <OwnerPicker
@@ -2191,7 +2197,7 @@ export function AdminGovernancePanel({
                 icon="settings"
                 tone="muted"
                 title="所有工作空间当前均遵循全局默认配额"
-                desc={`默认上限：${overview.defaultQuota.maxApps} 个应用 · ${overview.defaultQuota.dailyTaskLimit} 次/日任务 · ${overview.defaultQuota.maxConcurrentTasks} 并发任务。可从右上角下拉选择空间单独覆写。`}
+                desc={`默认上限：${overview.defaultQuota.maxApps} 个应用 · ${overview.defaultQuota.dailyTaskLimit} 次/日任务 · ${overview.defaultQuota.maxConcurrentTasks} 并发任务 · 云库 ${overview.defaultQuota.cloudDbQuotaMb ?? 200} MB / 托管库 ${overview.defaultQuota.serviceDbQuotaMb ?? 500} MB。可从右上角下拉选择空间单独覆写。`}
               />
             ) : (
               <>
@@ -2203,6 +2209,7 @@ export function AdminGovernancePanel({
                         <th scope="col">应用上限 (已用)</th>
                         <th scope="col">日任务上限 (今日)</th>
                         <th scope="col">并发 (活跃)</th>
+                        <th scope="col">数据库配额 (云库/托管)</th>
                         <th scope="col">备注 / 操作</th>
                       </tr>
                     </thead>
@@ -2228,6 +2235,10 @@ export function AdminGovernancePanel({
                           <td>
                             <b>{q.maxConcurrentTasks ?? overview.defaultQuota.maxConcurrentTasks}</b>{' '}
                             <span className="dash-muted">({q.activeTasks})</span>
+                          </td>
+                          <td className="dash-nowrap">
+                            <b>{q.cloudDbQuotaMb ?? overview.defaultQuota.cloudDbQuotaMb ?? 200} MB</b>
+                            <span className="dash-muted"> / {q.serviceDbQuotaMb ?? overview.defaultQuota.serviceDbQuotaMb ?? 500} MB</span>
                           </td>
                           <td className="dash-nowrap">
                             <div className="dash-action-row">
@@ -2775,6 +2786,16 @@ export function AdminQuotaModal({
       ? String(target.custom.maxConcurrentTasks)
       : String(defaultQuota.maxConcurrentTasks),
   );
+  const [cloudDbQuotaMb, setCloudDbQuotaMb] = useState(
+    target.custom?.cloudDbQuotaMb != null
+      ? String(target.custom.cloudDbQuotaMb)
+      : String(defaultQuota.cloudDbQuotaMb ?? 200),
+  );
+  const [serviceDbQuotaMb, setServiceDbQuotaMb] = useState(
+    target.custom?.serviceDbQuotaMb != null
+      ? String(target.custom.serviceDbQuotaMb)
+      : String(defaultQuota.serviceDbQuotaMb ?? 500),
+  );
   const [note, setNote] = useState(target.custom?.note ?? '');
   const [saving, setSaving] = useState(false);
 
@@ -2782,6 +2803,8 @@ export function AdminQuotaModal({
     const ma = Number(maxApps);
     const dt = Number(dailyTaskLimit);
     const mc = Number(maxConcurrentTasks);
+    const cd = Number(cloudDbQuotaMb);
+    const sd = Number(serviceDbQuotaMb);
     if (!Number.isInteger(ma) || ma < 1 || ma > 500) {
       toast('应用数量上限需要是 1～500 的整数', 'error');
       return;
@@ -2794,12 +2817,22 @@ export function AdminQuotaModal({
       toast('同时运行任务上限需要是 1～50 的整数', 'error');
       return;
     }
+    if (!Number.isInteger(cd) || cd < 10 || cd > 10240) {
+      toast('共享云库默认容量上限需要是 10～10240 MB 的整数', 'error');
+      return;
+    }
+    if (!Number.isInteger(sd) || sd < 10 || sd > 51200) {
+      toast('托管数据库默认容量上限需要是 10～51200 MB 的整数', 'error');
+      return;
+    }
     setSaving(true);
     try {
       await api.adminUpdateQuota(target.workspaceId, {
         maxApps: ma,
         dailyTaskLimit: dt,
         maxConcurrentTasks: mc,
+        cloudDbQuotaMb: cd,
+        serviceDbQuotaMb: sd,
         note: note.trim() || undefined,
       });
       await onSaved();
@@ -2859,6 +2892,28 @@ export function AdminQuotaModal({
               max={50}
               value={maxConcurrentTasks}
               onChange={(e) => setMaxConcurrentTasks(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="dash-modal-grid2">
+          <label>
+            <span>共享云库上限 (MB/应用)</span>
+            <input
+              type="number"
+              min={10}
+              max={10240}
+              value={cloudDbQuotaMb}
+              onChange={(e) => setCloudDbQuotaMb(e.target.value)}
+            />
+          </label>
+          <label>
+            <span>托管数据库上限 (MB/应用)</span>
+            <input
+              type="number"
+              min={10}
+              max={51200}
+              value={serviceDbQuotaMb}
+              onChange={(e) => setServiceDbQuotaMb(e.target.value)}
             />
           </label>
         </div>

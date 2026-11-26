@@ -192,7 +192,13 @@ export interface SiteAccess {
   presets: CloudPreset[];
 }
 export interface CloudTableInfo { name: string; description?: string; columns: Record<string, string>; policy: { preset?: string; fields?: Record<string, unknown> } | null }
-export interface ConsoleOverview { tables: CloudTableInfo[]; counts: Record<string, number>; presets: CloudPreset[]; access: AccessLevel }
+export interface ConsoleOverview {
+  tables: CloudTableInfo[];
+  counts: Record<string, number>;
+  presets: CloudPreset[];
+  access: AccessLevel;
+  dbQuota?: import('./types').CloudDbQuotaInfo;
+}
 export type CloudRow = Record<string, unknown> & { id: number };
 
 export interface AppListQuery {
@@ -776,14 +782,37 @@ export const api = {
       maxApps?: number | null;
       dailyTaskLimit?: number | null;
       maxConcurrentTasks?: number | null;
+      cloudDbQuotaMb?: number | null;
+      serviceDbQuotaMb?: number | null;
       note?: string;
       reset?: boolean;
     },
   ) =>
-    request<{ workspaceId: string; maxApps: number; dailyTaskLimit: number; maxConcurrentTasks: number; custom: boolean; note: string | null }>(
+    request<{
+      workspaceId: string;
+      maxApps: number;
+      dailyTaskLimit: number;
+      maxConcurrentTasks: number;
+      cloudDbQuotaMb?: number;
+      serviceDbQuotaMb?: number;
+      custom: boolean;
+      note: string | null;
+    }>(
       `/api/admin/workspaces/${enc(wsId)}/quota`,
       { method: 'PUT', body },
     ),
+  adminDatabaseUsage: (scan = false) =>
+    request<import('./types').AdminDatabaseUsageResponse>(`/api/admin/database-usage${scan ? '?scan=true' : ''}`),
+  adminScanDatabaseUsage: () =>
+    request<import('./types').AdminDatabaseUsageResponse>('/api/admin/database-usage/scan', { method: 'POST', body: {} }),
+  adminUpdateAppDbQuota: (
+    appId: string,
+    body: { quotaMb?: number | null; resetQuota?: boolean; writeBlocked?: boolean; reason?: string },
+  ) =>
+    request<import('./types').AdminDatabaseUsageItem>(`/api/admin/apps/${enc(appId)}/db-quota`, {
+      method: 'PUT',
+      body,
+    }),
   adminUnpublishApp: (id: string) => request<{ id: string; name: string; published: boolean }>(`/api/admin/apps/${enc(id)}/unpublish`, { method: 'POST', body: {} }),
   adminControlService: (appId: string, action: 'sleep' | 'stop' | 'start') =>
     request<import('./types').MonolithServiceStatus>(`/api/admin/services/${enc(appId)}/${action}`, { method: 'POST', body: {} }),

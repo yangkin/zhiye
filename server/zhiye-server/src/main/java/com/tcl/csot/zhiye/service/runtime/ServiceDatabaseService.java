@@ -33,6 +33,8 @@ public class ServiceDatabaseService {
     private final String datasourceUrl;
     private final String datasourceUser;
     private final String datasourcePassword;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.config.ZhiyeProperties props;
 
     public ServiceDatabaseService(JdbcClient jdbc,
                                   ServiceCrypto crypto,
@@ -127,6 +129,7 @@ public class ServiceDatabaseService {
                 jdbc.sql("alter default privileges in schema " + schema + " grant all on tables to " + candidateRole).update();
                 jdbc.sql("alter default privileges in schema " + schema + " grant all on sequences to " + candidateRole).update();
                 jdbc.sql("alter role " + candidateRole + " set search_path to " + schema).update();
+                hardenRole(candidateRole);
                 role = candidateRole;
                 passPlain = candidatePass;
                 passEnc = crypto.encrypt(candidatePass);
@@ -141,6 +144,7 @@ public class ServiceDatabaseService {
                 throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_DB_PROVISION_FAILED",
                         "检测到历史非隔离数据库凭据，出于安全隔离要求已拒绝注入，请重新初始化托管数据库角色");
             }
+            hardenRole(role);
             passPlain = crypto.decrypt(passEnc);
         }
 
@@ -151,6 +155,75 @@ public class ServiceDatabaseService {
         String dbUrl = "postgresql://" + auth + "@" + conn[0] + ":" + conn[1] + "/" + conn[2] + "?options=-csearch_path%3D" + schema;
         String jdbcUrl = "jdbc:postgresql://" + conn[0] + ":" + conn[1] + "/" + conn[2] + "?currentSchema=" + schema;
         return new ProvisionedDb(schema, role, passEnc, dbUrl, jdbcUrl);
+    }
+
+    /**
+     * 为单体应用独立 PG 角色施加防滥用硬参数：连接数上限、语句执行超时、空闲事务超时及临时文件上限（temp_file_limit 需 superuser，非 superuser 自动跳过）。
+     */
+    public void hardenRole(String role) {
+        if (role == null || role.equals(datasourceUser) || !SAFE_IDENT.matcher(role).matches()) return;
+        var q = props != null ? props.databaseQuota() : null;
+        int connLimit = q != null && q.serviceRoleConnectionLimit() > 0 ? q.serviceRoleConnectionLimit() : 10;
+        int stmtTimeoutMs = q != null && q.serviceStatementTimeoutMs() > 0 ? q.serviceStatementTimeoutMs() : 15_000;
+        int idleTxMs = q != null && q.serviceIdleTxTimeoutMs() > 0 ? q.serviceIdleTxTimeoutMs() : 30_000;
+        int tempFileMb = q != null && q.serviceTempFileLimitMb() > 0 ? q.serviceTempFileLimitMb() : 64;
+        try {
+            jdbc.sql("alter role " + role + " connection limit " + connLimit).update();
+        } catch (Exception e) {
+            log.debug("设置角色连接数上限跳过 role={}: {}", role, sanitizeDbError(e, null));
+        }
+        try {
+            jdbc.sql("alter role " + role + " set statement_timeout = '" + stmtTimeoutMs + "ms'").update();
+            jdbc.sql("alter role " + role + " set idle_in_transaction_session_timeout = '" + idleTxMs + "ms'").update();
+        } catch (Exception e) {
+            log.debug("设置角色超时参数跳过 role={}: {}", role, sanitizeDbError(e, null));
+        }
+        try {
+            jdbc.sql("alter role " + role + " set temp_file_limit = '" + tempFileMb + "MB'").update();
+        } catch (Exception e) {
+            // temp_file_limit 在 PostgreSQL 中属于 SUSET 参数，仅 CREATEROLE 账号可能无权设置，静默降级不阻断启动
+            log.debug("设置角色 temp_file_limit 跳过（非 superuser 属预期） role={}: {}", role, sanitizeDbError(e, null));
+        }
+    }
+
+    /**
+     * 单体托管数据库超限自动熔断 / 管理员一键限写与解封：
+     * - block=true：回收 CREATE / INSERT / UPDATE（含默认权限，并将已有表 owner 收归平台账号以防止应用自授写权），
+     *   但显式保留 USAGE + SELECT + DELETE + TRUNCATE，便于清理数据自救；
+     * - block=false：完整恢复应用专属 Schema 的读写建表权限。
+     */
+    public void enforceWriteBlock(String schema, String role, boolean block) {
+        if (schema == null || !SAFE_IDENT.matcher(schema).matches()) return;
+        if (role == null || role.equals(datasourceUser) || !SAFE_IDENT.matcher(role).matches()) return;
+        try {
+            if (block) {
+                jdbc.sql("revoke create on schema " + schema + " from " + role).update();
+                jdbc.sql("grant usage on schema " + schema + " to " + role).update();
+                // 收回表 owner（若权限允许），防止应用以 owner 身份重新 grant 自己写权限
+                try {
+                    var tbls = jdbc.sql("""
+                            select c.relname from pg_class c
+                              join pg_namespace n on n.oid = c.relnamespace
+                             where n.nspname = ? and c.relkind in ('r', 'p')
+                            """).param(schema).query(String.class).list();
+                    for (String tbl : tbls) {
+                        String q = "\"" + schema + "\".\"" + tbl.replace("\"", "\"\"") + "\"";
+                        jdbc.sql("alter table " + q + " owner to current_user").update();
+                    }
+                } catch (Exception ignored) {}
+                jdbc.sql("revoke all on all tables in schema " + schema + " from " + role).update();
+                jdbc.sql("grant select, delete, truncate on all tables in schema " + schema + " to " + role).update();
+                jdbc.sql("alter default privileges in schema " + schema + " revoke insert, update on tables from " + role).update();
+            } else {
+                jdbc.sql("grant usage, create on schema " + schema + " to " + role).update();
+                jdbc.sql("grant all on all tables in schema " + schema + " to " + role).update();
+                jdbc.sql("grant all on all sequences in schema " + schema + " to " + role).update();
+                jdbc.sql("alter default privileges in schema " + schema + " grant all on tables to " + role).update();
+                jdbc.sql("alter default privileges in schema " + schema + " grant all on sequences to " + role).update();
+            }
+        } catch (Exception e) {
+            log.warn("切换托管数据库限写状态失败 schema={} role={} block={}: {}", schema, role, block, sanitizeDbError(e, null));
+        }
     }
 
     /** 列出应用隔离 PostgreSQL Schema 下的全部表、列定义及近似行数（只读元数据）。 */

@@ -1899,12 +1899,79 @@ export interface AdminCustomQuota {
   maxApps: number | null;
   dailyTaskLimit: number | null;
   maxConcurrentTasks: number | null;
+  cloudDbQuotaMb?: number | null;
+  serviceDbQuotaMb?: number | null;
   note: string | null;
   updatedBy: string | null;
   updatedAt: string;
   appCount: number;
   tasksToday: number;
   activeTasks: number;
+}
+
+export interface CloudDbQuotaInfo {
+  usedBytes: number;
+  quotaMb: number;
+  quotaBytes: number;
+  usagePercent: number;
+  maxRowsPerTable: number;
+  maxRowBytes: number;
+  maxFieldBytes: number;
+  writeBlocked: boolean;
+  blockedByAdmin: boolean;
+  blockedReason?: string | null;
+  status: 'ok' | 'warning' | 'exceeded' | 'manual_blocked';
+}
+
+export interface AdminDatabaseUsageItem {
+  appId: string;
+  appName: string;
+  kind: 'cloud' | 'service';
+  schema: string;
+  workspaceId: string;
+  ownerLogin?: string | null;
+  ownerRealName?: string | null;
+  ownerName: string;
+  usedBytes: number;
+  quotaMb: number;
+  customQuotaMb: number | null;
+  usagePercent: number;
+  rowEstimate: number;
+  tableCount: number;
+  status: 'ok' | 'warning' | 'exceeded' | 'manual_blocked';
+  writeBlocked: boolean;
+  blockedByAdmin: boolean;
+  blockedReason?: string | null;
+  lastScannedAt?: string | null;
+}
+
+export interface AdminDatabaseUsageResponse {
+  defaults: {
+    cloudMaxRowBytes: number;
+    cloudMaxFieldBytes: number;
+    cloudMaxRowsPerTable: number;
+    cloudDefaultQuotaMb: number;
+    cloudWritesPerSecond: number;
+    cloudWritesPerMinute: number;
+    serviceDefaultQuotaMb: number;
+    serviceRoleConnectionLimit: number;
+    serviceStatementTimeoutMs: number;
+    serviceIdleTxTimeoutMs: number;
+    serviceTempFileLimitMb: number;
+    warnThresholdPercent: number;
+    recoverThresholdPercent: number;
+  };
+  summary: {
+    totalApps: number;
+    cloudCount: number;
+    serviceCount: number;
+    totalUsedBytes: number;
+    totalQuotaBytes: number;
+    warningCount: number;
+    blockedCount: number;
+    lastScannedAt?: string | null;
+  };
+  items: AdminDatabaseUsageItem[];
 }
 
 export interface AdminFeedbackItem {
@@ -2084,6 +2151,8 @@ export interface AdminOverview {
     maxApps: number;
     dailyTaskLimit: number;
     maxConcurrentTasks: number;
+    cloudDbQuotaMb?: number;
+    serviceDbQuotaMb?: number;
   };
   customQuotas: AdminCustomQuota[];
   users?: AdminUserItem[];

@@ -1849,6 +1849,12 @@
   gap: 10px;
 }
 
+.dash-modal-grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 /* Responsive */
 @media (max-width: 1180px) {
   .dash-kpi-grid-6 {
@@ -4294,10 +4300,164 @@
   .dash-sla-grid,
   .dash-sbx-kv-grid,
   .dash-exec-grid,
-  .gov-pulse-grid {
+  .gov-pulse-grid,
+  .dbq-summary-strip,
+  .dash-modal-grid2 {
     grid-template-columns: 1fr;
   }
   .dash-cluster-toolbar-right {
     margin-left: 0;
   }
+}
+
+/* 三层数据库容量治理与防刷监控面板 */
+.dbq-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dbq-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #ece7f5;
+  background: #faf9fd;
+}
+.dbq-kpi span {
+  font-size: 12px;
+  color: #6b647d;
+}
+.dbq-kpi b {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1f1b2e;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.dbq-kpi small {
+  font-size: 11px;
+  color: #8a839e;
+}
+.dbq-kpi.is-warn {
+  border-color: #f5d8a8;
+  background: #fffaf0;
+}
+.dbq-kpi.is-warn b {
+  color: #b4690e;
+}
+.dbq-kpi.is-danger {
+  border-color: #f3c4cb;
+  background: #fff5f6;
+}
+.dbq-kpi.is-danger b {
+  color: #c63649;
+}
+.dbq-app-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 170px;
+}
+.dbq-app-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dbq-app-title b {
+  font-size: 13px;
+  color: #1f1b2e;
+}
+.dbq-app-cell code {
+  font-size: 11px;
+  color: #7c7591;
+}
+.dbq-kind-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.dbq-kind-tag.is-cloud {
+  background: #f1ecfd;
+  color: #6241c4;
+}
+.dbq-kind-tag.is-service {
+  background: #e9f4ff;
+  color: #1b65b8;
+}
+.dbq-custom-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 10px;
+  background: #f4f1fa;
+  color: #5d5575;
+  border: 1px solid #e4ddf3;
+}
+.dbq-bar-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 165px;
+}
+.dbq-bar-head {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.dbq-bar-head b {
+  color: #1f1b2e;
+  font-weight: 600;
+}
+.dbq-bar-head span {
+  color: #7b7490;
+  font-size: 11px;
+}
+.dbq-bar-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #ede9f6;
+  overflow: hidden;
+}
+.dbq-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #7953dc, #9b7bf0);
+}
+.dbq-bar-track.is-warn i {
+  background: #d9822b;
+}
+.dbq-bar-track.is-danger i {
+  background: #d13d50;
+}
+.dbq-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dbq-status-pill.is-ok {
+  background: #eaf8f0;
+  color: #1b7f4c;
+}
+.dbq-status-pill.is-warn {
+  background: #fff4e2;
+  color: #b4690e;
+}
+.dbq-status-pill.is-danger {
+  background: #fdecef;
+  color: #c63649;
 }

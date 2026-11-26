@@ -25,6 +25,7 @@ public record ZhiyeProperties(
         @DefaultValue Storage storage,
         @DefaultValue Importer importer,
         @DefaultValue Publish publish,
+        @DefaultValue DatabaseQuota databaseQuota,
         @DefaultValue Dev dev) {
 
     public record Site(@DefaultValue("http://127.0.0.1:8083") String previewBase,
@@ -94,6 +95,37 @@ public record ZhiyeProperties(
                            @DefaultValue("10485760") long assetMaxBytes) {}
 
     public record Publish(@DefaultValue("true") boolean reviewRequired) {}
+
+    /** 三层数据库防刷与容量配额配置（共享云服务硬拦截 + 全栈托管角色防呆/自动只读熔断 + 管理员治理） */
+    public record DatabaseQuota(
+            /** 共享云服务单行 JSON 体积上限（字节，默认 256 KB） */
+            @DefaultValue("262144") int cloudMaxRowBytes,
+            /** 共享云服务单个字段值体积上限（字节，默认 128 KB） */
+            @DefaultValue("131072") int cloudMaxFieldBytes,
+            /** 共享云服务单张数据表最大行数（默认 50,000 行） */
+            @DefaultValue("50000") long cloudMaxRowsPerTable,
+            /** 共享云服务单应用 Schema 默认磁盘占用上限（MB，默认 200 MB） */
+            @DefaultValue("200") int cloudDefaultQuotaMb,
+            /** 共享云服务单应用写入速率上限：每秒最大写次数（默认 30） */
+            @DefaultValue("30") int cloudWritesPerSecond,
+            /** 共享云服务单应用写入速率上限：每分钟最大写次数（默认 600） */
+            @DefaultValue("600") int cloudWritesPerMinute,
+            /** 单体全栈托管 PostgreSQL 单应用 Schema 默认磁盘占用上限（MB，默认 500 MB） */
+            @DefaultValue("500") int serviceDefaultQuotaMb,
+            /** 单体全栈托管数据库独立角色最大并发连接数（默认 10） */
+            @DefaultValue("10") int serviceRoleConnectionLimit,
+            /** 单体全栈托管数据库独立角色语句超时（毫秒，默认 15 秒） */
+            @DefaultValue("15000") int serviceStatementTimeoutMs,
+            /** 单体全栈托管数据库独立角色空闲事务超时（毫秒，默认 30 秒） */
+            @DefaultValue("30000") int serviceIdleTxTimeoutMs,
+            /** 单体全栈托管数据库独立角色临时文件上限（MB，默认 64 MB；需 PG superuser，非 superuser 自动跳过） */
+            @DefaultValue("64") int serviceTempFileLimitMb,
+            /** 容量预警水位线百分比（默认 80%） */
+            @DefaultValue("80") int warnThresholdPercent,
+            /** 熔断后自动恢复水位线百分比（默认 90%，避免边界抖动） */
+            @DefaultValue("90") int recoverThresholdPercent,
+            /** 共享云服务实时写入检查时 Schema 磁盘体积缓存秒数（默认 20 秒） */
+            @DefaultValue("20") int sizeCacheSeconds) {}
 
     public record Dev(@DefaultValue("false") boolean faultsEnabled) {}
 
