@@ -206,10 +206,12 @@ export function EcosystemPickerModal({
     fontSize: 11,
     fontWeight: 600,
     color: 'var(--st-faint, #8b86a0)',
-    padding: '8px 10px 4px',
+    padding: '6px 8px 3px',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    cursor: 'default',
+    background: 'transparent',
   } as const;
 
   return createPortal(
@@ -218,7 +220,7 @@ export function EcosystemPickerModal({
       role="dialog"
       aria-label="生态"
       ref={box}
-      style={{ ...pos, width: 356, maxHeight: 340 }}
+      style={{ ...pos, width: 356, maxHeight: 360, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
     >
       {adding ? (
         <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -275,7 +277,7 @@ export function EcosystemPickerModal({
         </div>
       ) : (
         <>
-          <label className="skill-picker-search">
+          <label className="skill-picker-search" style={{ flex: 'none' }}>
             <Icon name="search" />
             <input
               ref={searchRef}
@@ -286,7 +288,7 @@ export function EcosystemPickerModal({
             />
           </label>
 
-          <ul className="skill-picker-list" role="listbox" aria-label="企业生态能力" style={{ maxHeight: 245 }}>
+          <ul className="skill-picker-list" role="listbox" aria-label="企业生态能力" style={{ flex: 1, minHeight: 0, maxHeight: 260 }}>
             {/* 分组 1：飞书机器人与多维表格 */}
             <li style={groupHeadStyle} role="presentation">
               <span>飞书机器人 &amp; 多维表格</span>
@@ -462,6 +464,7 @@ export function EcosystemPickerModal({
           <button
             type="button"
             className="skill-picker-more"
+            style={{ flex: 'none' }}
             onClick={() => setAdding(true)}
           >
             ＋ 添加我的飞书机器人 / 多维表格

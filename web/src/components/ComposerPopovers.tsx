@@ -44,12 +44,15 @@ export function useAnchoredPosition(anchor: RefObject<HTMLElement | null>, open:
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const below = r.bottom + 8 + height < window.innerHeight;
-      setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), top: below ? r.bottom + 8 : Math.max(8, r.top - height - 8) });
+      const below = r.bottom + 8 + height <= window.innerHeight - 8;
+      const rawTop = below ? r.bottom + 8 : r.top - height - 8;
+      setPos({
+        left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+        top: Math.max(8, Math.min(rawTop, window.innerHeight - height - 8)),
+      });
     };
     place();
     window.addEventListener('resize', place);
-    // 页面或内部容器滚动、锚点尺寸变化时都重新定位，否则弹层会脱离按钮悬在半空
     window.addEventListener('scroll', place, true);
     const ro = new ResizeObserver(place);
     if (anchor.current) ro.observe(anchor.current);
@@ -71,6 +74,11 @@ export function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[],
       const t = e.target instanceof Node ? e.target : null;
       if (!t || !refs.some((r) => r.current?.contains(t))) cb.current();
     };
+    const onScroll = (e: Event) => {
+      // 弹层内部列表滚动不关闭；外部页面滚动时自动收起，避免浮层脱离按钮漂在屏幕顶部
+      const t = e.target instanceof Node ? e.target : null;
+      if (!t || !refs.some((r) => r.current?.contains(t))) cb.current();
+    };
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -78,9 +86,11 @@ export function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[],
       }
     };
     document.addEventListener('pointerdown', down, true);
+    window.addEventListener('scroll', onScroll, true);
     document.addEventListener('keydown', key, true);
     return () => {
       document.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('keydown', key, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
