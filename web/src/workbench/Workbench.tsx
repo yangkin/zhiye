@@ -101,6 +101,40 @@ function Workbench({ id }: { id: string }) {
   // 右侧面板可以整块收起，把宽度让给对话（对照 meoo 的预览收缩）
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [liveDockOpen, setLiveDockOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState<number | null>(() => {
+    try {
+      const saved = Number(localStorage.getItem('zhiye.wb.chatWidth'));
+      return Number.isFinite(saved) && saved >= 260 && saved <= 640 ? saved : null;
+    } catch {
+      return null;
+    }
+  });
+  const startChatResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const bodyEl = (e.currentTarget as HTMLElement).parentElement;
+    const leftEl = bodyEl?.firstElementChild as HTMLElement | null;
+    const startW = chatWidth ?? (leftEl ? Math.round(leftEl.getBoundingClientRect().width) : 380);
+    document.body.classList.add('is-resizing-h');
+    const onMove = (ev: MouseEvent) => {
+      const maxW = Math.min(640, Math.round(window.innerWidth * 0.52));
+      const next = Math.max(260, Math.min(maxW, startW + (ev.clientX - startX)));
+      setChatWidth(next);
+    };
+    const onUp = () => {
+      document.body.classList.remove('is-resizing-h');
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setChatWidth((cur) => {
+        try {
+          if (cur != null) localStorage.setItem('zhiye.wb.chatWidth', String(cur));
+        } catch {}
+        return cur;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
   const [editMode, setEditMode] = useState<null | 'chat' | 'manual'>(null);
   const [previewVersion, setPreviewVersion] = useState<Version | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -618,7 +652,10 @@ function Workbench({ id }: { id: string }) {
           </button>
         </div>
       </header>
-      <div className={`workspace-body studio-body ${previewCollapsed ? 'preview-collapsed' : ''} ${maximized ? 'is-maximized' : ''}`}>
+      <div
+        className={`workspace-body studio-body ${previewCollapsed ? 'preview-collapsed' : ''} ${maximized ? 'is-maximized' : ''}`}
+        style={!previewCollapsed && chatWidth != null ? { gridTemplateColumns: `${chatWidth}px 6px minmax(0, 1fr)` } : undefined}
+      >
         {editMode === 'manual' && editor.selection && tab === 'preview' ? (
           <ManualPanel key={`${editor.selection.loc}#${editor.selection.instanceIndex ?? ''}`} editor={editor} selection={editor.selection} onClose={editor.clearSelection} />
         ) : (
@@ -645,6 +682,20 @@ function Workbench({ id }: { id: string }) {
           }}
         />
         )}
+        {!previewCollapsed ? (
+          <div
+            className="studio-split-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="左右拖拽调整工作区宽度"
+            title="左右拖拽调整宽度（双击还原默认比例）"
+            onMouseDown={startChatResize}
+            onDoubleClick={() => {
+              setChatWidth(null);
+              try { localStorage.removeItem('zhiye.wb.chatWidth'); } catch {}
+            }}
+          />
+        ) : null}
         {!previewCollapsed ? (
         <section className={`preview-panel studio-panel ${maximized ? 'preview-maximized' : ''}`}>
           {tab === 'preview' && (skill || script) ? (

@@ -30,8 +30,44 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [entries, setEntries] = useState<TermEntry[]>([]);
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
+  const [height, setHeight] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('zhiye.wb.dockHeight'));
+      return Number.isFinite(saved) && saved >= 180 && saved <= 760 ? saved : 300;
+    } catch {
+      return 300;
+    }
+  });
+  const [expanded, setExpanded] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const seqRef = useRef(1);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = expanded ? Math.round(window.innerHeight * 0.6) : height;
+    setExpanded(false);
+    setDragging(true);
+    document.body.classList.add('is-resizing-v');
+    const onMove = (ev: MouseEvent) => {
+      const maxH = Math.max(320, Math.round(window.innerHeight * 0.72));
+      const next = Math.max(180, Math.min(maxH, startH + (startY - ev.clientY)));
+      setHeight(next);
+    };
+    const onUp = () => {
+      setDragging(false);
+      document.body.classList.remove('is-resizing-v');
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setHeight((cur) => {
+        try { localStorage.setItem('zhiye.wb.dockHeight', String(cur)); } catch {}
+        return cur;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   const statusQ = useQuery({
     queryKey: ['live-ws', appId],
@@ -108,7 +144,26 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
       : '未启动';
 
   return (
-    <section className="live-dock" aria-label="活体开发环境与终端">
+    <section
+      className={`live-dock ${dragging ? 'is-dragging' : ''}`}
+      style={{ height: expanded ? '62vh' : `${height}px` }}
+      aria-label="活体开发环境与终端"
+    >
+      <div
+        className="live-dock-resizer"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="上下拖拽调整终端高度"
+        title="上下拖拽调整高度（双击重置）"
+        onMouseDown={startResize}
+        onDoubleClick={() => {
+          setExpanded(false);
+          setHeight(300);
+          try { localStorage.setItem('zhiye.wb.dockHeight', '300'); } catch {}
+        }}
+      >
+        <i />
+      </div>
       <div className="live-dock-head">
         <div className="live-dock-left">
           <div className="live-dock-title">
@@ -146,6 +201,15 @@ export function LiveWorkspaceDock({ appId, onClose }: { appId: string; onClose: 
           )}
           <button type="button" disabled={!!busyAction} onClick={() => void doAction('reset')}>
             {busyAction === 'reset' ? '重置中…' : '重置'}
+          </button>
+          <button
+            type="button"
+            className="icon-only"
+            aria-label={expanded ? '还原终端高度' : '放大终端高度'}
+            title={expanded ? '还原高度' : '放大终端面板'}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <Icon name={expanded ? 'contract' : 'expand'} />
           </button>
           <button type="button" className="icon-only" aria-label="关闭活体终端" title="收起活体开发环境" onClick={onClose}>
             <Icon name="close" />
