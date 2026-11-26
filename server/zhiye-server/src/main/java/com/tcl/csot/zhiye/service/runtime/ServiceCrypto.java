@@ -16,19 +16,36 @@ import java.util.Base64;
 /** AES-256-GCM 密文与 HMAC 预览签名工具：加密单体应用环境变量/数据库凭证，并签发隔离域名预览令牌。 */
 @Component
 public class ServiceCrypto {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(ServiceCrypto.class);
+    private static final String DEFAULT_DEV_SECRET = "zhiye-dev-cloud-secret-change-me";
     private static final SecureRandom RNG = new SecureRandom();
+    private final String baseSecret;
     private final SecretKeySpec key;
     private final SecretKeySpec hmacKey;
 
-    public ServiceCrypto(@Value("${zhiye.cloud.secret:zhiye-dev-cloud-secret-change-me}") String secret) {
+    public ServiceCrypto(@Value("${zhiye.cloud.secret:" + DEFAULT_DEV_SECRET + "}") String secret) {
         try {
             String base = secret == null || secret.isBlank() ? "dev" : secret;
+            this.baseSecret = base;
+            if (DEFAULT_DEV_SECRET.equals(base) || "dev".equals(base)) {
+                log.warn("ServiceCrypto 正在使用默认开发密钥 zhiye.cloud.secret；生产环境请务必通过环境变量 ZHIYE_CLOUD_SECRET 配置独立强密钥");
+            }
             byte[] hash = MessageDigest.getInstance("SHA-256")
                     .digest(("zhiye-service-env:" + base).getBytes(StandardCharsets.UTF_8));
             this.key = new SecretKeySpec(hash, "AES");
             byte[] macHash = MessageDigest.getInstance("SHA-256")
                     .digest(("zhiye-service-preview:" + base).getBytes(StandardCharsets.UTF_8));
             this.hmacKey = new SecretKeySpec(macHash, "HmacSHA256");
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 基于平台主密钥按业务域派生独立 HMAC 密钥，避免子服务硬编码默认密钥。 */
+    public byte[] deriveHmacKey(String domain) {
+        try {
+            return MessageDigest.getInstance("SHA-256")
+                    .digest((domain + ":" + baseSecret).getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

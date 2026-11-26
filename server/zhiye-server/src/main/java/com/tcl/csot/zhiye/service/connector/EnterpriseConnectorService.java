@@ -53,13 +53,28 @@ public class EnterpriseConnectorService {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
     private final ConcurrentHashMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
-    private final String appTokenSigningKey;
+    private final byte[] appTokenSigningKey;
 
     public EnterpriseConnectorService(JdbcClient jdbc, ServiceCrypto crypto) {
         this.jdbc = jdbc;
         this.crypto = crypto;
         String envKey = System.getenv("ZHIYE_CONNECTOR_TOKEN_SECRET");
-        this.appTokenSigningKey = (envKey != null && !envKey.isBlank()) ? envKey : "zhiye-app-connector-bridge-v1-dev";
+        this.appTokenSigningKey = (envKey != null && !envKey.isBlank())
+                ? envKey.getBytes(StandardCharsets.UTF_8)
+                : crypto.deriveHmacKey("zhiye-app-connector-bridge-v1");
+    }
+
+    /** 查询指定应用所属的工作空间 ID，用于严格隔离企业连接器调用权限。 */
+    public String workspaceOfApp(String appId) {
+        if (appId == null || appId.isBlank()) return null;
+        return jdbc.sql("select workspace_id from app where id = ? and deleted_at is null")
+                .param(appId).query(String.class).optional().orElse(null);
+    }
+
+    private static boolean isVisibleToWorkspace(ConnectorRow conn, String ws) {
+        if (conn == null) return false;
+        if (conn.workspaceId() == null || conn.workspaceId().isBlank()) return true;
+        return ws != null && !ws.isBlank() && conn.workspaceId().equals(ws);
     }
 
     /** 为单体全栈应用签发受控连接器网关令牌（仅标识 appId，不含任何飞书真实密钥）。 */
@@ -67,7 +82,7 @@ public class EnterpriseConnectorService {
         if (appId == null || appId.isBlank()) return "";
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(appTokenSigningKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(appTokenSigningKey, "HmacSHA256"));
             String sig = HexFormat.of().formatHex(mac.doFinal(appId.getBytes(StandardCharsets.UTF_8)));
             return "zct1." + appId + "." + sig;
         } catch (Exception e) {
@@ -273,8 +288,19 @@ public class EnterpriseConnectorService {
 
     // ==================== 连通性测试 ====================
 
-    public Map<String, Object> testConnector(String connectorId) {
+    public Map<String, Object> testConnectorForWorkspace(String ws, String connectorId) {
         ConnectorRow conn = requireEnabledConnector(connectorId);
+        if (!isVisibleToWorkspace(conn, ws)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_FORBIDDEN", "无权访问或测试其他工作空间的私有连接器");
+        }
+        return testConnectorRow(conn);
+    }
+
+    public Map<String, Object> testConnector(String connectorId) {
+        return testConnectorRow(requireEnabledConnector(connectorId));
+    }
+
+    private Map<String, Object> testConnectorRow(ConnectorRow conn) {
         if ("feishu_bitable".equals(conn.kind())) {
             return bitableList(conn.id(), null, Map.of("pageSize", 5));
         }
@@ -291,7 +317,7 @@ public class EnterpriseConnectorService {
     public Map<String, Object> sendFeishuCard(String connectorId, String appId, String title, String content,
                                               String templateColor, List<Map<String, String>> fields,
                                               List<Map<String, Object>> buttons) {
-        ConnectorRow conn = resolveConnector(connectorId, "feishu_bot", "feishu_app");
+        ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bot", "feishu_app");
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
 
@@ -358,7 +384,7 @@ public class EnterpriseConnectorService {
     // ==================== 2. 公域飞书多维表格 (Bitable) CRUD ====================
 
     public Map<String, Object> bitableList(String connectorId, String appId, Map<String, Object> opts) {
-        ConnectorRow conn = resolveConnector(connectorId, "feishu_bitable", "feishu_app");
+        ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bitable", "feishu_app");
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
@@ -396,7 +422,7 @@ public class EnterpriseConnectorService {
     }
 
     public Map<String, Object> bitableCreate(String connectorId, String appId, Map<String, Object> fields, Map<String, Object> opts) {
-        ConnectorRow conn = resolveConnector(connectorId, "feishu_bitable", "feishu_app");
+        ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bitable", "feishu_app");
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
@@ -432,7 +458,7 @@ public class EnterpriseConnectorService {
     }
 
     public Map<String, Object> bitableUpdate(String connectorId, String appId, String recordId, Map<String, Object> fields, Map<String, Object> opts) {
-        ConnectorRow conn = resolveConnector(connectorId, "feishu_bitable", "feishu_app");
+        ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bitable", "feishu_app");
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
@@ -538,16 +564,34 @@ public class EnterpriseConnectorService {
         return card;
     }
 
-    private ConnectorRow resolveConnector(String connectorId, String primaryKind, String fallbackKind) {
+    private ConnectorRow resolveConnector(String connectorId, String appId, String primaryKind, String fallbackKind) {
+        boolean hasAppContext = appId != null && !appId.isBlank();
+        String callerWs = hasAppContext ? workspaceOfApp(appId) : null;
         if (connectorId != null && !connectorId.isBlank()) {
-            return requireEnabledConnector(connectorId);
+            ConnectorRow conn = requireEnabledConnector(connectorId);
+            if (hasAppContext && !isVisibleToWorkspace(conn, callerWs)) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_FORBIDDEN", "当前应用无权调用其他工作空间的私有连接器");
+            }
+            return conn;
         }
-        Optional<ConnectorRow> found = jdbc.sql("""
-                select * from enterprise_connector
-                 where enabled = true and kind in (?, ?)
-                 order by (mode = 'live') desc, updated_at desc
-                 limit 1
-                """).params(primaryKind, fallbackKind).query((rs, i) -> mapRow(rs)).optional();
+        Optional<ConnectorRow> found;
+        if (callerWs != null && !callerWs.isBlank()) {
+            found = jdbc.sql("""
+                    select * from enterprise_connector
+                     where enabled = true and kind in (?, ?)
+                       and (workspace_id is null or workspace_id = ?)
+                     order by (workspace_id = ?) desc, (mode = 'live') desc, updated_at desc
+                     limit 1
+                    """).params(primaryKind, fallbackKind, callerWs, callerWs).query((rs, i) -> mapRow(rs)).optional();
+        } else {
+            found = jdbc.sql("""
+                    select * from enterprise_connector
+                     where enabled = true and kind in (?, ?)
+                       and workspace_id is null
+                     order by (mode = 'live') desc, updated_at desc
+                     limit 1
+                    """).params(primaryKind, fallbackKind).query((rs, i) -> mapRow(rs)).optional();
+        }
         return found.orElseThrow(() -> ApiException.notFound("可用的 " + primaryKind + " 连接器"));
     }
 
@@ -559,6 +603,9 @@ public class EnterpriseConnectorService {
 
     private void enforceRateLimit(ConnectorRow conn) {
         long bucket = Instant.now().getEpochSecond() / 60L;
+        if (rateWindows.size() > 1000) {
+            rateWindows.entrySet().removeIf(e -> e.getValue().minuteBucket() < bucket - 2);
+        }
         RateWindow rw = rateWindows.compute(conn.id(), (k, old) ->
                 (old == null || old.minuteBucket() != bucket) ? new RateWindow(bucket, new AtomicInteger(0)) : old);
         if (rw.count().incrementAndGet() > conn.rateLimitPerMin()) {

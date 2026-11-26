@@ -163,15 +163,20 @@
 .xz-ask-btn:hover { background: #f3ecff; border-color: #b49be8; }
 .xz-ask-btn .icon { width: 14px; height: 14px; }
 
-.xz-doc-md { font-size: 13.5px; line-height: 1.7; color: #3a3048; }
-.xz-doc-md h3 { font-size: 14.5px; font-weight: 600; color: #251c36; margin: 18px 0 8px; padding-bottom: 5px; border-bottom: 1px solid #f1ecf8; }
+.xz-doc-md { font-size: 13.5px; line-height: 1.75; color: #3a3048; }
+.xz-doc-md h3 { font-size: 15px; font-weight: 700; color: #251c36; margin: 22px 0 10px; padding: 0 0 6px; border-bottom: 1px solid #ede7f7; letter-spacing: -0.01em; }
 .xz-doc-md h3:first-child { margin-top: 2px; }
-.xz-doc-md table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 12.5px; border-radius: 10px; overflow: hidden; border: 1px solid #e9e3f3; }
+.xz-doc-md h4 { font-size: 13.8px; font-weight: 600; color: #3d2f5c; margin: 14px 0 6px; }
+.xz-doc-md blockquote { margin: 10px 0 14px; padding: 10px 14px; border-left: 3px solid #8a6be0; border-radius: 0 10px 10px 0; background: #faf8ff; color: #54476b; font-size: 13px; line-height: 1.65; }
+.xz-doc-md blockquote p { margin: 0; }
+.xz-doc-md hr { border: 0; border-top: 1px solid #f0eaf8; margin: 18px 0; }
+.xz-doc-md table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 12.5px; border-radius: 10px; overflow: hidden; border: 1px solid #e9e3f3; }
 .xz-doc-md th { text-align: left; background: #f7f4fc; color: #43375a; font-weight: 600; padding: 8px 10px; border: 1px solid #e9e3f3; white-space: nowrap; }
-.xz-doc-md td { padding: 8px 10px; border: 1px solid #eee9f6; vertical-align: top; line-height: 1.55; }
+.xz-doc-md td { padding: 8px 10px; border: 1px solid #eee9f6; vertical-align: top; line-height: 1.6; }
 .xz-doc-md tbody tr:nth-child(even) td { background: #fcfbfe; }
-.xz-doc-md ul, .xz-doc-md ol { margin: 6px 0 12px; padding-left: 20px; }
-.xz-doc-md li { margin: 5px 0; }
+.xz-doc-md ul, .xz-doc-md ol { margin: 6px 0 14px; padding-left: 20px; }
+.xz-doc-md li { margin: 6px 0; }
+.xz-doc-md li > ul, .xz-doc-md li > ol { margin: 4px 0 6px; }
 
 /* FAQ 手风琴 */
 .xz-faq-list { display: flex; flex-direction: column; gap: 8px; }

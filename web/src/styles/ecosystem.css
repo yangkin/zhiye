@@ -365,6 +365,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 22px;
 }
 .eco-field label {
   font-size: 13px;
@@ -373,11 +374,15 @@
   line-height: 1.35;
 }
 .eco-label-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
   font-size: 11px;
   font-weight: 500;
+  line-height: 1;
   color: #6b5fa0;
   background: #f2eefb;
-  padding: 2px 7px;
+  padding: 0 8px;
   border-radius: 999px;
   white-space: nowrap;
   flex: none;
@@ -388,16 +393,17 @@
 }
 .eco-grid-2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  align-items: start;
+  align-items: end;
 }
 @media (max-width: 560px) {
   .eco-grid-2 {
     grid-template-columns: 1fr;
   }
 }
-.eco-field input:not([type='checkbox']):not([type='radio']) {
+.eco-field input:not([type='checkbox']):not([type='radio']),
+.eco-field .zy-select.field {
   width: 100%;
   min-width: 0;
   height: 40px;

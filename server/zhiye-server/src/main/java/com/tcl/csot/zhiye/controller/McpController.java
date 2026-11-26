@@ -76,10 +76,10 @@ public class McpController {
 
     @PostMapping("/api/mcp-servers/{key}/test")
     public Map<String, Object> testForWorkspace(@PathVariable String key, @RequestBody(required = false) JsonNode body) {
-        principal.workspaceId();
+        String ws = principal.workspaceId();
         String tool = body == null ? "" : body.path("tool").asText("").trim();
         JsonNode args = body == null ? null : body.get("arguments");
-        return mcp.testForWorkspace(key, tool, args);
+        return mcp.testForWorkspace(ws, key, tool, args);
     }
 
     @GetMapping("/api/admin/mcp-servers")
@@ -124,6 +124,7 @@ public class McpController {
         String raw = auth != null && auth.startsWith("Bearer ") ? auth.substring(7).trim() : (auth == null ? "" : auth.trim());
         String taskId = tokens.validate(raw).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_TASK_TOKEN", "无效或已过期的任务令牌"));
         String appId = tasks.findById(taskId).map(t -> t.appId()).orElse(null);
-        return mcp.callTool(body.path("serverKey").asText(""), body.path("tool").asText(""), body.get("arguments"), taskId, appId);
+        String callerWs = mcp.workspaceOfTaskOrApp(taskId, appId);
+        return mcp.callToolForWorkspace(callerWs, body.path("serverKey").asText(""), body.path("tool").asText(""), body.get("arguments"), taskId, appId);
     }
 }

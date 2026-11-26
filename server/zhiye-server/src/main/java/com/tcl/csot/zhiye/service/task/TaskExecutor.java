@@ -551,9 +551,9 @@ public class TaskExecutor {
                 log.warn("写入全栈运行态快照失败 app={}：{}", app.id(), e.getMessage());
             }
         }
-        // Harness V2：写入企业 MCP 清单（脱敏）+ 企业连接器清单 + 绑定数据源探测快照，供智能体调用
+        // Harness V2：写入企业 MCP 清单（脱敏、按当前工作空间隔离）+ 企业连接器清单 + 绑定数据源探测快照，供智能体调用
         if (mcpRegistry != null) {
-            mcpRegistry.writeCatalogForAgent(ctx.agentDir);
+            mcpRegistry.writeCatalogForAgent(ctx.agentDir, app.workspaceId());
         }
         if (enterpriseConnectors != null && !app.isSkill()) {
             enterpriseConnectors.writeConnectorsCatalogForAgent(ctx.agentDir, app.workspaceId());

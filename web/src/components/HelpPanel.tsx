@@ -116,9 +116,9 @@ export function HelpPanel() {
   const wsId = workspace?.id ?? null;
 
   const [view, setView] = useState<'chat' | 'history'>('chat');
-  const [docChapterId, setDocChapterId] = useState<string>('limits');
+  const [docChapterId, setDocChapterId] = useState<string>('workflow');
   const [docQuery, setDocQuery] = useState('');
-  const [openFaqId, setOpenFaqId] = useState<string | null>('limits');
+  const [openFaqId, setOpenFaqId] = useState<string | null>('start');
 
   const docChapters = useMemo<HelpDocChapter[]>(() => {
     const items = remoteDocs?.items;
@@ -619,7 +619,7 @@ export function HelpPanel() {
                 type="text"
                 value={docQuery}
                 onChange={(e) => setDocQuery(e.target.value)}
-                placeholder="搜索限制项、休眠、1C1G、云存储、预检 Skill…"
+                placeholder="搜索使用手册、Excel 看板、飞书、数据源、1C1G、休眠、预检…"
                 aria-label="搜索帮助文档"
               />
               {docQuery ? (

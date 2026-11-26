@@ -27,11 +27,24 @@ class HelpKnowledgeAndMemoryTest extends IntegrationTest {
     void helpKnowledgeCrudIsSingleSourceOfTruthForDocsAndBot() {
         Client c = client();
 
-        // 1. V37 初始化的 5 篇官方文档可直接通过公开接口读取，并已注入小织系统提示
+        // 1. V37+V50+V51 初始化的官方文档可直接通过公开接口读取，并已完整注入小织系统提示
         JsonNode initialDocs = c.ok(c.get("/api/help/docs")).path("items");
-        assertThat(initialDocs.size()).isGreaterThanOrEqualTo(5);
-        assertThat(initialDocs.toString()).contains("平台资源与配额限制总览").contains("闲置自动休眠");
-        assertThat(knowledgeService.buildBotSystemPrompt()).contains("1024 MB（1G）").contains("2 天");
+        assertThat(initialDocs.size()).isGreaterThanOrEqualTo(6);
+        assertThat(initialDocs.get(0).path("slug").asText()).isEqualTo("workflow");
+        assertThat(initialDocs.toString())
+                .contains("织页 AI 完整使用手册")
+                .contains("平台资源与配额限制总览")
+                .contains("闲置自动休眠")
+                .contains("企业生态对接、多员工隔离安全与审核发布");
+        String botPrompt = knowledgeService.buildBotSystemPrompt();
+        assertThat(botPrompt)
+                .contains("1024 MB（1G）")
+                .contains("2 天")
+                .contains("飞书多维表格")
+                .contains("Vibe Coding 应用登记表")
+                .contains("不会串数据")
+                .contains("脚本运行控制台")
+                .contains("Excel / CSV");
 
         // 2. 非管理员访问后台知识库管理接口必须 Fail-Closed 403
         assertThat(c.get("/api/admin/help-knowledge").status()).isEqualTo(403);

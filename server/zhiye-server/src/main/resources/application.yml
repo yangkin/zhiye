@@ -11,7 +11,9 @@ spring:
     username: ${ZHIYE_DB_USER:zhiye}
     password: ${ZHIYE_DB_PASSWORD:zhiye}
     hikari:
-      maximum-pool-size: 20
+      maximum-pool-size: ${ZHIYE_DB_POOL_SIZE:30}
+      minimum-idle: 5
+      connection-timeout: 15000
   flyway:
     enabled: true
     # 迁移按编号顺序执行；新增迁移请取下一个编号（当前到 V25）
@@ -37,6 +39,10 @@ spring:
 server:
   port: 8080
   shutdown: graceful
+  compression:
+    enabled: true
+    min-response-size: 1024
+    mime-types: application/json,application/javascript,text/javascript,text/css,text/html,text/plain,text/xml,image/svg+xml
   tomcat:
     max-swallow-size: -1
 

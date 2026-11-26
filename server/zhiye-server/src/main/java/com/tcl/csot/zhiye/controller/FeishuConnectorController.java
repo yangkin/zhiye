@@ -79,10 +79,10 @@ public class FeishuConnectorController {
         return Map.of("ok", true);
     }
 
-    /** 普通工作空间用户也可以直接自检连接器连通性。 */
+    /** 普通工作空间用户也可以直接自检连接器连通性（仅限平台全局或当前工作空间自建连接器）。 */
     @PostMapping("/api/connectors/{id}/test")
     public Map<String, Object> testForWorkspace(@PathVariable String id) {
-        return connectors.testConnector(id);
+        return connectors.testConnectorForWorkspace(ws(), id);
     }
 
     @GetMapping("/api/admin/connectors")

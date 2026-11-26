@@ -90,8 +90,88 @@ public class Views {
     }
 
     public Map<String, Object> summary(AppRow a) {
-        Map<String, Object> m = new LinkedHashMap<>();
         VersionRow cur = a.currentVersionId() == null ? null : versions.find(a.currentVersionId()).orElse(null);
+        boolean hasDraft = drafts.exists(a.id());
+        boolean cloudEnabled = !a.isSkill() && !a.isService() && jdbc.sql("select exists(select 1 from app_cloud where app_id = ? and status = 'on')")
+                .params(a.id()).query(Boolean.class).single();
+        TaskRow activeTask = tasks.activeForApp(a.id()).orElse(null);
+        Map<String, Object> rev = (publishReviews != null && !a.isSkill() && !a.isScript())
+                ? publishReviews.summaryForApp(a.id()) : null;
+        return buildSummary(a, cur, hasDraft, cloudEnabled, activeTask, rev);
+    }
+
+    /** 批量构造应用列表摘要：将 version / draft / app_cloud / activeTask / publish_request 合并为 5 条批量 SQL，消除 /api/apps 的 N+1 查询。 */
+    public List<Map<String, Object>> summaries(List<AppRow> rows) {
+        if (rows == null || rows.isEmpty()) return List.of();
+        if (rows.size() == 1) return List.of(summary(rows.get(0)));
+
+        List<String> appIds = rows.stream().map(AppRow::id).toList();
+        List<String> curVersionIds = rows.stream().map(AppRow::currentVersionId)
+                .filter(id -> id != null && !id.isBlank()).distinct().toList();
+
+        Map<String, VersionRow> verById = new HashMap<>();
+        if (!curVersionIds.isEmpty()) {
+            jdbc.sql("select * from version where id in (:ids)")
+                    .param("ids", curVersionIds).query(VersionRow::map).list()
+                    .forEach(v -> verById.put(v.id(), v));
+        }
+
+        Set<String> draftAppIds = new HashSet<>(jdbc.sql("select app_id from draft where app_id in (:ids)")
+                .param("ids", appIds).query(String.class).list());
+
+        Set<String> cloudAppIds = new HashSet<>(jdbc.sql("select app_id from app_cloud where app_id in (:ids) and status = 'on'")
+                .param("ids", appIds).query(String.class).list());
+
+        Map<String, TaskRow> activeTaskByApp = new HashMap<>();
+        jdbc.sql("select * from task where app_id in (:ids) and status in ('QUEUED','PREPARING','RUNNING','VERIFYING','COMMITTING','CANCELLING')")
+                .param("ids", appIds).query(TaskRow::map).list()
+                .forEach(t -> activeTaskByApp.putIfAbsent(t.appId(), t));
+
+        Map<String, Map<String, Object>> reviewByApp = new HashMap<>();
+        if (publishReviews != null) {
+            List<String> reviewAppIds = rows.stream().filter(a -> !a.isSkill() && !a.isScript()).map(AppRow::id).toList();
+            if (!reviewAppIds.isEmpty()) {
+                jdbc.sql("""
+                        select app_id, id, version_id, version_number, status, review_comment, reviewer_actor, reviewed_at, created_at
+                        from publish_request
+                        where app_id in (:ids)
+                        order by created_at desc
+                        """).param("ids", reviewAppIds).query(rs -> {
+                    String aid = rs.getString("app_id");
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("id", rs.getString("id"));
+                    item.put("versionId", rs.getString("version_id"));
+                    item.put("versionNumber", rs.getInt("version_number"));
+                    item.put("status", rs.getString("status"));
+                    item.put("reviewComment", rs.getString("review_comment"));
+                    item.put("reviewerActor", rs.getString("reviewer_actor"));
+                    item.put("reviewedAt", Db.iso(Db.ts(rs, "reviewed_at")));
+                    item.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
+                    Map<String, Object> bucket = reviewByApp.computeIfAbsent(aid, k -> {
+                        Map<String, Object> b = new LinkedHashMap<>();
+                        b.put("pending", null);
+                        b.put("latest", null);
+                        return b;
+                    });
+                    if (bucket.get("latest") == null) bucket.put("latest", item);
+                    if (bucket.get("pending") == null && "pending".equals(item.get("status"))) bucket.put("pending", item);
+                });
+            }
+        }
+
+        List<Map<String, Object>> out = new ArrayList<>(rows.size());
+        for (AppRow a : rows) {
+            VersionRow cur = a.currentVersionId() == null ? null : verById.get(a.currentVersionId());
+            boolean cloudEnabled = !a.isSkill() && !a.isService() && cloudAppIds.contains(a.id());
+            Map<String, Object> rev = (!a.isSkill() && !a.isScript()) ? reviewByApp.get(a.id()) : null;
+            out.add(buildSummary(a, cur, draftAppIds.contains(a.id()), cloudEnabled, activeTaskByApp.get(a.id()), rev));
+        }
+        return out;
+    }
+
+    private Map<String, Object> buildSummary(AppRow a, VersionRow cur, boolean hasDraft, boolean cloudEnabled,
+                                             TaskRow activeTask, Map<String, Object> rev) {
+        Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.id());
         m.put("name", a.name());
         m.put("type", a.type());
@@ -108,15 +188,13 @@ public class Views {
         String svcPreview = a.isService() ? siteUrl(a.slug()) + (serviceCrypto == null ? "" : "?_zhiye_preview=" + serviceCrypto.signPreviewToken(a.id())) : null;
         m.put("previewUrl", cur == null || a.isSkill() ? null : a.isService() ? svcPreview : previewUrl(cur.buildId()));
         m.put("siteUrl", a.publishedVersionId() == null || a.isSkill() ? null : siteUrl(a.slug()));
-        m.put("hasDraft", drafts.exists(a.id()));
+        m.put("hasDraft", hasDraft);
         m.put("visualEditable", a.visualEditable());
-        m.put("cloudEnabled", !a.isSkill() && !a.isService() && jdbc.sql("select exists(select 1 from app_cloud where app_id = ? and status = 'on')")
-                .params(a.id()).query(Boolean.class).single());
-        m.put("activeTask", taskRef(tasks.activeForApp(a.id()).orElse(null)));
+        m.put("cloudEnabled", cloudEnabled);
+        m.put("activeTask", taskRef(activeTask));
         m.put("skillhub", skillHub == null ? null : skillHub.summary(a));
         m.put("service", a.isService() && monolithService != null ? monolithService.summaryForApp(a.id()) : null);
-        if (publishReviews != null && !a.isSkill() && !a.isScript()) {
-            var rev = publishReviews.summaryForApp(a.id());
+        if (rev != null) {
             m.put("pendingPublishRequest", rev.get("pending"));
             m.put("latestPublishRequest", rev.get("latest"));
         } else {

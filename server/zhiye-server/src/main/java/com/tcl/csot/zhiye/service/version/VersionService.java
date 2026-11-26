@@ -151,7 +151,7 @@ public class VersionService {
             sql.append(" and v.created_at < :endTs");
             p.put("endTs", java.sql.Timestamp.from(end.plusDays(1).atStartOfDay(zone).toInstant()));
         }
-        sql.append(" order by v.created_at desc, v.number desc");
+        sql.append(" order by v.created_at desc, v.number desc limit 500");
         List<Map<String, Object>> rows = new ArrayList<>();
         Map<String, AppRow> appCache = new HashMap<>();
         jdbc.sql(sql.toString()).params(p).query((rs, i) -> {

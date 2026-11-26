@@ -122,8 +122,11 @@ export function HistoryPage() {
     queryFn: () => api.history(hq),
     placeholderData: keepPreviousData,
   });
-  const { data: total } = useQuery({ queryKey: qk.history({ filter: 'all' }), queryFn: () => api.history({ filter: 'all' }) });
+  // 复用顶部 HistoryStats 的 ['history-summary'] 缓存判断是否从未生成过版本，避免额外全量拉取第二遍 /api/history
+  const { data: historySummary } = useQuery({ queryKey: ['history-summary'], queryFn: () => api.historySummary() });
   const rows = data ?? [];
+  const hasAnyFilter = Boolean(q || appId || hasDateFilter || filter !== '全部记录');
+  const isCompletelyEmpty = historySummary ? historySummary.versions === 0 : !hasAnyFilter && rows.length === 0;
   const pager = useClientPagination(rows, 15, `${filter}|${appId}|${q}|${startDate}|${endDate}`);
 
   const grouped = useMemo(() => {
@@ -277,7 +280,7 @@ export function HistoryPage() {
               />
             ) : null}
             {rows.length === 0 ? (
-              total && total.length === 0 ? (
+              isCompletelyEmpty ? (
                 <EmptyState icon="history" title="这里还没有记录" desc="生成应用后，每一个版本都会出现在这里。" canCreate />
               ) : (
                 <EmptyState title="这里还没有记录" desc="试试其他关键词，或者取消筛选条件。" />

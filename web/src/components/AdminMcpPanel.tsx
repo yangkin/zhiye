@@ -252,7 +252,7 @@ export function AdminMcpPanel() {
                   <label>服务标识 *</label>
                   <span className="eco-label-badge">英文小写</span>
                 </div>
-                <input className="mono" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
+                <input className="is-mono" placeholder="如 csot-gitlab-mcp" value={serverKey} onChange={(e) => setServerKey(e.target.value)} />
               </div>
               <div className="eco-field">
                 <div className="eco-label-row">
@@ -267,7 +267,7 @@ export function AdminMcpPanel() {
                 <label>服务地址 *</label>
                 <span className="eco-label-badge">Streamable HTTP / JSON-RPC 2.0</span>
               </div>
-              <input className="mono" placeholder="https://mcp.internal.example/mcp" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
+              <input className="is-mono" placeholder="https://mcp.internal.example/mcp" value={endpointUrl} onChange={(e) => setEndpointUrl(e.target.value)} />
             </div>
 
             <div className="eco-fieldset">
@@ -276,9 +276,9 @@ export function AdminMcpPanel() {
                 <div className="eco-field">
                   <div className="eco-label-row">
                     <label>鉴权请求头</label>
-                    <span className="eco-label-badge">可选</span>
+                    <span className="eco-label-badge is-muted">可选</span>
                   </div>
-                  <input className="mono" placeholder="Authorization" value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
+                  <input className="is-mono" placeholder="Authorization" value={authHeader} onChange={(e) => setAuthHeader(e.target.value)} />
                 </div>
                 <div className="eco-field">
                   <div className="eco-label-row">

@@ -27,8 +27,9 @@ public class InternalAppConnectorController {
 
     @GetMapping("/internal/app-connectors/list")
     public Map<String, Object> internalList(@RequestHeader(value = "Authorization", required = false) String auth) {
-        connectors.verifyAppConnectorToken(auth);
-        return Map.of("ok", true, "connectors", connectors.list(null));
+        String appId = connectors.verifyAppConnectorToken(auth);
+        String ws = connectors.workspaceOfApp(appId);
+        return Map.of("ok", true, "connectors", connectors.list(ws));
     }
 
     @PostMapping("/internal/app-connectors/feishu/send-card")

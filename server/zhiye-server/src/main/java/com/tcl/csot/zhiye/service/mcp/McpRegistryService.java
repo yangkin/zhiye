@@ -3,6 +3,7 @@ package com.tcl.csot.zhiye.service.mcp;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.tcl.csot.zhiye.config.SourceProperties;
 import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.service.runtime.ServiceCrypto;
 import com.tcl.csot.zhiye.util.Db;
@@ -10,10 +11,12 @@ import com.tcl.csot.zhiye.util.Ids;
 import com.tcl.csot.zhiye.util.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -59,6 +62,8 @@ public class McpRegistryService {
     private final JdbcClient jdbc;
     private final ServiceCrypto crypto;
     private final HttpClient http;
+    @Autowired(required = false)
+    private SourceProperties sourceProps;
 
     public McpRegistryService(JdbcClient jdbc, ServiceCrypto crypto) {
         this.jdbc = jdbc;
@@ -69,15 +74,89 @@ public class McpRegistryService {
                 .build();
     }
 
+    private static boolean isWorkspacePrivate(ServerRow r) {
+        return r != null && r.createdBy() != null && r.createdBy().startsWith("ws:");
+    }
+
+    private static boolean isVisibleToWorkspace(ServerRow r, String ws) {
+        if (!isWorkspacePrivate(r)) return true;
+        return ws != null && !ws.isBlank() && ("ws:" + ws).equals(r.createdBy());
+    }
+
+    public String workspaceOfTaskOrApp(String taskId, String appId) {
+        if (appId != null && !appId.isBlank()) {
+            var ws = jdbc.sql("select workspace_id from app where id = ?").param(appId).query(String.class).optional();
+            if (ws.isPresent()) return ws.get();
+        }
+        if (taskId != null && !taskId.isBlank()) {
+            var ws = jdbc.sql("select a.workspace_id from task t join app a on a.id = t.app_id where t.id = ?")
+                    .param(taskId).query(String.class).optional();
+            if (ws.isPresent()) return ws.get();
+        }
+        return null;
+    }
+
+    /** 校验远端 HTTP MCP 地址，防止 SSRF 探测云元数据、链路本地及（生产环境）本机回环服务。 */
+    public void validateMcpEndpointUrl(String rawUrl, boolean resolveDns) {
+        if (rawUrl == null || rawUrl.isBlank()) {
+            throw ApiException.validation("请提供合法的 http:// 或 https:// MCP 地址");
+        }
+        URI uri;
+        try {
+            uri = URI.create(rawUrl.trim());
+        } catch (Exception e) {
+            throw ApiException.validation("MCP Endpoint 地址格式无效");
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            throw ApiException.validation("HTTP MCP 服务必须提供合法的 http:// 或 https:// 地址");
+        }
+        String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
+        if (host.isBlank()) {
+            throw ApiException.validation("MCP Endpoint 缺少有效主机名");
+        }
+        boolean allowLoopback = sourceProps != null && sourceProps.allowLoopback();
+        if (host.equals("169.254.169.254") || host.equals("100.100.100.200") || host.equals("0.0.0.0")
+                || host.equals("::") || host.startsWith("169.254.") || host.startsWith("fe80:")) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_HOST_BLOCKED", "SSRF 安全拦截：禁止访问元数据或链路本地地址 " + host);
+        }
+        if (!allowLoopback && (host.equals("localhost") || host.startsWith("127.") || host.equals("::1") || host.endsWith(".localhost"))) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_HOST_BLOCKED", "SSRF 安全拦截：生产环境禁止 MCP 访问本机回环地址 " + host);
+        }
+        if (resolveDns) {
+            InetAddress[] addrs;
+            try {
+                addrs = InetAddress.getAllByName(host);
+            } catch (Exception e) {
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "MCP_UNREACHABLE", "无法解析 MCP 主机地址：" + host);
+            }
+            for (InetAddress a : addrs) {
+                byte[] b = a.getAddress();
+                boolean aliyunMeta = b.length == 4 && (b[0] & 0xff) == 100 && (b[1] & 0xff) == 100 && (b[2] & 0xff) == 100 && (b[3] & 0xff) == 200;
+                if (a.isLinkLocalAddress() || a.isAnyLocalAddress() || a.isMulticastAddress() || aliyunMeta) {
+                    throw new ApiException(HttpStatus.FORBIDDEN, "MCP_HOST_BLOCKED", "SSRF 安全拦截：目标地址解析到受限网段 " + host);
+                }
+                if (a.isLoopbackAddress() && !allowLoopback) {
+                    throw new ApiException(HttpStatus.FORBIDDEN, "MCP_HOST_BLOCKED", "SSRF 安全拦截：目标地址解析到本机回环地址 " + host);
+                }
+            }
+        }
+    }
+
     public List<Map<String, Object>> listAll() {
         return jdbc.sql("select * from enterprise_mcp_server order by builtin desc, created_at desc")
                 .query(ServerRow::map).list().stream().map(this::view).toList();
     }
 
-    /** 面向普通工作空间用户的已启用企业 MCP / 知识库目录（完全脱敏，不含密钥）。 */
+    /** 面向普通工作空间用户的已启用企业 MCP / 知识库目录（严格按工作空间隔离：仅返回平台全局 + 当前工作空间自建，完全脱敏）。 */
     public List<Map<String, Object>> listEnabledForWorkspace(String ws) {
         String ownerTag = ws != null && !ws.isBlank() ? "ws:" + ws : "";
-        return jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
+        return jdbc.sql("""
+                select * from enterprise_mcp_server
+                where enabled = true
+                  and (created_by is null or created_by not like 'ws:%' or created_by = ?)
+                order by builtin desc, created_at desc
+                """).param(ownerTag)
                 .query(ServerRow::map).list().stream().map(r -> {
                     boolean owned = !ownerTag.isEmpty() && ownerTag.equals(r.createdBy());
                     boolean isKb = "knowledge".equals(r.transport()) && r.endpointUrl() != null && r.endpointUrl().startsWith("kb:");
@@ -236,8 +315,8 @@ public class McpRegistryService {
         String transport = body.path("transport").asText("http").trim().toLowerCase(Locale.ROOT);
         if (!Set.of("http", "knowledge").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 knowledge");
         String url = body.path("endpointUrl").asText("").trim();
-        if ("http".equals(transport) && !url.startsWith("http://") && !url.startsWith("https://")) {
-            throw ApiException.validation("HTTP MCP 服务必须提供合法的 http:// 或 https:// 地址");
+        if ("http".equals(transport)) {
+            validateMcpEndpointUrl(url, false);
         }
         String desc = body.path("description").asText("").trim();
         String authHeader = body.path("authHeader").asText("Authorization").trim();
@@ -267,6 +346,9 @@ public class McpRegistryService {
         String transport = body.has("transport") ? body.path("transport").asText(cur.transport()).trim().toLowerCase(Locale.ROOT) : cur.transport();
         if (!Set.of("http", "knowledge").contains(transport)) throw ApiException.validation("传输方式仅支持 http 或 knowledge");
         String url = body.has("endpointUrl") ? body.path("endpointUrl").asText("").trim() : cur.endpointUrl();
+        if ("http".equals(transport)) {
+            validateMcpEndpointUrl(url, false);
+        }
         String authHeader = body.has("authHeader") ? body.path("authHeader").asText("Authorization").trim() : cur.authHeader();
         String secretEnc = cur.secretEnc();
         if (body.has("secret") && !body.path("secret").asText("").isBlank()) {
@@ -289,11 +371,21 @@ public class McpRegistryService {
         jdbc.sql("delete from enterprise_mcp_server where id = ?").param(id).update();
     }
 
-    /** 将所有已启用的 MCP 服务清单（脱敏、不含凭据）写入沙箱 {agentDir}/mcp-servers.json。 */
+    /** 将平台全局已启用 MCP 清单写入沙箱（仅含全局条目，不含任何个人工作空间私有条目）。 */
     public void writeCatalogForAgent(Path agentDir) {
+        writeCatalogForAgent(agentDir, null);
+    }
+
+    /** 将对当前工作空间可见的已启用 MCP / 知识库清单（脱敏、不含凭据、严格隔离他人的私有知识库）写入沙箱 {agentDir}/mcp-servers.json。 */
+    public void writeCatalogForAgent(Path agentDir, String ws) {
         try {
-            List<ServerRow> rows = jdbc.sql("select * from enterprise_mcp_server where enabled = true order by builtin desc, created_at desc")
-                    .query(ServerRow::map).list();
+            String ownerTag = ws != null && !ws.isBlank() ? "ws:" + ws : "";
+            List<ServerRow> rows = jdbc.sql("""
+                    select * from enterprise_mcp_server
+                    where enabled = true
+                      and (created_by is null or created_by not like 'ws:%' or created_by = ?)
+                    order by builtin desc, created_at desc
+                    """).param(ownerTag).query(ServerRow::map).list();
             ObjectNode root = Json.obj();
             ArrayNode arr = root.putArray("servers");
             for (ServerRow r : rows) {
@@ -311,8 +403,18 @@ public class McpRegistryService {
         }
     }
 
-    /** 代理执行 MCP 工具调用并记录完整审计日志。 */
+    /** 管理员/受信任内部代理执行 MCP 工具调用并记录完整审计日志。 */
     public Map<String, Object> callTool(String serverKey, String toolName, JsonNode arguments, String taskId, String appId) {
+        return callToolInternal(null, false, serverKey, toolName, arguments, taskId, appId);
+    }
+
+    /** 工作空间受控代理调用 MCP 工具：严格校验归属权，禁止跨工作空间访问其他员工私有知识库或 MCP。 */
+    public Map<String, Object> callToolForWorkspace(String callerWs, String serverKey, String toolName, JsonNode arguments, String taskId, String appId) {
+        return callToolInternal(callerWs, true, serverKey, toolName, arguments, taskId, appId);
+    }
+
+    private Map<String, Object> callToolInternal(String callerWs, boolean enforceWorkspace,
+                                                 String serverKey, String toolName, JsonNode arguments, String taskId, String appId) {
         long t0 = System.currentTimeMillis();
         String key = serverKey == null ? "" : serverKey.trim().toLowerCase(Locale.ROOT);
         String tool = toolName == null ? "" : toolName.trim();
@@ -321,6 +423,9 @@ public class McpRegistryService {
         ServerRow srv = jdbc.sql("select * from enterprise_mcp_server where server_key = ?")
                 .param(key).query(ServerRow::map).optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "MCP_NOT_FOUND", "未找到 MCP 服务：" + key));
+        if (enforceWorkspace && !isVisibleToWorkspace(srv, callerWs)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_FORBIDDEN", "无权调用其他工作空间的私有知识库或 MCP 服务");
+        }
         if (!srv.enabled()) throw new ApiException(HttpStatus.FORBIDDEN, "MCP_DISABLED", "MCP 服务「" + key + "」已被管理员停用");
 
         try {
@@ -348,9 +453,7 @@ public class McpRegistryService {
 
     /** 向远端 Streamable HTTP / JSON-RPC 2.0 MCP 服务发 tools/list 探测，返回标准工具列表。 */
     public JsonNode discoverRemoteTools(String endpointUrl, String authHeader, String secret) throws Exception {
-        if (endpointUrl == null || (!endpointUrl.startsWith("http://") && !endpointUrl.startsWith("https://"))) {
-            throw ApiException.validation("请提供合法的 http:// 或 https:// MCP 地址");
-        }
+        validateMcpEndpointUrl(endpointUrl, true);
         String sessionId = tryInitializeSession(endpointUrl, authHeader, secret);
         ObjectNode rpc = Json.obj();
         rpc.put("jsonrpc", "2.0");
@@ -372,12 +475,15 @@ public class McpRegistryService {
         return out;
     }
 
-    /** 面向工作台卡片的连通性试调用：HTTP MCP 默认走真实的 tools/list 协议握手（并自动同步最新工具列表），知识库/仿真 MCP 直接执行工具调用。 */
-    public Map<String, Object> testForWorkspace(String serverKey, String toolName, JsonNode arguments) {
+    /** 面向工作台卡片的连通性试调用：严格校验工作空间隔离后执行 HTTP tools/list 或知识库检索。 */
+    public Map<String, Object> testForWorkspace(String ws, String serverKey, String toolName, JsonNode arguments) {
         String key = serverKey == null ? "" : serverKey.trim().toLowerCase(Locale.ROOT);
         ServerRow srv = jdbc.sql("select * from enterprise_mcp_server where server_key = ?")
                 .param(key).query(ServerRow::map).optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "MCP_NOT_FOUND", "未找到 MCP 服务：" + key));
+        if (!isVisibleToWorkspace(srv, ws)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "MCP_FORBIDDEN", "无权测试其他工作空间的私有知识库或 MCP 服务");
+        }
         if (!srv.enabled()) throw new ApiException(HttpStatus.FORBIDDEN, "MCP_DISABLED", "MCP 服务已停用");
 
         if ("http".equals(srv.transport()) && (toolName == null || toolName.isBlank() || "__ping__".equals(toolName))) {
@@ -401,6 +507,10 @@ public class McpRegistryService {
                 out.put("tools", discovered);
                 out.put("content", "真实 Streamable HTTP MCP 握手成功，发现 " + names.size() + " 个工具：" + String.join(", ", names.stream().limit(8).toList()));
                 return out;
+            } catch (ApiException e) {
+                int ms = (int) (System.currentTimeMillis() - t0);
+                audit(key, "tools/list", "ws-test", null, false, ms, e.getMessage());
+                throw e;
             } catch (Exception e) {
                 int ms = (int) (System.currentTimeMillis() - t0);
                 String msg = Optional.ofNullable(e.getMessage()).orElse(e.getClass().getSimpleName());
@@ -409,7 +519,7 @@ public class McpRegistryService {
             }
         }
         String effectiveTool = (toolName == null || toolName.isBlank() || "__ping__".equals(toolName)) ? "search_knowledge" : toolName;
-        return callTool(key, effectiveTool, arguments, "ws-test", null);
+        return callToolForWorkspace(ws, key, effectiveTool, arguments, "ws-test", null);
     }
 
     private String tryInitializeSession(String endpointUrl, String authHeader, String secret) {
@@ -489,6 +599,7 @@ public class McpRegistryService {
     }
 
     private String executeHttpJsonRpc(ServerRow srv, String tool, JsonNode args) throws Exception {
+        validateMcpEndpointUrl(srv.endpointUrl(), true);
         String secret = (srv.secretEnc() != null && !srv.secretEnc().isBlank()) ? crypto.decrypt(srv.secretEnc()) : "";
         String sessionId = tryInitializeSession(srv.endpointUrl(), srv.authHeader(), secret);
         ObjectNode rpc = Json.obj();

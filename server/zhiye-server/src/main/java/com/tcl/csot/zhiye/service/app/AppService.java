@@ -190,7 +190,7 @@ public class AppService {
             case "name" -> rows.sort((a, b) -> zh.compare(a.name(), b.name()));
             default -> rows.sort(Comparator.comparing(AppRow::updatedAt).reversed());
         }
-        return rows.stream().map(views::summary).toList();
+        return views.summaries(rows);
     }
 
     public Map<String, Object> detail(String ws, String id) { return views.detail(require(ws, id)); }

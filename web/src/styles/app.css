@@ -644,6 +644,8 @@
 .svc-field > span {
   font-size: 12px;
   font-weight: 500;
+  line-height: 1.4;
+  min-height: 18px;
   color: #5a5270;
 }
 .svc-field input[type="text"],
@@ -684,10 +686,11 @@
 .svc-input-unit {
   display: flex;
   align-items: center;
-  height: 36px;
-  border-radius: 9px;
-  border: 1px solid #e2dce9;
-  background: #fcfbfe;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #dfd9ef;
+  background: #fff;
+  box-sizing: border-box;
   overflow: hidden;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
