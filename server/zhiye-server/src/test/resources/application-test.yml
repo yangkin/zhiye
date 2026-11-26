@@ -26,6 +26,8 @@ zhiye:
     verify-fix-rounds: 2
   workspace:
     daily-task-limit: 1000
+  publish:
+    review-required: false
   dev:
     faults-enabled: true
   admin:

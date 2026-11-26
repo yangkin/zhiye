@@ -23,6 +23,7 @@ import { useVisualEditor } from '../editor/useVisualEditor';
 import { ChatPanel } from './ChatPanel';
 import { CloudPane, FilesPane } from './Panes';
 import { ServiceRuntimePane } from './ServiceRuntimePane';
+import { ScriptRunnerPane } from './ScriptRunnerPane';
 import { LiveWorkspaceDock } from './LiveWorkspaceDock';
 import { PublishModal } from './PublishModal';
 import { SkillhubModal } from './SkillhubModal';
@@ -32,7 +33,7 @@ import { PREVIEW_RESOLUTION_OPTIONS, usePreviewViewport } from '../hooks/usePrev
 
 const CodePane = retryableLazy(() => import('./CodePane').then((m) => ({ default: m.CodePane })));
 
-type Tab = 'code' | 'preview' | 'files' | 'cloud' | 'service';
+type Tab = 'code' | 'preview' | 'run' | 'files' | 'cloud' | 'service';
 
 /** 预览地址能不能打开：同源时看状态码；跨域时只能确认网络可达 */
 async function probePreview(src: string): Promise<boolean> {
@@ -74,14 +75,16 @@ function Workbench({ id }: { id: string }) {
   const skill = app ? isSkillApp(app) : false;
   const script = app ? isScriptApp(app) : false;
   const service = app ? isServiceApp(app) : false;
-  const mainTab: Tab = skill || script ? 'code' : 'preview';
-  // 技能包默认打开「代码」；没有云服务
+  const mainTab: Tab = skill ? 'code' : script ? 'run' : 'preview';
+  // 技能包默认打开「代码」，无页面脚本默认打开「在线运行」
   useEffect(() => {
     if (skill) setTab('code');
-  }, [skill, app?.id]);
+    else if (script) setTab('run');
+  }, [skill, script, app?.id]);
   useEffect(() => {
-    if (skill && tab === 'cloud') setTab('code');
-  }, [skill, tab]);
+    if (skill && (tab === 'cloud' || tab === 'run')) setTab('code');
+    if (script && (tab === 'cloud' || tab === 'preview' || tab === 'service')) setTab('run');
+  }, [skill, script, tab]);
   // 时间线 / 消息里的「在代码中打开」「查看改动」：切到代码页
   useEffect(() => {
     const openCode = () => setTab('code');
@@ -560,13 +563,19 @@ function Workbench({ id }: { id: string }) {
         </div>
         <div className={`studio-tabs ${previewCollapsed ? 'is-hidden' : ''}`} role="tablist" aria-label="工作台功能" onKeyDown={onTabKey}>
           {(
-            [
-              ['code', '代码', 'code'],
-              ['preview', '预览', 'preview'],
-              ['files', '文件', 'clip'],
-              ...(service ? ([['service', '服务托管', 'cloud']] as const) : ([['cloud', '云服务', 'cloud']] as const)),
-            ] as const
-          ).filter(([value]) => !((skill || script) && (value === 'cloud' || value === 'preview' || value === 'service'))).map(([value, label, symbol]) => (
+            script
+              ? ([
+                  ['run', '在线运行', 'play'],
+                  ['code', '代码', 'code'],
+                  ['files', '文件', 'clip'],
+                ] as const)
+              : ([
+                  ['code', '代码', 'code'],
+                  ['preview', '预览', 'preview'],
+                  ['files', '文件', 'clip'],
+                  ...(service ? ([['service', '服务托管', 'cloud']] as const) : ([['cloud', '云服务', 'cloud']] as const)),
+                ] as const).filter(([value]) => !(skill && (value === 'cloud' || value === 'preview' || value === 'service')))
+          ).map(([value, label, symbol]) => (
             <button
               key={value}
               className={tab === value ? 'active' : ''}
@@ -616,26 +625,38 @@ function Workbench({ id }: { id: string }) {
           ) : (() => {
             const publishedVer = app.publishedVersionId ? versions.find((x) => x.id === app.publishedVersionId) : null;
             const hasUnpublished = Boolean(app.publishedVersionId && currentVersion && app.publishedVersionId !== currentVersion.id);
+            const pendingReview = app.pendingPublishRequest;
+            const rejectedReview = !pendingReview && app.latestPublishRequest?.status === 'rejected';
             return (
               <button
-                className={`studio-publish ${hasUnpublished ? 'has-unpublished' : ''}`}
+                className={`studio-publish ${pendingReview ? 'is-review-pending' : hasUnpublished || rejectedReview ? 'has-unpublished' : ''}`}
                 disabled={!ready}
                 title={
-                  hasUnpublished
-                    ? `当前预览已是 V${currentVersion?.number}，线上同事看到的仍是 ${publishedVer ? `V${publishedVer.number}` : '旧版本'}；点击发布同步上线`
-                    : app.publishedVersionId
-                      ? '线上已是当前版本，点击管理访问范围或分享链接'
-                      : '发布上线并生成内网分享链接'
+                  pendingReview
+                    ? `V${pendingReview.versionNumber} 发布申请审核中，点击查看登记表或撤回`
+                    : rejectedReview
+                      ? `上次发布申请被驳回：${app.latestPublishRequest?.reviewComment || '点击查看并重新提交'}`
+                      : hasUnpublished
+                        ? `当前预览已是 V${currentVersion?.number}，线上仍是 ${publishedVer ? `V${publishedVer.number}` : '旧版本'}；点击提交发布审核`
+                        : app.publishedVersionId
+                          ? '线上已是当前版本，点击管理访问范围、分享链接或提交新版本审核'
+                          : '填写 Vibe Coding 应用登记表并提交发布审核'
                 }
                 onClick={() => setModal('publish')}
               >
                 <Icon name="globe" />
                 <span>
-                  {hasUnpublished
-                    ? `更新线上${publishedVer && currentVersion ? ` (V${publishedVer.number}→V${currentVersion.number})` : ''}`
-                    : '发布'}
+                  {pendingReview
+                    ? `审核中 (V${pendingReview.versionNumber})`
+                    : rejectedReview
+                      ? '重提发布'
+                      : hasUnpublished
+                        ? `更新线上${publishedVer && currentVersion ? ` (V${publishedVer.number}→V${currentVersion.number})` : ''}`
+                        : '发布'}
                 </span>
-                {hasUnpublished ? <i className="studio-publish-dot" aria-label="有未发布改动" /> : null}
+                {pendingReview || hasUnpublished || rejectedReview ? (
+                  <i className={`studio-publish-dot ${pendingReview ? 'is-amber' : ''}`} aria-label={pendingReview ? '发布审核中' : '有待处理状态'} />
+                ) : null}
               </button>
             );
           })()}
@@ -665,7 +686,7 @@ function Workbench({ id }: { id: string }) {
           currentVersion={currentVersion}
           versions={versions}
           onTaskStarted={onTaskStarted}
-          onEnableCloud={service ? undefined : () => useChat.getState().setCloudAsk(true)}
+          onEnableCloud={service || script ? undefined : () => useChat.getState().setCloudAsk(true)}
           onOpenCloud={() => setTab(service ? 'service' : 'cloud')}
           onRestoreVersion={(v) => setRestoreTarget(v)}
           onPublish={() => (script ? download('export') : setModal(skill ? 'skillhub' : 'publish'))}
@@ -698,7 +719,9 @@ function Workbench({ id }: { id: string }) {
         ) : null}
         {!previewCollapsed ? (
         <section className={`preview-panel studio-panel ${maximized ? 'preview-maximized' : ''}`}>
-          {tab === 'preview' && (skill || script) ? (
+          {tab === 'run' && script ? (
+            <ScriptRunnerPane app={app} versionId={viewedVersionId} onOpenCode={() => setTab('code')} />
+          ) : tab === 'preview' && (skill || script) ? (
             <div className="no-preview">
               <Pet size={150} sleeping bubble={script ? '脚本项目只有文件，没有页面哦' : '技能包只有文件，没有页面哦'} />
               <b>暂无预览</b>

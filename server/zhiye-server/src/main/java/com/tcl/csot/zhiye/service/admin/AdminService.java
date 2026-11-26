@@ -69,6 +69,9 @@ public class AdminService {
     @Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
 
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.app.PublishReviewService publishReviews;
+
     @Autowired
     public AdminService(JdbcClient jdbc,
                         QuotaService quota,
@@ -150,6 +153,7 @@ public class AdminService {
         out.put("templates", queryTemplates());
         out.put("rateLimitStats", queryRateLimitStats());
         out.put("auditLogs", queryAuditLogs());
+        out.put("pendingPublishReviewCount", publishReviews == null ? 0L : publishReviews.pendingCount());
         return out;
     }
 

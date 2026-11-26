@@ -24,6 +24,7 @@ public record ZhiyeProperties(
         @DefaultValue Llm llm,
         @DefaultValue Storage storage,
         @DefaultValue Importer importer,
+        @DefaultValue Publish publish,
         @DefaultValue Dev dev) {
 
     public record Site(@DefaultValue("http://127.0.0.1:8083") String previewBase,
@@ -89,6 +90,8 @@ public record ZhiyeProperties(
                            @DefaultValue("209715200") long maxUnpackedBytes,
                            @DefaultValue("20971520") long maxFileBytes,
                            @DefaultValue("10485760") long assetMaxBytes) {}
+
+    public record Publish(@DefaultValue("true") boolean reviewRequired) {}
 
     public record Dev(@DefaultValue("false") boolean faultsEnabled) {}
 

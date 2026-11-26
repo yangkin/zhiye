@@ -31,6 +31,8 @@ public class Views {
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.ServiceCrypto serviceCrypto;
+    @org.springframework.beans.factory.annotation.Autowired(required = false) @org.springframework.context.annotation.Lazy
+    private PublishReviewService publishReviews;
 
     public Views(ZhiyeProperties props, VersionRepository versions, TaskRepository tasks, DraftRepository drafts, JdbcClient jdbc) {
         this.props = props;
@@ -111,6 +113,14 @@ public class Views {
         m.put("activeTask", taskRef(tasks.activeForApp(a.id()).orElse(null)));
         m.put("skillhub", skillHub == null ? null : skillHub.summary(a));
         m.put("service", a.isService() && monolithService != null ? monolithService.summaryForApp(a.id()) : null);
+        if (publishReviews != null && !a.isSkill() && !a.isScript()) {
+            var rev = publishReviews.summaryForApp(a.id());
+            m.put("pendingPublishRequest", rev.get("pending"));
+            m.put("latestPublishRequest", rev.get("latest"));
+        } else {
+            m.put("pendingPublishRequest", null);
+            m.put("latestPublishRequest", null);
+        }
         return m;
     }
 

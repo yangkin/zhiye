@@ -6,7 +6,7 @@ export interface PickedFile {
 }
 
 export interface Prechecked {
-  format: 'html' | 'zip' | 'folder';
+  format: 'html' | 'zip' | 'folder' | 'script';
   files: PickedFile[];
   total: number;
   folderName?: string;
@@ -36,8 +36,16 @@ export async function precheck(input: File[], limits: Limits = DEFAULT_LIMITS): 
   const folder = files.some((f) => f.path.includes('/'));
   if (!folder && files.length > 1) throw new Error('每次导入一个项目，请选择项目文件夹或打包为 ZIP。');
   const first = files[0];
-  const format = folder ? 'folder' : /\.zip$/i.test(first.file.name) ? 'zip' : /\.html?$/i.test(first.file.name) ? 'html' : null;
-  if (!format) throw new Error('请选择 HTML（.html/.htm）、ZIP 文件或项目文件夹。');
+  const format = folder
+    ? 'folder'
+    : /\.zip$/i.test(first.file.name)
+      ? 'zip'
+      : /\.html?$/i.test(first.file.name)
+        ? 'html'
+        : /\.(py|js|mjs|cjs)$/i.test(first.file.name)
+          ? 'script'
+          : null;
+  if (!format) throw new Error('请选择 HTML（.html/.htm）、Python/JS 脚本（.py/.js/.mjs）、ZIP 文件或项目文件夹。');
   if (format === 'zip') {
     const bytes = new Uint8Array(await first.file.slice(0, 4).arrayBuffer());
     const valid = bytes[0] === 80 && bytes[1] === 75 && [[3, 4], [5, 6], [7, 8]].some((p) => bytes[2] === p[0] && bytes[3] === p[1]);
@@ -47,15 +55,19 @@ export async function precheck(input: File[], limits: Limits = DEFAULT_LIMITS): 
   if (paths.some((p) => p.split('/').some((part) => part === '..')) || new Set(paths).size !== paths.length)
     throw new Error('项目文件路径重复或无效，请重新选择。');
   if (format === 'folder') {
-    if (!paths.some((p) => /\.(html?|vue|[jt]sx?|py|go|java)$|(^|\/)(package\.json|go\.mod|pom\.xml|requirements\.txt)$/i.test(p)))
-      throw new Error('请选择包含网页或项目源码的文件夹。');
+    if (!paths.some((p) => /\.(html?|vue|[jt]sx?|mjs|cjs|py|go|java)$|(^|\/)(package\.json|go\.mod|pom\.xml|requirements\.txt)$/i.test(p)))
+      throw new Error('请选择包含网页、脚本或项目源码的文件夹。');
   }
   if (format === 'html') {
     const text = await first.file.slice(0, 65536).text();
     if (!/<[a-z][\s\S]*>/i.test(text)) throw new Error('HTML 内容为空或无效，请重新选择。');
   }
+  if (format === 'script') {
+    const text = await first.file.slice(0, 65536).text();
+    if (!text.trim()) throw new Error('脚本文件内容为空，请重新选择。');
+  }
   const folderName = folder ? paths[0].split('/')[0] : undefined;
-  const name = (folderName ?? first.file.name.replace(/\.(zip|html?)$/i, '')).slice(0, 40) || '我的代码项目';
+  const name = (folderName ?? first.file.name.replace(/\.(zip|html?|py|mjs|cjs|js)$/i, '')).slice(0, 40) || '我的代码项目';
   return { format, files, total, folderName, name };
 }
 

@@ -37,15 +37,18 @@ public class DeployEngineController {
     private final DeployLogBroadcaster broadcaster;
     private final AppRepository apps;
     private final CurrentPrincipal principal;
+    private final com.tcl.csot.zhiye.config.ZhiyeProperties props;
 
     public DeployEngineController(MonolithServiceManager manager, DeployOpsService ops,
                                   DeployLogBroadcaster broadcaster, AppRepository apps,
-                                  CurrentPrincipal principal) {
+                                  CurrentPrincipal principal,
+                                  com.tcl.csot.zhiye.config.ZhiyeProperties props) {
         this.manager = manager;
         this.ops = ops;
         this.broadcaster = broadcaster;
         this.apps = apps;
         this.principal = principal;
+        this.props = props;
     }
 
     private String ws() { return principal.workspaceId(); }
@@ -63,6 +66,10 @@ public class DeployEngineController {
 
     @PostMapping("/api/apps/{appId}/service/promote")
     public Map<String, Object> promotePreview(@PathVariable String appId) throws Exception {
+        if (props.publish().reviewRequired()) {
+            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "PUBLISH_REVIEW_REQUIRED",
+                    "预览晋升上线需先点击右上角「发布」提交《Vibe Coding 应用登记表》并经管理员审核通过");
+        }
         return manager.promotePreview(ws(), appId);
     }
 

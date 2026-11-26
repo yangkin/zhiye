@@ -382,11 +382,11 @@ public class TaskExecutor {
         AppRow app = apps.findById(ctx.task.appId()).orElseThrow(() -> new TaskContext.Fail("NOT_FOUND", "应用不存在"));
         phase(ctx, "RUNNING", "正在生成创造计划", 30);
         String system = app.isService() ? """
-                你是「织页」的全栈应用规划助手。根据用户的需求写一份清晰的前后端一体创造计划，用来指导编码 agent 在 React + Vite + TypeScript（src/）与 Node.js Express 后端（server/index.mjs）骨架上完成真实可运行的全栈应用。
+                你是「织页」的全栈与后端服务规划助手。根据用户的需求写一份清晰的实现计划：若用户需要页面，则在全栈架构下规划前端页面与后端 API；若用户只需要无页面的纯后端 Python（FastAPI/Flask/http.server）或 Node.js（Express/Fastify/node:http）REST API / Webhook / 数据接口服务，则直接规划纯后端 API 服务（无需强行编写前端页面，根路径 / 返回服务状态或接口说明 JSON）。
                 只输出一个 JSON 对象，不要输出其他文字：
                 {"name": "简洁的中文应用名，不超过 16 字", "shape": "service", "scale": "normal", "planDoc": "Markdown 格式的创造计划"}
-                planDoc 结构：# 应用名称 / ## 应用目标 / ## 前端页面与交互（路由、核心组件、图表/看板/表单交互）/ ## 后端 REST API 契约（列出每条 GET/POST/PATCH/DELETE /api/... 路径、入参、出参及校验规则，含 GET /api/health）/ ## 数据持久化方案（DATA_DIR 文件存储或 PG 表结构、种子数据）/ ## 验收标准。
-                要求：前端全部通过相对路径 /api/... 调用后端，后端绑定 0.0.0.0:${PORT:-8080}，遵守单应用 1C 1G 约束，不引入 Redis/Kafka/微服务。总字数 400～1000 字。
+                planDoc 结构：# 应用名称 / ## 应用目标 / ## 界面与交互（纯后端无页面服务写「无页面纯后端 API 服务」） / ## 后端 REST API 契约（列出每条 GET/POST/PATCH/DELETE 路径、入参、出参及校验规则，含 GET /api/health）/ ## 数据持久化方案（DATA_DIR 文件存储或 PG 表结构）/ ## 验收标准。
+                要求：后端绑定 0.0.0.0:${PORT:-8080}，遵守单应用 1C 1G 约束，不引入 Redis/Kafka/微服务。总字数 400～1000 字。
                 """ : app.isSkill() ? """
                 你是「织页」的技能规划助手。根据用户的需求写一份简洁的中文创造计划，用来指导编码 agent 编写一个符合 SkillHub 规范的 skill 包（只有文件，不是网页）。
                 只输出一个 JSON 对象，不要输出其他文字：
@@ -399,7 +399,7 @@ public class TaskExecutor {
                 - "web"：需要界面和交互的网页应用（Vite + React + Tailwind），网页应用默认选这个；
                 - "vue"：用户**明确要求用 Vue** 开发的网页应用（Vite + Vue 3 + Tailwind）；用户没提 Vue 时不要选；
                 - "static"：内容简单、不需要构建的静态页面（单页官网、活动页、说明页）；
-                - "script"：命令行程序 / 数据处理脚本 / 定时任务，只交付可运行的代码，没有页面；
+                - "script"：无页面的 Python 3 或 Node.js (JS/MJS) 命令行程序 / 数据处理脚本 / 自动化任务，支持工作台直接在线运行并交付可运行代码，没有网页页面；
                 - "doc"：用户明确要**网页形式**的文档站（带目录、搜索的在线文档网站）；只是要一份文档时不会走到这里（会话里直接写成文件）。
                 只输出一个 JSON 对象，不要输出其他文字：
                 {"name": "名称（2～12 个字）", "shape": "web|vue|static|script|doc", "reason": "一句话说明为什么选这个形态", "scale": "normal|phased", "planDoc": "Markdown 格式的创造计划"}
@@ -976,13 +976,19 @@ public class TaskExecutor {
         git.checkout(app.id(), null, ctx.workspace, input.path("projectKind").asText("static"));
         Files.createDirectories(ctx.agentDir);
         String format = input.path("format").asText("zip");
-        Path archive = ctx.agentDir.resolve("upload." + ("html".equals(format) ? "html" : "zip"));
+        String origFileName = input.path("fileName").asText("");
+        String ext = "html".equals(format) ? ".html" : "script".equals(format) ? ("-" + (origFileName.isBlank() ? "script.py" : Path.of(origFileName).getFileName().toString())) : ".zip";
+        Path archive = ctx.agentDir.resolve("upload" + ext);
         try (InputStream in = store.get(input.path("objectKey").asText()).orElseThrow(() -> new TaskContext.Fail("IMPORT_INVALID", "上传的文件已过期，请重新选择"))) {
             Files.copy(in, archive, StandardCopyOption.REPLACE_EXISTING);
         }
         String requestedKind = input.path("projectKind").asText("static");
         if ("service".equals(requestedKind)) {
             runServiceImport(ctx, app, input, archive);
+            return;
+        }
+        if ("script".equals(requestedKind)) {
+            runScriptImport(ctx, app, input, archive);
             return;
         }
         boolean vite = "vite".equals(requestedKind);
@@ -1018,23 +1024,65 @@ public class TaskExecutor {
         app = apps.findById(app.id()).orElseThrow();
         VersionRow ver = commit(ctx, app, "导入代码并部署", "import", false);
         if ("vite".equals(kind)) saveDeps(app.id(), ctx.workspace);
-        phase(ctx, "COMMITTING", "正在部署", 95);
-        versionService.publishInternal(app.id(), ver.id());
+        phase(ctx, "COMMITTING", props.publish().reviewRequired() ? "正在准备预览" : "正在部署", 95);
+        if (!props.publish().reviewRequired()) {
+            versionService.publishInternal(app.id(), ver.id());
+        }
         jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
         ObjectNode result = Json.obj().put("framework", framework).put("projectKind", kind);
         result.set("notes", notes);
         succeed(ctx, ver.id(), result);
     }
 
-    /** 单体后端 / 前后端一体应用导入流程：安全解包 → 提交 V1 → 自动编译构建并启动托管实例 → 发布上线。 */
+    /** 无页面 Python / Node.js 脚本导入流程：安全解包（单文件或 ZIP）→ 提交 V1 → 直接进入工作台「在线运行」。 */
+    private void runScriptImport(TaskContext ctx, AppRow app, JsonNode input, Path archive) throws Exception {
+        phase(ctx, "RUNNING", "正在解包并校验脚本项目", 25);
+        String format = input.path("format").asText("zip");
+        int extracted;
+        if ("script".equals(format)) {
+            String rawName = input.path("fileName").asText("main.py").replace('\\', '/');
+            String safeName = Path.of(rawName).getFileName().toString();
+            if (safeName.isBlank() || safeName.contains("..")) safeName = "main.py";
+            Files.copy(archive, ctx.workspace.resolve(safeName), StandardCopyOption.REPLACE_EXISTING);
+            extracted = 1;
+        } else {
+            var imp = props.importer();
+            var limits = new com.tcl.csot.zhiye.service.importer.ImportInspector.Limits(
+                    imp.maxUploadBytes(), imp.maxFiles(), imp.maxUnpackedBytes(), imp.maxFileBytes());
+            String rootDir = input.path("rootDir").asText("");
+            extracted = com.tcl.csot.zhiye.service.importer.ImportInspector.extractZipToDir(archive, ctx.workspace, rootDir, limits);
+        }
+        events.emit(ctx.id(), "tool", Map.of("id", "script-unpack", "name", "import", "summary", "导入无页面脚本 · " + extracted + " 个文件", "state", "end", "ok", true));
+        jdbc.sql("update app set project_kind = 'script' where id = ?").param(app.id()).update();
+        app = apps.findById(app.id()).orElseThrow();
+        phase(ctx, "COMMITTING", "正在保存脚本版本", 85);
+        VersionRow ver = commit(ctx, app, "导入无页面脚本", "import", false);
+        jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
+        ObjectNode result = Json.obj()
+                .put("framework", app.framework() == null ? "Python / Node.js 脚本" : app.framework())
+                .put("projectKind", "script");
+        succeed(ctx, ver.id(), result);
+    }
+
+    /** 单体后端 / 前后端一体应用导入流程：安全解包 → 提交 V1 → 自动编译构建并启动托管实例。 */
     private void runServiceImport(TaskContext ctx, AppRow app, JsonNode input, Path archive) throws Exception {
         if (monolithService == null) throw new TaskContext.Fail("SERVICE_DISABLED", "当前环境未启用单体后端托管服务");
         phase(ctx, "RUNNING", "正在解包并识别单体应用", 15);
-        var imp = props.importer();
-        var limits = new com.tcl.csot.zhiye.service.importer.ImportInspector.Limits(
-                imp.maxUploadBytes(), imp.maxFiles(), imp.maxUnpackedBytes(), imp.maxFileBytes());
-        String rootDir = input.path("rootDir").asText("");
-        int extracted = com.tcl.csot.zhiye.service.importer.ImportInspector.extractZipToDir(archive, ctx.workspace, rootDir, limits);
+        String format = input.path("format").asText("zip");
+        int extracted;
+        if ("script".equals(format)) {
+            String rawName = input.path("fileName").asText("main.py").replace('\\', '/');
+            String safeName = Path.of(rawName).getFileName().toString();
+            if (safeName.isBlank() || safeName.contains("..")) safeName = "main.py";
+            Files.copy(archive, ctx.workspace.resolve(safeName), StandardCopyOption.REPLACE_EXISTING);
+            extracted = 1;
+        } else {
+            var imp = props.importer();
+            var limits = new com.tcl.csot.zhiye.service.importer.ImportInspector.Limits(
+                    imp.maxUploadBytes(), imp.maxFiles(), imp.maxUnpackedBytes(), imp.maxFileBytes());
+            String rootDir = input.path("rootDir").asText("");
+            extracted = com.tcl.csot.zhiye.service.importer.ImportInspector.extractZipToDir(archive, ctx.workspace, rootDir, limits);
+        }
         events.emit(ctx.id(), "tool", Map.of("id", "svc-unpack", "name", "import", "summary", "解包单体项目 · " + extracted + " 个文件", "state", "end", "ok", true));
 
         jdbc.sql("update app set project_kind = 'service' where id = ?").param(app.id()).update();
@@ -1056,8 +1104,12 @@ public class TaskExecutor {
         if (deployError == null) {
             events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
                     "summary", "单体服务启动就绪（" + fw + "）", "state", "end", "ok", true));
-            phase(ctx, "COMMITTING", "正在上线网关路由", 95);
-            versionService.publishInternal(app.id(), ver.id());
+            if (!props.publish().reviewRequired()) {
+                phase(ctx, "COMMITTING", "正在上线网关路由", 95);
+                versionService.publishInternal(app.id(), ver.id());
+            } else {
+                phase(ctx, "COMMITTING", "预览实例已就绪（正式发布需审核）", 95);
+            }
         } else {
             events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
                     "summary", "源码已导入为 V1，但首次启动未就绪，请前往「服务托管」配置环境变量/数据库或启动命令后重新部署",

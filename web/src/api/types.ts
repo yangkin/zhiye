@@ -91,6 +91,121 @@ export interface AppSummary {
     lastStartedAt?: string | null;
     lastAccessAt?: string | null;
   } | null;
+  /** 当前待审核的发布申请摘要 */
+  pendingPublishRequest?: PublishRequestBrief | null;
+  /** 最近一次发布审核申请摘要 */
+  latestPublishRequest?: PublishRequestBrief | null;
+}
+
+export interface PublishRequestBrief {
+  id: string;
+  versionId: string;
+  versionNumber: number;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  reviewComment?: string | null;
+  reviewerActor?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+}
+
+export interface PublishRegistrationForm {
+  appName: string;
+  department: string;
+  businessBg: string;
+  painPoints: string;
+  solution: string;
+  expectedBenefit: string;
+  targetUsers: string;
+  deployMode: string;
+  contacts: string;
+  expectedUntil: string;
+  techAndData: string;
+}
+
+export interface PublishRequestItem extends PublishRegistrationForm {
+  id: string;
+  appId: string;
+  workspaceId: string;
+  versionId: string;
+  versionNumber: number;
+  accessLevel: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  submitterId?: string | null;
+  submitterName?: string | null;
+  reviewerActor?: string | null;
+  reviewComment?: string | null;
+  reviewedAt?: string | null;
+  publishedSiteUrl?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishRequestListResponse {
+  reviewRequired: boolean;
+  currentPending: PublishRequestItem | null;
+  latestRequest: PublishRequestItem | null;
+  history: PublishRequestItem[];
+  defaults: PublishRegistrationForm & { suggestedTechAndData?: string };
+}
+
+export interface AdminPublishRequestItem extends PublishRequestItem {
+  currentAppName?: string | null;
+  appType?: string | null;
+  framework?: string | null;
+  projectKind?: string | null;
+  slug?: string | null;
+  versionTitle?: string | null;
+  isPublished?: boolean;
+  siteUrl?: string | null;
+  previewUrl?: string | null;
+  ownerLogin?: string | null;
+  ownerRealName?: string | null;
+}
+
+export interface AdminPublishRequestsResponse {
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  cancelledCount: number;
+  total: number;
+  items: AdminPublishRequestItem[];
+}
+
+export interface ScriptEntryFile {
+  path: string;
+  runtime: 'python' | 'node';
+  size: number;
+}
+
+export interface ScriptOutputFile {
+  path: string;
+  size: number;
+  preview?: string;
+}
+
+export interface ScriptRunResult {
+  id: string;
+  versionId?: string | null;
+  entryFile: string;
+  runtime: 'python' | 'node';
+  args: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  outputFiles?: ScriptOutputFile[];
+  createdAt: string;
+}
+
+export interface ScriptInspectResponse {
+  appId: string;
+  versionId: string | null;
+  versionNumber: number | null;
+  entries: ScriptEntryFile[];
+  defaultEntry: string | null;
+  sampleFiles: string[];
+  history: ScriptRunResult[];
 }
 
 export interface Asset {
@@ -290,9 +405,9 @@ export interface Draft {
 export interface ImportManifest {
   uploadId: string;
   name: string;
-  format: 'html' | 'zip';
+  format: 'html' | 'zip' | 'script';
   framework: string;
-  projectKind?: 'static' | 'vite' | 'service' | null;
+  projectKind?: 'static' | 'vite' | 'service' | 'script' | null;
   deployable: boolean;
   unsupportedReason: string | null;
   fileCount: number;
@@ -305,7 +420,7 @@ export interface ImportManifest {
 
 export interface ImportCandidate {
   dir: string;
-  kind: 'static' | 'vite' | 'service';
+  kind: 'static' | 'vite' | 'service' | 'script';
   framework: string;
   label: string;
   prebuilt: boolean;
@@ -333,6 +448,8 @@ export interface Meta {
   skillhub?: boolean;
   /** 模型与额度以五星AI岛为准：模型列表改用 /api/llm/models，并显示个人额度 */
   fivestar?: boolean;
+  /** 是否开启管理员发布审核门禁（Vibe Coding 应用登记表） */
+  publishReviewRequired?: boolean;
 }
 
 export interface LlmModel {
@@ -1984,6 +2101,7 @@ export interface AdminOverview {
     recentHits24h: number;
     buckets: AdminRateLimitBucket[];
   };
+  pendingPublishReviewCount?: number;
   auditLogs: AdminAuditLogItem[];
 }
 

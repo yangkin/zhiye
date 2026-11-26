@@ -32,6 +32,20 @@ public final class ServiceRuntimeDetector {
     private static final List<String> FRONTEND_HINTS = List.of("frontend", "web", "client", "ui", "portal", "admin");
     private static final Pattern EXPOSE_PORT = Pattern.compile("(?im)^\\s*EXPOSE\\s+(\\d{2,5})\\b");
     private static final Pattern HEALTH_ROUTE = Pattern.compile("['\"`](/healthz?|/api/healthz?|/actuator/health)['\"`]");
+    private static final Pattern PY_WEB_REQS = Pattern.compile(
+            "(?i)\\b(fastapi|flask|django|streamlit|uvicorn|gunicorn|aiohttp|tornado|sanic|starlette|gradio|bottle|falcon|quart)\\b");
+    private static final Pattern PY_WEB_CODE = Pattern.compile(
+            "(FastAPI\\s*\\(|Flask\\s*\\(|HTTPServer|ThreadingHTTPServer|BaseHTTPRequestHandler|http\\.server|wsgiref|socketserver|uvicorn\\.run|streamlit|aiohttp\\.web|tornado\\.web|app\\.run\\s*\\()");
+    private static final Pattern NODE_WEB_CODE = Pattern.compile(
+            "(createServer\\s*\\(|\\.listen\\s*\\(|\\bexpress\\s*\\(|\\bfastify\\s*\\(|\\bnew\\s+Koa\\s*\\(|\\bnew\\s+Hono\\s*\\()");
+
+    public static boolean looksLikePythonWebSource(String src) {
+        return src != null && PY_WEB_CODE.matcher(src).find();
+    }
+
+    public static boolean looksLikeNodeWebSource(String src) {
+        return src != null && NODE_WEB_CODE.matcher(src).find();
+    }
 
     public static Optional<Spec> detect(Set<String> files, Function<String, String> reader) {
         if (files == null || files.isEmpty()) return Optional.empty();
@@ -83,10 +97,14 @@ public final class ServiceRuntimeDetector {
         // 先探测具体语言（Python / Go / Java / Node），这样即使仓库自带 Dockerfile，
         // 本地隔离进程也能准确编译启动，同时 K8s Kaniko 模式仍会自动优先采用仓库的自定义 Dockerfile。
 
-        // Python
+        // Python（仅当明确包含 Web/HTTP 框架或服务监听代码时按常驻服务托管；纯脚本交给 script 流程）
+        String anyPy = findRootByExt(dir, List.of(".py"), files);
         if (has(dir, "requirements.txt", files) || has(dir, "pyproject.toml", files) || has(dir, "manage.py", files)
-                || hasAny(dir, List.of("app.py", "main.py", "server.py"), files)) {
-            return Optional.of(detectPython(dir, files, reader));
+                || hasAny(dir, List.of("app.py", "main.py", "server.py"), files)
+                || (anyPy != null && looksLikePythonWebSource(safeRead(dir, anyPy, reader)))) {
+            if (isPythonWebService(dir, files, reader) || (anyPy != null && looksLikePythonWebSource(safeRead(dir, anyPy, reader))) || has(dir, "Dockerfile", files)) {
+                return Optional.of(detectPython(dir, files, reader));
+            }
         }
 
         // Go
@@ -104,6 +122,17 @@ public final class ServiceRuntimeDetector {
         if (has(dir, "package.json", files)) {
             Optional<Spec> node = detectNodeServer(dir, files, reader);
             if (node.isPresent()) return node;
+        } else {
+            // 无 package.json 的零依赖 Node HTTP 服务（例如 node:http 的 server.js / api.mjs）
+            String rawNodeEntry = firstPresent(dir, List.of("server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs"), files);
+            if (rawNodeEntry == null) rawNodeEntry = findRootByExt(dir, List.of(".mjs", ".js", ".cjs"), files);
+            if (rawNodeEntry != null) {
+                String src = safeRead(dir, rawNodeEntry, reader);
+                if (looksLikeNodeWebSource(src)) {
+                    return Optional.of(new Spec("node", "Node.js HTTP 服务", "", dir, "", "node " + rawNodeEntry,
+                            8080, guessHealthPath(src), 512, 500));
+                }
+            }
         }
 
         // 无已知语言标记但包含自定义 Dockerfile 时，按自定义容器服务托管
@@ -121,9 +150,20 @@ public final class ServiceRuntimeDetector {
         return Optional.empty();
     }
 
+    private static boolean isPythonWebService(String dir, Set<String> files, Function<String, String> reader) {
+        if (has(dir, "manage.py", files)) return true;
+        String reqs = safeRead(dir, "requirements.txt", reader) + "\n" + safeRead(dir, "pyproject.toml", reader);
+        if (PY_WEB_REQS.matcher(reqs).find()) return true;
+        for (String name : List.of("main.py", "app.py", "server.py", "wsgi.py", "asgi.py")) {
+            if (has(dir, name, files) && looksLikePythonWebSource(safeRead(dir, name, reader))) return true;
+        }
+        return false;
+    }
+
     private static Spec detectPython(String dir, Set<String> files, Function<String, String> reader) {
         String reqs = (safeRead(dir, "requirements.txt", reader) + "\n" + safeRead(dir, "pyproject.toml", reader)).toLowerCase(Locale.ROOT);
         String entry = firstPresent(dir, List.of("main.py", "app.py", "server.py", "wsgi.py", "asgi.py", "manage.py"), files);
+        if (entry == null) entry = findRootByExt(dir, List.of(".py"), files);
         String entrySrc = entry == null ? "" : safeRead(dir, entry, reader);
         String health = guessHealthPath(entrySrc);
         String build = has(dir, "requirements.txt", files) ? "pip install --no-cache-dir -r requirements.txt"
@@ -232,12 +272,16 @@ public final class ServiceRuntimeDetector {
 
         String mainEntry = pkg.path("main").asText("").trim();
         String entry = !mainEntry.isEmpty() && has(dir, mainEntry, files) ? mainEntry
-                : firstPresent(dir, List.of("server.js", "server.mjs", "index.js", "index.mjs", "app.js", "src/server.js", "src/index.js"), files);
-
-        if (serverFw == null && startScript.isEmpty()) return Optional.empty();
-        if (serverFw == null) serverFw = "Node.js 服务端";
+                : firstPresent(dir, List.of("server.js", "server.mjs", "server.cjs", "index.js", "index.mjs", "app.js", "app.mjs", "src/server.js", "src/index.js"), files);
 
         String src = entry == null ? "" : safeRead(dir, entry, reader);
+        if (serverFw == null && startScript.isEmpty() && !looksLikeNodeWebSource(src)) return Optional.empty();
+        // 无主流 Web 框架且入口脚本未监听端口（纯 CLI/数据处理脚本），交由 script 流程在线运行
+        if (serverFw == null && !has(dir, "Dockerfile", files) && !looksLikeNodeWebSource(src) && !src.contains("PORT")) {
+            return Optional.empty();
+        }
+        if (serverFw == null) serverFw = "Node.js 服务端";
+
         String startCmd = !startScript.isEmpty() ? "npm start" : ("node " + (entry != null ? entry : "index.js"));
         String buildCmd = !buildScript.isEmpty() ? "npm run build" : "";
         return Optional.of(new Spec("node", serverFw, "", dir, buildCmd, startCmd, 8080, guessHealthPath(src), 512, 500));
@@ -326,6 +370,18 @@ public final class ServiceRuntimeDetector {
 
     private static boolean hasAny(String dir, List<String> names, Set<String> files) {
         return firstPresent(dir, names, files) != null;
+    }
+
+    private static String findRootByExt(String dir, List<String> exts, Set<String> files) {
+        String prefix = dir.isEmpty() ? "" : dir + "/";
+        for (String f : files) {
+            if (!f.startsWith(prefix)) continue;
+            String rel = f.substring(prefix.length());
+            if (rel.contains("/")) continue;
+            String lower = rel.toLowerCase(Locale.ROOT);
+            for (String ext : exts) if (lower.endsWith(ext)) return rel;
+        }
+        return null;
     }
 
     private static String firstPresent(String dir, List<String> names, Set<String> files) {

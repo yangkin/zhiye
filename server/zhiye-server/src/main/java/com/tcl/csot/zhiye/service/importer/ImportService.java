@@ -71,13 +71,16 @@ public class ImportService {
             } else if (lower.endsWith(".zip")) {
                 format = "zip";
                 r = ImportInspector.inspectZip(tmp, limits());
+            } else if (lower.endsWith(".py") || lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
+                format = "script";
+                r = ImportInspector.inspectScript(original, Files.readAllBytes(tmp), limits());
             } else {
-                throw ImportInspector.invalid("只支持 .html、.htm、.zip 文件或项目文件夹");
+                throw ImportInspector.invalid("只支持 .html、.htm、.zip、.py、.js、.mjs、.cjs 文件或项目文件夹");
             }
             String id = Ids.newId("up");
-            String key = "uploads/" + id + "/" + ("html".equals(format) ? "index.html" : "archive.zip");
+            String key = "uploads/" + id + "/" + ("html".equals(format) ? "index.html" : "script".equals(format) ? original : "archive.zip");
             store.put(key, tmp);
-            String name = folderName != null && !folderName.isBlank() ? folderName.trim() : original.replaceFirst("\\.(html?|zip)$", "");
+            String name = folderName != null && !folderName.isBlank() ? folderName.trim() : original.replaceFirst("\\.(html?|zip|py|mjs|cjs|js)$", "");
             if (name.length() > 40) name = name.substring(0, 40);
             Map<String, Object> manifest = new LinkedHashMap<>();
             manifest.put("uploadId", id);
@@ -117,8 +120,8 @@ public class ImportService {
         String type = body.path("type").asText(Catalog.DEFAULT_TYPE);
         if (type.isBlank()) type = Catalog.DEFAULT_TYPE;
         if (!Catalog.TYPES.contains(type)) throw ApiException.validation(Catalog.TYPE_ERROR);
-        var up = jdbc.sql("select object_key, format, folder_name, manifest from upload where id = ? and workspace_id = ?")
-                .params(uploadId, ws).query((rs, i) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)})
+        var up = jdbc.sql("select object_key, format, folder_name, manifest, file_name from upload where id = ? and workspace_id = ?")
+                .params(uploadId, ws).query((rs, i) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)})
                 .optional().orElseThrow(() -> ApiException.notFound("上传文件"));
         JsonNode manifest = Json.read(up[3]);
         if (!manifest.path("deployable").asBoolean())
@@ -163,6 +166,7 @@ public class ImportService {
         input.put("objectKey", up[0]);
         input.put("format", up[1]);
         if (up[2] != null) input.put("folderName", up[2]);
+        if (up.length > 4 && up[4] != null && !up[4].isBlank()) input.put("fileName", up[4]);
         input.put("projectKind", kind);
         input.put("rootDir", candidate.path("dir").asText(""));
         if (prebuiltDir != null && "vite".equals(kind)) input.put("prebuiltDir", prebuiltDir);

@@ -58,6 +58,33 @@ public final class ImportInspector {
                 List.of(new ProjectAnalyzer.Candidate("", "static", "HTML", "根目录 · HTML", false)), List.of());
     }
 
+    /** 单文件 Python / Node.js 脚本导入预检（支持无页面脚本在线运行；若包含 HTTP 监听代码则同时提供服务托管候选）。 */
+    public static Result inspectScript(String fileName, byte[] data, Limits limits) {
+        if (data.length > limits.maxFile()) throw invalid("脚本文件太大：单个文件最多 " + (limits.maxFile() >> 20) + " MB");
+        String src = new String(data, StandardCharsets.UTF_8);
+        if (src.trim().isEmpty()) throw invalid("脚本文件是空的，请选择有内容的 Python 或 JS 文件");
+        String lower = fileName.toLowerCase(Locale.ROOT);
+        boolean isPy = lower.endsWith(".py");
+        String scriptFw = isPy ? "Python 脚本" : "Node.js (JS) 脚本";
+        boolean looksWeb = isPy
+                ? com.tcl.csot.zhiye.service.runtime.ServiceRuntimeDetector.looksLikePythonWebSource(src)
+                : com.tcl.csot.zhiye.service.runtime.ServiceRuntimeDetector.looksLikeNodeWebSource(src);
+        List<ProjectAnalyzer.Candidate> candidates = new ArrayList<>();
+        List<ProjectAnalyzer.Warning> warnings = new ArrayList<>();
+        if (looksWeb) {
+            String svcFw = isPy ? "Python HTTP 服务" : "Node.js HTTP 服务";
+            candidates.add(new ProjectAnalyzer.Candidate("", "service", svcFw, "根目录 · " + svcFw + "（单体服务托管）", false));
+            candidates.add(new ProjectAnalyzer.Candidate("", "script", scriptFw, "根目录 · " + scriptFw + "（在线运行脚本）", false));
+            warnings.add(new ProjectAnalyzer.Warning("info", "headless-api", "识别到无页面 HTTP 接口脚本（" + svcFw + "）",
+                    "检测到服务监听代码，默认按单体后端服务托管；若只需要单次执行查看输出，也可改选「在线运行脚本」。"));
+            return new Result(svcFw, true, null, "service", 1, data.length, List.of(new FileInfo(fileName, data.length)), "", candidates, warnings);
+        }
+        candidates.add(new ProjectAnalyzer.Candidate("", "script", scriptFw, "根目录 · " + scriptFw + "（在线运行脚本）", false));
+        warnings.add(new ProjectAnalyzer.Warning("info", "headless-script", "无页面脚本项目（" + scriptFw + "）",
+                "导入后无需前端页面，可直接在工作台「在线运行」传入命令行参数与标准输入测试，或用 AI 迭代扩展。"));
+        return new Result(scriptFw, true, null, "script", 1, data.length, List.of(new FileInfo(fileName, data.length)), "", candidates, warnings);
+    }
+
     public static Result inspectZip(Path zip, Limits limits) throws IOException {
         long size = Files.size(zip);
         if (size > limits.maxUpload()) throw invalid("压缩包太大：最多 " + (limits.maxUpload() >> 20) + " MB，请删掉不需要的文件后重试");

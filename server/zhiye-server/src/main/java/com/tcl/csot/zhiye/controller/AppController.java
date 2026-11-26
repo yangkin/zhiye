@@ -290,6 +290,30 @@ public class AppController {
         return apps.saveCode(ws(), id, body, key);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.app.PublishReviewService publishReviews;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.auth.AuthService authService;
+
+    @GetMapping("/{id}/publish-requests")
+    public Map<String, Object> listPublishRequests(@PathVariable String id, jakarta.servlet.http.HttpServletRequest req) {
+        var user = authService == null ? null : authService.currentUser(req).orElse(null);
+        return publishReviews.listForApp(ws(), id, user);
+    }
+
+    @PostMapping("/{id}/publish-requests")
+    public Map<String, Object> submitPublishRequest(@PathVariable String id,
+                                                    @RequestBody(required = false) JsonNode body,
+                                                    jakarta.servlet.http.HttpServletRequest req) {
+        var user = authService == null ? null : authService.currentUser(req).orElse(null);
+        return publishReviews.submit(ws(), id, body == null ? Json.obj() : body, user);
+    }
+
+    @PostMapping("/{id}/publish-requests/{reqId}/cancel")
+    public Map<String, Object> cancelPublishRequest(@PathVariable String id, @PathVariable String reqId) {
+        return publishReviews.cancel(ws(), id, reqId);
+    }
+
     @PostMapping("/{id}/publish")
     public Map<String, Object> publish(@PathVariable String id, @RequestBody(required = false) JsonNode body) {
         String workspaceId = ws();

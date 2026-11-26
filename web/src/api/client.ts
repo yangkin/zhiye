@@ -702,6 +702,24 @@ export const api = {
   adminFeishuCardAction: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/admin/feishu/card-action', { method: 'POST', body: input }),
 
+  // 无页面 Python / Node.js 脚本在线运行
+  scriptFiles: (appId: string, versionId?: string) =>
+    request<import('./types').ScriptInspectResponse>(`/api/apps/${enc(appId)}/script/files` + qs({ versionId })),
+  scriptRun: (
+    appId: string,
+    body: { versionId?: string; entryFile: string; args?: string; stdin?: string; timeoutSeconds?: number; env?: Record<string, string> },
+  ) => request<import('./types').ScriptRunResult>(`/api/apps/${enc(appId)}/script/run`, { method: 'POST', body }),
+
+  // 发布审核（Vibe Coding 应用登记表）
+  publishRequests: (appId: string) =>
+    request<import('./types').PublishRequestListResponse>(`/api/apps/${enc(appId)}/publish-requests`),
+  submitPublishRequest: (
+    appId: string,
+    body: { versionId?: string; form: import('./types').PublishRegistrationForm },
+  ) => request<import('./types').PublishRequestItem>(`/api/apps/${enc(appId)}/publish-requests`, { method: 'POST', body }),
+  cancelPublishRequest: (appId: string, reqId: string) =>
+    request<import('./types').PublishRequestItem>(`/api/apps/${enc(appId)}/publish-requests/${enc(reqId)}/cancel`, { method: 'POST', body: {} }),
+
   // 导入
   uploadImport: (file: Blob, fileName: string, folderName?: string, signal?: AbortSignal) => {
     const form = new FormData();
@@ -723,6 +741,18 @@ export const api = {
 
   // 管理控制台治理与运维
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),
+  adminPublishRequests: (opts: { status?: string; q?: string } = {}) =>
+    request<import('./types').AdminPublishRequestsResponse>('/api/admin/publish-requests' + qs(opts)),
+  adminApprovePublishRequest: (reqId: string, comment?: string) =>
+    request<{ ok: boolean; request: import('./types').PublishRequestItem; siteUrl: string; versionId: string }>(
+      `/api/admin/publish-requests/${enc(reqId)}/approve`,
+      { method: 'POST', body: { comment: comment ?? '' } },
+    ),
+  adminRejectPublishRequest: (reqId: string, comment: string) =>
+    request<{ ok: boolean; request: import('./types').PublishRequestItem }>(
+      `/api/admin/publish-requests/${enc(reqId)}/reject`,
+      { method: 'POST', body: { comment } },
+    ),
   adminWorkspaceProfile: (wsId: string) =>
     request<import('./types').AdminWorkspaceProfile>(`/api/admin/workspaces/${enc(wsId)}/profile`),
   adminUpdateQuota: (

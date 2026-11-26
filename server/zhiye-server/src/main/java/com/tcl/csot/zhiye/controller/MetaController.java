@@ -62,6 +62,7 @@ public class MetaController {
         // 五星模式：模型列表与额度改从 /api/llm/models、/api/llm/quota 取（以五星AI岛为准）
         m.put("fivestar", fivestar.enabled());
         m.put("skillhub", skillhub.enabled());
+        m.put("publishReviewRequired", props.publish().reviewRequired());
         // 内置技能：编码与问答时由模型按需加载，这里只用于在技能选择器里展示
         m.put("builtinSkills", skillRefs.builtinList());
         // 登录页也会读取 meta；此时没有工作空间，不能因为查询安装列表返回 401

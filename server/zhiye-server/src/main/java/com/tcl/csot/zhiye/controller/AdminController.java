@@ -31,6 +31,8 @@ public class AdminController {
 
     @Autowired(required = false)
     private ClusterSandboxService clusterSandbox;
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.app.PublishReviewService publishReviews;
 
     public AdminController(AdminService admin, CurrentPrincipal principal) {
         this.admin = admin;
@@ -218,6 +220,34 @@ public class AdminController {
                                               HttpServletRequest req) throws Exception {
         String actor = admin.requireActor(req, principal.workspaceId());
         return admin.controlMonolithService(appId, action, actor);
+    }
+
+    // ---------- 发布审核（Vibe Coding 应用登记表审批） ----------
+    @GetMapping("/publish-requests")
+    public Map<String, Object> listPublishRequests(@RequestParam(required = false) String status,
+                                                   @RequestParam(required = false) String q,
+                                                   HttpServletRequest req) {
+        admin.requireActor(req, principal.workspaceId());
+        return publishReviews == null ? Map.of("pendingCount", 0, "items", java.util.List.of())
+                : publishReviews.adminList(status, q);
+    }
+
+    @PostMapping("/publish-requests/{reqId}/approve")
+    public Map<String, Object> approvePublishRequest(@PathVariable String reqId,
+                                                     @RequestBody(required = false) JsonNode body,
+                                                     HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        String comment = body == null ? "" : body.path("comment").asText("");
+        return publishReviews.adminApprove(reqId, comment, actor);
+    }
+
+    @PostMapping("/publish-requests/{reqId}/reject")
+    public Map<String, Object> rejectPublishRequest(@PathVariable String reqId,
+                                                    @RequestBody(required = false) JsonNode body,
+                                                    HttpServletRequest req) {
+        String actor = admin.requireActor(req, principal.workspaceId());
+        String comment = body == null ? "" : body.path("comment").asText("");
+        return publishReviews.adminReject(reqId, comment, actor);
     }
 
     // ---------- 帮助知识库在线维护（实时同步帮助文档 + 小织机器人） ----------

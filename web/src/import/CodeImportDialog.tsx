@@ -56,7 +56,13 @@ function footerText(m: ImportManifest, selectedKey: string) {
   const c = chosen(m, selectedKey);
   const risks = selectedKey === primaryKey(m) ? (m.warnings ?? []).filter((w) => w.level === 'risk').length : 0;
   const what =
-    c?.kind === 'service' ? '自动构建并启动单体服务托管' : c?.kind === 'vite' ? '安装依赖、构建并部署' : '保存文件并部署';
+    c?.kind === 'service'
+      ? '自动构建并启动单体服务托管'
+      : c?.kind === 'script'
+        ? '保存为无页面脚本项目，支持工作台在线运行'
+        : c?.kind === 'vite'
+          ? '安装依赖、构建并部署'
+          : '保存文件并部署';
   return `确认后会${what}${c && c.dir ? ` ${dirLabel(c.dir)}` : ''}，完成后进入应用工作台。${risks ? `体检发现 ${risks} 项风险，部署后部分功能可能不可用。` : ''}`;
 }
 
@@ -91,9 +97,11 @@ function ImportReport({
                       ? '已构建产物，直接部署，不安装依赖'
                       : x.kind === 'service'
                         ? `${x.framework} · 单体后端/全栈托管`
-                        : x.kind === 'vite'
-                          ? `${x.framework} · 从源码构建`
-                          : x.framework}
+                        : x.kind === 'script'
+                          ? `${x.framework} · 无页面脚本在线运行`
+                          : x.kind === 'vite'
+                            ? `${x.framework} · 从源码构建`
+                            : x.framework}
                   </small>
                 </span>
               </label>
@@ -255,7 +263,8 @@ function Dialog() {
       const initCandidate = chosen(m, initKey);
       setManifest(m);
       setSelectedKey(initKey);
-      setType(initCandidate?.kind === 'service' || m.projectKind === 'service' ? '全栈应用' : '开发网站');
+      const initKind = initCandidate?.kind ?? m.projectKind;
+      setType(initKind === 'service' ? '全栈应用' : initKind === 'script' ? '日常开发' : '开发网站');
       setName((m.name || checked.name).slice(0, 40));
       keyRef.current = null;
       setPhase('review');
@@ -320,7 +329,7 @@ function Dialog() {
         <input
           ref={fileRef}
           type="file"
-          accept=".zip,.html,.htm"
+          accept=".zip,.html,.htm,.py,.js,.mjs,.cjs"
           hidden
           onChange={(e) => {
             void read(Array.from(e.target.files ?? []));
@@ -386,10 +395,10 @@ function Dialog() {
             >
               <FolderArt />
               <h2>代码导入</h2>
-              <p>支持纯前端项目（HTML、Vite / Vue / React / Umi / dist 产物）以及 Python、Node.js、Java、Go 单体后端与前后端一体项目</p>
-              <p>自动识别运行环境并容器化托管（同域免跨域、内置 PostgreSQL Schema、/data 持久化与自动休眠）</p>
+              <p>支持静态网页、前端工程、Python / Node.js / Java / Go 单体服务，以及无页面 Python / JS 脚本（.py / .js / .mjs）</p>
+              <p>自动识别运行形态：网页与全栈自动托管，纯脚本导入后可直接在线运行传参、查看输出与 AI 迭代</p>
               <p>
-                拖拽项目文件夹、.zip 或 .html 到这里，或{' '}
+                拖拽项目文件夹、.zip、.html 或 .py / .js 脚本到这里，或{' '}
                 <button type="button" className="code-inline" disabled={busy} onClick={() => fileRef.current?.click()}>
                   选择文件
                 </button>
@@ -418,7 +427,8 @@ function Dialog() {
                     <span className="code-project-badge">{chosen(manifest, selectedKey)?.framework ?? manifest.framework}</span>
                     <h3>{name || manifest.name}</h3>
                     <p>
-                      {manifest.fileCount} 个文件 · {sizeLabel(manifest.totalSize)} · {manifest.format === 'zip' ? 'ZIP / 项目文件夹' : 'HTML 页面'}
+                      {manifest.fileCount} 个文件 · {sizeLabel(manifest.totalSize)} ·{' '}
+                      {manifest.format === 'zip' ? 'ZIP / 项目文件夹' : manifest.format === 'script' ? '单文件脚本' : 'HTML 页面'}
                     </p>
                   </div>
                   <button type="button" className="code-text-button" onClick={reset}>
@@ -448,7 +458,7 @@ function Dialog() {
                   selectedKey={selectedKey}
                   onSelect={(c) => {
                     setSelectedKey(candidateKey(c));
-                    setType(c.kind === 'service' ? '全栈应用' : '开发网站');
+                    setType(c.kind === 'service' ? '全栈应用' : c.kind === 'script' ? '日常开发' : '开发网站');
                     keyRef.current = null;
                   }}
                 />

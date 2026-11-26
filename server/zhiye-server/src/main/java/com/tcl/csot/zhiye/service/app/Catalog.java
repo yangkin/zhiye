@@ -30,17 +30,27 @@ public final class Catalog {
         return "template";
     }
 
-    /** 需求像「一个命令行脚本 / 数据处理程序」时，产出脚本项目：没有页面预览，只交付代码 */
+    /** 需求像「一个命令行脚本 / 数据处理程序（Python / Node.js / JS）」时，产出脚本项目：没有页面预览，支持在线运行与导出代码 */
     private static final java.util.regex.Pattern SCRIPT_HINT = java.util.regex.Pattern.compile(
-            "(命令行|脚本|批处理|shell|bash|python|py 程序|python3|excel|excel数据|表格清洗|数据清洗|csv|爬虫|定时任务脚本|cli)",
+            "(命令行|脚本|批处理|shell|bash|python|py\\s*程序|python3|node\\.?js|\\bnode\\b|javascript|\\bjs\\s*脚本|\\bjs\\s*程序|typescript|\\bts\\s*脚本|excel|excel数据|表格清洗|数据清洗|数据处理|csv|日志分析|爬虫|定时任务脚本|自动化脚本|cli)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern EXPLICIT_NO_PAGE_SCRIPT = java.util.regex.Pattern.compile(
+            "(不要页面|不需要页面|无页面|没有页面|纯脚本|纯命令行|只写脚本|python\\s*脚本|py\\s*脚本|js\\s*脚本|node\\.?js\\s*脚本|node\\s*脚本|命令行工具)",
             java.util.regex.Pattern.CASE_INSENSITIVE);
     private static final java.util.regex.Pattern WEB_HINT = java.util.regex.Pattern.compile(
             "(网页|页面|网站|官网|看板|仪表盘|界面|按钮|表单|H5|前端)", java.util.regex.Pattern.CASE_INSENSITIVE);
 
-    /** 有页面需求时优先做页面；只有明显是脚本类需求才走脚本项目 */
+    /** 有页面需求时优先做页面；明确是无页面 Python/JS/命令行脚本类需求时走脚本项目 */
     public static boolean looksLikeScript(String prompt) {
         if (prompt == null || prompt.isBlank()) return false;
+        if (EXPLICIT_NO_PAGE_SCRIPT.matcher(prompt).find()) return true;
         return SCRIPT_HINT.matcher(prompt).find() && !WEB_HINT.matcher(prompt).find();
+    }
+
+    /** 即使用户未切到「日常开发」，明确要求无页面 Python / JS 脚本时也直接走脚本项目 */
+    public static boolean explicitlyNoPageScript(String prompt) {
+        if (prompt == null || prompt.isBlank()) return false;
+        return EXPLICIT_NO_PAGE_SCRIPT.matcher(prompt).find();
     }
 
     private static final java.util.regex.Pattern SPRING_BOOT_HINT = java.util.regex.Pattern.compile(

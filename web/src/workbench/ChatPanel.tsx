@@ -1444,7 +1444,7 @@ function CompletionCard({
         <button type="button" className="text-button" onClick={() => useChat.getState().requestFocus()}>
           继续修改
         </button>
-        {!skill && !cloudEnabled && onEnableCloud ? (
+        {!skill && app.projectKind !== 'script' && !cloudEnabled && onEnableCloud ? (
           <button type="button" className="text-button" onClick={onEnableCloud}>
             启用云服务
           </button>
@@ -1503,21 +1503,26 @@ function CompletionCard({
           <button
             className="subtle-button"
             onClick={onFocusPreview}
-            disabled={!skill && previewVisible}
-            title={!skill && previewVisible ? '当前已在预览' : undefined}
+            disabled={!skill && app.projectKind !== 'script' && previewVisible}
+            title={!skill && app.projectKind !== 'script' && previewVisible ? '当前已在预览' : undefined}
           >
-            <Icon name={skill ? 'code' : 'eye'} />
-            {skill ? '查看文件' : previewVisible ? '已打开预览' : '打开预览'}
+            <Icon name={app.projectKind === 'script' ? 'play' : skill ? 'code' : 'eye'} />
+            {app.projectKind === 'script' ? '在线运行' : skill ? '查看文件' : previewVisible ? '已打开预览' : '打开预览'}
           </button>
           {skill ? (
             <button className="dark-button" aria-label="发布技能" onClick={onPublish}>
               <Icon name="cloud" />
               发布技能
             </button>
+          ) : app.projectKind === 'script' ? (
+            <button className="dark-button" aria-label="导出源码" onClick={onPublish}>
+              <Icon name="download" />
+              导出源码
+            </button>
           ) : (
             <button className="dark-button" onClick={onPublish}>
               <Icon name="cloud" />
-              {isOnline ? '已发布' : '发布应用'}
+              {app.pendingPublishRequest ? '审核中' : isOnline ? '已发布' : '发布应用'}
             </button>
           )}
         </div>

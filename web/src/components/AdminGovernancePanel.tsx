@@ -26,8 +26,9 @@ import { AdminKnowledgePanel } from './AdminKnowledgePanel';
 import { AdminLoginAllowlistPanel } from './AdminLoginAllowlistPanel';
 import { AdminMcpPanel } from './AdminMcpPanel';
 import { AdminFeishuConnectorPanel } from './AdminFeishuConnectorPanel';
+import { AdminPublishReviewPanel } from './AdminPublishReviewPanel';
 
-export type GovTab = 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
+export type GovTab = 'reviews' | 'handover' | 'sites' | 'feedback' | 'trash' | 'ops' | 'knowledge' | 'users';
 
 function OwnerBadge({
   ownerName,
@@ -125,6 +126,8 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   SERVICE_SLEEP: '休眠单体服务',
   SERVICE_STOP: '强停单体服务',
   SERVICE_START: '启动单体服务',
+  PUBLISH_APPROVE: '通过发布审核并上线',
+  PUBLISH_REJECT: '驳回发布申请',
   RUNTIME_LOG_VIEW: '查看服务运行日志',
   RUNNER_LOG_DOWNLOAD: '下载 Runner 日志',
 };
@@ -169,7 +172,7 @@ export function AdminGovernancePanel({
   const normalizeGovTab = (raw: string | null): GovTab | null => {
     if (!raw) return null;
     if (raw === 'quota' || raw === 'quotas') return 'ops';
-    if (['handover', 'sites', 'feedback', 'trash', 'ops', 'knowledge', 'users'].includes(raw)) return raw as GovTab;
+    if (['reviews', 'handover', 'sites', 'feedback', 'trash', 'ops', 'knowledge', 'users'].includes(raw)) return raw as GovTab;
     return null;
   };
   const urlTab = normalizeGovTab(searchParams.get('tab'));
@@ -700,6 +703,8 @@ export function AdminGovernancePanel({
   );
   const fbUnclosedCount = fbOpenOnlyCount + fbInProgressCount;
 
+  const pendingPublishReviews = overview.pendingPublishReviewCount ?? 0;
+
   const pulseItems: {
     tab: GovTab;
     icon: IconName;
@@ -710,6 +715,16 @@ export function AdminGovernancePanel({
     alert?: boolean;
     healthy?: boolean;
   }[] = [
+    {
+      tab: 'reviews',
+      icon: 'check',
+      label: '发布审核',
+      value: pendingPublishReviews > 0 ? `${fmtNum(pendingPublishReviews)} 待审` : '0 待审',
+      sub: pendingPublishReviews > 0 ? 'Vibe Coding 登记表待审批' : '全部发布申请已处理',
+      tone: pendingPublishReviews > 0 ? 'rose' : 'teal',
+      alert: pendingPublishReviews > 0,
+      healthy: pendingPublishReviews === 0,
+    },
     {
       tab: 'handover',
       icon: 'grid',
@@ -845,6 +860,11 @@ export function AdminGovernancePanel({
           </button>
         ))}
       </div>
+
+      {/* 模块 0：应用发布审核（Vibe Coding 应用登记表审批队列） */}
+      {govTab === 'reviews' ? (
+        <AdminPublishReviewPanel onReviewed={() => void invalidateAll()} />
+      ) : null}
 
       {/* ====================================================================
          模块 1：资产台账与交接（高频全平台应用检索置于首屏，低频离职批量交接可按需展开）

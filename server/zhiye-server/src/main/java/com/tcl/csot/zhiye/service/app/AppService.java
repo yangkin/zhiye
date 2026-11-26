@@ -48,6 +48,9 @@ public class AppService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.workspace.WorkspaceMemoryService memories;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.config.ZhiyeProperties props;
+
     public AppService(AppRepository apps, TaskService taskService, TaskRepository tasks, MessageRepository messages,
                       DraftRepository drafts, VersionRepository versions, VersionService versionService, GitService git,
                       Views views, JdbcClient jdbc, com.tcl.csot.zhiye.service.workspace.QuotaService quota) {
@@ -104,8 +107,9 @@ public class AppService {
         String id = Ids.newId("app");
         // 开发skill 跳过创造计划：计划文档就是用户需求，直接进入生成
         boolean skill = Catalog.SKILL_TYPE.equals(type);
-        // 明显是命令行/脚本的需求（例如「写一个 python 程序清洗 excel」）→ 脚本项目，没有页面预览
-        boolean script = "日常开发".equals(type) && Catalog.looksLikeScript(prompt);
+        // 明显是无页面 Python/JS/命令行脚本的需求（例如「写一个 python / js 脚本清洗数据」）→ 脚本项目，支持在线运行与导出代码
+        boolean script = ("日常开发".equals(type) && Catalog.looksLikeScript(prompt))
+                || (!skill && !Catalog.FULLSTACK_TYPE.equals(type) && Catalog.explicitlyNoPageScript(prompt));
         String kind = script ? "script" : Catalog.projectKindFor(type);
         boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(prompt);
         boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(prompt);
@@ -534,6 +538,15 @@ public class AppService {
 
     // ---------- 发布 ----------
     public Map<String, Object> publish(String ws, String id, String versionId) {
+        if (props != null && props.publish().reviewRequired()) {
+            throw new ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "PUBLISH_REVIEW_REQUIRED",
+                    "正式发布需填写《Vibe Coding 应用登记表》并经管理员审核通过后方可上线");
+        }
+        return publishApproved(ws, id, versionId);
+    }
+
+    /** 审核通过后（或未开启发布审核门禁时）执行正式发布上线。 */
+    public Map<String, Object> publishApproved(String ws, String id, String versionId) {
         AppRow app = require(ws, id);
         if (app.isSkill()) throw skillNotPublishable();
         if (app.isScript()) throw scriptNotPublishable();

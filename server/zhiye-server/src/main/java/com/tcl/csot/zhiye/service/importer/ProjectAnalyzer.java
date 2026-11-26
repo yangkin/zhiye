@@ -86,6 +86,13 @@ public final class ProjectAnalyzer {
             String lbl = "根目录 · " + s.framework() + "（单体服务托管）";
             candidates.add(new Candidate("", "service", s.framework(), lbl, false));
         }
+        // 纯 Python / Node.js 无页面脚本项目探测（不依赖前端页面或常驻 HTTP 端口）
+        if (candidates.isEmpty()) {
+            String scriptFw = detectHeadlessScriptFramework();
+            if (scriptFw != null) {
+                candidates.add(new Candidate("", "script", scriptFw, "根目录 · " + scriptFw + "（在线运行脚本）", false));
+            }
+        }
         candidates.sort(Comparator.comparingInt(this::rank));
         if (candidates.isEmpty()) return unsupported(nodes, backend);
 
@@ -93,6 +100,11 @@ public final class ProjectAnalyzer {
         List<Warning> warnings = new ArrayList<>();
         if ("service".equals(primary.kind())) {
             serviceSpec.ifPresent(s -> serviceWarnings(s, warnings));
+            return new Report(primary.framework(), true, null, primary.kind(), primary.dir(), candidates, warnings);
+        }
+        if ("script".equals(primary.kind())) {
+            warnings.add(info("headless-script", "无页面脚本项目（" + primary.framework() + "）",
+                    "该项目不包含网页界面，导入后可直接在工作台「在线运行」传入命令行参数与标准输入测试、用 AI 迭代修改或导出源码包。"));
             return new Report(primary.framework(), true, null, primary.kind(), primary.dir(), candidates, warnings);
         }
         if (backend != null)
@@ -112,6 +124,21 @@ public final class ProjectAnalyzer {
             }
         }
         return new Report(primary.framework(), true, null, primary.kind(), primary.dir(), candidates, warnings);
+    }
+
+    private String detectHeadlessScriptFramework() {
+        boolean hasPy = false, hasJs = false;
+        for (String p : files.keySet()) {
+            String lower = p.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".py")) hasPy = true;
+            else if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) hasJs = true;
+        }
+        // 如果项目声明了不支持的后端语言（如 PHP/Rust/Ruby），不要误当成 JS 脚本
+        if (has("", "composer.json") || has("", "Cargo.toml") || has("", "Gemfile")) return null;
+        if (hasPy && hasJs) return "Python / Node.js 脚本";
+        if (hasPy) return "Python 脚本";
+        if (hasJs) return "Node.js (JS) 脚本";
+        return null;
     }
 
     private Report unsupported(Map<String, Node> nodes, String backend) {

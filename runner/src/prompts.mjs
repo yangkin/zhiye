@@ -63,13 +63,13 @@ const VUE = `
 - 完成后执行 \`npx vue-tsc --noEmit -p tsconfig.json\` 自查类型错误，有错就修，直到没有输出为止。`
 
 const SCRIPT = `
-## 项目结构（命令行脚本项目）
-- 这是一个命令行/数据处理脚本项目，**不产出网页**：不要创建 index.html、src/、package.json，也不需要构建。
-- 入口脚本放在工作区根目录（例如 main.py 或 clean_excel.py）；辅助脚本放 scripts/；样例数据放 examples/（体积要小）。
-- 只用标准库（Python 3）或 Node 内置模块；不能安装依赖，也不能联网。
-- 必须写 README.md：说明这个脚本做什么、怎么运行（命令行示例）、输入输出格式、参数说明。
-- 脚本要能直接运行：参数用 argparse（Python）或 process.argv（Node），没有参数时打印用法而不是报错堆栈。
-- 用 \`python3 main.py --help\` 或带一份小样例数据实际跑一遍自测，确认能跑通；自测产生的临时文件请删掉。`
+## 项目结构（无页面 Python / Node.js 命令行与数据处理脚本项目）
+- 这是一个无页面的 Python 3 或 Node.js (JS/MJS) 脚本项目，**不产出网页**：不要创建 index.html 或前端框架代码，也不需要构建。
+- 入口脚本放在工作区根目录（Python 优先 \`main.py\`，Node.js 优先 \`index.mjs\` 或 \`index.js\`）；辅助模块可放 \`scripts/\` 或 \`lib/\`；样例数据放 \`examples/\`（体积要小）。
+- 只用 Python 3 标准库或 Node.js 内置模块（\`node:fs\`、\`node:path\`、\`node:crypto\` 等）；不能联网安装依赖。
+- 必须写 \`README.md\`：说明这个脚本做什么、怎么运行（命令行示例）、输入输出格式、参数说明。
+- 脚本要能直接运行：参数用 \`argparse\`（Python）或 \`process.argv\`（Node），同时兼容命令行参数与标准输入（stdin）；无参数时输出清晰帮助信息或运行内置演示，不抛未捕获堆栈。
+- 写完后务必在沙箱里用 \`python3 main.py --help\` / \`node index.mjs --help\` 及小样例数据实际运行验证，确认退出码为 0、输出正确，并清理临时自测产物。`
 
 const STATIC = `
 ## 项目结构（静态 HTML 站点）
