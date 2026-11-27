@@ -42,8 +42,21 @@ public class AskService {
     public static final String FILE_OPEN = "[[file:", FILE_CLOSE = "[[/file]]";
     /** 计划阶段对话修订块：[[plan]] … [[/plan]]，服务端提取并自动更新 app.plan_doc */
     public static final String PLAN_OPEN = "[[plan]]", PLAN_CLOSE = "[[/plan]]";
-    /** 计划阶段一次对话的结果：回复正文、修订后的完整计划（未修订则为 null）、思考过程 */
-    public record PlanChatResult(String reply, String planDoc, String thinking) {}
+    /** 计划阶段对话自主开工标记：[[execute]]，服务端立即触发 generate 任务 */
+    public static final String EXECUTE_MARKER = "[[execute]]";
+    /** 计划阶段切换形态标记：[[shape:static|web|vue|script|service]] */
+    private static final java.util.regex.Pattern SHAPE_MARKER = java.util.regex.Pattern.compile(
+            "\\[\\[shape:\\s*(static|web|template|vue|script|service)\\s*\\]\\]",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.regex.Pattern PLAN_CTRL_TAGS = java.util.regex.Pattern.compile(
+            "\\[\\[(?:execute|shape:\\s*(?:static|web|template|vue|script|service))\\s*\\]\\]",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+    /** 计划阶段一次对话的结果：回复正文、修订后的完整计划（未修订则为 null）、思考过程、是否立即开工、形态切换 */
+    public record PlanChatResult(String reply, String planDoc, String thinking, boolean startGenerate, String switchProjectKind) {
+        public PlanChatResult(String reply, String planDoc, String thinking) {
+            this(reply, planDoc, thinking, false, null);
+        }
+    }
     /** 带文件的历史消息保留的长度（后续修改要看到整份文档） */
     public static final int MAX_FILE_CHARS = 40000;
     public static final int MAX_HISTORY = 12;
@@ -74,14 +87,17 @@ public class AskService {
               3. 需要时写一条反例：什么情况下结论要反过来
               4. 最后一行「一句话：……」，给一个能直接执行的结论
             - 需求还很宽泛模糊、缺少会直接影响架构或核心流程的关键信息时：简要给出核心方案，只问 1～2 个最关键的问题，其余写清你的默认假设，结尾说「确认这几点（或直接说开始），我马上动工」。
-            - **不要为了凑回合硬提问**：如果用户已经说清楚了想做什么（例如贴了完整文档/大纲、附了参考截图、描述了具体页面内容，或明确说「帮我做一个 / 生成一个 / 开始做 / 就这样做 / 直接生成」），**直接在回答第一行单独输出 `[[build:类型]]`**，第二行开始用 2～3 句话简明说明实现方案，系统会立刻进入创建，无需让用户再催一次！
+            - **不要为了凑回合硬提问**：如果用户已经说清楚了想做什么（例如贴了完整文档/大纲、附了参考截图、描述了具体页面内容，或明确说「帮我做一个 / 生成一个 / 开始做 / 就这样做 / 直接生成」），**直接在回答第一行单独输出构建标记**，第二行开始用 2～3 句话简明说明实现方案，系统会立刻进入创建，无需让用户再催一次！
+            - **自主决定「直接生成」还是「先出创造计划」**（减少不必要的确认弹窗）：
+              · **直接生成（跳过计划卡）**：当需求清晰自洽、形态明确、不需要多轮架构评审时（例如：单个/纯静态 HTML 页面、汇报/述职展示页、落地页、个人主页、简单小工具/计算器/倒计时、贴了完整大纲/文档/参考图、或用户说了「直接生成 / 不用出计划 / 马上写」），在标记末尾加 `|direct`，如 `[[build:开发网站|static|direct]]`（纯静态 HTML 页面）或 `[[build:日常开发|direct]]`（轻量单页工具）或 `[[build:开发网站|vue|direct]]`（明确指定 Vue 的简单页面），系统将直接开写代码！
+              · **先出创造计划（等待确认）**：当需求是多模块业务系统、多角色权限/审批流、前后端全栈应用、或仍有值得用户先确认范围/页面结构的较复杂项目时，输出标准 `[[build:类型]]`（不带 `|direct`），系统先整理创造计划供确认。
             - 回答末尾可以单独一行输出 [[next]] 建议一 | 建议二（2～3 个用户最可能的下一句话，用用户口吻，每个不超过 14 个字），
               系统会显示成可点击的按钮；没有合适的就不要输出。这一行不要放进代码块。
             - 只依据下面的产品知识和用户附上的技能包文件回答；不知道就说不知道，不要编造按钮、入口、日期。
             - 用户附上了技能包时，依据文件内容说明它是做什么的、怎么用、有哪些文件；没附就按产品知识回答。
             - 用户附上的技能包是用户自己生成或导入的；「织页内置技能」是平台提供的，问题涉及时可以用 read_skill 读取后再回答。
-            - 输出 `[[build:类型]]` 时，标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——那样系统不会开始创建，用户会以为卡住了。如果真的还缺影响实现的关键信息，先问清楚，不要输出 `[[build]]`。
-            - [[build:类型]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一，例如 [[build:日常开发]] 或 [[build:开发网站]]：
+            - 输出 `[[build:...]]` 时，标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——那样系统不会开始创建，用户会以为卡住了。如果真的还缺影响实现的关键信息，先问清楚，不要输出 `[[build]]`。
+            - [[build:类型]] 或 [[build:类型|形态|direct]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一；可选形态为 `static`（纯静态 HTML）/ `web`（React 应用）/ `vue`（Vue 应用）/ `script`（命令行脚本）：
               · 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（纯前端或结合内置共享云服务，无需独立后端服务托管）；
               · 开发网站：官网、活动页、展示页、单页 HTML / 静态网页（含根据 Word 文档、报告或截图生成 HTML 页面），或多角色前端站点；
               · 全栈应用：**仅当用户明确要求**「前后端一体 / 前后端分离 / 自定义后端 API / Vue + Java (Spring Boot) / React + Node Express / Python (FastAPI·Flask) / Go / 服务端持久化」时才选；**如果用户只是要写一个 HTML 页面、静态页、展示页、看板，或把 Word/图片生成 HTML，绝不要选 `[[build:全栈应用]]`（不要擅自引入 Node.js 后端和服务托管）**；
@@ -180,6 +196,10 @@ public class AskService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.context.annotation.Lazy
+    private com.tcl.csot.zhiye.service.version.VersionService versionService;
 
     public interface Sink {
         void event(String name, Object data) throws Exception;
@@ -509,7 +529,7 @@ public class AskService {
         StringBuilder answer = new StringBuilder();
         try {
             for (int round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-                boolean allowTools = (commit != null || builtins) && round < MAX_TOOL_ROUNDS;
+                boolean allowTools = (hasApp || commit != null || builtins) && round < MAX_TOOL_ROUNDS;
                 ObjectNode req = Json.obj();
                 req.put("model", route.model());
                 req.put("stream", true);
@@ -517,7 +537,7 @@ public class AskService {
                 req.put("reasoning_effort", hasApp ? "low" : "medium");
                 req.putObject("stream_options").put("include_usage", true);
                 req.set("messages", msgs.deepCopy());
-                if (allowTools) req.set("tools", toolDefs(commit != null, builtins, appId));
+                if (allowTools) req.set("tools", toolDefs(hasApp, commit != null, builtins, appId));
 
                 ObjectNode acc = Json.obj();
                 ArrayNode toolCalls = Json.M.createArrayNode();
@@ -592,7 +612,7 @@ public class AskService {
                     String id = call.path("id").asText("");
                     String name = call.path("function").path("name").asText("");
                     String args = call.path("function").path("arguments").asText("{}");
-                    String result = execTool(appId, commit, name, args);
+                    String result = execTool(ws, appId, commit, name, args, sink);
                     msgs.addObject().put("role", "tool").put("tool_call_id", id).put("content", result);
                 }
             }
@@ -657,7 +677,9 @@ public class AskService {
         var app = apps.findById(appId).filter(a -> a.workspaceId().equals(ws) && a.deletedAt() == null).orElse(null);
         if (app == null) return "";
         StringBuilder out = new StringBuilder();
-        out.append("\n【当前应用】名称：").append(app.name()).append("；类型：").append(app.type());
+        out.append("\n【当前应用】名称：").append(app.name()).append("；类型：").append(app.type())
+                .append("；形态：").append(app.projectKind())
+                .append("。（工作台自主操作：当用户要求给应用改名、查看历史版本、回到上一版/指定版本，或排查后明确要改代码时，请直接调用 rename_app / list_versions / restore_version / handoff_to_modify 工具完成，不要只回复「请点击右上角按钮」。）");
         if (dataSources != null) out.append(dataSources.summary(app.id()));
         if (cloud != null && cloud.enabled(app.id())) out.append("；已启用云服务（可用 cloud_data 工具看表结构和数据）");
         if (app.currentVersionId() == null) {
@@ -697,13 +719,18 @@ public class AskService {
         return sb.toString();
     }
 
-    private ArrayNode toolDefs(boolean appTools, boolean skillTool, String appId) {
+    private ArrayNode toolDefs(boolean hasApp, boolean appTools, boolean skillTool, String appId) {
         ArrayNode tools = Json.M.createArrayNode();
         if (skillTool) {
             ObjectNode p0 = Json.obj();
             p0.putObject("name").put("type", "string").put("description", "内置技能名，例如 charts-dashboard");
             p0.putObject("path").put("type", "string").put("description", "技能里的文件，默认 SKILL.md，也可以是 references/ 下的文件");
             tools.add(tool("read_skill", "读取一个织页内置技能的说明文件", p0, "name"));
+        }
+        if (hasApp) {
+            ObjectNode pRename = Json.obj();
+            pRename.putObject("name").put("type", "string").put("description", "新的应用名称（1～40 字）");
+            tools.add(tool("rename_app", "直接修改当前应用的显示名称（用户要求改名/重命名时调用）", pRename, "name"));
         }
         if (!appTools) return tools;
 
@@ -721,6 +748,12 @@ public class AskService {
         p3.putObject("pattern").put("type", "string").put("description", "正则表达式，例如 useState\\(|judgeNumber");
         p3.putObject("prefix").put("type", "string").put("description", "只搜这个前缀下的文件，可为空");
         tools.add(tool("search", "在当前应用版本的文本文件里按正则搜索，返回 路径:行号: 内容", p3, "pattern"));
+
+        tools.add(tool("list_versions", "列出当前应用最近的历史版本（含版本号、标题、是否为当前/已发布版本）", Json.obj(), null));
+
+        ObjectNode pRestore = Json.obj();
+        pRestore.putObject("versionNumber").put("type", "integer").put("description", "要恢复的目标版本号（如 2 表示 V2）；留空或 0 则恢复到上一个版本");
+        tools.add(tool("restore_version", "将当前应用恢复到上一个版本或指定版本号（新建恢复版本并更新预览，不改动线上已发布版本）；仅当用户明确要求回退/撤回/恢复版本时调用", pRestore, null));
 
         if (cloud != null && cloud.enabled(appId)) {
             ObjectNode p4 = Json.obj();
@@ -754,10 +787,13 @@ public class AskService {
         return !path.startsWith(".git/") && !path.startsWith(".zhiye/") && !path.contains("node_modules/");
     }
 
-    private String execTool(String appId, String commit, String name, String argsJson) {
+    private String execTool(String ws, String appId, String commit, String name, String argsJson, Sink sink) {
         try {
             JsonNode args = argsJson == null || argsJson.isBlank() ? Json.obj() : Json.M.readTree(argsJson);
             return switch (name) {
+                case "rename_app" -> renameAppTool(ws, appId, args.path("name").asText(""), sink);
+                case "list_versions" -> listVersionsTool(ws, appId);
+                case "restore_version" -> restoreVersionTool(ws, appId, args.path("versionNumber").asInt(0), sink);
                 case "list_files" -> listTool(appId, commit, args.path("prefix").asText(""));
                 case "read_file" -> readTool(appId, commit, args.path("path").asText(""),
                         args.path("offset").asInt(0), args.path("limit").asInt(0));
@@ -779,6 +815,75 @@ public class AskService {
         } catch (Exception e) {
             return "工具执行失败：" + e.getMessage();
         }
+    }
+
+    private String renameAppTool(String ws, String appId, String rawName, Sink sink) {
+        if (appId == null || appId.isBlank()) return "当前不在应用工作台中";
+        var app = apps.find(ws, appId).orElse(null);
+        if (app == null) return "未找到当前应用";
+        String n = rawName == null ? "" : rawName.trim().replaceAll("[\\r\\n]+", " ");
+        if (n.isEmpty() || n.length() > 40) return "应用名称需要 1～40 个字";
+        apps.update(appId, "name", n);
+        apps.update(appId, "name_locked", true);
+        emit(sink, "app_updated", Json.obj().put("action", "rename").put("appId", appId).put("name", n));
+        return "已成功将应用名称修改为「" + n + "」。";
+    }
+
+    private String listVersionsTool(String ws, String appId) {
+        if (appId == null || appId.isBlank()) return "当前不在应用工作台中";
+        var app = apps.find(ws, appId).orElse(null);
+        if (app == null) return "未找到当前应用";
+        var list = versions.listByApp(appId);
+        if (list.isEmpty()) return "当前还没有任何已保存的版本。";
+        StringBuilder sb = new StringBuilder("共 ").append(list.size()).append(" 个版本（按新到旧）：\n");
+        int shown = 0;
+        for (var v : list) {
+            if (shown++ >= 15) { sb.append("…\n"); break; }
+            sb.append("- V").append(v.number()).append("：").append(v.title());
+            if (v.id().equals(app.currentVersionId())) sb.append("【当前版本】");
+            if (v.id().equals(app.publishedVersionId())) sb.append("【线上已发布】");
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    private String restoreVersionTool(String ws, String appId, int targetNumber, Sink sink) throws Exception {
+        if (appId == null || appId.isBlank()) return "当前不在应用工作台中";
+        if (versionService == null) return "版本服务暂时不可用";
+        var app = apps.find(ws, appId).orElse(null);
+        if (app == null) return "未找到当前应用";
+        var list = versions.listByApp(appId);
+        if (list.size() < 2) return "目前只有 1 个版本，没有可回退的更早版本。";
+        com.tcl.csot.zhiye.entity.VersionRow target = null;
+        if (targetNumber > 0) {
+            for (var v : list) {
+                if (v.number() == targetNumber) { target = v; break; }
+            }
+            if (target == null) return "找不到版本 V" + targetNumber + "，请先用 list_versions 确认可用版本号。";
+        } else {
+            // 默认恢复到「上一版」：跳过当前版本和中断快照，取最近一个稳定历史版本；若没有则取任意前一个版本
+            for (var v : list) {
+                if (!v.id().equals(app.currentVersionId()) && !"interrupted".equals(v.source())) {
+                    target = v;
+                    break;
+                }
+            }
+            if (target == null) {
+                for (var v : list) {
+                    if (!v.id().equals(app.currentVersionId())) { target = v; break; }
+                }
+            }
+        }
+        if (target == null) return "没有可恢复的历史版本。";
+        if (target.id().equals(app.currentVersionId())) return "V" + target.number() + " 已经是当前版本，无需恢复。";
+        Map<String, Object> restored = versionService.restore(ws, target.id());
+        Object newNum = restored.get("number");
+        emit(sink, "app_updated", Json.obj()
+                .put("action", "restore")
+                .put("appId", appId)
+                .put("restoredFrom", target.number())
+                .put("newVersionNumber", newNum instanceof Number n ? n.intValue() : 0));
+        return "已成功恢复到 V" + target.number() + "（" + target.title() + "），并保存为新版本 V" + newNum + "，工作台预览已刷新（线上已发布版本不受影响）。";
     }
 
     private String listTool(String appId, String commit, String prefix) throws Exception {
@@ -924,41 +1029,57 @@ public class AskService {
             你是「织页」的产品与方案规划助手，正在「创造计划待确认」阶段和用户一起打磨当前应用的创造计划。
             核心规则：
             1. 思考过程（reasoning）必须全程使用简体中文，简短清晰。
-            2. 当前仍在规划讨论阶段，**绝不开始写代码、绝不假装已经开始执行**；真正执行需要用户确认后点击页面上的「立即执行」按钮。
-            3. **区分「纯讨论/提问」与「要求修改/优化计划」**：
-               - 如果用户只是提问、询问可行性、打问号（如「？」）、质疑某个设计、或聊思路还没明确让改计划：
-                 直接用自然简洁的中文回答并给出建议，**不要输出 [[plan]] 块**，保持当前计划不变。
-               - 如果用户要求优化、修改、完善、补充、精简或重写计划（例如「不行，继续优化」「加上审批流」「去掉某某功能」「把数据结构说细一点」「重新整理」）：
+            2. **区分三种用户意图**：
+               - **纯讨论 / 提问**：用户只是提问、询问可行性、打问号、质疑某个设计、或聊思路还没明确让改计划或开工：
+                 直接用自然简洁的中文回答并给出建议，**不要输出 [[plan]] 和 [[execute]]**，保持当前计划不变。
+               - **要求修改 / 优化计划（暂不执行）**：例如「不行，继续优化」「加上审批流」「去掉某某功能」「把数据结构说细一点」：
                  a) 先用 2～5 句简明中文说明你优化或调整了哪些关键点；
                  b) 紧接着输出修订后的**完整新版创造计划（Markdown）**，严格用 [[plan]] 和 [[/plan]] 包裹：
                     [[plan]]
                     # 名称
                     ...
                     [[/plan]]
+               - **确认计划并开始执行**：用户表示满意、要求开始生成或动手写代码（例如「可以了，开始做吧」「没问题，生成吧」「按这个执行」「把第三节删掉然后直接开始做」）：
+                 a) 如果顺带提了最后一条修改意见，先输出修订后的 [[plan]]...[[/plan]]；
+                 b) 用 1～2 句简短中文确认，然后**在单独一行输出 `[[execute]]`**，系统会立刻自动启动代码生成，**不要**让用户再去点「立即执行」按钮！
+            3. **切换项目形态**：如果用户在计划阶段明确要求改变技术形态（例如「改成纯静态 HTML，不要后端/不要 React」「换成 Vue 3」「改成全栈前后端服务」），在回复中输出对应标记：`[[shape:static]]` / `[[shape:web]]` / `[[shape:vue]]` / `[[shape:script]]` / `[[shape:service]]`，并同步更新 `[[plan]]...[[/plan]]`。
             4. **新版计划质量要求**：
                - 必须输出**完整可直接交付执行的整份计划**，把用户的新要求融进对应正式章节（如 # 名称 / ## 目标 / ## 内容与功能 / ## 业务规则 / ## 异常与边界情况 / ## 验收标准 / ## 本期不实现；技能包保持 # 技能名称 / ## 技能目标 / ## 文件结构 / ## 使用流程 / ## 验收标准）。
                - **严禁在末尾机械堆砌 `## 补充反馈`**；如果原计划里残留了旧的 `## 补充反馈`，请把其中有价值的需求吸收到正式章节里，并清掉无意义条目（如单独的问号）。
                - 非技能网页应用遵循桌面宽屏全宽流式布局与自定义下拉组件规范，不要在计划里写代码或 diff；总字数 400～1000 字（技能类 200～550 字），能用表格的用表格。
-            5. 回答最后（[[/plan]] 之后）可按需附一行 `[[next]] 建议一 | 建议二`（2～3 个用户最可能接着讨论或补充计划的简短追问，每个不超过 14 字；不要输出「立即执行」「开始生成」这类执行按钮文案），没有合适的就不要输出。
+            5. 如果本次**没有**输出 `[[execute]]`，回答最后可按需附一行 `[[next]] 建议一 | 建议二`（2～3 个用户最可能接着讨论、修改或说「开始生成」的简短回复，每个不超过 14 字），没有合适的就不要输出。
             """;
 
-    /** 解析计划阶段对话回复：分离对话正文与 [[plan]]...[[/plan]] 中的完整新版计划 */
+    /** 解析计划阶段对话回复：分离对话正文、[[plan]]...[[/plan]] 完整新版计划、[[execute]] 自主开工标记与 [[shape:...]] 形态切换 */
     public static PlanChatResult parsePlanReply(String raw, String thinking) {
         String s = raw == null ? "" : raw;
-        int open = s.indexOf(PLAN_OPEN);
-        if (open < 0) {
-            return new PlanChatResult(s.trim(), null, thinking == null ? "" : thinking);
+        boolean startGenerate = s.toLowerCase(java.util.Locale.ROOT).contains(EXECUTE_MARKER);
+        String switchKind = null;
+        java.util.regex.Matcher sm = SHAPE_MARKER.matcher(s);
+        while (sm.find()) {
+            String tok = sm.group(1).trim().toLowerCase(java.util.Locale.ROOT);
+            switchKind = "web".equals(tok) ? "template" : tok;
         }
-        String before = s.substring(0, open).trim();
+        String cleaned = PLAN_CTRL_TAGS.matcher(s).replaceAll("");
+
+        int open = cleaned.indexOf(PLAN_OPEN);
+        if (open < 0) {
+            String replyText = cleaned.trim();
+            if (replyText.isEmpty() && startGenerate) {
+                replyText = "好的，计划已确认，马上开始为你生成应用。";
+            }
+            return new PlanChatResult(replyText, null, thinking == null ? "" : thinking, startGenerate, switchKind);
+        }
+        String before = cleaned.substring(0, open).trim();
         int bodyStart = open + PLAN_OPEN.length();
-        int close = s.indexOf(PLAN_CLOSE, bodyStart);
+        int close = cleaned.indexOf(PLAN_CLOSE, bodyStart);
         String planRaw;
         String after = "";
         if (close >= 0) {
-            planRaw = s.substring(bodyStart, close).trim();
-            after = s.substring(close + PLAN_CLOSE.length()).trim();
+            planRaw = cleaned.substring(bodyStart, close).trim();
+            after = cleaned.substring(close + PLAN_CLOSE.length()).trim();
         } else {
-            planRaw = s.substring(bodyStart).trim();
+            planRaw = cleaned.substring(bodyStart).trim();
         }
         // 去掉模型偶尔多包的 ```markdown ... ``` 外壳
         planRaw = stripCodeFence(planRaw).trim();
@@ -976,12 +1097,15 @@ public class AskService {
             // 若正文（不含 [[next]] 行）为空，补一句清晰说明
             String bodyWithoutNext = replyText.replaceAll("(?m)^\\[\\[next\\]\\].*$", "").trim();
             if (bodyWithoutNext.isEmpty()) {
-                replyText = replyText.isEmpty()
-                        ? "已按你的意见优化了上方「创造计划」，可以查看确认或继续补充。"
-                        : "已按你的意见优化了上方「创造计划」，可以查看确认或继续补充。\n\n" + replyText;
+                String fallback = startGenerate
+                        ? "已按你的意见更新「创造计划」，正在立即开始生成。"
+                        : "已按你的意见优化了上方「创造计划」，可以查看确认或继续补充。";
+                replyText = replyText.isEmpty() ? fallback : fallback + "\n\n" + replyText;
             }
+        } else if (replyText.isEmpty() && startGenerate) {
+            replyText = "好的，计划已确认，马上开始为你生成应用。";
         }
-        return new PlanChatResult(replyText, planDoc, thinking == null ? "" : thinking);
+        return new PlanChatResult(replyText, planDoc, thinking == null ? "" : thinking, startGenerate, switchKind);
     }
 
     private static String stripCodeFence(String s) {
@@ -1072,7 +1196,7 @@ public class AskService {
                 StringBuilder pending = new StringBuilder();
                 boolean inPlan = false;
                 boolean planClosed = false;
-                final int guard = PLAN_OPEN.length();
+                final int guard = 22;
 
                 while ((line = r.readLine()) != null) {
                     if (stopped.getAsBoolean()) return;
@@ -1092,9 +1216,14 @@ public class AskService {
                     raw.append(piece);
                     if (!inPlan) {
                         pending.append(piece);
+                        String stripped = PLAN_CTRL_TAGS.matcher(pending).replaceAll("");
+                        if (stripped.length() != pending.length()) {
+                            pending.setLength(0);
+                            pending.append(stripped);
+                        }
                         int idx = pending.indexOf(PLAN_OPEN);
                         if (idx >= 0) {
-                            String before = pending.substring(0, idx);
+                            String before = PLAN_CTRL_TAGS.matcher(pending.substring(0, idx)).replaceAll("");
                             if (!before.isEmpty()) emit(sink, "delta", Json.obj().put("text", before));
                             String tail = pending.substring(idx + PLAN_OPEN.length());
                             pending.setLength(0);
@@ -1106,12 +1235,12 @@ public class AskService {
                                 planClosed = true;
                                 String after = pending.substring(closeIdx + PLAN_CLOSE.length());
                                 pending.setLength(0);
-                                if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                                pending.append(after);
                             }
                         } else if (pending.length() > guard) {
                             String flush = pending.substring(0, pending.length() - guard);
                             pending.delete(0, pending.length() - guard);
-                            emit(sink, "delta", Json.obj().put("text", flush));
+                            if (!flush.isEmpty()) emit(sink, "delta", Json.obj().put("text", flush));
                         }
                     } else if (!planClosed) {
                         pending.append(piece);
@@ -1120,18 +1249,29 @@ public class AskService {
                             planClosed = true;
                             String after = pending.substring(closeIdx + PLAN_CLOSE.length());
                             pending.setLength(0);
-                            if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                            pending.append(after);
                         } else if (pending.length() > PLAN_CLOSE.length() + 16) {
                             pending.delete(0, pending.length() - PLAN_CLOSE.length());
                         }
                     } else {
-                        emit(sink, "delta", Json.obj().put("text", piece));
+                        pending.append(piece);
+                        String stripped = PLAN_CTRL_TAGS.matcher(pending).replaceAll("");
+                        if (stripped.length() != pending.length()) {
+                            pending.setLength(0);
+                            pending.append(stripped);
+                        }
+                        if (pending.length() > guard) {
+                            String flush = pending.substring(0, pending.length() - guard);
+                            pending.delete(0, pending.length() - guard);
+                            if (!flush.isEmpty()) emit(sink, "delta", Json.obj().put("text", flush));
+                        }
                     }
                     if (stopped.getAsBoolean()) return;
                 }
                 if (stopped.getAsBoolean()) return;
-                if (!inPlan && !pending.isEmpty()) {
-                    emit(sink, "delta", Json.obj().put("text", pending.toString()));
+                if ((!inPlan || planClosed) && !pending.isEmpty()) {
+                    String rest = PLAN_CTRL_TAGS.matcher(pending).replaceAll("");
+                    if (!rest.isEmpty()) emit(sink, "delta", Json.obj().put("text", rest));
                     pending.setLength(0);
                 }
                 if (stopped.getAsBoolean()) return;
@@ -1141,17 +1281,32 @@ public class AskService {
                 }
                 PlanChatResult parsed = parsePlanReply(raw.toString(), thinking.toString());
                 if (stopped.getAsBoolean()) return;
-                Map<String, Object> updatedApp = null;
+                Map<String, Object> outcome = null;
                 try {
-                    updatedApp = onComplete.apply(parsed);
+                    outcome = onComplete.apply(parsed);
                 } catch (Exception e) {
                     log.warn("保存计划对话结果失败：{}", e.toString());
                 }
                 if (stopped.getAsBoolean()) return;
+                Object updatedApp = null;
+                Object startedTask = null;
+                if (outcome != null) {
+                    if (Boolean.TRUE.equals(outcome.get("__planOutcome"))) {
+                        updatedApp = outcome.get("app");
+                        startedTask = outcome.get("task");
+                    } else {
+                        updatedApp = outcome;
+                    }
+                }
                 if (updatedApp != null) {
                     emit(sink, "plan_updated", updatedApp);
                 }
-                emit(sink, "done", Json.obj().put("planUpdated", updatedApp != null));
+                if (startedTask != null) {
+                    emit(sink, "task_started", startedTask);
+                }
+                emit(sink, "done", Json.obj()
+                        .put("planUpdated", updatedApp != null)
+                        .put("taskStarted", startedTask != null));
             }
         } catch (Exception e) {
             if (stopped.getAsBoolean()) return;

@@ -65,6 +65,18 @@ const DISCARD_TASK_RE =
 const RESUME_TASK_RE =
   /^(继续|接着做|继续做|恢复)(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧)?(?:[，,。.:：\s]+([\s\S]+))?$/;
 
+/** 计划待确认阶段：用户直接说「开始做 / 可以了 / 立即执行」时直接启动生成，无需点按钮 */
+const PLAN_START_RE =
+  /^(?:(?:好的?|可以了?|没问题|没意见|同意|确认|通过|满意|就这样|就按这个|按这个来?)[，,、\s]*)?(?:开始|开始做|开始生成|立即执行|执行|生成|动手|开工|开干)(?:吧|啦|了)?[。！!～~]*$|^(?:可以了|没问题|就这样吧?|按这个来吧?|按这个做吧?|没意见)[。！!～~]*$/;
+
+/** 待确认卡片（云服务 / 新开应用）的对话式肯定与否定回复 */
+const CONFIRM_YES_RE = /^(?:确认|确定|好|好的|可以|行|同意|启用|开启|是的|要|新开|新开一个|开新的|继续)(?:吧|啦|了)?[。！!～~]*$/;
+const CONFIRM_NO_RE = /^(?:取消|不用|不要|算了|拒绝|不启用|不开|不了|就在这里|就在当前|就在当前应用|就在当前改|当前应用|不新开)(?:吧|啦|了)?[。！!～~]*$/;
+
+/** 已停止 / 失败首轮生成阶段的快捷对话控制 */
+const REGEN_TASK_RE = /^(?:重新生成|重新开始|重来|重新做|重试|再试一次|再生成一次)(?:吧|了)?[。！!～~]*$/;
+const BACK_TO_PLAN_RE = /^(?:返回修改计划|返回计划|修改计划|改计划|回到计划|放弃)(?:吧|了)?[。！!～~]*$/;
+
 /** 启用云服务后自动发给 AI 的那句话 */
 const CLOUD_DESIGN_PROMPT = '云服务已启用。请按这个应用现在的功能设计表结构和数据权限，把数据改成云端读写。';
 
@@ -351,7 +363,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     const content = rawContent || (!runningTaskId && chatAssets.length ? '请根据我附上的参考内容帮我处理' : '');
     if (!content || sending) return;
     composer.dismissPasteNotice();
-    // 正在等「继续」或「方案确认」：输入框里说的话直接作为回复发给当前任务，不进队列
+    // 正在等「继续」「方案确认」或「云服务确认」：输入框里说的话直接作为回复发给当前任务，不进队列
     const waitingPromptConfirm =
       runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' && (stream.confirm.kind === 'continue' || stream.confirm.kind === 'choice')
         ? stream.confirm
@@ -363,6 +375,96 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         await api.confirmTask(runningTaskId, waitingPromptConfirm.id, true, content);
         setDraft('');
         toast(waitingPromptConfirm.kind === 'choice' ? '已回复，AI 正在按你的决定继续。' : '好的，AI 接着做。');
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+    if (runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' && stream.confirm.kind === 'cloud') {
+      const accept = CONFIRM_YES_RE.test(content);
+      const decline = CONFIRM_NO_RE.test(content);
+      if (accept || decline) {
+        setSending(true);
+        setError('');
+        try {
+          await api.confirmTask(runningTaskId, stream.confirm.id, accept);
+          setDraft('');
+          toast(accept ? '已确认启用云服务，AI 继续执行中。' : '已跳过启用云服务，AI 继续执行中。');
+        } catch (err) {
+          setError(errorMessage(err));
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
+    }
+    // 悬浮中的「新开应用」或「启用云服务」确认卡：支持直接通过对话回复「好 / 确认 / 不用 / 就在当前应用」
+    if (!runningTaskId && newApp) {
+      if (CONFIRM_YES_RE.test(content)) {
+        setDraft('');
+        void answerNewApp(true);
+        return;
+      }
+      if (CONFIRM_NO_RE.test(content)) {
+        setDraft('');
+        void answerNewApp(false);
+        return;
+      }
+    }
+    if (!runningTaskId && cloudAsk && cloudEnabled === false) {
+      if (CONFIRM_YES_RE.test(content)) {
+        setDraft('');
+        void answerCloud(true);
+        return;
+      }
+      if (CONFIRM_NO_RE.test(content)) {
+        setDraft('');
+        void answerCloud(false);
+        return;
+      }
+    }
+    // 首轮生成已停止 / 失败阶段：全对话操控「继续 / 补充继续 / 重新生成 / 返回改计划」
+    if (!runningTaskId && (app.phase === 'stopped' || app.phase === 'failed')) {
+      if (otherBusy) {
+        setError(`「${otherBusy.name}」正在运行任务，完成后再试。`);
+        return;
+      }
+      setSending(true);
+      setError('');
+      try {
+        if (BACK_TO_PLAN_RE.test(content) && !skill && app.planDoc && stream.taskId) {
+          await api.discardTask(stream.taskId);
+          setDraft('');
+          onDismissTask?.(stream.taskId);
+          toast('已放弃未完成进度，已返回「创造计划」。');
+          return;
+        }
+        if (REGEN_TASK_RE.test(content)) {
+          const next = app.phase === 'failed' && stream.taskId && stream.task?.retryable
+            ? await api.retryTask(stream.taskId)
+            : await api.generate(app.id);
+          setDraft('');
+          onTaskStarted(next);
+          toast('已重新开始生成。');
+          return;
+        }
+        if (stream.taskId && stream.task?.resumable) {
+          const rm = RESUME_TASK_RE.exec(content);
+          const extra = rm ? (rm[5] ?? '').trim() : content;
+          const next = await api.resumeTask(stream.taskId, extra || undefined);
+          setDraft('');
+          onTaskStarted(next);
+          toast(extra ? '已带着你的补充继续生成。' : '好的，继续完成刚才的生成。');
+          return;
+        }
+        const next = app.phase === 'failed' && stream.taskId && stream.task?.retryable
+          ? await api.retryTask(stream.taskId)
+          : await api.generate(app.id);
+        setDraft('');
+        onTaskStarted(next);
+        toast('已重新开始生成。');
       } catch (err) {
         setError(errorMessage(err));
       } finally {
@@ -395,6 +497,22 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       return;
     }
     if (app.phase === 'plan') {
+      // 纯粹的一句话开工确认（如「可以了，开始做吧」「立即执行」）：秒级启动生成，无需多等一轮对话
+      if (!chatAssets.length && !chatSkills.length && !otherBusy && PLAN_START_RE.test(content)) {
+        setSending(true);
+        setError('');
+        try {
+          const next = await api.generate(app.id);
+          setDraft('');
+          onTaskStarted(next);
+          toast('收到，正在按计划开始为你生成应用。');
+        } catch (err) {
+          setError(errorMessage(err));
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
       setSending(true);
       setError('');
       setDraft('');
@@ -423,6 +541,10 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               qc.setQueryData(qk.app(app.id), nextApp);
               setPlanUpdatedTick((v) => v + 1);
               toast('已同步更新上方「创造计划」', 'ok', { label: '查看计划', run: scrollToPlan });
+            },
+            onTaskStarted: (t) => {
+              onTaskStarted(t);
+              toast('计划已确认，正在为你生成应用。');
             },
           },
           ctrl.signal,
@@ -536,6 +658,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           ctrl.signal,
           (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
           (h) => { handoffReq = h; },
+          (upd) => {
+            void qc.invalidateQueries({ queryKey: qk.app(app.id) });
+            void qc.invalidateQueries({ queryKey: qk.versions(app.id) });
+            void qc.invalidateQueries({ queryKey: ['apps'] });
+            if (upd.action === 'rename' && upd.name) toast(`已将应用改名为「${upd.name}」。`);
+            else if (upd.action === 'restore') toast(`已恢复到 V${upd.restoredFrom ?? ''}，预览已同步更新。`);
+          },
         );
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
@@ -1206,8 +1335,8 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               id="plan-feedback"
               rows={2}
               maxLength={MAX_PROMPT_CHARS}
-              placeholder="继续聊聊，或粘贴参考文档/图片告诉织页怎么调整计划…"
-              aria-label="讨论或优化计划"
+              placeholder="继续讨论、修改计划，或直接说「开始做」立即生成…"
+              aria-label="讨论、优化或开始执行计划"
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
@@ -1284,26 +1413,45 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               </div>
             </div>
           </>
-        ) : phase === 'failed' ? (
-          <span>
-            <Icon name="alert" /> 可以在上方重试生成，或修改计划后再试。
-          </span>
-        ) : phase === 'stopped' ? (
-          <div className="stopped-composer-bar">
-            <span>
-              <Icon name="stop" /> 生成已停止
-            </span>
-            <div className="stopped-composer-actions">
-              {stream.taskId && task?.resumable ? (
+        ) : phase === 'failed' || phase === 'stopped' ? (
+          <>
+            <div className="stopped-composer-bar is-conversational">
+              <span>
+                <Icon name={phase === 'failed' ? 'alert' : 'stop'} /> {phase === 'failed' ? '生成未完成' : '生成已停止'}
+              </span>
+              <div className="stopped-composer-actions">
+                {stream.taskId && task?.resumable ? (
+                  <button
+                    type="button"
+                    className="task-pill accent"
+                    disabled={sending}
+                    onClick={async () => {
+                      if (!stream.taskId) return;
+                      setSending(true);
+                      try {
+                        onTaskStarted(await api.resumeTask(stream.taskId));
+                      } catch (err) {
+                        toast(errorMessage(err), 'error');
+                      } finally {
+                        setSending(false);
+                      }
+                    }}
+                  >
+                    <i className="pill-play" aria-hidden="true" />
+                    继续生成
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className="task-pill accent"
+                  className="task-pill"
                   disabled={sending}
                   onClick={async () => {
-                    if (!stream.taskId) return;
                     setSending(true);
                     try {
-                      onTaskStarted(await api.resumeTask(stream.taskId));
+                      const next = phase === 'failed' && stream.taskId && task?.retryable
+                        ? await api.retryTask(stream.taskId)
+                        : await api.generate(app.id);
+                      onTaskStarted(next);
                     } catch (err) {
                       toast(errorMessage(err), 'error');
                     } finally {
@@ -1311,52 +1459,71 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                     }
                   }}
                 >
-                  <i className="pill-play" aria-hidden="true" />
-                  继续生成
+                  <Icon name="refresh" />
+                  {phase === 'failed' ? '重试生成' : '重新生成'}
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="task-pill"
-                disabled={sending}
-                onClick={async () => {
-                  setSending(true);
-                  try {
-                    onTaskStarted(await api.generate(app.id));
-                  } catch (err) {
-                    toast(errorMessage(err), 'error');
-                  } finally {
-                    setSending(false);
-                  }
-                }}
-              >
-                <Icon name="refresh" />
-                重新生成
-              </button>
-              {!skill && app.planDoc && stream.taskId ? (
-                <button
-                  type="button"
-                  className="task-pill ghost"
-                  disabled={sending}
-                  onClick={async () => {
-                    if (!stream.taskId) return;
-                    setSending(true);
-                    try {
-                      await api.discardTask(stream.taskId);
-                      onDismissTask?.(stream.taskId);
-                      toast('已放弃未完成进度，已返回「创造计划」。');
-                    } catch (err) {
-                      toast(errorMessage(err), 'error');
-                    } finally {
-                      setSending(false);
-                    }
-                  }}
-                >
-                  返回修改计划
-                </button>
-              ) : null}
+                {!skill && app.planDoc && stream.taskId ? (
+                  <button
+                    type="button"
+                    className="task-pill ghost"
+                    disabled={sending}
+                    onClick={async () => {
+                      if (!stream.taskId) return;
+                      setSending(true);
+                      try {
+                        await api.discardTask(stream.taskId);
+                        onDismissTask?.(stream.taskId);
+                        toast('已放弃未完成进度，已返回「创造计划」。');
+                      } catch (err) {
+                        toast(errorMessage(err), 'error');
+                      } finally {
+                        setSending(false);
+                      }
+                    }}
+                  >
+                    返回修改计划
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
+            <textarea
+              ref={input}
+              id="stopped-followup"
+              rows={2}
+              maxLength={MAX_PROMPT_CHARS}
+              placeholder={
+                task?.resumable
+                  ? '直接说「继续」、补充调整要求，或说「重新生成」「返回改计划」…'
+                  : '直接说「重新生成」或「返回改计划」…'
+              }
+              aria-label="继续或调整生成"
+              value={draft}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                if (error) setError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+            />
+            {error ? <p className="composer-error" role="alert">{error}</p> : null}
+            <div className="composer-bottom">
+              <div className="composer-tools" />
+              <div className="composer-actions">
+                <button
+                  className="send-button"
+                  aria-label="发送指令"
+                  disabled={!draft.trim() || sending}
+                  onClick={() => void send()}
+                >
+                  <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
+                </button>
+              </div>
+            </div>
+          </>
         ) : (
           <span>
             <Icon name="spark" /> {stream.phaseLabel || '任务进行中，完成后可以继续修改。'}

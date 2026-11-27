@@ -72,7 +72,13 @@ public class AppService {
     }
 
     public record CreateRequest(String type, String prompt, String mode, String model, List<String> assetIds, String name,
-                                List<String> skillAppIds, List<String> sourceIds, String billingType) {}
+                                List<String> skillAppIds, List<String> sourceIds, String billingType,
+                                Boolean skipPlan, String preferredShape) {
+        public CreateRequest(String type, String prompt, String mode, String model, List<String> assetIds, String name,
+                             List<String> skillAppIds, List<String> sourceIds, String billingType) {
+            this(type, prompt, mode, model, assetIds, name, skillAppIds, sourceIds, billingType, null, null);
+        }
+    }
 
     public Map<String, Object> create(String ws, CreateRequest req, String idemKey) throws Exception {
         try {
@@ -118,12 +124,19 @@ public class AppService {
             type = Catalog.FULLSTACK_TYPE;
         }
         String kind = script ? "script" : Catalog.projectKindFor(type);
+        // 尊重会话模型识别出的轻量形态提示（如 static 纯静态 HTML / vue），但不越权降级或升格全栈服务
+        String prefKind = normalizePreferredKind(req.preferredShape());
+        if (prefKind != null && !skill && !script && !"service".equals(kind) && !"service".equals(prefKind)) {
+            kind = prefKind;
+        }
+        // 开发skill 或简单/明确需求（skipPlan=true）跳过创造计划，直接进入代码生成
+        boolean direct = skill || Boolean.TRUE.equals(req.skipPlan());
         boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(userIntent);
         boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(userIntent);
         String desc = userText(prompt);
         AppRow row = new AppRow(id, ws, name, named, type, desc.length() > 60 ? desc.substring(0, 60) : desc, prompt,
                 skill ? prompt : "", "lavender", false, mode, model, false,
-                skill ? "generating" : "planning", "create", vueSpringBoot ? "Java (Spring Boot) + Vue" : null,
+                direct ? "generating" : "planning", "create", vueSpringBoot ? "Java (Spring Boot) + Vue" : null,
                 kind, true, Ids.slug(), assetIds, null, null, null, null, null);
         apps.insert(row);
         if (memories != null) memories.learnFromPrompt(ws, prompt);
@@ -134,9 +147,14 @@ public class AppService {
             if (cleanWorkspace) {
                 git.initCleanWorkspace(id, name);
             } else {
-                String tpl = row.isSkill() ? "skill-template"
-                        : row.isScript() ? "script-template"
-                        : row.isService() ? (vueSpringBoot ? "vue-springboot-template" : "fullstack-template") : "app-template";
+                String tpl = switch (kind) {
+                    case "skill" -> "skill-template";
+                    case "script" -> "script-template";
+                    case "static" -> "static-template";
+                    case "vue" -> "vue-template";
+                    case "service" -> vueSpringBoot ? "vue-springboot-template" : "fullstack-template";
+                    default -> "app-template";
+                };
                 git.initFromTemplate(id, tpl);
             }
         } catch (Exception e) {
@@ -148,7 +166,7 @@ public class AppService {
             ObjectNode planInput = Json.obj();
             String billing = com.tcl.csot.zhiye.service.llm.LlmRouter.normalizeBilling(req.billingType());
             if (billing != null) planInput.put("modelBilling", billing);
-            taskService.create(ws, id, skill ? "generate" : "plan", null, planInput, idemKey, 1, null);
+            taskService.create(ws, id, direct ? "generate" : "plan", null, planInput, idemKey, 1, null);
         } catch (RuntimeException e) {
             apps.softDelete(id);
             git.deleteRepo(id);
@@ -168,12 +186,22 @@ public class AppService {
         return end > 0 ? rest.substring(0, end).strip() : rest;
     }
 
+    private static final java.util.regex.Pattern QUOTED_TITLE = java.util.regex.Pattern.compile("[「《“\"]([^」》”\"\\r\\n]{2,20})[」》”\"]");
+
     static String placeholderName(String prompt) {
         prompt = userText(prompt);
-        String p = prompt.replaceAll("\\s+", " ").replaceFirst("^(帮我|请|我想|我要)?(做|创建|生成|设计|写)?(一个|一款|个)?", "");
+        var qm = QUOTED_TITLE.matcher(prompt);
+        if (qm.find()) {
+            String quoted = qm.group(1).trim();
+            if (!quoted.isEmpty()) return quoted.length() > 16 ? quoted.substring(0, 16) : quoted;
+        }
+        String p = prompt.replaceAll("\\s+", " ")
+                .replaceFirst("^(帮我|请|我想|我要|麻烦)?(做|创建|生成|设计|写|搭建|开发|制作)?(一个|一款|一套|份|个)?", "")
+                .replaceFirst("^(纯静态|纯|静态)?\\s*(HTML5?|html5?|网页|页面|单页|前端|React|Vue\\s*3?)\\s*(的|版|页面|网页)?\\s*", "");
         p = p.split("[，,。.：:；;！!？?]")[0].trim();
+        p = p.replaceAll("[「《“\"『]+$", "").trim();
         if (p.isEmpty()) p = "我的应用";
-        return p.length() > 12 ? p.substring(0, 12) : p;
+        return p.length() > 16 ? p.substring(0, 16) : p;
     }
 
     public List<Map<String, Object>> list(String ws, String q, String type, String favorite, String published, String sort) {
@@ -250,12 +278,56 @@ public class AppService {
         }
     }
 
-    /** 计划阶段对话完成：按需更新 planDoc 并落库助手回复；若更新了计划则返回最新应用详情 */
+    static String normalizePreferredKind(String shape) {
+        if (shape == null || shape.isBlank()) return null;
+        return switch (shape.trim().toLowerCase(Locale.ROOT)) {
+            case "static" -> "static";
+            case "vue" -> "vue";
+            case "web", "template" -> "template";
+            case "script" -> "script";
+            case "service", "fullstack" -> "service";
+            default -> null;
+        };
+    }
+
+    /** 计划阶段对话完成后的综合结果：可能更新了计划/形态，也可能自主启动了生成任务 */
+    public record PlanChatOutcome(Map<String, Object> updatedApp, Map<String, Object> startedTask) {}
+
+    /** 计划阶段对话完成：按需切换形态、更新 planDoc、落库助手回复，并在用户确认时自主启动生成 */
     public Map<String, Object> applyPlanChatResult(String ws, String appId, com.tcl.csot.zhiye.service.chat.AskService.PlanChatResult res) {
+        return applyPlanChatOutcome(ws, appId, res).updatedApp();
+    }
+
+    public PlanChatOutcome applyPlanChatOutcome(String ws, String appId, com.tcl.csot.zhiye.service.chat.AskService.PlanChatResult res) {
+        AppRow cur = apps.find(ws, appId).orElse(null);
+        boolean inPlan = cur != null && "plan".equals(cur.phase());
+        boolean shapeChanged = false;
+        String targetKind = normalizePreferredKind(res.switchProjectKind());
+        if (inPlan && cur.currentVersionId() == null && !cur.isSkill()
+                && targetKind != null && !targetKind.equals(cur.projectKind())) {
+            try {
+                String tpl = switch (targetKind) {
+                    case "static" -> "static-template";
+                    case "vue" -> "vue-template";
+                    case "script" -> "script-template";
+                    case "service" -> "fullstack-template";
+                    default -> "app-template";
+                };
+                git.initFromTemplate(appId, tpl);
+                apps.update(appId, "project_kind", targetKind);
+                if ("service".equals(targetKind) && !Catalog.FULLSTACK_TYPE.equals(cur.type())) {
+                    apps.update(appId, "type", Catalog.FULLSTACK_TYPE);
+                } else if (!"service".equals(targetKind) && Catalog.FULLSTACK_TYPE.equals(cur.type())) {
+                    apps.update(appId, "type", Catalog.DEFAULT_TYPE);
+                }
+                shapeChanged = true;
+                cur = apps.find(ws, appId).orElse(cur);
+            } catch (Exception e) {
+                // 形态切换失败不影响对话落库
+            }
+        }
         boolean updated = res.planDoc() != null && !res.planDoc().isBlank();
         if (updated) {
-            // 仅在仍处于 plan 阶段时更新，避免用户中途点「立即执行」后覆盖状态
-            AppRow cur = apps.find(ws, appId).orElse(null);
             if (cur != null && "plan".equals(cur.phase())) {
                 apps.setPlan(appId, null, res.planDoc(), "plan");
             } else {
@@ -263,8 +335,17 @@ public class AppService {
             }
         }
         String reply = res.reply() == null ? "" : res.reply().trim();
-        if (updated) {
-            String badge = "> ✓ 已同步更新上方「创造计划」，可继续讨论或点击「立即执行」。";
+        Map<String, Object> startedTask = null;
+        if (res.startGenerate() && cur != null && "plan".equals(cur.phase())) {
+            try {
+                startedTask = generate(ws, appId, null);
+            } catch (Exception e) {
+                // 若因并发任务上限等原因无法立刻启动，保留计划与对话，在回复末尾明确提示原因
+                reply = (reply.isEmpty() ? "" : reply + "\n\n") + "> ⚠️ 暂时未能自动启动生成：" + e.getMessage();
+            }
+        }
+        if ((updated || shapeChanged) && startedTask == null) {
+            String badge = "> ✓ 已同步更新上方「创造计划」，可直接说「开始做」或点击「立即执行」。";
             int nextIdx = reply.indexOf("\n[[next]]");
             if (nextIdx >= 0) {
                 reply = reply.substring(0, nextIdx).trim() + "\n\n" + badge + "\n" + reply.substring(nextIdx + 1);
@@ -279,7 +360,8 @@ public class AppService {
         if (!reply.isEmpty()) {
             messages.insert(appId, "assistant", reply, null, null, "ok");
         }
-        return updated ? detail(ws, appId) : null;
+        Map<String, Object> appDetail = (updated || shapeChanged || startedTask != null) ? detail(ws, appId) : null;
+        return new PlanChatOutcome(appDetail, startedTask);
     }
 
     public Map<String, Object> patch(String ws, String id, JsonNode body) {

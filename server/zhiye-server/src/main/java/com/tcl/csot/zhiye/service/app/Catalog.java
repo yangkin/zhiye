@@ -108,6 +108,17 @@ public final class Catalog {
         return PURE_HTML_INTENT.matcher(text).find() && !EXPLICIT_BUILD_BACKEND_ACTION.matcher(text).find();
     }
 
+    /** 用户明确要单个/纯静态 HTML 页面（非 React/Vue 工程、非后端服务）。 */
+    public static boolean looksLikePureStaticHtml(String raw) {
+        String text = extractUserOnlyText(raw);
+        if (text.isBlank()) return false;
+        if (EXPLICIT_BUILD_BACKEND_ACTION.matcher(text).find()) return false;
+        if (REACT_HINT.matcher(text).find() || VUE_HINT.matcher(text).find()) return false;
+        return PURE_HTML_INTENT.matcher(text).find()
+                || java.util.regex.Pattern.compile("(纯静态|纯\\s*html|单个?\\s*html|静态\\s*html|静态网页|静态页面)",
+                        java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text).find();
+    }
+
     /** 判断用户是否明确要求搭建独立后端 / 全栈服务（过滤助手回复与「只要 HTML/不要后端」的场景）。 */
     public static boolean shouldForceFullstack(String prompt) {
         String userText = extractUserOnlyText(prompt);

@@ -315,7 +315,7 @@ public class ConversationService {
         String brief = dialogueBrief(messages, MAX_BRIEF_CHARS);
         // 复用现有创建入口时不能超过它的 prompt 限制；两次压缩都保留首条需求、最近 assistant 和最近 user。
         String prompt = brief.length() <= APP_PROMPT_CHARS ? brief : dialogueBrief(messages, APP_PROMPT_CHARS);
-        String type = inferType(messages, req.type());
+        BuildDirective directive = inferBuildDirective(messages, req.type());
         // 聊天过程里附过的素材也带给应用（参考图、需求文档等），不只是点「开始做」这一刻选的
         LinkedHashSet<String> assetIds = new LinkedHashSet<>();
         for (ConversationRepository.MessageRow msg : messages) {
@@ -325,8 +325,9 @@ public class ConversationService {
         LinkedHashSet<String> selectedSources = new LinkedHashSet<>();
         for (var source : dataSources.visibleSelection(ws, sourceIds(conversation.sourceIds()))) selectedSources.add(source.id());
         if (req.sourceIds() != null) selectedSources.addAll(req.sourceIds());
-        AppService.CreateRequest create = new AppService.CreateRequest(type, prompt, req.mode(), req.model(),
-                List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources), req.billingType());
+        AppService.CreateRequest create = new AppService.CreateRequest(directive.type(), prompt, req.mode(), req.model(),
+                List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources), req.billingType(),
+                directive.skipPlan(), directive.preferredShape());
         Map<String, Object> app = apps.create(ws, create, idemKey);
         Object appId = app.get("id");
         if (appId != null) {
@@ -436,7 +437,76 @@ public class ConversationService {
         return "assistant".equals(role) ? "assistant（助手）" : "user（用户）";
     }
 
-    private static final java.util.regex.Pattern BUILD_TYPE = java.util.regex.Pattern.compile("^\\s*\\[\\[build:\\s*([^\\]]+?)\\s*\\]\\]");
+    /** 从会话中模型输出的 [[build:类型|形态|direct]] 与用户意图综合解析出的构建指令。 */
+    public record BuildDirective(String type, String preferredShape, boolean skipPlan) {}
+
+    private static final java.util.regex.Pattern BUILD_TYPE = java.util.regex.Pattern.compile("\\[\\[build(?::\\s*([^\\]]+?))?\\s*\\]\\]");
+    private static final java.util.regex.Pattern EXPLICIT_SKIP_PLAN = java.util.regex.Pattern.compile(
+            "(不用出计划|跳过计划|不要计划|直接生成|直接写出来|直接帮我写|别出计划)");
+
+    /**
+     * 解析类型、形态提示与是否跳过计划直接生成：
+     * 优先听模型最近一条 [[build:类型|形态|direct]]；没有时退回用户原话关键词与页面所选类型。
+     */
+    static BuildDirective inferBuildDirective(List<ConversationRepository.MessageRow> messages, String requested) {
+        StringBuilder user = new StringBuilder();
+        String declaredType = null;
+        String declaredShape = null;
+        boolean declaredDirect = false;
+        for (ConversationRepository.MessageRow msg : messages) {
+            if (msg.content() == null) continue;
+            if ("user".equals(msg.role())) user.append(' ').append(msg.content());
+            if ("assistant".equals(msg.role())) {
+                var m = BUILD_TYPE.matcher(msg.content());
+                while (m.find()) {
+                    String arg = m.group(1);
+                    if (arg == null || arg.isBlank()) continue;
+                    String[] parts = arg.split("[|｜]");
+                    String first = parts[0].trim();
+                    if (Catalog.TYPES.contains(first)) declaredType = first;
+                    // 每遇到新的一条 [[build:...]] 重置本轮的 shape/direct，以最新指示为准
+                    String shape = null;
+                    boolean direct = false;
+                    for (int i = 0; i < parts.length; i++) {
+                        String tok = parts[i].trim().toLowerCase(Locale.ROOT);
+                        if (tok.isEmpty()) continue;
+                        if ("direct".equals(tok) || "skip-plan".equals(tok) || "skip_plan".equals(tok) || "fast".equals(tok)) {
+                            direct = true;
+                        } else if (Set.of("static", "web", "template", "vue", "script", "service").contains(tok)) {
+                            shape = "web".equals(tok) ? "template" : tok;
+                        }
+                    }
+                    declaredShape = shape;
+                    declaredDirect = direct;
+                }
+            }
+        }
+        String userText = user.toString();
+        String resolvedType;
+        if (Catalog.FULLSTACK_TYPE.equals(requested)) {
+            resolvedType = Catalog.FULLSTACK_TYPE;
+        } else if (declaredType != null) {
+            resolvedType = declaredType;
+        } else {
+            String inferred = inferTypeText(userText);
+            resolvedType = inferred != null ? inferred : (requested == null || requested.isBlank() ? Catalog.DEFAULT_TYPE : requested);
+        }
+
+        // 若用户明确只要纯静态 HTML 且非全栈应用，补齐 preferredShape="static"，跳过计划直接生成
+        String resolvedShape = declaredShape;
+        boolean pureStatic = !Catalog.FULLSTACK_TYPE.equals(resolvedType)
+                && !Catalog.SKILL_TYPE.equals(resolvedType)
+                && Catalog.looksLikePureStaticHtml(userText);
+        if (resolvedShape == null && pureStatic) {
+            resolvedShape = "static";
+        }
+        if (Catalog.FULLSTACK_TYPE.equals(resolvedType)) {
+            resolvedShape = null;
+        }
+        boolean skipPlan = declaredDirect
+                || (!Catalog.FULLSTACK_TYPE.equals(resolvedType) && EXPLICIT_SKIP_PLAN.matcher(userText).find());
+        return new BuildDirective(resolvedType, resolvedShape, skipPlan);
+    }
 
     /**
      * 类型优先听模型的：最近一条 [[build:类型]] 是模型按整段对话（含截图）判断的成品形态。
@@ -444,22 +514,7 @@ public class ConversationService {
      * 它复述截图时会提到「开发skill」这类界面文字，曾把「照着做一个工作台」判成技能包。
      */
     static String inferType(List<ConversationRepository.MessageRow> messages, String requested) {
-        // 若用户在创造页明确选定了「全栈应用」（含点击全栈模板），绝不降级覆盖
-        if (Catalog.FULLSTACK_TYPE.equals(requested)) return Catalog.FULLSTACK_TYPE;
-        StringBuilder user = new StringBuilder();
-        String declared = null;
-        for (ConversationRepository.MessageRow msg : messages) {
-            if (msg.content() == null) continue;
-            if ("user".equals(msg.role())) user.append(' ').append(msg.content());
-            if ("assistant".equals(msg.role())) {
-                var m = BUILD_TYPE.matcher(msg.content());
-                if (m.find() && Catalog.TYPES.contains(m.group(1))) declared = m.group(1);
-            }
-        }
-        if (declared != null) return declared;
-        String inferred = inferTypeText(user.toString());
-        if (inferred != null) return inferred;
-        return requested == null || requested.isBlank() ? Catalog.DEFAULT_TYPE : requested;
+        return inferBuildDirective(messages, requested).type();
     }
 
     private static String inferTypeText(String raw) {

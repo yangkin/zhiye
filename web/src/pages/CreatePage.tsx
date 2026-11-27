@@ -73,6 +73,9 @@ const PURE_INFO_QUESTION_RE = /(为什么|为啥|原理|怎么实现|是怎么|�
 /** 闲聊打招呼、确认状态或纯粹表示放弃/取消：绝不误触发代码修改任务 */
 const CASUAL_OR_ABORT_RE =
   /^(在吗|在不在|你好|您好|哈喽|hello|hi|hey|谢谢|多谢|好的|好吧|知道了|明白|收到|没事|不用了|算了|先不做了|不用做了|不要做了|别做了|停了吧|取消吧|放弃吧|放弃(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧|了)?)[。！!？?～~]*$/i;
+/** 工作台轻量控制指令（改名 / 查看或回退历史版本）：直接走助手工具循环，免去拉起编码沙箱 */
+const WORKBENCH_ACTION_RE =
+  /^(?:请|帮我|麻烦|帮忙)?(?:把|给)?(?:当前|这个)?(?:应用|项目|页面|网页)?(?:改名|重命名)(?:叫|为|成|做)?\s*.+|^(?:请|帮我|麻烦|帮忙)?(?:把|将)?(?:当前|这个)?(?:应用|项目)?(?:回到|恢复到?|回退到?|回滚到?|撤回|撤销)(?:上|前一?|刚才|刚那|最近|第?\s*\d+|V\d+|v\d+).*|^(?:查看|列出|有哪些|看看)(?:历史)?版本/;
 /** 明确「现在就要做」：有生产动词，且不是在问问题 */
 export function isIntentToBuild(text: string): boolean {
   const t = text.trim();
@@ -101,6 +104,8 @@ export function quickRoute(text: string, hasElement = false): Route {
   const pureInfo = PURE_INFO_QUESTION_RE.test(t);
   if (hasElement) return asked && pureInfo ? 'model' : 'modify';
   if (CASUAL_OR_ABORT_RE.test(t)) return 'ask';
+  // 工作台管理操作（改名、恢复上一版/指定版本、查版本）直接走助手工具，秒级完成
+  if (t.length <= 120 && WORKBENCH_ACTION_RE.test(t)) return 'ask';
   // 委婉修改请求（如「能不能把标题调小一点、图片居中？」）直接修改，不再只口头建议
   if (POLITE_MODIFY_RE.test(t) && !pureInfo && t.length <= 300) return 'modify';
   if (asked) return 'ask';

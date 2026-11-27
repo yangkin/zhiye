@@ -60,4 +60,39 @@ class InferTypeTest {
                 msg("assistant", "好的，我来整理成静态展示页。"));
         assertThat(ConversationService.inferType(wordToHtml, "开发网站")).isEqualTo("开发网站");
     }
+
+    @Test
+    void parsesDirectBuildAndPreferredShapeFromModelMarker() {
+        var staticDirect = List.of(
+                msg("user", "帮我写一个纯静态 HTML 年度述职汇报页面"),
+                msg("assistant", "[[build:开发网站|static|direct]]\n好的，需求很清晰，直接用纯静态 HTML 为你生成。"));
+        var d1 = ConversationService.inferBuildDirective(staticDirect, "开发网站");
+        assertThat(d1.type()).isEqualTo("开发网站");
+        assertThat(d1.preferredShape()).isEqualTo("static");
+        assertThat(d1.skipPlan()).isTrue();
+
+        var toolDirect = List.of(
+                msg("user", "帮我做一个极简番茄钟计算小工具"),
+                msg("assistant", "[[build:日常开发|direct]]\n明白，直接生成。"));
+        var d2 = ConversationService.inferBuildDirective(toolDirect, "开发网站");
+        assertThat(d2.type()).isEqualTo("日常开发");
+        assertThat(d2.preferredShape()).isNull();
+        assertThat(d2.skipPlan()).isTrue();
+
+        var complexPlan = List.of(
+                msg("user", "帮我搭一个多角色设备维保工单管理系统，含审批流与统计报表"),
+                msg("assistant", "[[build:日常开发]]\n这是一个多模块系统，我先整理一份创造计划供确认。"));
+        var d3 = ConversationService.inferBuildDirective(complexPlan, "开发网站");
+        assertThat(d3.type()).isEqualTo("日常开发");
+        assertThat(d3.skipPlan()).isFalse();
+
+        // 全栈应用即使有「直接生成」字样也不跳过全栈形态约束
+        var fullstack = List.of(
+                msg("user", "直接生成 Vue 3 + Java Spring Boot 工单系统"),
+                msg("assistant", "[[build:全栈应用]]\n好的。"));
+        var d4 = ConversationService.inferBuildDirective(fullstack, "全栈应用");
+        assertThat(d4.type()).isEqualTo("全栈应用");
+        assertThat(d4.preferredShape()).isNull();
+        assertThat(d4.skipPlan()).isFalse();
+    }
 }

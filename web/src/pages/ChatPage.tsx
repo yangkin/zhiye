@@ -251,7 +251,7 @@ export function ChatPage() {
       void qc.invalidateQueries({ queryKey: ['apps'] });
       void qc.invalidateQueries({ queryKey: ['history'] });
       navigate('/apps/' + app.id);
-      toast('正在为你整理创造计划。');
+      toast(app.phase === 'generating' ? '需求很清晰，已跳过计划步骤，正在直接为你生成应用。' : '正在为你整理创造计划。');
     } catch (err) {
       setActionError(errorMessage(err));
     } finally {

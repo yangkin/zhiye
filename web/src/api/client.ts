@@ -230,6 +230,8 @@ async function askStream(
     onThinking?: (text: string) => void;
     onPlanUpdating?: () => void;
     onPlanUpdated?: (app: AppDetail) => void;
+    onTaskStarted?: (task: Task) => void;
+    onAppUpdated?: (info: { action?: string; appId?: string; name?: string; restoredFrom?: number; newVersionNumber?: number }) => void;
     onHandoff?: (h: { summary?: string; instruction: string }) => void;
   },
 ): Promise<void> {
@@ -265,12 +267,17 @@ async function askStream(
       else if (line.startsWith('data:')) {
         const raw = line.slice(5).trim();
         if (!raw) continue;
-        let data: { text?: string; message?: string; summary?: string; instruction?: string } & Partial<AppDetail> = {};
+        let data: {
+          text?: string; message?: string; summary?: string; instruction?: string;
+          action?: string; appId?: string; name?: string; restoredFrom?: number; newVersionNumber?: number;
+        } & Partial<AppDetail> & Partial<Task> = {};
         try { data = JSON.parse(raw); } catch { continue; }
         if (event === 'delta' && data.text) onDelta(data.text);
         else if (event === 'thinking' && data.text) handlers?.onThinking?.(data.text);
         else if (event === 'plan_updating') handlers?.onPlanUpdating?.();
         else if (event === 'plan_updated' && data.id) handlers?.onPlanUpdated?.(data as AppDetail);
+        else if (event === 'task_started' && data.id) handlers?.onTaskStarted?.(data as Task);
+        else if (event === 'app_updated') handlers?.onAppUpdated?.(data);
         else if (event === 'handoff' && data.instruction) handlers?.onHandoff?.({ summary: data.summary, instruction: data.instruction });
         else if (event === 'done') finished = true;
         else if (event === 'error' && data.message) throw new ApiError(data.message, 'ASK_FAILED', 502);
@@ -331,7 +338,8 @@ export const api = {
     signal?: AbortSignal,
     onThinking?: (text: string) => void,
     onHandoff?: (h: { summary?: string; instruction: string }) => void,
-  ) => askStream('/api/chat/ask', input, onDelta, signal, onThinking || onHandoff ? { onThinking, onHandoff } : undefined),
+    onAppUpdated?: (info: { action?: string; appId?: string; name?: string; restoredFrom?: number; newVersionNumber?: number }) => void,
+  ) => askStream('/api/chat/ask', input, onDelta, signal, onThinking || onHandoff || onAppUpdated ? { onThinking, onHandoff, onAppUpdated } : undefined),
   askConversation: (
     id: string,
     input: {
@@ -508,6 +516,7 @@ export const api = {
       onThinking?: (text: string) => void;
       onPlanUpdating?: () => void;
       onPlanUpdated?: (app: AppDetail) => void;
+      onTaskStarted?: (task: Task) => void;
     },
     signal?: AbortSignal,
   ) =>
@@ -515,6 +524,7 @@ export const api = {
       onThinking: handlers.onThinking,
       onPlanUpdating: handlers.onPlanUpdating,
       onPlanUpdated: handlers.onPlanUpdated,
+      onTaskStarted: handlers.onTaskStarted,
     }),
   stopPlanChat: (appId: string) =>
     request<{ stopped: boolean; finished: boolean }>(`/api/apps/${enc(appId)}/plan-chat/stop`, { method: 'POST' }),

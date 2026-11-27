@@ -564,10 +564,11 @@ public class TaskExecutor {
         }
         // 任务开始前自动打一份前置检查点（便于时间旅行一键回退到改动前状态）
         if (checkpoints != null && !resumed && app.currentVersionId() != null) {
-            versions.find(app.currentVersionId()).ifPresent(prev -> checkpoints.record(
-                    app.id(), app.workspaceId(), t.id(), prev.id(), "pre_task",
+            final AppRow preTaskApp = app;
+            versions.find(preTaskApp.currentVersionId()).ifPresent(prev -> checkpoints.record(
+                    preTaskApp.id(), preTaskApp.workspaceId(), t.id(), prev.id(), "pre_task",
                     "任务前自动快照（V" + prev.number() + "）", prev.gitCommit(), prev.gitTree(),
-                    checkpoints.readSchemaSqlFromCommit(app.id(), prev.gitCommit()), null));
+                    checkpoints.readSchemaSqlFromCommit(preTaskApp.id(), prev.gitCommit()), null));
         }
         startRunner(ctx, false);
         boolean modify = "modify".equals(t.type());
@@ -662,6 +663,10 @@ public class TaskExecutor {
                 : resumed && (!retry || resume.path("continueWork").asBoolean(false)) ? Prompts.resume(instruction, resumeNote) : instruction;
         String summary = prompt(ctx, text);
 
+        // 代码驱动的 project_kind 演进：若 service 去掉后端变为纯静态/前端，或前端新增了真实后端服务，自动校正形态
+        ReconcileOutcome reconciled = reconcileProjectKindIfNeeded(ctx, app);
+        app = reconciled.app();
+
         int fixRounds = props.task().verifyFixRounds();
         JsonNode passed = null;
         List<String> fixes = new ArrayList<>();
@@ -742,6 +747,9 @@ public class TaskExecutor {
         }
 
         String title = modify ? modifyTitle(input.path("content").asText()) : "页面与交互生成完成";
+        if (!modify && !app.nameLocked()) {
+            maybeAutoNameFromWorkspace(ctx.workspace, app);
+        }
         VersionRow ver = commit(ctx, app, title, modify ? "modify" : "generate", false);
         if (checkpoints != null) {
             checkpoints.record(app.id(), app.workspaceId(), t.id(), ver.id(), "post_task",
@@ -772,11 +780,40 @@ public class TaskExecutor {
                     + qaVerdict.path("score").asInt(0) + " 分）· " + qaVerdict.path("summary").asText("");
             finalSummary = withNoteBeforeNext(finalSummary, qaLine);
         }
+        if (reconciled.note() != null) finalSummary = withNoteBeforeNext(finalSummary, reconciled.note());
         if (cloudNote != null) finalSummary = withNoteBeforeNext(finalSummary, cloudNote);
         if (modify) messages.setStatusByTask(t.id(), "ok");
         messages.insert(app.id(), "assistant", finalSummary, null, t.id(), "ok");
         tasks.deleteCheckpoint(t.id());
         succeed(ctx, ver.id(), Json.obj().put("summary", finalSummary).put("turns", ctx.turns));
+    }
+
+    private static final java.util.regex.Pattern HTML_TITLE_TAG = java.util.regex.Pattern.compile(
+            "<title[^>]*>([^<\\r\\n]{2,40})</title>", java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final java.util.Set<String> GENERIC_HTML_TITLES = java.util.Set.of(
+            "document", "app", "vite + react", "vite + react + ts", "vite + vue", "vite app", "react app", "vue app", "织页", "织页应用", "我的应用");
+
+    /** 跳过计划直接生成时，若应用名尚未被用户锁定，从生成的 index.html <title> 提取干净标题。 */
+    private void maybeAutoNameFromWorkspace(Path workspace, AppRow app) {
+        if (workspace == null || app == null || app.nameLocked()) return;
+        for (String rel : List.of("index.html", "frontend/index.html", "public/index.html")) {
+            Path p = workspace.resolve(rel);
+            if (!Files.isRegularFile(p)) continue;
+            try {
+                String html = Files.readString(p, java.nio.charset.StandardCharsets.UTF_8);
+                var m = HTML_TITLE_TAG.matcher(html);
+                if (!m.find()) continue;
+                String candidate = m.group(1).trim().replaceAll("\\s+", " ");
+                int dash = candidate.indexOf(" - ");
+                if (dash >= 2) candidate = candidate.substring(0, dash).trim();
+                int bar = candidate.indexOf(" | ");
+                if (bar >= 2) candidate = candidate.substring(0, bar).trim();
+                if (candidate.length() < 2 || candidate.length() > 24) continue;
+                if (GENERIC_HTML_TITLES.contains(candidate.toLowerCase(Locale.ROOT))) continue;
+                apps.update(app.id(), "name", candidate);
+                return;
+            } catch (Exception ignored) { }
+        }
     }
 
     static String modifyTitle(String content) {
@@ -885,6 +922,8 @@ public class TaskExecutor {
         }
         startRunner(ctx, false);
         ctx.prepared = true;
+        ReconcileOutcome reconciled = reconcileProjectKindIfNeeded(ctx, app);
+        app = reconciled.app();
         phase(ctx, "VERIFYING", "正在检查", 60);
         if (app.isService()) {
             VersionRow ver = commit(ctx, app, "代码编辑 · " + files.size() + " 个文件", "code", false);
@@ -897,7 +936,8 @@ public class TaskExecutor {
                 }
             }
             messages.insert(app.id(), "assistant",
-                    "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "），工作台预览已更新；线上已发布版本保持不变，确认无误后点击右上角 **「发布」** 切流上线。",
+                    "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "），工作台预览已更新；线上已发布版本保持不变，确认无误后点击右上角 **「发布」** 切流上线。"
+                            + (reconciled.note() == null ? "" : "\n\n" + reconciled.note()),
                     null, t.id(), "ok");
             succeed(ctx, ver.id(), Json.obj().put("files", files.size()));
             return;
@@ -906,8 +946,54 @@ public class TaskExecutor {
         if (!v.path("ok").asBoolean(false)) throw new TaskContext.Fail("VERIFY_FAILED", "检查没有通过，修改未保存：" + failedSummary(v));
         VersionRow ver = commit(ctx, app, "代码编辑 · " + files.size() + " 个文件", "code", false);
         String cloudNote = applyCloudSchema(ctx, app);
-        messages.insert(app.id(), "assistant", "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "）" + (cloudNote == null ? "" : "\n\n" + cloudNote), null, t.id(), "ok");
+        String extraNotes = (reconciled.note() == null ? "" : "\n\n" + reconciled.note()) + (cloudNote == null ? "" : "\n\n" + cloudNote);
+        messages.insert(app.id(), "assistant", "已保存你对 " + files.size() + " 个文件的修改（V" + ver.number() + "）" + extraNotes, null, t.id(), "ok");
         succeed(ctx, ver.id(), Json.obj().put("files", files.size()));
+    }
+
+    private record ReconcileOutcome(AppRow app, String note) {}
+
+    /**
+     * 代码驱动的项目形态自洽校正：根据工作区真实代码自动在 service 与 static/vite 之间切换，
+     * 避免已去除后端的应用仍卡在服务托管或混合内容外跳预览页。
+     */
+    private ReconcileOutcome reconcileProjectKindIfNeeded(TaskContext ctx, AppRow app) {
+        if (ctx.workspace == null || app == null) return new ReconcileOutcome(app, null);
+        WorkspaceKindReconciler.Decision d = WorkspaceKindReconciler.inspect(ctx.workspace, app.projectKind());
+        if (!d.changed()) return new ReconcileOutcome(app, null);
+        // 若准备从前端升级为 service，但当前环境未启用单体托管，则保持原形态
+        if ("service".equals(d.targetKind()) && monolithService == null) {
+            return new ReconcileOutcome(app, null);
+        }
+        try {
+            if (d.promotePublicDir()) {
+                WorkspaceKindReconciler.promotePublicToRoot(ctx.workspace);
+            }
+            boolean wasService = app.isService();
+            apps.update(app.id(), "project_kind", d.targetKind());
+            if (d.targetFramework() != null && !d.targetFramework().isBlank()) {
+                apps.update(app.id(), "framework", d.targetFramework());
+            }
+            if (wasService && !"service".equals(d.targetKind()) && Catalog.FULLSTACK_TYPE.equals(app.type())) {
+                apps.update(app.id(), "type", Catalog.DEFAULT_TYPE);
+            } else if (!wasService && "service".equals(d.targetKind()) && !Catalog.FULLSTACK_TYPE.equals(app.type())) {
+                apps.update(app.id(), "type", Catalog.FULLSTACK_TYPE);
+            }
+            if (wasService && !"service".equals(d.targetKind()) && monolithService != null) {
+                try { monolithService.stopForTrash(app); } catch (Exception e) {
+                    log.warn("降级静态模式时停止旧单体服务失败 app={}：{}", app.id(), e.getMessage());
+                }
+            }
+            // 形态已变，强制重新走新形态对应的 verify 生成 dist-preview / dist-publish
+            ctx.freshVerifyOk = false;
+            ctx.freshVerifyChecks = null;
+            events.emit(ctx.id(), "stage", Map.of("label", d.reason()));
+            AppRow refreshed = apps.findById(app.id()).orElse(app);
+            return new ReconcileOutcome(refreshed, "**项目形态已自动更新**：" + d.reason() + "。");
+        } catch (Exception e) {
+            log.warn("自动演进项目形态失败 app={} target={}：{}", app.id(), d.targetKind(), e.getMessage());
+            return new ReconcileOutcome(app, null);
+        }
     }
 
     private JsonNode applyVisual(TaskContext ctx, AppRow app, JsonNode patches) throws Exception {

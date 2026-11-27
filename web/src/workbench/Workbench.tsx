@@ -84,7 +84,8 @@ function Workbench({ id }: { id: string }) {
   useEffect(() => {
     if (skill && (tab === 'cloud' || tab === 'run')) setTab('code');
     if (script && (tab === 'cloud' || tab === 'preview' || tab === 'service')) setTab('run');
-  }, [skill, script, tab]);
+    if (!service && tab === 'service') setTab('preview');
+  }, [skill, script, service, tab]);
   // 时间线 / 消息里的「在代码中打开」「查看改动」：切到代码页
   useEffect(() => {
     const openCode = () => setTab('code');
@@ -339,7 +340,7 @@ function Workbench({ id }: { id: string }) {
       if (task.status === 'SUCCEEDED') {
         if (task.type === 'visual_save') setSavedCard(true);
         else toast(finishToast[task.type] ?? '任务已完成。');
-        if (task.type === 'modify' || task.type === 'visual_save') {
+        if (task.type === 'modify' || task.type === 'visual_save' || task.type === 'code_save' || task.type === 'generate') {
           await qc.refetchQueries({ queryKey: qk.app(id) });
           void editorRef.current.reloadDraft({ silent: true });
         }

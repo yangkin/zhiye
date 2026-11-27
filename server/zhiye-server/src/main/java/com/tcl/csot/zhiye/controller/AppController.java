@@ -168,7 +168,13 @@ public class AppController {
                                 return null;
                             }
                             run.saved().set(true);
-                            return apps.applyPlanChatResult(workspaceId, app.id(), res);
+                            var out = apps.applyPlanChatOutcome(workspaceId, app.id(), res);
+                            if (out.updatedApp() == null && out.startedTask() == null) return null;
+                            Map<String, Object> pack = new java.util.LinkedHashMap<>();
+                            pack.put("__planOutcome", true);
+                            if (out.updatedApp() != null) pack.put("app", out.updatedApp());
+                            if (out.startedTask() != null) pack.put("task", out.startedTask());
+                            return pack;
                         },
                         (name, data) -> {
                             if (isStopped.getAsBoolean()) throw new java.io.IOException("用户停止了回答");

@@ -23,7 +23,7 @@ const STYLE_DESC: Record<string, string> = {
   rose: '柔软细腻，保留生活的温度',
   cyber: '明亮碰撞，大胆表达自我',
 };
-const COUNTDOWN = 8;
+const COUNTDOWN = 12;
 
 /** 任务列表（- [ ]）渲染成勾选框符号：Markdown 清洗会去掉 input */
 const docView = (md: string) => md.replace(/^(\s*[-*+])\s+\[ \]\s+/gm, '$1 ☐ ').replace(/^(\s*[-*+])\s+\[[xX]\]\s+/gm, '$1 ☑ ');
