@@ -299,6 +299,10 @@ public class GitService {
     }
 
     public void exportZip(String appId, String commit, String rootName, OutputStream out) throws IOException {
+        exportZip(appId, commit, rootName, out, null);
+    }
+
+    public void exportZip(String appId, String commit, String rootName, OutputStream out, java.util.function.Predicate<String> include) throws IOException {
         try (Repository r = openBare(appId); TreeWalk tw = new TreeWalk(r); ZipOutputStream zip = new ZipOutputStream(out)) {
             tw.addTree(parse(r, commit).getTree());
             tw.setRecursive(true);
@@ -306,7 +310,9 @@ public class GitService {
             String prefix = (rootName == null || rootName.isEmpty()) ? "" : rootName + "/";
             while (tw.next()) {
                 if (tw.getFileMode(0).getObjectType() != Constants.OBJ_BLOB) continue;
-                zip.putNextEntry(new ZipEntry(prefix + tw.getPathString()));
+                String path = tw.getPathString();
+                if (include != null && !include.test(path)) continue;
+                zip.putNextEntry(new ZipEntry(prefix + path));
                 r.open(tw.getObjectId(0)).copyTo(zip);
                 zip.closeEntry();
             }

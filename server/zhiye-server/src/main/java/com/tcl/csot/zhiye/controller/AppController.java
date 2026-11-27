@@ -345,6 +345,17 @@ public class AppController {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private SkillHubController skillHub;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.template.TemplateRequirementsService templateRequirements;
+
+    /** 复刻自灵感社区的应用配置体检：实时检测缺失的数据源绑定、私有飞书连接器与单体服务环境变量 */
+    @GetMapping("/{id}/setup-check")
+    public Map<String, Object> setupCheck(@PathVariable String id) {
+        if (templateRequirements == null) {
+            return Map.of("needsSetup", false, "items", List.of(), "summary", Map.of("total", 0, "pending", 0, "ready", 0));
+        }
+        return templateRequirements.setupCheck(ws(), id);
+    }
 
     /** 兼容前端 SkillhubModal 与既有接口约定：/api/apps/{id}/skillhub/* 委托给 SkillHubController */
     @PostMapping("/{id}/skillhub/publish")

@@ -25,6 +25,7 @@ export const qk = {
   assets: ['assets'] as const,
   sources: ['sources'] as const,
   appSources: (appId: string) => ['appSources', appId] as const,
+  appSetupCheck: (appId: string) => ['appSetupCheck', appId] as const,
   skillhubCategories: ['skillhub', 'categories'] as const,
   skillhubMarket: (q: string, categoryId: string, page: number) => ['skillhub', 'market', q, categoryId, page] as const,
 };
@@ -50,6 +51,7 @@ export function useInvalidateApp() {
     void qc.invalidateQueries({ queryKey: qk.draft(appId) });
     void qc.invalidateQueries({ queryKey: ['queued', appId] });
     void qc.invalidateQueries({ queryKey: ['cloud', appId] });
+    void qc.invalidateQueries({ queryKey: qk.appSetupCheck(appId) });
     void qc.invalidateQueries({ queryKey: ['apps'] });
     void qc.invalidateQueries({ queryKey: ['history'] });
     void qc.invalidateQueries({ queryKey: qk.activeTask });

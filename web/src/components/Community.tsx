@@ -42,6 +42,12 @@ export function WorkCover({ t, live = true }: { t: TemplateItem; live?: boolean 
         模板
       </span>
       {t.featured ? <FeaturedBadge /> : null}
+      {t.requirements?.hasExternalDeps ? (
+        <span className="work-dep-badge" title="复刻后需自备或重新绑定外部数据源、飞书连接器或环境变量（不含作者密钥）">
+          <Icon name="settings" />
+          需自备配置
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -175,7 +181,9 @@ export function PublishWorkModal({ app, onClose }: { app: AppSummary; onClose: (
         onChange={(e) => setDesc(e.target.value)}
       />
       {error ? <p className="inline-error">{error}</p> : null}
-      <small className="muted-note">发布的是当前版本的快照：同事可以看效果、点赞，「使用模板」会复刻出一份自己的应用（带页面和表结构，不带你的数据）。之后你再改应用，社区里的作品不会跟着变。</small>
+      <small className="muted-note">
+        发布的是当前版本的脱敏快照：同事可查看效果、点赞并「使用模板」复刻为自己的应用；不会包含你的业务数据、AGW 数据源凭证、私有飞书连接器密钥、服务环境变量值及 .env 等私密文件，外部依赖会自动生成配置清单供复用者按需对接。
+      </small>
     </Modal>
   );
 }

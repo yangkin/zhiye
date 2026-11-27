@@ -952,6 +952,71 @@ export interface DataSourceCall {
   at: string;
 }
 
+export interface TemplateRequirementDataSource {
+  key: string;
+  name: string;
+  description?: string;
+  platform?: boolean;
+  provider?: string;
+}
+
+export interface TemplateRequirementConnector {
+  kind: string;
+  kindLabel: string;
+  name: string;
+  scope: 'platform' | 'workspace';
+  sourceConnectorId?: string;
+}
+
+export interface TemplateRequirementEnvVar {
+  key: string;
+  secret?: boolean;
+  source?: string;
+}
+
+export interface TemplateRequirements {
+  dataSources?: TemplateRequirementDataSource[];
+  connectors?: TemplateRequirementConnector[];
+  envVars?: TemplateRequirementEnvVar[];
+  cloud?: boolean;
+  managedPg?: boolean;
+  pvc?: boolean;
+  strippedSecretFileCount?: number;
+  projectKind?: string;
+  sourceOrigin?: string;
+  hasExternalDeps?: boolean;
+}
+
+export interface AppSetupCheckItem {
+  category: 'dataSource' | 'connector' | 'envVar';
+  key?: string;
+  kind?: string;
+  kindLabel?: string;
+  name: string;
+  description?: string;
+  scope?: 'platform' | 'workspace';
+  secret?: boolean;
+  sourceConnectorId?: string;
+  matchingSourceId?: string;
+  matchingSourceName?: string;
+  matchingConnectorId?: string;
+  matchingConnectorName?: string;
+  status: 'ready' | 'missing';
+  action?: 'bind_source' | 'open_sources' | 'open_ecosystem' | 'rebind_connector' | 'open_service';
+  hint: string;
+}
+
+export interface AppSetupCheck {
+  needsSetup: boolean;
+  sourceTemplateId: string | null;
+  strippedSecretFileCount?: number;
+  cloud?: boolean;
+  managedPg?: boolean;
+  pvc?: boolean;
+  items: AppSetupCheckItem[];
+  summary: { total: number; pending: number; ready: number };
+}
+
 export interface TemplateItem {
   id: string;
   name: string;
@@ -970,6 +1035,7 @@ export interface TemplateItem {
   liked: boolean;
   featured: boolean;
   pinnedOrder: number;
+  requirements?: TemplateRequirements;
   createdAt: string;
 }
 

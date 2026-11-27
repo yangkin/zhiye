@@ -169,8 +169,82 @@ export function WorkPage() {
           ) : null}
         </div>
         <small className="work-note">
-          左侧预览为只读展示快照，不可直接操作；点击「使用模板」会复刻一份到你的应用里（含页面与表结构，不含作者数据），之后可完整体验与修改。
+          左侧预览为只读展示快照，不可直接操作；点击「使用模板」会复刻一份到你的应用里（含页面与表结构，不含作者数据与凭证），之后可完整体验与修改。
         </small>
+        {(() => {
+          const req = t.requirements;
+          const dsList = req?.dataSources ?? [];
+          const connList = req?.connectors ?? [];
+          const envList = req?.envVars ?? [];
+          const autoItems = [
+            req?.cloud ? '云数据表（自动建独立空表）' : null,
+            req?.managedPg ? '托管 PostgreSQL（自动建空库）' : null,
+            req?.pvc ? '持久化卷（服务托管按需开启）' : null,
+          ].filter(Boolean) as string[];
+          if (!dsList.length && !connList.length && !envList.length && !autoItems.length) return null;
+          return (
+            <section className="work-reqs-card" aria-label="复用前依赖清单">
+              <div className="work-reqs-head">
+                <b>
+                  <Icon name="settings" />
+                  {req?.hasExternalDeps ? '使用前需自备配置' : '运行环境说明'}
+                </b>
+                <span className="work-reqs-safe">不含作者密钥</span>
+              </div>
+              {dsList.length > 0 ? (
+                <div className="work-reqs-group">
+                  <span className="work-reqs-label">AGW / 企业数据源</span>
+                  <ul>
+                    {dsList.map((d) => (
+                      <li key={d.key}>
+                        <span>{d.name || d.key}</span>
+                        <code>{d.key}</code>
+                        <em>{d.platform ? '平台公共' : '需自备权限'}</em>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {connList.length > 0 ? (
+                <div className="work-reqs-group">
+                  <span className="work-reqs-label">飞书 / 企业连接器</span>
+                  <ul>
+                    {connList.map((c, idx) => (
+                      <li key={`${c.kind}-${c.sourceConnectorId ?? idx}`}>
+                        <span>{c.kindLabel || c.name}</span>
+                        <em>{c.scope === 'platform' ? '平台公共 · 可直用' : '作者私有 · 需改绑'}</em>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {envList.length > 0 ? (
+                <div className="work-reqs-group">
+                  <span className="work-reqs-label">服务环境变量（仅键名）</span>
+                  <div className="work-reqs-chips">
+                    {envList.map((ev) => (
+                      <code key={ev.key} title="复刻后在工作台「服务托管 → 环境变量」填写">
+                        {ev.key}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {autoItems.length > 0 ? (
+                <div className="work-reqs-auto">
+                  {autoItems.map((label) => (
+                    <span key={label}>{label}</span>
+                  ))}
+                </div>
+              ) : null}
+              {req?.strippedSecretFileCount ? (
+                <p className="work-reqs-strip">
+                  发布时已自动剥离 {req.strippedSecretFileCount} 个本地私密文件（如 .env / 私钥），保障作者安全。
+                </p>
+              ) : null}
+            </section>
+          );
+        })()}
         {t.mine ? (
           <button className="text-button danger work-remove" onClick={() => setConfirmDelete(true)}>
             <Icon name="trash" />

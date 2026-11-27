@@ -385,6 +385,7 @@ export const api = {
     request<{ data: unknown; status: number }>(`/api/sources/${enc(id)}/test`, { method: 'POST', body: { params } }),
   sourceCalls: (id: string) => request<DataSourceCall[]>(`/api/sources/${enc(id)}/calls`),
   appSources: (appId: string) => request<DataSourceInfo[]>(`/api/apps/${enc(appId)}/sources`),
+  appSetupCheck: (appId: string) => request<import('./types').AppSetupCheck>(`/api/apps/${enc(appId)}/setup-check`),
   bindSource: (appId: string, sourceId: string) =>
     request<DataSourceInfo[]>(`/api/apps/${enc(appId)}/sources`, { method: 'POST', body: { sourceId } }),
   unbindSource: (appId: string, sourceId: string) =>

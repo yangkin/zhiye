@@ -52,10 +52,12 @@ public class TemplateService {
     private final TaskService taskService;
     private final QuotaService quota;
     private final Views views;
+    private final TemplateRequirementsService requirementsService;
     private final String previewBase;
 
     public TemplateService(JdbcClient jdbc, AppRepository apps, VersionRepository versions, GitService git,
-                           ObjectStore store, TaskService taskService, QuotaService quota, Views views, ZhiyeProperties props) {
+                           ObjectStore store, TaskService taskService, QuotaService quota, Views views,
+                           TemplateRequirementsService requirementsService, ZhiyeProperties props) {
         this.jdbc = jdbc;
         this.apps = apps;
         this.versions = versions;
@@ -64,6 +66,7 @@ public class TemplateService {
         this.taskService = taskService;
         this.quota = quota;
         this.views = views;
+        this.requirementsService = requirementsService;
         String templateBase = props.site().templatePreviewBase();
         this.previewBase = (templateBase == null || templateBase.isBlank() ? props.site().previewBase() : templateBase).replaceAll("/+$", "");
     }
@@ -71,7 +74,7 @@ public class TemplateService {
     private record Tpl(String id, String ws, String name, String description, String type, String kind, String framework,
                        Integer sourceVersion, String objectKey, int fileCount, Instant createdAt, String previewPrefix,
                        String author, String sourceAppId, int cloneCount, int viewCount, int likeCount, boolean liked,
-                       boolean featured, int pinnedOrder) {}
+                       boolean featured, int pinnedOrder, com.fasterxml.jackson.databind.JsonNode requirements) {}
 
     private static Tpl map(ResultSet rs, int i) throws SQLException {
         return new Tpl(rs.getString("id"), rs.getString("workspace_id"), rs.getString("name"), rs.getString("description"),
@@ -79,7 +82,8 @@ public class TemplateService {
                 rs.getObject("source_version", Integer.class), rs.getString("object_key"), rs.getInt("file_count"),
                 Db.ts(rs, "created_at"), rs.getString("preview_prefix"), rs.getString("author"), rs.getString("source_app_id"),
                 rs.getInt("clone_count"), rs.getInt("view_count"), rs.getInt("like_count"), rs.getBoolean("liked"),
-                rs.getBoolean("featured"), rs.getInt("pinned_order"));
+                rs.getBoolean("featured"), rs.getInt("pinned_order"),
+                TemplateRequirementsService.parseOrEmpty(rs.getString("requirements")));
     }
 
     private static final String SELECT = "select t.*, exists(select 1 from template_like l where l.template_id = t.id and l.workspace_id = :ws) as liked from template t";
@@ -104,18 +108,23 @@ public class TemplateService {
         Path tmp = Files.createTempFile("zhiye-tpl", ".zip");
         try {
             try (var out = Files.newOutputStream(tmp)) {
-                git.exportZip(app.id(), v.gitCommit(), "project", out);
+                git.exportZip(app.id(), v.gitCommit(), "project", out,
+                        p -> !TemplateRequirementsService.isSensitiveTemplateFile(p));
             }
             store.put(key, tmp);
         } finally {
             Files.deleteIfExists(tmp);
         }
-        int count = git.listFiles(app.id(), v.gitCommit()).size();
+        int count = (int) git.listFiles(app.id(), v.gitCommit()).stream()
+                .filter(f -> !TemplateRequirementsService.isSensitiveTemplateFile(f.path()))
+                .count();
+        ObjectNode requirements = requirementsService.extract(app, v.gitCommit());
         String preview = snapshot(id, v.buildId());
         jdbc.sql("""
                 insert into template (id, workspace_id, name, description, app_type, project_kind, framework, source_version,
-                  object_key, file_count, preview_prefix, author, source_app_id) values (?,?,?,?,?,?,?,?,?,?,?,?,?)""")
-                .params(id, ws, n, d, app.type(), app.projectKind(), app.framework(), v.number(), key, count, preview, author, app.id()).update();
+                  object_key, file_count, preview_prefix, author, source_app_id, requirements) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb)""")
+                .params(id, ws, n, d, app.type(), app.projectKind(), app.framework(), v.number(), key, count, preview, author, app.id(),
+                        Json.write(requirements)).update();
         return view(find(ws, id).orElseThrow(), ws);
     }
 
@@ -223,6 +232,12 @@ public class TemplateService {
                 "lavender", false, "适中", "auto", false, "generating", "import", t.framework(), t.kind(), false, Ids.slug(), List.of(),
                 null, null, null, null, null);
         apps.insert(row);
+        if (t.requirements() != null && t.requirements().isObject() && !t.requirements().isEmpty()) {
+            jdbc.sql("update app set source_template_id = ?, template_requirements = ?::jsonb where id = ?")
+                    .params(t.id(), Json.write(t.requirements()), appId).update();
+        } else {
+            jdbc.sql("update app set source_template_id = ? where id = ?").params(t.id(), appId).update();
+        }
         try { git.initEmpty(appId); } catch (Exception e) { apps.softDelete(appId); throw new IllegalStateException(e); }
         ObjectNode input = Json.obj();
         input.put("objectKey", t.objectKey());
@@ -261,6 +276,7 @@ public class TemplateService {
         m.put("liked", t.liked());
         m.put("featured", t.featured());
         m.put("pinnedOrder", t.pinnedOrder());
+        m.put("requirements", t.requirements() == null ? Json.obj() : t.requirements());
         m.put("createdAt", Db.iso(t.createdAt()));
         return m;
     }

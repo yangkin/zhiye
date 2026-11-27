@@ -25,6 +25,7 @@ import { CloudPane, FilesPane } from './Panes';
 import { ServiceRuntimePane } from './ServiceRuntimePane';
 import { ScriptRunnerPane } from './ScriptRunnerPane';
 import { LiveWorkspaceDock } from './LiveWorkspaceDock';
+import { SetupBanner } from './SetupBanner';
 import { PublishModal } from './PublishModal';
 import { SkillhubModal } from './SkillhubModal';
 import { Pet } from '../components/Pet';
@@ -72,6 +73,7 @@ function Workbench({ id }: { id: string }) {
   const versions = useMemo(() => versionsQ.data ?? [], [versionsQ.data]);
 
   const [tab, setTab] = useState<Tab>('preview');
+  const [serviceEnvTick, setServiceEnvTick] = useState(0);
   const skill = app ? isSkillApp(app) : false;
   const script = app ? isScriptApp(app) : false;
   const service = app ? isServiceApp(app) : false;
@@ -758,6 +760,23 @@ function Workbench({ id }: { id: string }) {
         ) : null}
         {!previewCollapsed ? (
         <section className={`preview-panel studio-panel ${maximized ? 'preview-maximized' : ''}`}>
+          {ready && !maximized ? (
+            <SetupBanner
+              app={app}
+              busy={busyHere}
+              onOpenService={() => {
+                setTab(service ? 'service' : 'code');
+                if (service) setServiceEnvTick((n) => n + 1);
+              }}
+              onSendPrompt={async (prompt) => {
+                if (!(await beforeTask())) return;
+                const res = await api.sendMessage(app.id, { content: prompt });
+                qc.setQueryData<Message[]>(qk.messages(app.id), (old) => [...(old ?? []), res.message]);
+                onTaskStarted(res.task);
+                toast('已交给 AI 替换连接器配置。');
+              }}
+            />
+          ) : null}
           {tab === 'run' && script ? (
             <ScriptRunnerPane app={app} versionId={viewedVersionId} onOpenCode={() => setTab('code')} />
           ) : tab === 'preview' && (skill || script) ? (
@@ -1101,7 +1120,7 @@ function Workbench({ id }: { id: string }) {
               versionId={viewedVersionId}
             />
           ) : tab === 'service' && service ? (
-            <ServiceRuntimePane app={app} />
+            <ServiceRuntimePane app={app} focusSub={serviceEnvTick ? 'env' : undefined} focusTick={serviceEnvTick} />
           ) : (
             <CloudPane appId={app.id} />
           )}

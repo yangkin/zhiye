@@ -155,9 +155,12 @@ function Switch({
   );
 }
 
-export function ServiceRuntimePane({ app }: { app: AppDetail }) {
+export function ServiceRuntimePane({ app, focusSub, focusTick }: { app: AppDetail; focusSub?: SubTab; focusTick?: number }) {
   const qc = useQueryClient();
-  const [sub, setSub] = useState<SubTab>('config');
+  const [sub, setSub] = useState<SubTab>(focusSub ?? 'config');
+  useEffect(() => {
+    if (focusSub && focusTick) setSub(focusSub);
+  }, [focusSub, focusTick]);
   const [logView, setLogView] = useState<LogView>('runtime');
   const [logQuery, setLogQuery] = useState('');
   const [onlyErrors, setOnlyErrors] = useState(false);
@@ -260,6 +263,7 @@ export function ServiceRuntimePane({ app }: { app: AppDetail }) {
         qc.invalidateQueries({ queryKey: ['service-status', app.id] }),
         qc.invalidateQueries({ queryKey: ['service-logs', app.id] }),
         qc.invalidateQueries({ queryKey: ['app', app.id] }),
+        qc.invalidateQueries({ queryKey: ['appSetupCheck', app.id] }),
       ]);
       setBusy(null);
     }
