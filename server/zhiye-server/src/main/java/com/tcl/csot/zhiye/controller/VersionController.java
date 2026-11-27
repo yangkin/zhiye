@@ -129,8 +129,21 @@ public class VersionController {
     public List<Map<String, Object>> files(@PathVariable String id) throws Exception { return versions.files(ws(), id); }
 
     @GetMapping("/versions/{id}/file")
-    public ResponseEntity<byte[]> file(@PathVariable String id, @RequestParam String path) throws Exception {
+    public ResponseEntity<byte[]> file(@PathVariable String id,
+                                       @RequestParam String path,
+                                       @RequestParam(defaultValue = "false") boolean download) throws Exception {
         byte[] data = versions.file(ws(), id, path);
+        if (download) {
+            String normalized = path == null ? "file" : path.replace('\\', '/');
+            int slash = normalized.lastIndexOf('/');
+            String fileName = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+            if (fileName.isBlank()) fileName = "file";
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(com.tcl.csot.zhiye.util.ContentTypes.of(fileName)))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build().toString())
+                    .header("X-Content-Type-Options", "nosniff")
+                    .body(data);
+        }
         return ResponseEntity.ok().contentType(new MediaType("text", "plain", StandardCharsets.UTF_8)).body(data);
     }
 

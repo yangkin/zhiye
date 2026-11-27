@@ -1097,10 +1097,8 @@ function Workbench({ id }: { id: string }) {
             </>
           ) : tab === 'files' ? (
             <FilesPane
+              appId={app.id}
               versionId={viewedVersionId}
-              assets={app.assets ?? []}
-              onDownloadPage={() => download('page')}
-              onExport={() => download('export')}
             />
           ) : tab === 'service' && service ? (
             <ServiceRuntimePane app={app} />

@@ -250,6 +250,9 @@ public class AppController {
     @GetMapping("/{id}/messages")
     public List<Map<String, Object>> messages(@PathVariable String id) { return apps.messages(ws(), id); }
 
+    @GetMapping("/{id}/files")
+    public Map<String, Object> files(@PathVariable String id) { return apps.files(ws(), id); }
+
     @PostMapping("/{id}/messages")
     public Map<String, Object> post(@PathVariable String id, @RequestBody JsonNode body,
                                     @RequestHeader(value = "Idempotency-Key", required = false) String key) throws Exception {

@@ -554,6 +554,13 @@ export const api = {
   versionFiles: (id: string) => request<FileEntry[]>(`/api/versions/${enc(id)}/files`),
   versionFile: (id: string, path: string) =>
     request<string>(`/api/versions/${enc(id)}/file` + qs({ path }), { text: true }),
+  versionFileDownloadUrl: (id: string, path: string) =>
+    `/api/versions/${enc(id)}/file` + qs({ path, download: true }),
+  appFiles: (appId: string) =>
+    request<{
+      uploaded: Array<{ id: string; name: string; mime: string; size: number; url: string; downloadUrl: string; createdAt: string }>;
+      chatFiles: Array<{ id: string; conversationId: string; name: string; version: number; size: number; createdAt: string }>;
+    }>(`/api/apps/${enc(appId)}/files`),
   exportUrl: (id: string) => `/api/versions/${enc(id)}/export`,
   pageUrl: (id: string) => `/api/versions/${enc(id)}/page`,
 
@@ -761,6 +768,7 @@ export const api = {
   },
   assets: () => request<Asset[]>('/api/assets'),
   assetContentUrl: (id: string) => `/api/assets/${enc(id)}/content`,
+  assetDownloadUrl: (id: string) => `/api/assets/${enc(id)}/content?download=1`,
 
   // 管理控制台治理与运维
   adminOverview: () => request<AdminOverview>('/api/admin/overview'),

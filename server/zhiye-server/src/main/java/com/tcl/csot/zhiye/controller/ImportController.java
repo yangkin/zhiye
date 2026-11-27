@@ -51,10 +51,13 @@ public class ImportController {
     public List<Map<String, Object>> listAssets() { return assets.list(principal.workspaceId()); }
 
     @GetMapping("/assets/{id}/content")
-    public ResponseEntity<byte[]> content(@PathVariable String id) throws Exception {
+    public ResponseEntity<byte[]> content(@PathVariable String id,
+                                          @RequestParam(defaultValue = "false") boolean download) throws Exception {
         var c = assets.content(principal.workspaceId(), id);
+        var disp = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
+                .filename(c.name(), StandardCharsets.UTF_8).build().toString();
         return ResponseEntity.ok().contentType(MediaType.parseMediaType(c.mime()))
-                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().filename(c.name(), StandardCharsets.UTF_8).build().toString())
+                .header(HttpHeaders.CONTENT_DISPOSITION, disp)
                 .header("X-Content-Type-Options", "nosniff")
                 .body(c.data());
     }

@@ -430,6 +430,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
         await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+        void qc.invalidateQueries({ queryKey: ['app-files', app.id] });
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') {
           await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
@@ -540,6 +541,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
         await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+        void qc.invalidateQueries({ queryKey: ['app-files', app.id] });
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') {
           await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
@@ -598,6 +600,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       useChat.getState().setAssets([]);
       useChat.getState().setSkills([]);
       qc.setQueryData<Message[]>(qk.messages(app.id), (old) => [...(old ?? []), res.message]);
+      void qc.invalidateQueries({ queryKey: ['app-files', app.id] });
       if (n > 0) useChat.getState().addDraftNote([res.message.id, res.task.id], n);
       onTaskStarted(res.task);
     } catch (err) {

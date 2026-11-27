@@ -51,6 +51,9 @@ public class AppService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.config.ZhiyeProperties props;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.conversation.ConversationFileService conversationFiles;
+
     public AppService(AppRepository apps, TaskService taskService, TaskRepository tasks, MessageRepository messages,
                       DraftRepository drafts, VersionRepository versions, VersionService versionService, GitService git,
                       Views views, JdbcClient jdbc, com.tcl.csot.zhiye.service.workspace.QuotaService quota) {
@@ -426,6 +429,67 @@ public class AppService {
     public List<Map<String, Object>> messages(String ws, String id) {
         AppRow app = require(ws, id);
         return messages.list(app.id()).stream().map(views::message).toList();
+    }
+
+    /**
+     * 工作台「文件」页签数据：汇总该应用全生命周期中上传的所有附件（创建时、工作台每轮对话、来源会话）
+     * 以及来源会话中 AI 生成的文档文件（不含源码，支持预览与下载）。
+     */
+    public Map<String, Object> files(String ws, String id) {
+        AppRow app = require(ws, id);
+        LinkedHashSet<String> assetIds = new LinkedHashSet<>();
+        // 1. 工作台每轮对话上传的附件（新到旧）
+        List<String> msgAssetJsonList = jdbc.sql(
+                        "select asset_ids::text from message where app_id = ? and asset_ids is not null order by created_at desc")
+                .param(app.id()).query(String.class).list();
+        for (String raw : msgAssetJsonList) collectAssetIds(raw, assetIds);
+        // 2. 应用创建时附带的素材
+        if (app.assetIds() != null) {
+            for (String aid : app.assetIds()) if (aid != null && !aid.isBlank()) assetIds.add(aid);
+        }
+        // 3. 来源会话中的上传附件与 AI 生成文档
+        String convId = jdbc.sql("select conversation_id from app_conversation where app_id = ?")
+                .param(app.id()).query(String.class).optional().orElse(null);
+        List<Map<String, Object>> chatFiles = new ArrayList<>();
+        if (convId != null && !convId.isBlank()) {
+            List<String> convAssetJsonList = jdbc.sql(
+                            "select asset_ids::text from conversation_message where conversation_id = ? and asset_ids is not null order by created_at desc")
+                    .param(convId).query(String.class).list();
+            for (String raw : convAssetJsonList) collectAssetIds(raw, assetIds);
+            if (conversationFiles != null) {
+                for (Map<String, Object> cf : conversationFiles.list(convId)) {
+                    Map<String, Object> item = new LinkedHashMap<>(cf);
+                    item.put("conversationId", convId);
+                    chatFiles.add(item);
+                }
+            }
+        }
+        List<Map<String, Object>> uploaded = new ArrayList<>();
+        for (String aid : assetIds) {
+            jdbc.sql("select * from asset where id = ? and workspace_id = ?").params(aid, ws)
+                    .query((rs, i) -> {
+                        Map<String, Object> m = views.asset(rs);
+                        m.put("downloadUrl", "/api/assets/" + rs.getString("id") + "/content?download=1");
+                        return m;
+                    }).optional().ifPresent(uploaded::add);
+        }
+        uploaded.sort(Comparator.comparing((Map<String, Object> m) -> String.valueOf(m.getOrDefault("createdAt", ""))).reversed());
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("uploaded", uploaded);
+        out.put("chatFiles", chatFiles);
+        return out;
+    }
+
+    private static void collectAssetIds(String rawJson, Set<String> out) {
+        if (rawJson == null || rawJson.isBlank()) return;
+        try {
+            JsonNode arr = Json.M.readTree(rawJson);
+            if (arr != null && arr.isArray()) {
+                for (JsonNode n : arr) {
+                    if (n.isTextual() && !n.asText().isBlank()) out.add(n.asText());
+                }
+            }
+        } catch (Exception ignored) { }
     }
 
     public List<Map<String, Object>> tasks(String ws, String id, boolean active) {
