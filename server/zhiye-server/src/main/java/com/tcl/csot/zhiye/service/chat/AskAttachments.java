@@ -32,13 +32,16 @@ public class AskAttachments {
         public boolean isImage() { return image != null; }
     }
 
-    static final int MAX_ATTACH = 5;
+    static final int MAX_ATTACH = 10;
     /** 单个文本附件带进模型的上限 */
-    static final int TEXT_CHARS = 14000;
+    static final int TEXT_CHARS = 20000;
     /** 全部文本附件合计上限 */
-    static final int TOTAL_TEXT_CHARS = 32000;
+    static final int TOTAL_TEXT_CHARS = 40000;
     /** 图片超过这个大小就不带（上传上限 10MB，太大的 base64 会让请求很慢） */
     static final long IMAGE_BYTES = 6L * 1024 * 1024;
+    /** 单条消息直接发给多模态模型的图片总张数与总字节预算（超出仍保留在附件里，构建时会全部拷进项目） */
+    static final int MAX_VISION_IMAGES = 8;
+    static final long MAX_VISION_TOTAL_BYTES = 10L * 1024 * 1024;
     /** Word 内嵌图片带给多模态模型的上限（构建时会全部解压到 public/assets/） */
     static final int MAX_DOCX_VISION_IMAGES = 4;
     static final long MAX_DOCX_VISION_IMAGE_BYTES = 2L * 1024 * 1024;
@@ -54,6 +57,8 @@ public class AskAttachments {
         List<Attached> out = new ArrayList<>();
         int textTotal = 0;
         int docCount = 0;
+        int visionImages = 0;
+        long visionBytesTotal = 0;
         for (String id : assetIds) {
             if (id == null || id.isBlank() || docCount >= MAX_ATTACH) continue;
             AssetService.Content c;
@@ -68,9 +73,15 @@ public class AskAttachments {
             docCount++;
             // SVG 是 XML 文本，当文档处理（视觉模型对矢量图效果不好）
             if (c.mime().startsWith("image/") && !c.mime().equals("image/svg+xml")) {
-                out.add(c.data().length <= IMAGE_BYTES
-                        ? new Attached(id, c.name(), c.mime(), null, c.data())
-                        : new Attached(id, c.name(), c.mime(), "（图片超过大小限制，未能带给模型）", null));
+                if (c.data().length > IMAGE_BYTES) {
+                    out.add(new Attached(id, c.name(), c.mime(), "（图片超过大小限制，未能带给模型）", null));
+                } else if (visionImages >= MAX_VISION_IMAGES || visionBytesTotal + c.data().length > MAX_VISION_TOTAL_BYTES) {
+                    out.add(new Attached(id, c.name(), c.mime(), "（本条图片总体积较大，对话阶段略过视觉预览；构建应用时仍会完整拷入项目）", null));
+                } else {
+                    visionImages++;
+                    visionBytesTotal += c.data().length;
+                    out.add(new Attached(id, c.name(), c.mime(), null, c.data()));
+                }
                 continue;
             }
             if (textTotal >= TOTAL_TEXT_CHARS) {

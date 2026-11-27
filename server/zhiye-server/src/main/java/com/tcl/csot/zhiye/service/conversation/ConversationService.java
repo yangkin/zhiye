@@ -28,9 +28,9 @@ public class ConversationService {
     private static final int MAX_HISTORY_CHARS = 2000;
     private static final int MAX_TITLE_CHARS = 80;
     private static final int AUTO_TITLE_CHARS = 24;
-    private static final int MAX_BRIEF_CHARS = 8000;
-    /** AppService.create 目前限制 prompt 为 5000 字，创建时采用更严格的压缩上限。 */
-    private static final int APP_PROMPT_CHARS = 5000;
+    private static final int MAX_BRIEF_CHARS = 12000;
+    /** AppService.create 目前限制 prompt 为 12000 字，创建时与该上限对齐。 */
+    private static final int APP_PROMPT_CHARS = 12000;
 
     private static final String BRIEF_HEADER = "请根据以下按时间顺序排列的多轮对话整理并创建应用。"
             + "assistant 已给出的功能结论、核心功能/二期再做/明确不做等范围约束，以及最近一次 user 的确认都必须保留；"

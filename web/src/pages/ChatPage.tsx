@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Markdown, splitNext } from '../lib/markdown';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,8 +6,10 @@ import { errorMessage } from '../api/client';
 import { api, type ConversationMessage } from '../api/conversation';
 import { useActiveTask, useMeta } from '../api/queries';
 import type { AppType, Asset, Mode } from '../api/types';
-import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
+import { AddMenuButton, SourceChips } from '../components/AddMenu';
 import { AssetChips } from '../components/AssetChips';
+import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
+import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, type SkillRef } from '../components/ComposerPopovers';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Icon } from '../lib/icons';
@@ -108,6 +110,10 @@ export function ChatPage() {
   const fileCount = files.data?.length ?? 0;
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
   const skillBtn = useRef<HTMLButtonElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const askAbort = useRef<AbortController | null>(null);
@@ -121,6 +127,29 @@ export function ChatPage() {
   const { models, defaultId } = useModelList();
   const modes: Mode[] = meta?.modes?.length ? meta.modes : ['快速', '适中', '深度'];
   const busy = asking || building || sourceSaving;
+  const composer = useComposerAssets({
+    getAttachments: () => attachmentsRef.current,
+    addAttachment: (asset) =>
+      setAttachments((list) => (list.length < MAX_ATTACHMENTS && !list.some((a) => a.id === asset.id) ? [...list, asset] : list)),
+    removeAttachment: (assetId) => setAttachments((list) => list.filter((a) => a.id !== assetId)),
+    getText: () => promptRef.current,
+    setText: (next) => {
+      setPrompt(next);
+      setActionError('');
+    },
+    textareaRef: textarea,
+    maxAttachments: MAX_ATTACHMENTS,
+    maxChars: MAX_PROMPT_CHARS,
+    disabled: busy,
+  });
+
+  // 输入框随内容自动伸缩（粘贴多段文字时舒展可读，最多 200px 后内部滚动）
+  useLayoutEffect(() => {
+    const el = textarea.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(200, Math.max(54, el.scrollHeight))}px`;
+  }, [prompt, id]);
   // 新会话优先选免费模型：还没用户点选、也没有历史模型时用默认（免费）模型
   const modelTouched = useRef(!!initial?.model);
   useEffect(() => {
@@ -163,6 +192,8 @@ export function ChatPage() {
     setSources(initial?.sources ?? []);
     setFilesOpen(false);
     setOpenFile(null);
+    composer.dismissPasteNotice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
@@ -247,7 +278,13 @@ export function ChatPage() {
   };
 
   const send = async (override?: string, again?: { skills: SkillRef[]; assets: Asset[]; replace: string[] }) => {
-    const content = (override ?? prompt).trim();
+    if (!again && composer.uploading) {
+      toast('附件正在上传中，请稍候片刻再发送。');
+      return;
+    }
+    const sentAssets = again ? again.assets : attachments;
+    const rawContent = (override ?? prompt).trim();
+    const content = rawContent || (sentAssets.length ? '请根据我附上的参考内容帮我处理' : '');
     if (!id || !content || action.current || sourceSaving) return;
     // 重试：去掉失败的那一问一答，用原来的文字、技能、附件重新发
     if (again) setMessages((list) => list.filter((m) => !again.replace.includes(m.id)));
@@ -255,13 +292,13 @@ export function ChatPage() {
     setAsking(true);
     setActionError('');
     setPicker(null);
+    composer.dismissPasteNotice();
     const stamp = Date.now();
     sentAt.current = stamp;
     setStopArmed(false);
     window.setTimeout(() => { if (sentAt.current === stamp) setStopArmed(true); }, 1000);
     const assistantId = `local-a-${stamp}`;
     const selectedSkills = again ? again.skills : skills;
-    const sentAssets = again ? again.assets : attachments;
     const userId = `local-u-${stamp}`;
     setMessages((list) => [
       ...list,
@@ -547,13 +584,15 @@ export function ChatPage() {
               <Link to={'/apps/' + active.appId} className="text-button">去查看</Link>
             </div>
           ) : null}
-          <section className="composer conversation-composer" aria-label="继续会话">
+          <section className={`composer conversation-composer${composer.dragOver ? ' is-drag-over' : ''}`} aria-label="继续会话" {...composer.dropHandlers}>
+            <ComposerDropOverlay visible={composer.dragOver} />
+            <PasteNoticeBanner notice={composer.pasteNotice} onDismiss={composer.dismissPasteNotice} />
             <textarea
               ref={textarea}
               rows={2}
-              maxLength={3000}
+              maxLength={MAX_PROMPT_CHARS}
               aria-label="继续输入消息"
-              placeholder={hasBrief ? '继续补充要求；够清楚时我会直接开始做…' : '说说你想做什么，先聊清楚再开始…'}
+              placeholder={hasBrief ? '继续补充要求，支持粘贴 Word 内容/图片或拖入文件…' : '说说你想做什么，支持粘贴 Word 内容/图片或拖入文件…'}
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value);
@@ -562,7 +601,7 @@ export function ChatPage() {
                 if (mention) setPicker({ via: 'mention', ...mention });
                 else if (picker?.via === 'mention') setPicker(null);
               }}
-              onPaste={(e) => handleAssetPaste(e, (asset) => setAttachments((list) => (list.length < 5 && !list.some((a) => a.id === asset.id) ? [...list, asset] : list)), attachments.length)}
+              onPaste={composer.handlePaste}
               onKeyDown={(e) => {
                 // 回车发送，Shift+Enter 换行；输入法组合中不触发
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -577,17 +616,14 @@ export function ChatPage() {
                 <SourceChips sources={sources} onRemove={(sid) => void changeSources(sources.filter((s) => s.id !== sid))} />
               </div>
             ) : null}
-            {attachments.length || skills.length ? (
+            {attachments.length || composer.pending.length || skills.length ? (
               <div className="attachments">
                 <SkillChips skills={skills} onRemove={(skillId) => setSkills((list) => list.filter((s) => s.id !== skillId))} />
-                {attachments.map((asset) => (
-                  <span key={asset.id}>
-                    <Icon name="file" /> {asset.name}
-                    <button type="button" aria-label={`移除附件 ${asset.name}`} onClick={() => setAttachments((list) => list.filter((a) => a.id !== asset.id))}>
-                      <Icon name="close" />
-                    </button>
-                  </span>
-                ))}
+                <ComposerAttachmentList
+                  assets={attachments}
+                  pending={composer.pending}
+                  onRemove={(assetId) => setAttachments((list) => list.filter((a) => a.id !== assetId))}
+                />
               </div>
             ) : null}
             {actionError ? <p className="inline-error conversation-error" role="alert">{actionError}</p> : null}
@@ -596,8 +632,9 @@ export function ChatPage() {
                 <AddMenuButton
                   variant="workbench"
                   placement="top"
-                  attachedCount={attachments.length}
-                  onAttach={(asset) => setAttachments((list) => (list.length < 5 && !list.some((a) => a.id === asset.id) ? [...list, asset] : list))}
+                  attachedCount={attachments.length + composer.pending.length}
+                  maxAttachments={MAX_ATTACHMENTS}
+                  onUploadFiles={composer.uploadBatch}
                   pickedSourceIds={sources.map((s) => s.id)}
                   onPickSource={(s) => void changeSources(sources.some((x) => x.id === s.id) ? sources : [...sources, { id: s.id, name: s.name }])}
                 />
@@ -606,14 +643,26 @@ export function ChatPage() {
                   <Icon name="book" /> 技能
                 </button>
               </div>
-              <div>
+              <div className="composer-actions">
+                {prompt.length > 2000 ? (
+                  <span className={`composer-char-count${prompt.length > MAX_PROMPT_CHARS - 800 ? ' is-near' : ''}`}>
+                    {prompt.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+                  </span>
+                ) : null}
                 {asking ? (
                   <button type="button" className="send-button chat-send is-stop" aria-label="停止回答" title="停止回答" disabled={!stopArmed} onClick={stopAsk}>
                     <Icon name="stop" />
                   </button>
                 ) : (
-                  <button type="button" className="send-button chat-send" aria-label="发送消息" disabled={!prompt.trim() || busy} onClick={() => void send()}>
-                    <Icon name={building ? 'refresh' : 'send'} className={building ? 'spinning' : ''} />
+                  <button
+                    type="button"
+                    className="send-button chat-send"
+                    aria-label="发送消息"
+                    title={composer.uploading ? '附件上传中，请稍候…' : '发送消息'}
+                    disabled={(!prompt.trim() && !attachments.length) || busy || composer.uploading}
+                    onClick={() => void send()}
+                  >
+                    <Icon name={building || composer.uploading ? 'refresh' : 'send'} className={building || composer.uploading ? 'spinning' : ''} />
                   </button>
                 )}
               </div>

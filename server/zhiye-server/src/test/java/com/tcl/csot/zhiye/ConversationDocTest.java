@@ -95,17 +95,17 @@ class ConversationDocTest extends IntegrationTest {
         assertThat(c.ok(c.get("/api/conversations/" + id + "/files")).size()).isEqualTo(1);
     }
 
-    /** 与前端输入框 maxLength=3000 对齐：2500 字正常受理，超过 3000 字返回 400。 */
+    /** 与前端输入框 maxLength=12000 对齐：5000 字正常受理，超过 12000 字返回 400。 */
     @Test
-    void askLengthLimitMatchesFrontend3000() {
+    void askLengthLimitMatchesFrontend() {
         Client c = client();
         String id = c.ok(c.post("/api/conversations", Map.of())).path("id").asText();
         Client.Res ok = c.send("POST", "/api/conversations/" + id + "/ask",
-                Map.of("content", "测".repeat(2500)), Map.of("Accept", "text/event-stream"));
+                Map.of("content", "测".repeat(5000)), Map.of("Accept", "text/event-stream"));
         assertThat(ok.status()).isEqualTo(200);
         Client.Res tooLong = c.send("POST", "/api/conversations/" + id + "/ask",
-                Map.of("content", "测".repeat(3001)), Map.of("Accept", "text/event-stream"));
+                Map.of("content", "测".repeat(12001)), Map.of("Accept", "text/event-stream"));
         assertThat(tooLong.status()).isEqualTo(400);
-        assertThat(tooLong.body()).contains("3000");
+        assertThat(tooLong.body()).contains("12000");
     }
 }

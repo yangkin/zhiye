@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api, errorMessage } from '../api/client';
 import type { Asset, DataSourceInfo } from '../api/types';
 import { Icon } from '../lib/icons';
+import { MAX_ATTACHMENTS } from '../lib/clipboardPaste';
 import { toast, useUi } from '../lib/store';
 import { useSources } from './DataSourceDialog';
 
@@ -14,6 +15,8 @@ interface AddMenuButtonProps {
   buttonClassName?: string;
   /** 不提供时（工作台对话）上传文件不可用 */
   onAttach?: (asset: Asset) => void;
+  /** 可选：统一走输入框的上传队列，立即可见缩略图与上传中状态 */
+  onUploadFiles?: (files: Iterable<File>) => Promise<unknown>;
   attachedCount?: number;
   maxAttachments?: number;
   /** 弹层向上展开（输入框靠近页面底部时） */
@@ -30,7 +33,7 @@ export async function attachFiles(
   files: Iterable<File>,
   onAttach: (asset: Asset) => void,
   attachedCount: number,
-  maxAttachments = 5,
+  maxAttachments = MAX_ATTACHMENTS,
 ): Promise<number> {
   const room = Math.max(0, maxAttachments - attachedCount);
   const list = Array.from(files).slice(0, room);
@@ -55,12 +58,12 @@ export async function attachFiles(
   return ok;
 }
 
-/** 输入框 onPaste：剪贴板里有文件时上传成素材并接管这次粘贴；纯文本不拦截。 */
+/** 输入框 onPaste：兼容旧调用；推荐使用 useComposerAssets 获得完整 Word 富文本与图文混合粘贴体验。 */
 export function handleAssetPaste(
   e: { clipboardData: DataTransfer | null; preventDefault: () => void },
   onAttach: (asset: Asset) => void,
   attachedCount: number,
-  maxAttachments = 5,
+  maxAttachments = MAX_ATTACHMENTS,
 ) {
   const files = e.clipboardData?.files;
   if (!files || files.length === 0) return;
@@ -73,8 +76,9 @@ export function AddMenuButton({
   variant = 'create',
   buttonClassName = 'icon-button add-button',
   onAttach,
+  onUploadFiles,
   attachedCount = 0,
-  maxAttachments = 5,
+  maxAttachments = MAX_ATTACHMENTS,
   placement = 'bottom',
   onPickSource,
   pickedSourceIds = [],
@@ -131,11 +135,13 @@ export function AddMenuButton({
     };
   }, [open]);
 
+  const canUpload = Boolean(onUploadFiles || onAttach);
   const upload = async (files: FileList | null) => {
-    if (!files || !onAttach) return;
+    if (!files || !canUpload) return;
     setUploading(true);
     try {
-      await attachFiles(files, onAttach, attachedCount, maxAttachments);
+      if (onUploadFiles) await onUploadFiles(files);
+      else if (onAttach) await attachFiles(files, onAttach, attachedCount, maxAttachments);
     } finally {
       setUploading(false);
     }
@@ -198,12 +204,12 @@ export function AddMenuButton({
             type="button"
             role="menuitem"
             aria-label="上传文件或图片"
-            aria-disabled={!onAttach || uploading}
+            aria-disabled={!canUpload || uploading}
             className="add-menu-item"
-            title={onAttach ? `图片、PDF、Word/Excel/PPT 与文本，单个最多 ${MAX_ASSET_MB} MB；也可以直接粘贴到输入框` : '创建应用时可以添加参考文件'}
+            title={canUpload ? `图片、PDF、Word/Excel/PPT 与文本，最多 ${maxAttachments} 份、单个 ≤ ${MAX_ASSET_MB} MB；也支持直接粘贴或拖入输入框` : '创建应用时可以添加参考文件'}
             onMouseEnter={() => setSub(false)}
             onClick={() => {
-              if (!onAttach || uploading) return toast(onAttach ? '正在上传…' : '创建应用时可以添加参考文件。');
+              if (!canUpload || uploading) return toast(canUpload ? '正在上传…' : '创建应用时可以添加参考文件。');
               close();
               picker.current?.click();
             }}
@@ -211,7 +217,7 @@ export function AddMenuButton({
             <Icon name="clip" />
             <span>
               上传文件或图片
-              <small>{onAttach ? `单个最多 ${MAX_ASSET_MB} MB` : '创建应用时可添加'}</small>
+              <small>{canUpload ? `最多 ${maxAttachments} 份 · 单个 ≤ ${MAX_ASSET_MB} MB` : '创建应用时可添加'}</small>
             </span>
           </button>
           {variant === 'create' ? (

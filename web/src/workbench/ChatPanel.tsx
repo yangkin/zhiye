@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage, newIdempotencyKey } from '../api/client';
@@ -9,8 +9,10 @@ import { isTerminal, type AppDetail, type ElementContext, type Message, type Que
 import { Icon } from '../lib/icons';
 import { copyText, fmtDate, fmtTime, shortDay } from '../lib/format';
 import { toast, useChat } from '../lib/store';
-import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
+import { AddMenuButton, SourceChips } from '../components/AddMenu';
 import { AssetChips, type ChatAsset } from '../components/AssetChips';
+import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
+import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, useMySkills } from '../components/ComposerPopovers';
 import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { styleFor } from '../components/Thumbnail';
@@ -204,6 +206,44 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
 
   const chatAssets = useChat((s) => s.assets);
   const chatHint = useChat((s) => s.hint);
+  const canDropOrPaste = app.phase === 'ready' || app.phase === 'plan' || (app.phase === 'generating' && !!runningTaskId);
+  const composer = useComposerAssets({
+    getAttachments: () => useChat.getState().assets,
+    addAttachment: (asset) => {
+      const cur = useChat.getState().assets;
+      if (cur.length < MAX_ATTACHMENTS && !cur.some((x) => x.id === asset.id)) {
+        useChat.getState().setAssets([...cur, asset]);
+      }
+    },
+    removeAttachment: (assetId) => {
+      const cur = useChat.getState().assets;
+      useChat.getState().setAssets(cur.filter((x) => x.id !== assetId));
+    },
+    getText: () => useChat.getState().draft,
+    setText: (next) => {
+      setDraft(next);
+      if (error) setError('');
+      if (chatHint) useChat.getState().setHint('');
+    },
+    textareaRef: input,
+    maxAttachments: MAX_ATTACHMENTS,
+    maxChars: MAX_PROMPT_CHARS,
+    disabled: !canDropOrPaste || sending,
+  });
+
+  // 切换应用时清理粘贴提示
+  useEffect(() => {
+    composer.dismissPasteNotice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.id]);
+
+  // 输入框随内容自动伸缩（粘贴多段 Word 文字时舒展可读，最多 180px 后滚动）
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(180, Math.max(46, el.scrollHeight))}px`;
+  }, [draft, app.phase]);
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
   const [ecoOpen, setEcoOpen] = useState(false);
   const ecoBtn = useRef<HTMLButtonElement>(null);
@@ -303,8 +343,14 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
 
   /** forceModify：用户已经确认就在当前应用里做，不再判断意图 */
   const send = async (override?: string, forceModify = false) => {
-    const content = (override ?? draft).trim();
+    if (composer.uploading) {
+      toast('附件正在上传中，请稍候片刻再发送。');
+      return;
+    }
+    const rawContent = (override ?? draft).trim();
+    const content = rawContent || (!runningTaskId && chatAssets.length ? '请根据我附上的参考内容帮我处理' : '');
     if (!content || sending) return;
+    composer.dismissPasteNotice();
     // 正在等「继续」或「方案确认」：输入框里说的话直接作为回复发给当前任务，不进队列
     const waitingPromptConfirm =
       runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' && (stream.confirm.kind === 'continue' || stream.confirm.kind === 'choice')
@@ -837,7 +883,8 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           </div>
         ) : null}
       </div>
-      <div className="chat-composer">
+      <div className={`chat-composer${composer.dragOver ? ' is-drag-over' : ''}`} {...composer.dropHandlers}>
+        <ComposerDropOverlay visible={composer.dragOver} />
         {/* 确认卡、待办、待发送消息悬浮在输入框上方，不把输入框撑高 */}
         <div className="composer-float" ref={floatRef}>
         {runningTaskId && stream.taskId === runningTaskId && stream.confirm?.state === 'pending' ? (
@@ -916,31 +963,29 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 <SourceChips sources={boundSources} onRemove={(id) => void changeSource('unbind', id, boundSources.find((s) => s.id === id)?.name ?? '')} />
               </div>
             ) : null}
-            {chatAssets.length || chatSkills.length || ecosystems.length ? (
+            {chatAssets.length || composer.pending.length || chatSkills.length || ecosystems.length ? (
               <div className="attachments chat-attachments">
                 <EcosystemChips items={ecosystems} onRemove={(id) => setEcosystems((prev) => prev.filter((x) => x.id !== id))} />
                 <SkillChips skills={chatSkills} onRemove={(id) => saveSkills(chatSkills.filter((x) => x.id !== id))} />
-                {chatAssets.map((a) => (
-                  <span key={a.id}>
-                    <Icon name="file" />
-                    {a.name}
-                    <button aria-label="移除附件" onClick={() => useChat.getState().setAssets(chatAssets.filter((x) => x.id !== a.id))}>
-                      <Icon name="close" />
-                    </button>
-                  </span>
-                ))}
+                <ComposerAttachmentList
+                  assets={chatAssets}
+                  pending={composer.pending}
+                  onRemove={(assetId) => useChat.getState().setAssets(chatAssets.filter((x) => x.id !== assetId))}
+                />
               </div>
             ) : null}
+            <PasteNoticeBanner notice={composer.pasteNotice} onDismiss={composer.dismissPasteNotice} />
             <textarea
               ref={input}
               id="iteration-prompt"
               rows={2}
+              maxLength={MAX_PROMPT_CHARS}
               placeholder={
                 runningTaskId && stream.confirm?.state === 'pending' && stream.confirm.kind === 'continue'
                   ? '说「继续」接着做，也可以顺便补充要求…'
                   : runningTaskId
                     ? '补充要求，当前任务完成后自动执行…'
-                    : '告诉织页你还想调整什么，或 @ 使用技能'
+                    : '告诉织页你还想调整什么，支持粘贴 Word/图片或 @ 使用技能'
               }
               aria-label="修改需求"
               value={draft}
@@ -952,10 +997,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 if (m) setPicker({ via: 'mention', ...m });
                 else if (picker?.via === 'mention') setPicker(null);
               }}
-              onPaste={(e) => handleAssetPaste(e, (asset) => {
-                const cur = useChat.getState().assets;
-                if (cur.length < 5 && !cur.some((x) => x.id === asset.id)) useChat.getState().setAssets([...cur, asset]);
-              }, chatAssets.length)}
+              onPaste={composer.handlePaste}
               onKeyDown={(e) => {
                 // 与创造页、会话页一致：回车发送，Shift+Enter 换行；输入法组合中、@ 技能弹层打开时不触发
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !picker) {
@@ -989,11 +1031,9 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   variant="workbench"
                   buttonClassName="icon-button"
                   placement="top"
-                  attachedCount={chatAssets.length}
-                  onAttach={(asset) => {
-                    const cur = useChat.getState().assets;
-                    if (cur.length < 5 && !cur.some((a) => a.id === asset.id)) useChat.getState().setAssets([...cur, asset]);
-                  }}
+                  attachedCount={chatAssets.length + composer.pending.length}
+                  maxAttachments={MAX_ATTACHMENTS}
+                  onUploadFiles={composer.uploadBatch}
                   pickedSourceIds={boundSources.map((s) => s.id)}
                   onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
                 />
@@ -1086,8 +1126,13 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 )}
               </div>
               <div className="composer-actions">
+                {draft.length > 2000 ? (
+                  <span className={`composer-char-count${draft.length > MAX_PROMPT_CHARS - 800 ? ' is-near' : ''}`}>
+                    {draft.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+                  </span>
+                ) : null}
                 {runningTaskId && draft.trim() ? (
-                  <button className="send-button" aria-label="加入待发送队列" title="当前任务完成后自动执行" disabled={sending} onClick={() => void send()}>
+                  <button className="send-button" aria-label="加入待发送队列" title="当前任务完成后自动执行" disabled={sending || composer.uploading} onClick={() => void send()}>
                     <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
                   </button>
                 ) : null}
@@ -1126,8 +1171,14 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                     <Icon name="send" />
                   </button>
                 ) : (
-                  <button className="send-button" aria-label="提交修改需求" disabled={!draft.trim() || sending} onClick={() => void send()}>
-                    <Icon name={sending ? 'refresh' : 'send'} className={sending ? 'spinning' : ''} />
+                  <button
+                    className="send-button"
+                    aria-label="提交修改需求"
+                    title={composer.uploading ? '附件上传中，请稍候…' : '提交修改需求'}
+                    disabled={(!draft.trim() && !chatAssets.length) || sending || composer.uploading}
+                    onClick={() => void send()}
+                  >
+                    <Icon name={sending || composer.uploading ? 'refresh' : 'send'} className={sending || composer.uploading ? 'spinning' : ''} />
                   </button>
                 )}
               </div>
@@ -1135,17 +1186,29 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           </>
         ) : phase === 'plan' ? (
           <>
+            {chatAssets.length || composer.pending.length ? (
+              <div className="attachments chat-attachments">
+                <ComposerAttachmentList
+                  assets={chatAssets}
+                  pending={composer.pending}
+                  onRemove={(assetId) => useChat.getState().setAssets(chatAssets.filter((x) => x.id !== assetId))}
+                />
+              </div>
+            ) : null}
+            <PasteNoticeBanner notice={composer.pasteNotice} onDismiss={composer.dismissPasteNotice} />
             <textarea
               ref={input}
               id="plan-feedback"
               rows={2}
-              placeholder="继续聊聊，或告诉织页怎么调整计划…"
+              maxLength={MAX_PROMPT_CHARS}
+              placeholder="继续聊聊，或粘贴参考文档/图片告诉织页怎么调整计划…"
               aria-label="讨论或优化计划"
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
                 if (error) setError('');
               }}
+              onPaste={composer.handlePaste}
               onKeyDown={(e) => {
                 // 与创造页、会话页一致：回车发送，Shift+Enter 换行；输入法组合中、@ 技能弹层打开时不触发
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && !picker) {
@@ -1157,6 +1220,16 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             {error ? <p className="composer-error" role="alert">{error}</p> : null}
             <div className="composer-bottom">
               <div className="composer-tools">
+                <AddMenuButton
+                  variant="workbench"
+                  buttonClassName="icon-button"
+                  placement="top"
+                  attachedCount={chatAssets.length + composer.pending.length}
+                  maxAttachments={MAX_ATTACHMENTS}
+                  onUploadFiles={composer.uploadBatch}
+                  pickedSourceIds={boundSources.map((s) => s.id)}
+                  onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+                />
                 <ModelModeButton
                   models={meta?.models ?? []}
                   modes={meta?.modes ?? []}
@@ -1173,6 +1246,11 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 ) : null}
               </div>
               <div className="composer-actions">
+                {draft.length > 2000 ? (
+                  <span className={`composer-char-count${draft.length > MAX_PROMPT_CHARS - 800 ? ' is-near' : ''}`}>
+                    {draft.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+                  </span>
+                ) : null}
                 {sending ? (
                   <button
                     type="button"
@@ -1188,8 +1266,14 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                     <i className="stop-glyph" aria-hidden="true" />
                   </button>
                 ) : (
-                  <button className="send-button" aria-label="发送消息" title="发送" disabled={!draft.trim()} onClick={() => void send()}>
-                    <Icon name="send" />
+                  <button
+                    className="send-button"
+                    aria-label="发送消息"
+                    title={composer.uploading ? '附件上传中，请稍候…' : '发送'}
+                    disabled={(!draft.trim() && !chatAssets.length) || composer.uploading}
+                    onClick={() => void send()}
+                  >
+                    <Icon name={composer.uploading ? 'refresh' : 'send'} className={composer.uploading ? 'spinning' : ''} />
                   </button>
                 )}
               </div>

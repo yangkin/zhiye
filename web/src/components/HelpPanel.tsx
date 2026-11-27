@@ -8,6 +8,7 @@ import { HelpError, helpApi, streamHelp, type HelpAsset, type HelpConversation, 
 import { Icon } from '../lib/icons';
 import { HELP, HELP_CHIPS, HELP_DOC_CHAPTERS, offlineAnswer, type HelpChip, type HelpDocChapter } from '../lib/helpFaq';
 import { copyText, fmtDate, fmtTime, isToday, isYesterday } from '../lib/format';
+import { parseClipboardData, spliceAtCursor } from '../lib/clipboardPaste';
 import { toast, useUi } from '../lib/store';
 import { Pet } from './Pet';
 import '../styles/help.css';
@@ -398,10 +399,22 @@ export function HelpPanel() {
     });
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(e.clipboardData.files ?? []).filter((f) => f.type.startsWith('image/'));
-    if (files.length) {
-      e.preventDefault();
-      addFiles(files);
+    const parsed = parseClipboardData(e.clipboardData);
+    const imgFiles = parsed.files.filter((f) => f.type.startsWith('image/') && f.type !== 'image/svg+xml');
+    if (!imgFiles.length && !parsed.blockedLocalImages && !parsed.fromRichHtml) return;
+    e.preventDefault();
+    if (parsed.text && parsed.text.trim()) {
+      const el = inputRef.current;
+      const { nextValue, nextCursor } = spliceAtCursor(draft, parsed.text, el?.selectionStart, el?.selectionEnd);
+      setDraft(nextValue);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(nextCursor, nextCursor);
+      });
+    }
+    if (imgFiles.length) addFiles(imgFiles);
+    if (parsed.blockedLocalImages > 0) {
+      setNotice(`文字已粘贴；Word 中的 ${parsed.blockedLocalImages} 张本地图片受浏览器限制无法随全选读取，请在 Word 中单选图片 Ctrl+C 后粘贴。`);
     }
   };
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api/client';
 import { Icon } from '../lib/icons';
 
@@ -38,11 +39,14 @@ export function AssetChips({ assets }: { assets: ChatAsset[] }) {
           ),
         )}
       </span>
-      {viewing ? (
-        <div className="asset-lightbox" role="dialog" aria-label={`预览 ${viewing.name}`} onClick={() => setViewing(null)}>
-          <img src={api.assetContentUrl(viewing.id)} alt={viewing.name} />
-        </div>
-      ) : null}
+      {viewing
+        ? createPortal(
+            <div className="asset-lightbox" role="dialog" aria-label={`预览 ${viewing.name}`} onClick={() => setViewing(null)}>
+              <img src={api.assetContentUrl(viewing.id)} alt={viewing.name} onClick={(e) => e.stopPropagation()} />
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

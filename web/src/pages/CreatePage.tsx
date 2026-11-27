@@ -15,7 +15,9 @@ import { Pet } from '../components/Pet';
 import { TemplateIcon } from '../lib/templateIcons';
 import { Icon, kindIcon } from '../lib/icons';
 import { toast, useUi } from '../lib/store';
-import { AddMenuButton, SourceChips, handleAssetPaste } from '../components/AddMenu';
+import { AddMenuButton, SourceChips } from '../components/AddMenu';
+import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
+import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt, useModelList } from '../components/ComposerPopovers';
 import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { Modal } from '../components/Modal';
@@ -158,6 +160,28 @@ export function CreatePage() {
     saveThread(thread);
   }, [thread]);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const composer = useComposerAssets({
+    getAttachments: () => useCreateForm.getState().attachments,
+    addAttachment: (asset) => {
+      const cur = useCreateForm.getState().attachments;
+      if (cur.length < MAX_ATTACHMENTS && !cur.some((a) => a.id === asset.id)) {
+        f.set({ attachments: [...cur, asset] });
+      }
+    },
+    removeAttachment: (assetId) => {
+      const cur = useCreateForm.getState().attachments;
+      f.set({ attachments: cur.filter((x) => x.id !== assetId) });
+    },
+    getText: () => useCreateForm.getState().prompt,
+    setText: (next) => {
+      f.set({ prompt: next });
+      if (error) setError('');
+    },
+    textareaRef: textarea,
+    maxAttachments: MAX_ATTACHMENTS,
+    maxChars: MAX_PROMPT_CHARS,
+    disabled: submitting,
+  });
 
   const { models, defaultId } = useModelList();
   const modes: Mode[] = meta?.modes?.length ? meta.modes : ['快速', '适中', '深度'];
@@ -200,7 +224,9 @@ export function CreatePage() {
   };
 
   const submit = async (overridePrompt?: string) => {
-    const prompt = (overridePrompt ?? f.prompt).trim();
+    if (composer.uploading) return toast('附件正在上传中，请稍候片刻再发送。');
+    const rawPrompt = (overridePrompt ?? f.prompt).trim();
+    const prompt = rawPrompt || (f.attachments.length ? '请根据我附上的参考内容帮我处理' : '');
     if (!prompt) return toast('先写下你的应用想法吧。', 'error');
     if (submitting) return;
     // 先进入会话；普通问答不受其他应用生成任务影响，真正开始生成时再检查任务限制
@@ -220,6 +246,7 @@ export function CreatePage() {
       };
       f.set({ prompt: '', attachments: [], skills: [], sources: [], typeChosen: false });
       setEcosystems([]);
+      composer.dismissPasteNotice();
       navigate('/chat/' + conv.id, { state });
     } catch (err) {
       setError(errorMessage(err));
@@ -428,13 +455,15 @@ export function CreatePage() {
         <div className={`cp-pet ${helpOpen ? 'is-hidden' : ''}`}>
           <Pet size={120} onClick={() => openHelp('chat')} />
         </div>
-        <div className="composer cp-composer">
+        <div className={`composer cp-composer${composer.dragOver ? ' is-drag-over' : ''}`} {...composer.dropHandlers}>
+        <ComposerDropOverlay visible={composer.dragOver} />
+        <PasteNoticeBanner notice={composer.pasteNotice} onDismiss={composer.dismissPasteNotice} />
         <textarea
           ref={textarea}
           id="home-prompt"
           rows={4}
-          placeholder="直接说说你的想法，边聊边做，不用先选类型…"
-          maxLength={3000}
+          placeholder="直接说说你的想法，或粘贴 Word 内容/图片、拖入参考文档…"
+          maxLength={MAX_PROMPT_CHARS}
           aria-label="应用需求"
           value={f.prompt}
           onChange={(e) => {
@@ -444,10 +473,7 @@ export function CreatePage() {
             if (m) setPicker({ via: 'mention', ...m });
             else if (picker?.via === 'mention') setPicker(null);
           }}
-          onPaste={(e) => handleAssetPaste(e, (asset) => {
-            const cur = useCreateForm.getState().attachments;
-            if (cur.length < 5 && !cur.some((a) => a.id === asset.id)) f.set({ attachments: [...cur, asset] });
-          }, f.attachments.length)}
+          onPaste={composer.handlePaste}
           onKeyDown={(e) => {
             // 回车发送，Shift+Enter 换行；输入法组合中不触发
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -462,33 +488,24 @@ export function CreatePage() {
             <SourceChips sources={f.sources} onRemove={(id) => f.set({ sources: f.sources.filter((x) => x.id !== id) })} />
           </div>
         ) : null}
-        {f.attachments.length || f.skills.length || ecosystems.length ? (
+        {f.attachments.length || composer.pending.length || f.skills.length || ecosystems.length ? (
           <div className="attachments">
             <EcosystemChips items={ecosystems} onRemove={(id) => setEcosystems((prev) => prev.filter((x) => x.id !== id))} />
             <SkillChips skills={f.skills} onRemove={(id) => f.set({ skills: f.skills.filter((x) => x.id !== id) })} />
-            {f.attachments.map((a) => (
-              <span key={a.id}>
-                <Icon name="file" />
-                {a.name}
-                <button
-                  aria-label="移除附件"
-                  onClick={() => f.set({ attachments: f.attachments.filter((x) => x.id !== a.id) })}
-                >
-                  <Icon name="close" />
-                </button>
-              </span>
-            ))}
+            <ComposerAttachmentList
+              assets={f.attachments}
+              pending={composer.pending}
+              onRemove={(assetId) => f.set({ attachments: f.attachments.filter((x) => x.id !== assetId) })}
+            />
           </div>
         ) : null}
         <div className="composer-bottom">
           <div className="composer-tools">
             <AddMenuButton
               variant="create"
-              attachedCount={f.attachments.length}
-              onAttach={(asset) => {
-                const cur = useCreateForm.getState().attachments;
-                if (cur.length < 5 && !cur.some((a) => a.id === asset.id)) f.set({ attachments: [...cur, asset] });
-              }}
+              attachedCount={f.attachments.length + composer.pending.length}
+              maxAttachments={MAX_ATTACHMENTS}
+              onUploadFiles={composer.uploadBatch}
               pickedSourceIds={f.sources.map((s) => s.id)}
               onPickSource={(s) => f.set({ sources: [...useCreateForm.getState().sources, { id: s.id, name: s.name }] })}
             />
@@ -518,15 +535,20 @@ export function CreatePage() {
             </button>
           </div>
           <div className="composer-actions">
+            {f.prompt.length > 2000 ? (
+              <span className={`composer-char-count${f.prompt.length > MAX_PROMPT_CHARS - 800 ? ' is-near' : ''}`}>
+                {f.prompt.length.toLocaleString()} / {MAX_PROMPT_CHARS.toLocaleString()}
+              </span>
+            ) : null}
             <PolishButton value={f.prompt} onPolished={(text) => f.set({ prompt: text })} />
             <button
               className="send-button"
               aria-label="发送"
-              title="发到对话里继续聊；聊清楚后再开始生成"
-              disabled={!f.prompt.trim() || submitting}
+              title={composer.uploading ? '附件上传中，请稍候…' : '发到对话里继续聊；聊清楚后再开始生成'}
+              disabled={(!f.prompt.trim() && !f.attachments.length) || submitting || composer.uploading}
               onClick={() => void submit()}
             >
-              <Icon name={submitting ? 'refresh' : 'send'} className={submitting ? 'spinning' : ''} />
+              <Icon name={submitting || composer.uploading ? 'refresh' : 'send'} className={submitting || composer.uploading ? 'spinning' : ''} />
             </button>
           </div>
         </div>

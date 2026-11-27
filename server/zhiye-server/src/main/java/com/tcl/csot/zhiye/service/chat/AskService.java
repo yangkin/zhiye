@@ -33,7 +33,7 @@ import java.util.Map;
 @Service
 public class AskService {
     private static final Logger log = LoggerFactory.getLogger(AskService.class);
-    public static final int MAX_CHARS = 3000;
+    public static final int MAX_CHARS = 12000;
     public static final int MAX_SKILLS = com.tcl.csot.zhiye.service.skillhub.SkillRefs.MAX_SKILLS;
     private static final int MAX_TOKENS = 2000;
     /** 会话里可能直接写一整份文档（文件），给足输出长度；思考也算在里面 */
@@ -109,7 +109,7 @@ public class AskService {
               · skill 包（SKILL.md + references/ + scripts/，可一键发布到 SkillHub，不是网页）。
             - 判断不了就先聊清楚用途和使用场景，再给建议；不要罗列一堆类型让用户挑。
             ## 怎么开始
-            - 在「创造」页写需求（可点「润色」扩写、点华星场景模板、粘贴/上传最多 5 个图片或文档附件），发送后先在会话里澄清或生成「创造计划」（含「确认计划」「设计风格」两步，可双击编辑 Markdown 文档），确认后执行；开发skill 跳过计划，直接生成。
+            - 在「创造」页写需求（可点「润色」扩写、点华星场景模板、粘贴/拖入/上传最多 10 个图片或文档附件），发送后先在会话里澄清或生成「创造计划」（含「确认计划」「设计风格」两步，可双击编辑 Markdown 文档），确认后执行；开发skill 跳过计划，直接生成。
             - 生成中能看到真实进度和待办，可随时点「停止」（自动保存「任务中断前自动保存」版本，不覆盖当前版本）；停止后可点「继续」接着做、点「放弃」清除进度，或直接发新需求从当前版本干净开始；中途发消息可排入「待发送消息」队列。
             - 完成后右侧是预览；不选类型只是提问时，织页直接回答，不会创建应用。
             ## 修改、云服务、单体托管与数据源
@@ -122,7 +122,7 @@ public class AskService {
             - 每次成功生成或修改都会存一个新版本，可以预览、收藏、写备注、回到某个版本（新建一个版本，原记录都保留），也可以在回复上的「查看改动」里看这次改了什么。
             - 「发布」把当前版本放到可分享的网址（可选内网公开 / 员工登录 / 指定人员）；编辑与恢复旧版本仅更新预览，点「发布」后线上才正式切流生效。
             ## 限制
-            - 每人最多 10 个应用（含最多 5 个单体/全栈服务，删除的不算），个人运行中单体总计 ≤ 2C 2G；同一时间只能有 1 个写任务，单条消息最多选 5 个技能、5 个附件，导入压缩包最多 50 MB。
+            - 每人最多 10 个应用（含最多 5 个单体/全栈服务，删除的不算），个人运行中单体总计 ≤ 2C 2G；同一时间只能有 1 个写任务，单条消息最多选 5 个技能、10 个附件，导入压缩包最多 50 MB。
             """;
 
     /** 只在创造页的会话里追加（工作台问答不产出文件） */
@@ -247,7 +247,7 @@ public class AskService {
     public String polish(String ws, String content) throws com.tcl.csot.zhiye.exception.LlmException {
         String c = content == null ? "" : content.trim();
         if (c.isEmpty()) throw ApiException.validation("请输入要润色的需求");
-        if (c.length() > 3000) throw ApiException.validation("润色内容最多 3000 字");
+        if (c.length() > MAX_CHARS) throw ApiException.validation("润色内容最多 " + MAX_CHARS + " 字");
         if (!upstream.hasKey()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "ASK_UNAVAILABLE", "模型服务暂时不可用");
         return complete(ws, POLISH_SYSTEM, c, 1200, "润色");
     }

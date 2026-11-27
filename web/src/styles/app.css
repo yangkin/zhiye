@@ -2305,6 +2305,57 @@ a.skill-chip{text-decoration:none}
 .asset-lightbox{position:fixed;inset:0;z-index:1200;background:rgba(22,16,44,.72);display:flex;align-items:center;justify-content:center;padding:40px;cursor:zoom-out;animation:asset-lb-in .15s ease}
 .asset-lightbox img{max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.45);cursor:default}
 
+/* ===== 输入框素材缩略图、上传进度态、文档预览与拖放 ===== */
+.composer,.chat-composer{position:relative}
+.composer.is-drag-over,.chat-composer.is-drag-over{border-color:#7c5ce6!important;box-shadow:0 0 0 3px rgba(124,92,230,.18),0 10px 28px rgba(81,64,140,.14)!important}
+.composer-drop-overlay{position:absolute;inset:4px;z-index:18;border-radius:16px;border:1.5px dashed #8a6ae6;background:rgba(247,244,254,.92);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;gap:8px;color:#5a3fbf;font-size:13px;font-weight:600;pointer-events:none;animation:asset-lb-in .12s ease}
+.composer-drop-overlay .icon{width:17px;height:17px}
+
+.attachments,.chat-attachments{align-items:center;max-height:160px;padding:8px 6px 2px 0}
+.ca-thumb{position:relative;width:58px;height:58px;border-radius:11px;border:1px solid #e3ddf5;background:#f8f6fc;flex:none;overflow:visible;transition:border-color .15s,transform .15s}
+.ca-thumb:hover{border-color:#b8a3ec}
+.ca-thumb-open{display:block;width:100%;height:100%;padding:0!important;border:0;background:transparent;border-radius:10px;overflow:hidden;cursor:zoom-in}
+.ca-thumb-open img,.ca-thumb>img{display:block;width:100%;height:100%;object-fit:cover;border-radius:10px}
+.ca-thumb-remove{position:absolute;top:-6px;right:-6px;width:19px;height:19px;padding:0!important;border-radius:999px;border:1.5px solid #fff;background:#3a3153;color:#fff!important;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(24,18,46,.28);opacity:.9;transition:opacity .15s,background .15s,transform .15s;cursor:pointer}
+.ca-thumb-remove:hover{opacity:1;background:#d9384a;transform:scale(1.06)}
+.ca-thumb-remove .icon{width:10px!important;height:10px!important}
+.ca-thumb.is-uploading>img{opacity:.52;filter:saturate(.75)}
+.ca-thumb-spinner{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.45);border-radius:10px;color:#6547c8}
+.ca-thumb-spinner .icon{width:18px!important;height:18px!important}
+
+.ca-file{display:inline-flex;align-items:center;gap:4px;max-width:240px;padding:5px 7px 5px 6px;border-radius:10px;border:1px solid #e5def3;background:#faf8fe;color:#3d3554;transition:border-color .15s,background .15s}
+.ca-file:hover{border-color:#c7b8ee;background:#f4effd}
+.ca-file.is-uploading{opacity:.78}
+.ca-file-open{display:inline-flex;align-items:center;gap:7px;min-width:0;padding:0!important;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.ca-file-ext{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;padding:0 5px;border-radius:7px;background:#ece6fb;color:#5b3db5;font-size:10px;font-weight:700;letter-spacing:.3px;flex:none}
+.ca-file-meta{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.ca-file-meta b{font-size:12px;font-weight:500;color:#2f2842;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.ca-file-meta small{font-size:10.5px;color:#8a829e}
+.ca-file-remove{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0!important;border:0;border-radius:6px;background:transparent;color:#9b92b0!important;flex:none;cursor:pointer}
+.ca-file-remove:hover{background:#ebe4fa;color:#473a66!important}
+.ca-file-remove .icon{width:12px!important;height:12px!important}
+
+.paste-notice-banner{display:flex;align-items:flex-start;gap:8px;margin:0 0 8px;padding:8px 10px;border-radius:10px;border:1px solid #f0dcad;background:#fffaf0;color:#7a5210;font-size:12px;line-height:1.55}
+.paste-notice-banner>.icon{width:15px;height:15px;flex:none;margin-top:2px;color:#c98212}
+.paste-notice-banner>span{flex:1;min-width:0}
+.paste-notice-banner b{color:#5d3c07;font-weight:600}
+.paste-notice-banner>button{flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:0;border-radius:6px;background:transparent;color:#9c7535;cursor:pointer}
+.paste-notice-banner>button:hover{background:#f7e8c6;color:#5d3c07}
+.paste-notice-banner>button .icon{width:12px;height:12px}
+
+.composer-char-count{font-size:11px;color:#9a92ad;font-variant-numeric:tabular-nums;margin-right:4px;white-space:nowrap}
+.composer-char-count.is-near{color:#c96e12;font-weight:600}
+
+.ca-doc-modal-mask{position:fixed;inset:0;z-index:1200;background:rgba(22,16,44,.52);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:24px;animation:asset-lb-in .14s ease}
+.ca-doc-modal{width:min(740px,100%);max-height:80dvh;display:flex;flex-direction:column;background:#fff;border-radius:16px;border:1px solid #e8e3f4;box-shadow:0 20px 60px rgba(20,14,42,.28);overflow:hidden}
+.ca-doc-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid #f0ecf7;background:#faf8fe}
+.ca-doc-modal-head>div{display:flex;align-items:baseline;gap:10px;min-width:0}
+.ca-doc-modal-head b{font-size:14px;color:#231c35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ca-doc-modal-head small{font-size:12px;color:#857d99;white-space:nowrap}
+.ca-doc-modal-body{flex:1;min-height:120px;overflow:auto;padding:16px 20px}
+.ca-doc-modal-body pre{margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.7;color:#2f2842}
+.ca-doc-loading{margin:24px 0;text-align:center;font-size:13px;color:#857d99}
+
 /* ===== 会话里的应用入口卡（[[build]] 回复后，重新打开会话也能找到应用） ===== */
 .conv-app-card{display:flex;align-items:center;gap:10px;margin-top:10px;padding:10px 12px;border:1px solid #e7ddf4;border-radius:12px;background:linear-gradient(120deg,#fdfbff,#f6effc);max-width:340px;transition:.15s}
 .conv-app-card:hover{border-color:#c9ade7;box-shadow:0 4px 14px rgba(120,80,160,.09)}

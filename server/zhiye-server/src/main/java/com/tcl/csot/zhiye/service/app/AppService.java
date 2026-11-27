@@ -91,7 +91,7 @@ public class AppService {
         if (dup.isPresent()) return views.detail(require(ws, dup.get().appId()));
         String prompt = req.prompt() == null ? "" : req.prompt().trim();
         if (prompt.isEmpty()) throw ApiException.validation("请先描述你的应用需求");
-        if (prompt.length() > 5000) throw ApiException.validation("需求描述最多 5000 字");
+        if (prompt.length() > 12000) throw ApiException.validation("需求描述最多 12000 字");
         String type = req.type() == null || req.type().isBlank() ? Catalog.DEFAULT_TYPE : req.type();
         if (!Catalog.TYPES.contains(type)) throw ApiException.validation(Catalog.TYPE_ERROR);
         quota.checkCanCreateApp(ws);
@@ -363,7 +363,7 @@ public class AppService {
         AppRow app = require(ws, id);
         String content = body.path("content").asText("").trim();
         if (content.isEmpty()) throw ApiException.validation("请输入要修改的内容");
-        if (content.length() > 5000) throw ApiException.validation("内容最多 5000 字");
+        if (content.length() > 12000) throw ApiException.validation("内容最多 12000 字");
         JsonNode ctx = body.get("elementContext");
         if (ctx != null && ctx.isNull()) ctx = null;
         if (ctx != null) {
