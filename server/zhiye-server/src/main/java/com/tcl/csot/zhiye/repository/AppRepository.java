@@ -55,6 +55,10 @@ public class AppRepository {
         jdbc.sql("update app set phase = ?, updated_at = now() where id = ?").params(phase, id).update();
     }
 
+    public void markVisibleAndPhase(String id, String phase) {
+        jdbc.sql("update app set visible = true, phase = ?, updated_at = now() where id = ?").params(phase, id).update();
+    }
+
     public void touch(String id) { jdbc.sql("update app set updated_at = now() where id = ?").param(id).update(); }
 
     public void update(String id, String column, Object value) {

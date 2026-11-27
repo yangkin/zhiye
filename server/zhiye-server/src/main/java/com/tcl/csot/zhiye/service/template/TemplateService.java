@@ -229,7 +229,7 @@ public class TemplateService {
         quota.checkCanStart(ws, true);
         String appId = Ids.newId("app");
         AppRow row = new AppRow(appId, ws, name, true, t.type(), "来自灵感社区「" + t.name() + "」", "使用灵感社区的作品「" + t.name() + "」创建并部署。", "",
-                "lavender", false, "适中", "auto", false, "generating", "import", t.framework(), t.kind(), false, Ids.slug(), List.of(),
+                "lavender", false, "适中", "auto", false, "generating", "import", t.framework(), t.kind(), true, Ids.slug(), List.of(),
                 null, null, null, null, null);
         apps.insert(row);
         if (t.requirements() != null && t.requirements().isObject() && !t.requirements().isEmpty()) {

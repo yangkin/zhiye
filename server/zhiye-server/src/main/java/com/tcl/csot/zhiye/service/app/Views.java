@@ -84,7 +84,11 @@ public class Views {
         boolean discarded = t.result() != null && t.result().path("discarded").asBoolean(false);
         m.put("discarded", discarded);
         m.put("resumable", "CANCELLED".equals(t.status()) && !discarded && tasks.checkpoint(t.id()).isPresent());
-        m.put("retryable", "FAILED".equals(t.status()) && !discarded && !"import".equals(t.type()) && !"clone".equals(t.type()));
+        boolean cloneRetryable = "clone".equals(t.type())
+                && ("FAILED".equals(t.status()) || "CANCELLED".equals(t.status()))
+                && !discarded
+                && t.resultVersionId() == null;
+        m.put("retryable", cloneRetryable || ("FAILED".equals(t.status()) && !discarded && !"import".equals(t.type()) && !"clone".equals(t.type())));
         m.put("createdAt", Db.iso(t.createdAt()));
         m.put("startedAt", Db.iso(t.startedAt()));
         m.put("finishedAt", Db.iso(t.finishedAt()));

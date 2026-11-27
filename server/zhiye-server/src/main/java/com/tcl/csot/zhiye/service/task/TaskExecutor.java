@@ -1011,6 +1011,7 @@ public class TaskExecutor {
         }
         phase(ctx, "VERIFYING", "正在构建与校验", 60);
         JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app.projectKind())));
+        ctx.checkCancelled();
         if (!v.path("ok").asBoolean(false)) throw new TaskContext.Fail("BUILD_FAILED", "构建或校验失败：" + failedSummary(v));
         VersionRow ver = commit(ctx, app, "从模板「" + t.input().path("templateName").asText("") + "」复刻", "import", false);
         if ("vite".equals(app.projectKind())) saveDeps(app.id(), ctx.workspace);

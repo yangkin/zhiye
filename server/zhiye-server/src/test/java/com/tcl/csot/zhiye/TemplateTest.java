@@ -85,6 +85,86 @@ class TemplateTest extends IntegrationTest {
         assertThat(alice.get("/t/" + tplId + "/").status()).isEqualTo(404);
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    com.tcl.csot.zhiye.service.task.TaskService taskService;
+    @org.springframework.beans.factory.annotation.Autowired
+    com.tcl.csot.zhiye.repository.TaskRepository taskRepo;
+    @org.springframework.beans.factory.annotation.Autowired
+    com.tcl.csot.zhiye.repository.AppRepository appRepo;
+
+    @Test
+    void cancellingOrFailingCloneKeepsAppAndAllowsRetryAndRestart() {
+        Client alice = client();
+        JsonNode srcApp = alice.createApp("做一个带按钮的备忘录");
+        String srcAppId = srcApp.path("id").asText();
+        alice.waitTask(alice.ok(alice.post("/api/apps/" + srcAppId + "/generate", Map.of())).path("id").asText());
+        JsonNode srcReady = alice.ok(alice.get("/api/apps/" + srcAppId));
+        JsonNode tpl = alice.ok(alice.post("/api/templates", Map.of("appId", srcAppId, "name", "备忘录模板", "description", "测试停止复刻")));
+        String tplId = tpl.path("id").asText();
+
+        Client bob = client();
+        // 1. 复刻模板后直接触发真实取消：绝不能软删除应用（避免工作台 404「这个应用暂时找不到了」）
+        JsonNode cloned = bob.ok(bob.post("/api/templates/" + tplId + "/clone", Map.of("name", "Bob 的备忘录")));
+        String bobAppId = cloned.path("app").path("id").asText();
+        String taskId1 = cloned.path("task").path("id").asText();
+        bob.post("/api/tasks/" + taskId1 + "/cancel", Map.of());
+        bob.waitTask(taskId1);
+        assertThat(bob.get("/api/apps/" + bobAppId).status()).isEqualTo(200);
+        assertThat(ids(bob.ok(bob.get("/api/apps")))).contains(bobAppId);
+
+        // 2. 确定性验证：clone 任务进入 CANCELLED 终态后，应用不被软删、phase=stopped、visible=true、retryable=true，且 /retry 能重新复刻成功
+        JsonNode clonedDet = bob.ok(bob.post("/api/templates/" + tplId + "/clone", Map.of("name", "Bob 停止复刻验证")));
+        String detAppId = clonedDet.path("app").path("id").asText();
+        String detTaskId = clonedDet.path("task").path("id").asText();
+        bob.waitTask(detTaskId);
+        var srcRow = appRepo.findById(detAppId).orElseThrow();
+        var origTask = taskRepo.findById(detTaskId).orElseThrow();
+        var jdbcField = org.springframework.test.util.ReflectionTestUtils.getField(appRepo, "jdbc");
+        ((org.springframework.jdbc.core.simple.JdbcClient) jdbcField)
+                .sql("update app set current_version_id = null, published_version_id = null, phase = 'generating' where id = ?")
+                .param(detAppId).update();
+        String cancelledCloneId = com.tcl.csot.zhiye.util.Ids.newId("task");
+        taskRepo.insert(cancelledCloneId, srcRow.workspaceId(), detAppId, "clone", null, origTask.input(), null, 1, null);
+        assertThat(taskRepo.cancelQueued(cancelledCloneId)).isTrue();
+        taskService.afterTerminal(taskRepo.findById(cancelledCloneId).orElseThrow(), "CANCELLED", null, null);
+
+        JsonNode stoppedApp = bob.ok(bob.get("/api/apps/" + detAppId));
+        assertThat(stoppedApp.path("phase").asText()).isEqualTo("stopped");
+        assertThat(ids(bob.ok(bob.get("/api/apps")))).contains(detAppId);
+        JsonNode cancelledTaskView = bob.ok(bob.get("/api/tasks/" + cancelledCloneId));
+        assertThat(cancelledTaskView.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(cancelledTaskView.path("retryable").asBoolean()).isTrue();
+
+        // 通过 /retry 重新复刻并成功落地
+        JsonNode retried = bob.ok(bob.post("/api/tasks/" + cancelledCloneId + "/retry", Map.of()));
+        assertThat(retried.path("type").asText()).isEqualTo("clone");
+        JsonNode retriedDone = bob.waitTask(retried.path("id").asText());
+        assertThat(retriedDone.path("status").asText()).as(retriedDone.toString()).isEqualTo("SUCCEEDED");
+        assertThat(bob.ok(bob.get("/api/apps/" + detAppId)).path("phase").asText()).isEqualTo("ready");
+
+        // 3. 确定性验证：clone 失败/停止并 discard 后，应用仍在，且 POST /api/apps/{id}/generate 依然重启 clone 任务而非空白 AI generate
+        ((org.springframework.jdbc.core.simple.JdbcClient) jdbcField)
+                .sql("update app set current_version_id = null, published_version_id = null, phase = 'generating' where id = ?")
+                .param(detAppId).update();
+        String failedCloneId = com.tcl.csot.zhiye.util.Ids.newId("task");
+        taskRepo.insert(failedCloneId, srcRow.workspaceId(), detAppId, "clone", null, origTask.input(), null, 1, null);
+        taskRepo.finish(failedCloneId, "FAILED", "失败", 40, "BUILD_FAILED", "模拟复刻构建失败", null, null);
+        taskService.afterTerminal(taskRepo.findById(failedCloneId).orElseThrow(), "FAILED", "BUILD_FAILED", "模拟复刻构建失败");
+
+        assertThat(bob.ok(bob.get("/api/apps/" + detAppId)).path("phase").asText()).isEqualTo("failed");
+        bob.ok(bob.post("/api/tasks/" + failedCloneId + "/discard", Map.of()));
+        assertThat(bob.get("/api/apps/" + detAppId).status()).isEqualTo(200);
+        JsonNode restarted = bob.ok(bob.post("/api/apps/" + detAppId + "/generate", Map.of()));
+        assertThat(restarted.path("type").asText()).isEqualTo("clone");
+        JsonNode done3 = bob.waitTask(restarted.path("id").asText());
+        assertThat(done3.path("status").asText()).as(done3.toString()).isEqualTo("SUCCEEDED");
+        assertThat(bob.ok(bob.get("/api/apps/" + detAppId)).path("phase").asText()).isEqualTo("ready");
+
+        // 清理测试模板
+        alice.ok(alice.delete("/api/templates/" + tplId));
+        assertThat(srcReady.path("phase").asText()).isEqualTo("ready");
+    }
+
     private static String enc(String s) { return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8); }
 
     private static java.util.List<String> ids(JsonNode list) {

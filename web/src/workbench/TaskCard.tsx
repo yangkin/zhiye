@@ -24,7 +24,7 @@ interface Props {
   /** 停止/失败任务被用户主动「放弃 / 关闭」后通知外层收起卡片并刷新状态 */
   onDismiss?: (taskId: string) => void;
   /** 点击「停止」时立即通知外层进入 stopping/CANCELLING 状态，避免重复点击 */
-  onCancelRequested?: (taskId: string) => void;
+  onCancelRequested?: (taskId: string, nextStatus?: Task['status']) => void;
   /** 首次生成被停止且有计划文档时，点「放弃」会回到计划阶段继续调整 */
   canReturnToPlan?: boolean;
   compact?: boolean;
@@ -65,12 +65,22 @@ export function TaskCard({ stream, type, onNewTask, onDismiss, onCancelRequested
     setBusy(kind);
     try {
       if (kind === 'cancel') {
-        onCancelRequested?.(stream.taskId);
-        await api.cancelTask(stream.taskId);
+        onCancelRequested?.(stream.taskId, 'CANCELLING');
+        const updated = await api.cancelTask(stream.taskId);
+        onCancelRequested?.(stream.taskId, updated.status);
+        if (updated.status === 'COMMITTING') {
+          toast('任务已进入最终保存阶段，即将完成。');
+        }
       } else if (kind === 'discard') {
         await api.discardTask(stream.taskId);
         onDismiss?.(stream.taskId);
-        toast(canReturnToPlan && t === 'generate' ? '已放弃本次未完成生成，已返回「创造计划」。' : '已放弃未完成的任务进度。');
+        toast(
+          t === 'clone'
+            ? '已关闭本次复刻提示，如需继续可随时点击「重新复刻」。'
+            : canReturnToPlan && t === 'generate'
+              ? '已放弃本次未完成生成，已返回「创造计划」。'
+              : '已放弃未完成的任务进度。',
+        );
       } else {
         const next = kind === 'resume' ? await api.resumeTask(stream.taskId) : await api.retryTask(stream.taskId);
         onNewTask(next);
@@ -110,9 +120,9 @@ export function TaskCard({ stream, type, onNewTask, onDismiss, onCancelRequested
             </button>
           ) : null}
           {done && task?.retryable ? (
-            <button type="button" className="task-pill accent" aria-label="重试" disabled={!!busy} onClick={() => void act('retry')}>
+            <button type="button" className="task-pill accent" aria-label={t === 'clone' ? '重新复刻' : '重试'} disabled={!!busy} onClick={() => void act('retry')}>
               <Icon name="refresh" />
-              {busy === 'retry' ? '重试中' : '重试'}
+              {busy === 'retry' ? (t === 'clone' ? '复刻中' : '重试中') : t === 'clone' ? '重新复刻' : '重试'}
             </button>
           ) : null}
           {done && (cancelled || failed) && onDismiss ? (

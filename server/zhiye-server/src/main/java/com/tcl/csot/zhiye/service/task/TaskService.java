@@ -160,6 +160,8 @@ public class TaskService {
                     apps.setPhase(app.id(), "plan");
                 }
                 messages.replaceSystemForTask(app.id(), t.id(), null);
+            } else if ("clone".equals(t.type())) {
+                messages.replaceSystemForTask(app.id(), t.id(), "已放弃本次模板复刻，如需再次复刻可点击「重新复刻」。");
             } else if ("CANCELLED".equals(t.status())) {
                 messages.replaceSystemForTask(app.id(), t.id(), "已停止，已放弃未完成进度。");
             } else if ("FAILED".equals(t.status())) {
@@ -208,9 +210,16 @@ public class TaskService {
         Optional<TaskRow> dup = byIdem(ws, idemKey);
         if (dup.isPresent()) return dup.get();
         TaskRow old = get(ws, id);
-        if (!"FAILED".equals(old.status()) || "import".equals(old.type()) || "clone".equals(old.type()))
+        boolean discarded = old.result() != null && old.result().path("discarded").asBoolean(false);
+        boolean canRetry = !discarded && (
+                ("FAILED".equals(old.status()) && !"import".equals(old.type()))
+                || ("CANCELLED".equals(old.status()) && "clone".equals(old.type()))
+        );
+        if (!canRetry)
             throw ApiException.conflict("NOT_RETRYABLE", "这个任务不能重试");
         AppRow app = apps.find(ws, old.appId()).orElseThrow(() -> ApiException.notFound("应用"));
+        if ("clone".equals(old.type()) && app.currentVersionId() != null)
+            throw ApiException.conflict("NOT_RETRYABLE", "模板源码已经复刻完成，无需重复复刻");
         ObjectNode input = old.input().deepCopy();
         input.remove("resume");
         var cp = tasks.checkpoint(id);
@@ -221,7 +230,7 @@ public class TaskService {
             // 上一轮是做到上限才停的：重试要接着做，不要把原指令当新任务从头做
             if (java.util.Set.of("TOO_LARGE", "TIMEOUT", "PAUSED", "BUDGET_EXCEEDED", "PROVIDER_QUOTA", "PROVIDER_RATE_LIMIT").contains(old.errorCode())) resume.put("continueWork", true);
             input.set("resume", resume);
-        } else {
+        } else if (!"clone".equals(old.type())) {
             base = input.hasNonNull("manualVersionId") ? input.path("manualVersionId").asText() : app.currentVersionId();
         }
         TaskRow t = create(ws, app.id(), old.type(), base, input, idemKey, old.attempt() + 1, old.id());
@@ -267,6 +276,7 @@ public class TaskService {
         switch (old.type()) {
             case "plan" -> apps.setPhase(app.id(), "planning");
             case "generate" -> apps.setPhase(app.id(), "generating");
+            case "clone" -> apps.markVisibleAndPhase(app.id(), "generating");
             case "modify" -> messages.retarget(old.id(), t.id());
             default -> { }
         }
@@ -311,10 +321,27 @@ public class TaskService {
                         cancelled ? "已停止保存，可视化编辑仍保留在草稿中。" : "保存可视化编辑失败：" + errorMessage + "。修改仍保留在草稿中。", null, t.id(), "ok");
                 case "code_save" -> messages.insert(app.id(), "system",
                         cancelled ? "已停止保存代码，没有生成新版本。" : "保存代码失败：" + errorMessage, null, t.id(), "ok");
-                case "import", "clone" -> {
-                    // 取消或失败的导入/复刻不留下应用
-                    apps.softDelete(app.id());
-                    git.deleteRepo(app.id());
+                case "import" -> {
+                    if (app.currentVersionId() == null) {
+                        // 取消或失败的弹窗代码导入尚未进入工作台，不留下空应用
+                        apps.softDelete(app.id());
+                        git.deleteRepo(app.id());
+                    } else {
+                        apps.markVisibleAndPhase(app.id(), "ready");
+                    }
+                }
+                case "clone" -> {
+                    // 复刻社区模板时用户已进入工作台，停止或失败绝不能静默软删除应用（否则工作台立即 404「这个应用暂时找不到了」）
+                    boolean hasVersion = app.currentVersionId() != null;
+                    apps.markVisibleAndPhase(app.id(), hasVersion ? "ready" : (cancelled ? "stopped" : "failed"));
+                    String text = hasVersion
+                            ? (cancelled
+                                ? "已停止后续部署，模板源码已保存为当前版本，可以直接预览、在「服务托管」重启或继续对话修改。"
+                                : "模板源码已保存为当前版本，但后续步骤未完成：" + errorMessage)
+                            : (cancelled
+                                ? "模板复刻已停止，应用已保留。可以点击「重新复刻」继续完成。"
+                                : "模板复刻失败：" + errorMessage + "。可以点击「重新复刻」重试。");
+                    messages.insert(app.id(), "system", text, null, t.id(), "ok");
                 }
                 default -> { }
             }

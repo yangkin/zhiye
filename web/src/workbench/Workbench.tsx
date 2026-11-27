@@ -193,7 +193,7 @@ function Workbench({ id }: { id: string }) {
     const actionable =
       !latest.discarded &&
       !dismissedIdsRef.current.has(latest.id) &&
-      ((latest.status === 'CANCELLED' && latest.resumable) || (latest.status === 'FAILED' && latest.retryable));
+      ((latest.status === 'CANCELLED' && (latest.resumable || latest.retryable)) || (latest.status === 'FAILED' && latest.retryable));
     if (actionable && newerThanVersion) {
       setTrackedId(latest.id);
       setHistoricalId(latest.id);
@@ -351,7 +351,13 @@ function Workbench({ id }: { id: string }) {
       } else if (task.status === 'FAILED') {
         toast(task.error?.message || '任务没有完成，可以重试。', 'error');
       } else if (task.status === 'CANCELLED') {
-        toast(task.resumable ? '已停止，进度已保存。可点「继续」接着做、点「放弃」清除，或直接发新需求。' : '已停止。');
+        toast(
+          task.type === 'clone' && task.retryable
+            ? '模板复刻已停止，应用已保留。可点击「重新复刻」继续完成。'
+            : task.resumable
+              ? '已停止，进度已保存。可点「继续」接着做、点「放弃」清除，或直接发新需求。'
+              : '已停止。',
+        );
       }
     },
     [id, invalidate, qc],
@@ -391,9 +397,9 @@ function Workbench({ id }: { id: string }) {
   );
 
   const onCancelRequested = useCallback(
-    (tid: string) => {
+    (tid: string, nextStatus: Task['status'] = 'CANCELLING') => {
       qc.setQueryData(qk.app(id), (old: typeof app) =>
-        old && old.activeTask?.id === tid ? { ...old, activeTask: { ...old.activeTask, status: 'CANCELLING' as const } } : old,
+        old && old.activeTask?.id === tid ? { ...old, activeTask: isTerminal(nextStatus) ? null : { ...old.activeTask, status: nextStatus } } : old,
       );
     },
     [id, qc],
@@ -432,14 +438,24 @@ function Workbench({ id }: { id: string }) {
         <LoadingState label="正在打开应用…" />
       </Shell>
     );
-  if (appQ.error || !app)
+  const appStatus = (appQ.error as { status?: number } | null)?.status;
+  if ((!app && appQ.error) || appStatus === 404)
     return (
       <Shell>
-        {appQ.error && (appQ.error as { status?: number }).status !== 404 ? (
+        {appQ.error && appStatus !== 404 ? (
           <ErrorState message={errorMessage(appQ.error)} onRetry={() => appQ.refetch()} />
         ) : (
-          <EmptyState title="这个应用暂时找不到了" desc="从应用列表重新选择一个应用。" canCreate />
+          <EmptyState title="这个应用暂时找不到了" desc="该应用可能已被删除或无访问权限，请从应用列表重新选择。" canCreate />
         )}
+        <button className="subtle-button center-back" onClick={() => navigate('/apps')}>
+          返回应用列表
+        </button>
+      </Shell>
+    );
+  if (!app)
+    return (
+      <Shell>
+        <EmptyState title="这个应用暂时找不到了" desc="该应用可能已被删除或无访问权限，请从应用列表重新选择。" canCreate />
         <button className="subtle-button center-back" onClick={() => navigate('/apps')}>
           返回应用列表
         </button>
@@ -1056,19 +1072,19 @@ function Workbench({ id }: { id: string }) {
                 ) : app.phase === 'stopped' ? (
                   <div className="preview-empty preview-empty-pet">
                     <Pet size={150} sleeping bubble="想继续就叫醒我～" />
-                    <h3>生成已停止</h3>
-                    <p>进度已保存，在左侧点「继续」就能接着做。</p>
+                    <h3>{app.source === 'import' ? '模板复刻已停止' : '生成已停止'}</h3>
+                    <p>{app.source === 'import' ? '应用已保留，在左侧点「重新复刻」即可继续完成部署。' : '进度已保存，在左侧点「继续」就能接着做。'}</p>
                   </div>
                 ) : app.phase === 'failed' ? (
                   <div className="preview-empty">
                     <span>
                       <Icon name="alert" />
                     </span>
-                    <h3>这次没能生成出来</h3>
+                    <h3>{app.source === 'import' ? '模板复刻没有完成' : '这次没能生成出来'}</h3>
                     <p>可以在左侧查看原因并重试。</p>
                   </div>
                 ) : (
-                  <CreatingStage label={stream.phaseLabel} skill={skill} />
+                  <CreatingStage label={stream.phaseLabel} skill={skill} cloning={app.activeTask?.type === 'clone' || stream.task?.type === 'clone'} />
                 )}
               </div>
             </>

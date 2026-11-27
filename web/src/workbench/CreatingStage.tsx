@@ -14,7 +14,7 @@ const TIPS: { t: string; only?: 'skill' | 'web' }[] = [
  * 生成中的占位：小机器人对着电脑敲代码（public/pet/robot-code.webp，原图在交接包「动图」目录的「萌趣机器人编程敲击动画」），
  * 下面轮流滚动手册式的小提示（对照 meoo 的「正在启动工作区…」动效）。
  */
-export function CreatingStage({ skill = false }: { label?: string; skill?: boolean }) {
+export function CreatingStage({ skill = false, cloning = false }: { label?: string; skill?: boolean; cloning?: boolean }) {
   const [i, setI] = useState(0);
   const tips = TIPS.filter((x) => !x.only || x.only === (skill ? 'skill' : 'web')).map((x) => x.t);
   useEffect(() => {
@@ -33,7 +33,7 @@ export function CreatingStage({ skill = false }: { label?: string; skill?: boole
         <span className="cs-pet-spark cs-s2">✦</span>
       </div>
       <h3>
-        {skill ? '正在编写技能包' : '正在创作中'}
+        {cloning ? '正在复刻模板' : skill ? '正在编写技能包' : '正在创作中'}
         <span className="dots">…</span>
       </h3>
       <ul className="cs-tips" aria-label="使用小贴士">

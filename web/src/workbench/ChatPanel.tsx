@@ -33,8 +33,8 @@ interface Props {
   onTaskStarted: (t: Task) => void;
   /** 用户主动放弃/关闭已停止或失败任务卡片 */
   onDismissTask?: (taskId: string) => void;
-  /** 点击停止按钮时同步进入 CANCELLING 乐观状态 */
-  onCancelRequested?: (taskId: string) => void;
+  /** 点击停止按钮时同步进入 CANCELLING 乐观状态（并在后端返回 COMMITTING 时同步修正） */
+  onCancelRequested?: (taskId: string, nextStatus?: Task['status']) => void;
   onEnableCloud?: () => void;
   onRestoreVersion: (version: Version) => void;
   /** 切到「云服务」页 */
@@ -683,13 +683,19 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           ? '技能包会直接开始生成，不需要确认计划。'
           : '好想法！我为你整理了一份实现计划。确认后，我们就可以开始了。'
         : phase === 'generating'
-          ? skill
-            ? '正在编写技能包：SKILL.md、参考资料和脚本会逐个出现在下面。'
-            : '正在把你的想法，变成看得见的作品。'
+          ? app.source === 'import'
+            ? '正在按社区模板复刻并部署，完成后即可体验与修改。'
+            : skill
+              ? '正在编写技能包：SKILL.md、参考资料和脚本会逐个出现在下面。'
+              : '正在把你的想法，变成看得见的作品。'
           : phase === 'failed'
-            ? '这次没能完成生成，已保留当前进度，可以重试。'
+            ? app.source === 'import'
+              ? '这次模板复刻没有完成，应用已保留，可以点「重新复刻」重试。'
+              : '这次没能完成生成，已保留当前进度，可以重试。'
             : phase === 'stopped'
-              ? '生成已停止，进度已保存，可以点「继续」接着做。'
+              ? app.source === 'import'
+                ? '模板复刻已停止，应用已保留，可以点「重新复刻」继续完成。'
+                : '生成已停止，进度已保存，可以点「继续」接着做。'
             : app.source === 'import'
               ? '代码已经导入并部署，可以继续打磨。'
               : '你的想法，已经有了新的模样。';
@@ -1161,10 +1167,15 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                     disabled={isCancelling}
                     onClick={async () => {
                       setStopping(true);
-                      onCancelRequested?.(runningTaskId);
+                      onCancelRequested?.(runningTaskId, 'CANCELLING');
                       try {
-                        await api.cancelTask(runningTaskId);
+                        const updated = await api.cancelTask(runningTaskId);
+                        onCancelRequested?.(runningTaskId, updated.status);
+                        if (updated.status === 'COMMITTING') {
+                          toast('任务已进入最终保存阶段，即将完成。');
+                        }
                       } catch (err) {
+                        void qc.invalidateQueries({ queryKey: qk.app(app.id) });
                         toast(errorMessage(err), 'error');
                       } finally {
                         setStopping(false);
@@ -1334,12 +1345,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           </>
         ) : phase === 'failed' ? (
           <span>
-            <Icon name="alert" /> 可以在上方重试生成，或修改计划后再试。
+            <Icon name="alert" /> {app.source === 'import' ? '模板复刻未完成，可在上方点击「重新复刻」重试。' : '可以在上方重试生成，或修改计划后再试。'}
           </span>
         ) : phase === 'stopped' ? (
           <div className="stopped-composer-bar">
             <span>
-              <Icon name="stop" /> 生成已停止
+              <Icon name="stop" /> {app.source === 'import' ? '模板复刻已停止' : '生成已停止'}
             </span>
             <div className="stopped-composer-actions">
               {stream.taskId && task?.resumable ? (
@@ -1365,7 +1376,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               ) : null}
               <button
                 type="button"
-                className="task-pill"
+                className={app.source === 'import' ? 'task-pill accent' : 'task-pill'}
                 disabled={sending}
                 onClick={async () => {
                   setSending(true);
@@ -1379,7 +1390,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 }}
               >
                 <Icon name="refresh" />
-                重新生成
+                {app.source === 'import' ? '重新复刻' : '重新生成'}
               </button>
               {!skill && app.planDoc && stream.taskId ? (
                 <button
@@ -1728,13 +1739,14 @@ function AssistantActions({
 
 function FailedNoTask({ app, onTaskStarted }: { app: AppDetail; onTaskStarted: (t: Task) => void }) {
   const [busy, setBusy] = useState(false);
+  const isClone = app.source === 'import';
   return (
     <div className={`progress-card task-card ${app.phase === 'stopped' ? '' : 'is-failed'}`}>
       <div className="progress-title">
         <span>
           <Icon name={app.phase === 'stopped' ? 'stop' : 'alert'} />
         </span>
-        <b>{app.phase === 'stopped' ? '生成已停止' : '生成没有完成'}</b>
+        <b>{isClone ? (app.phase === 'stopped' ? '模板复刻已停止' : '模板复刻没有完成') : app.phase === 'stopped' ? '生成已停止' : '生成没有完成'}</b>
       </div>
       <div className="task-actions">
         <button
@@ -1752,7 +1764,7 @@ function FailedNoTask({ app, onTaskStarted }: { app: AppDetail; onTaskStarted: (
           }}
         >
           <Icon name="refresh" />
-          {busy ? '正在开始…' : app.phase === 'stopped' ? '重新生成' : '重试'}
+          {busy ? '正在开始…' : isClone ? '重新复刻' : app.phase === 'stopped' ? '重新生成' : '重试'}
         </button>
       </div>
     </div>

@@ -355,6 +355,17 @@ public class AppService {
         if (tasks.activeForApp(app.id()).isPresent()) throw ApiException.busy();
         if (!"plan".equals(app.phase()) && !"failed".equals(app.phase()) && !"stopped".equals(app.phase()))
             throw ApiException.conflict("INVALID_PHASE", "当前阶段不能执行生成");
+        if ("import".equals(app.source()) && app.currentVersionId() == null) {
+            TaskRow lastClone = tasks.listByApp(app.id(), false).stream()
+                    .filter(tk -> "clone".equals(tk.type()))
+                    .findFirst().orElse(null);
+            if (lastClone != null) {
+                taskService.discardPendingStoppedCheckpoints(app.id());
+                TaskRow t = taskService.create(ws, app.id(), "clone", null, lastClone.input(), idemKey, lastClone.attempt() + 1, lastClone.id());
+                apps.markVisibleAndPhase(app.id(), "generating");
+                return views.task(t);
+            }
+        }
         taskService.discardPendingStoppedCheckpoints(app.id());
         TaskRow t = taskService.create(ws, app.id(), "generate", app.currentVersionId(), Json.obj(), idemKey, 1, null);
         apps.setPhase(app.id(), "generating");
