@@ -608,7 +608,8 @@ public class TaskExecutor {
         phase(ctx, "RUNNING", "正在编写代码", 20);
         String instruction = modify ? Prompts.modify(input.path("content").asText(), elementContext, app.projectKind())
                 : Prompts.generate(app, assetPaths(ctx, app, app.assetIds()));
-        if (!app.isSkill() && enterpriseConnectors != null) {
+        // 纯静态 HTML 页面不注入无关的企业连接器说明，避免分散模型注意力
+        if (!app.isSkill() && !"static".equals(app.projectKind()) && enterpriseConnectors != null) {
             String connGuide = enterpriseConnectors.promptGuideForAgent(app.workspaceId(), app.isService(), cloudOn);
             if (!connGuide.isBlank()) instruction = instruction + connGuide;
         }
@@ -629,7 +630,7 @@ public class TaskExecutor {
                 events.emit(ctx.id(), "tool", Map.of("id", "fn-logs", "name", "read", "summary", "读取云函数报错日志", "state", "end", "ok", true));
             }
         }
-        if (app.isTemplateLike() || app.isService() || app.isScript()) {
+        if (app.isTemplateLike() || app.isService() || app.isScript() || "static".equals(app.projectKind())) {
             Set<String> taken = new HashSet<>();
             for (com.tcl.csot.zhiye.service.skillhub.SkillRefs.Placed s : skills) taken.add(s.name());
             // 按项目形态过滤不相关的内置技能，让编码智能体只看到高相关精品技能
@@ -637,6 +638,11 @@ public class TaskExecutor {
                 taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app", "cloud-functions",
                         "app-ai", "data-sources", "forms-and-tables", "enterprise-ui-craft",
                         "vue-springboot-enterprise", "zhiye-deploy-preflight"));
+            } else if ("static".equals(app.projectKind())) {
+                // 纯静态 HTML 页面：保留 enterprise-ui-craft（视觉排版规范）与 excel-csv-to-dashboard，屏蔽 React/Vue/后端/云函数技能
+                taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app", "cloud-functions",
+                        "app-ai", "data-sources", "forms-and-tables", "vue-springboot-enterprise",
+                        "python-js-automation-scripts", "zhiye-deploy-preflight"));
             } else if (app.isVue()) {
                 taken.addAll(List.of("charts-dashboard", "multi-page-app", "fullstack-app",
                         "vue-springboot-enterprise", "python-js-automation-scripts"));
@@ -661,7 +667,23 @@ public class TaskExecutor {
         List<String> fixes = new ArrayList<>();
         for (int round = 0; ; round++) {
             phase(ctx, "VERIFYING", "正在校验：类型检查、构建、冒烟测试", 70);
-            JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, verify(ctx, app, round)));
+            JsonNode baseVerify;
+            if (round == 0 && canReuseAgentVerify(ctx, app)) {
+                ObjectNode reused = Json.obj().put("ok", true);
+                ArrayNode checks;
+                if (ctx.freshVerifyChecks != null && ctx.freshVerifyChecks.isArray()) {
+                    checks = (ArrayNode) ctx.freshVerifyChecks.deepCopy();
+                } else {
+                    checks = Json.M.createArrayNode();
+                    checks.addObject().put("name", "工程自检").put("ok", true).put("detail", "");
+                }
+                reused.set("checks", checks);
+                events.emit(ctx.id(), "verify", Map.of("checks", checks));
+                baseVerify = reused;
+            } else {
+                baseVerify = verify(ctx, app, round);
+            }
+            JsonNode v = withFunctionCheck(ctx, withSchemaCheck(ctx, baseVerify));
             if (v.path("ok").asBoolean(false)) { passed = v; break; }
             if (round >= fixRounds)
                 throw new TaskContext.Fail("VERIFY_FAILED", "校验未通过（已修复 " + fixRounds + " 轮）：" + failedSummary(v));
@@ -670,13 +692,18 @@ public class TaskExecutor {
             if (fixSummary != null && !fixSummary.isBlank()) fixes.add(fixSummary.trim());
         }
 
-        // Harness V2：刷新项目架构摘要 .zhiye/architecture.md，并执行独立对抗式 QA 验收环
+        // Harness V2：刷新项目架构摘要 .zhiye/architecture.md；独立对抗式 QA 仅在首次生成复杂应用时运行，日常增量修改与纯静态 HTML 不拖慢节奏
         try {
             call(ctx, "arch_summary", Json.obj().put("projectKind", app.projectKind()));
         } catch (Exception ignored) {}
 
         JsonNode qaVerdict = null;
-        if (props.task().qaGateEnabled() && !app.isSkill() && !app.isScript()) {
+        boolean runQaGate = props.task().qaGateEnabled()
+                && !modify
+                && !app.isSkill()
+                && !app.isScript()
+                && !"static".equals(app.projectKind());
+        if (runQaGate) {
             int maxQa = Math.max(1, props.task().qaMaxRounds());
             String reqText = modify ? input.path("content").asText("") : app.prompt();
             for (int qaRound = 1; qaRound <= maxQa; qaRound++) {
@@ -1539,6 +1566,17 @@ public class TaskExecutor {
         return new TaskContext.Fail("MODEL_ERROR", "模型服务暂不可用，请稍后重试" + (detail == null || detail.isBlank() ? "" : "（" + truncate(detail, 200) + "）"));
     }
 
+    /** 编码代理刚通过 verify_app 且之后未再改文件、且所需构建产物已就绪时，直接复用校验结果免去重复构建。 */
+    private boolean canReuseAgentVerify(TaskContext ctx, AppRow app) {
+        if (!ctx.freshVerifyOk || faults.buildError()) return false;
+        if (app.noPreview() || app.isService()) return true;
+        Path dist = ctx.workspace == null ? null : ctx.workspace.resolve(".zhiye");
+        if (dist == null) return false;
+        boolean previewReady = Files.isRegularFile(dist.resolve("dist-preview/index.html"));
+        boolean publishReady = Files.isRegularFile(dist.resolve("dist-publish/index.html"));
+        return previewReady && publishReady;
+    }
+
     private JsonNode verify(TaskContext ctx, String projectKind) throws Exception {
         return verify(ctx, null, -1, projectKind);
     }
@@ -1569,7 +1607,7 @@ public class TaskExecutor {
         }
         ArrayNode checks = v.path("checks").isArray() ? (ArrayNode) v.get("checks") : Json.M.createArrayNode();
         String shot = extractAndStripScreenshot(checks);
-        if (round == 0 && shot != null && app != null && (app.isTemplateLike() || app.isService()) && visualCritique != null && v.path("ok").asBoolean(false)) {
+        if (round == 0 && shot != null && app != null && (app.isTemplateLike() || app.isService() || "static".equals(app.projectKind())) && visualCritique != null && v.path("ok").asBoolean(false)) {
             Optional<String> issue = visualCritique.review(ctx.id(), app, shot);
             if (issue.isPresent()) {
                 if (v.isObject()) ((ObjectNode) v).put("ok", false);
@@ -1871,11 +1909,22 @@ public class TaskExecutor {
             }
             case "tool" -> {
                 flushText(ctx, true);
+                String toolName = ev.path("name").asText();
+                String toolState = ev.path("state").asText();
+                if ("verify_app".equals(toolName) && "end".equals(toolState)) {
+                    boolean ok = ev.path("ok").asBoolean(false) && ev.path("detail").path("ok").asBoolean(false);
+                    ctx.freshVerifyOk = ok;
+                    ctx.freshVerifyChecks = ok && ev.path("detail").has("checks") ? ev.path("detail").get("checks") : null;
+                } else if ("write".equals(toolName) || "edit".equals(toolName) || "bash".equals(toolName)
+                        || "install_package".equals(toolName) || "enable_cloud".equals(toolName)) {
+                    ctx.freshVerifyOk = false;
+                    ctx.freshVerifyChecks = null;
+                }
                 ObjectNode p = Json.obj();
                 p.put("id", ev.path("id").asText());
-                p.put("name", ev.path("name").asText());
+                p.put("name", toolName);
                 p.put("summary", ev.path("summary").asText());
-                p.put("state", ev.path("state").asText());
+                p.put("state", toolState);
                 if (ev.has("ok")) p.set("ok", ev.get("ok"));
                 if (ev.hasNonNull("detail")) capDetail(p, ev.get("detail"));
                 events.emit(ctx.id(), "tool", p);

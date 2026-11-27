@@ -767,7 +767,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               <SkillStart app={app} onStarted={onTaskStarted} />
             ) : phase === 'plan' ? (
               <div ref={planCardRef}>
-                <PlanCard app={app} onStarted={onTaskStarted} updatedTick={planUpdatedTick} />
+                <PlanCard
+                  app={app}
+                  onStarted={onTaskStarted}
+                  updatedTick={planUpdatedTick}
+                  userInteracting={draft.trim().length > 0 || sending || Boolean(asking)}
+                />
               </div>
             ) : (
               <>

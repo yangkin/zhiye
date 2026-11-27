@@ -248,7 +248,8 @@ export class Agent {
         let detail = null, counts = ''
         try { ({ detail, counts } = stepDetail(this.cwd, e.toolName, ts.args, ts.snap, e.result, e.isError)) } catch (err) { log('step detail failed', err) }
         const summary = toolSummary(this.cwd, e.toolName, ts.args, { created: ts.snap ? !ts.snap.existed : undefined }) + counts
-        emitEvent({ type: 'tool', id: e.toolCallId, name: e.toolName, summary, state: 'end', ok: !e.isError, ...(detail ? { detail } : {}) })
+        const toolOk = !e.isError && (e.toolName !== 'verify_app' || detail?.ok === true)
+        emitEvent({ type: 'tool', id: e.toolCallId, name: e.toolName, summary, state: 'end', ok: toolOk, ...(detail ? { detail } : {}) })
         break
       }
       case 'auto_retry_start':

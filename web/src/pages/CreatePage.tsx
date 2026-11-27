@@ -64,8 +64,12 @@ useCreateForm.subscribe((s) => {
  * 创造页里 @ 技能 问「这是干嘛的」这类问题应当直接回答，而不是建一个应用。
  * 只要有明确的生产动词就按需求处理（更安全：用户可以随时停止）。
  */
-const BUILD_WORDS = /(帮我做|做一个|做个|做出来|实现|生成|搭建|创建|开发|写一个|写个|设计一|改一下|优化一下|部署|上线|重构|替换|加上|增加一个)/;
+const BUILD_WORDS = /(帮我做|做一个|做个|做出来|实现|生成|搭建|创建|开发|写一个|写个|设计一|改一下|改下|改成|改为|改个|改回|换成|换为|换个|调整|调大|调小|调宽|调高|修改|优化|美化|部署|上线|重构|替换|加上|加一个|加个|增加|新增|添加|补充|删掉|删除|去掉|移除|隐藏|居中|对齐|重排|排版|修复|修一下|还原)/;
 const QUESTION_WORDS = /(\?|？|吗|呢|怎么|如何|为什么|什么|干嘛|干吗|介绍|能不能|可不可以|区别|用处|用途|有哪些|支持|适合|是不是)/;
+/** 委婉提问式修改请求（如「能不能把标题调小一点？」「可以把按钮换成蓝色吗？」）应直接动手改，不要只动嘴不动手 */
+const POLITE_MODIFY_RE = /(能不能|可不可以|可以|能否|能|帮我|帮忙|请).{0,24}(改|换|调|加|增|删|去|移|修|补|美化|优化|居中|对齐|替换|隐藏|显示|做成|生成|写)/;
+/** 明确的纯咨询/排查根因类问题 */
+const PURE_INFO_QUESTION_RE = /(为什么|为啥|原理|怎么实现|是怎么|有什么区别|区别是什么|在哪|哪个文件|帮我查一下|先帮我查|先查一下|先看看为什么|分析一下原因)/;
 /** 闲聊打招呼、确认状态或纯粹表示放弃/取消：绝不误触发代码修改任务 */
 const CASUAL_OR_ABORT_RE =
   /^(在吗|在不在|你好|您好|哈喽|hello|hi|hey|谢谢|多谢|好的|好吧|知道了|明白|收到|没事|不用了|算了|先不做了|不用做了|不要做了|别做了|停了吧|取消吧|放弃吧|放弃(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧|了)?)[。！!？?～~]*$/i;
@@ -73,7 +77,7 @@ const CASUAL_OR_ABORT_RE =
 export function isIntentToBuild(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
-  if (/[?？]\s*$/.test(t)) return false;
+  if (/[?？]\s*$/.test(t) && !POLITE_MODIFY_RE.test(t)) return false;
   return BUILD_WORDS.test(t);
 }
 
@@ -81,6 +85,7 @@ export function isQuestion(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 160) return false;
   if (CASUAL_OR_ABORT_RE.test(t)) return true;
+  if (POLITE_MODIFY_RE.test(t) && !PURE_INFO_QUESTION_RE.test(t)) return false;
   // 以问号结尾通常是提问，即使句子里有「实现/生成」这类词（例如「顶栏是怎么实现的？」）；
   // 明确以「帮我/给我/请」开头的命令句仍按需求处理。
   if (/[?？]\s*$/.test(t) && !/^(帮我|给我|请|帮忙)/.test(t)) return true;
@@ -93,10 +98,14 @@ export type Route = 'ask' | 'modify' | 'model';
 export function quickRoute(text: string, hasElement = false): Route {
   const t = text.trim();
   const asked = /[?？]\s*$/.test(t) && !/^(帮我|给我|请|帮忙)/.test(t);
-  if (hasElement) return asked ? 'model' : 'modify';
-  if (asked || CASUAL_OR_ABORT_RE.test(t)) return 'ask';
-  if (t.length <= 80 && BUILD_WORDS.test(t) && !QUESTION_WORDS.test(t)) return 'modify';
-  if (t.length <= 80 && QUESTION_WORDS.test(t) && !BUILD_WORDS.test(t)) return 'ask';
+  const pureInfo = PURE_INFO_QUESTION_RE.test(t);
+  if (hasElement) return asked && pureInfo ? 'model' : 'modify';
+  if (CASUAL_OR_ABORT_RE.test(t)) return 'ask';
+  // 委婉修改请求（如「能不能把标题调小一点、图片居中？」）直接修改，不再只口头建议
+  if (POLITE_MODIFY_RE.test(t) && !pureInfo && t.length <= 300) return 'modify';
+  if (asked) return 'ask';
+  if (t.length <= 300 && BUILD_WORDS.test(t) && !pureInfo && !QUESTION_WORDS.test(t)) return 'modify';
+  if (t.length <= 120 && (pureInfo || QUESTION_WORDS.test(t)) && !BUILD_WORDS.test(t)) return 'ask';
   return 'model';
 }
 

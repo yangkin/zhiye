@@ -184,6 +184,11 @@ export function stepDetail(cwd, toolName, args = {}, snap, result, isError) {
       if (blocked) detail.blocked = true
       return { detail, counts: '' }
     }
+    case 'verify_app': {
+      const ok = !isError && result?.details?.ok === true
+      const checks = Array.isArray(result?.details?.checks) ? result.details.checks : []
+      return { detail: { kind: 'verify', ok, checks }, counts: '' }
+    }
     default:
       return { detail: null, counts: '' }
   }

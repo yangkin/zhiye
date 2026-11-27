@@ -31,6 +31,9 @@ class TaskContext {
     int manualVersionNumber;
     boolean ownsDirs = true;
     int turns;
+    /** 编码代理刚调过 verify_app 且通过、之后未再修改文件，服务端可直接复用该次校验结果避免重复构建 */
+    volatile boolean freshVerifyOk;
+    volatile com.fasterxml.jackson.databind.JsonNode freshVerifyChecks;
     final StringBuilder textBuf = new StringBuilder();
     /** 当前思考块：事件行号、已累计的文字、开始时间、上次写库时间 */
     int thinkingSeq;

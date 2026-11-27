@@ -23,7 +23,7 @@ const STYLE_DESC: Record<string, string> = {
   rose: '柔软细腻，保留生活的温度',
   cyber: '明亮碰撞，大胆表达自我',
 };
-const COUNTDOWN = 15;
+const COUNTDOWN = 8;
 
 /** 任务列表（- [ ]）渲染成勾选框符号：Markdown 清洗会去掉 input */
 const docView = (md: string) => md.replace(/^(\s*[-*+])\s+\[ \]\s+/gm, '$1 ☐ ').replace(/^(\s*[-*+])\s+\[[xX]\]\s+/gm, '$1 ☑ ');
@@ -33,16 +33,36 @@ const PHASED = /^##\s*分期计划/m;
 const UNSUPPORTED = /^##\s*做不到的部分/m;
 
 const shapeLabel = (kind?: string) =>
-  kind === 'script' ? '命令行脚本' : kind === 'static' ? '静态页面' : kind === 'skill' ? '技能包' : kind === 'vue' ? '网页应用 · Vue' : '网页应用';
+  kind === 'service'
+    ? '全栈服务（后端托管）'
+    : kind === 'static'
+      ? '纯静态 HTML'
+      : kind === 'script'
+        ? '命令行脚本'
+        : kind === 'skill'
+          ? '技能包'
+          : kind === 'vue'
+            ? '网页应用 · Vue'
+            : '网页应用';
+
+/** 刚生成完 15 秒内的计划默认开启短倒计时顺滑开工；重新打开旧计划时不自动触发 */
+function isFreshPlan(updatedAt?: string): boolean {
+  if (!updatedAt) return false;
+  const ts = Date.parse(updatedAt);
+  return Number.isFinite(ts) && Date.now() - ts >= -5000 && Date.now() - ts < 15_000;
+}
 
 export function PlanCard({
   app,
   onStarted,
   updatedTick = 0,
+  userInteracting = false,
 }: {
   app: AppDetail;
   onStarted: (t: Task) => void;
   updatedTick?: number;
+  /** 用户正在计划对话框输入或讨论，自动暂停倒计时避免打断 */
+  userInteracting?: boolean;
 }) {
   const qc = useQueryClient();
   const { data: meta } = useMeta();
@@ -50,15 +70,20 @@ export function PlanCard({
   const [tab, setTab] = useState<'plan' | 'style'>('plan');
   const [doc, setDoc] = useState(app.planDoc);
   const [editing, setEditing] = useState(false);
-  const [auto, setAuto] = useState(false);
+  const [auto, setAuto] = useState(() => isFreshPlan(app.updatedAt));
   const [count, setCount] = useState(COUNTDOWN);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState('');
   const [justUpdated, setJustUpdated] = useState(false);
 
   useEffect(() => {
+    if (userInteracting || editing) setAuto(false);
+  }, [userInteracting, editing]);
+
+  useEffect(() => {
     if (!updatedTick) return;
     setTab('plan');
+    setAuto(false);
     setJustUpdated(true);
     const id = setTimeout(() => setJustUpdated(false), 3200);
     return () => clearTimeout(id);
@@ -195,7 +220,16 @@ export function PlanCard({
             ['style', '设计风格'],
           ] as const
         ).map(([p, t], i) => (
-          <button key={p} className={tab === p ? 'active' : ''} role="tab" aria-selected={tab === p} onClick={() => setTab(p)}>
+          <button
+            key={p}
+            className={tab === p ? 'active' : ''}
+            role="tab"
+            aria-selected={tab === p}
+            onClick={() => {
+              setTab(p);
+              if (p === 'style') setAuto(false);
+            }}
+          >
             <small>{i + 1}</small>
             {t}
           </button>

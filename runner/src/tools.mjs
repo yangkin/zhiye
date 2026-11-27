@@ -218,7 +218,13 @@ export function createVerifyExtension({ cwd, projectKind, env = process.env, run
         const content = [{ type: 'text', text: `${header}\n\n${lines.join('\n\n')}` }]
         const vision = Array.isArray(ctx?.model?.input) ? ctx.model.input.includes('image') : true
         if (shot && vision && res.ok) content.push({ type: 'image', data: shot, mimeType: 'image/jpeg' })
-        return { content, details: { ok: !!res.ok } }
+        const compactChecks = (res.checks || []).map(({ name, ok, skipped, detail }) => ({
+          name,
+          ok: !!ok,
+          ...(skipped ? { skipped: true } : {}),
+          ...(detail ? { detail: String(detail).slice(0, 1000) } : {}),
+        }))
+        return { content, details: { ok: !!res.ok, checks: compactChecks } }
       },
     })
   }
