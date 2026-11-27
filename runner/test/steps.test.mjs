@@ -190,3 +190,73 @@ test('读取 agent 目录里的 SKILL.md 显示为「加载技能」，项目里
   assert.equal(toolSummary(ws, 'read', { path: '/tmp/agents/t1/skills/charts-dashboard/SKILL.md' }), '加载技能 · charts-dashboard')
   assert.equal(toolSummary(ws, 'read', { path: 'skills/demo/SKILL.md' }), '读取 skills/demo/SKILL.md')
 })
+
+test('computeToolOk 准确识别校验/测试/装包/截图的失败状态，stepDetail 生成可展开详情', async () => {
+  const { computeToolOk, selectToolsForSession } = await import('../src/agent.mjs')
+  const diagFail = stepDetail(ws, 'typecheck_diagnostics', {}, null, {
+    content: [{ type: 'text', text: `✗ 增量诊断发现 2 处错误：\n- ${ws}/src/App.tsx:10:3 [TS2322] type mismatch` }],
+    details: { ok: false, count: 2, durationMs: 312 },
+  }, false)
+  assert.equal(diagFail.detail.kind, 'tool_output')
+  assert.equal(diagFail.detail.ok, false)
+  assert.equal(diagFail.counts, ' · 2 处错误')
+  noAbs(diagFail.detail)
+  assert.equal(computeToolOk(false, diagFail.detail, { details: { ok: false } }), false)
+
+  const btFail = stepDetail(ws, 'browser_test', { steps: [{ action: 'click' }] }, null, {
+    content: [{ type: 'text', text: '✗ 浏览器交互 E2E 自测发现问题' }],
+    details: { ok: false, steps: 1 },
+  }, false)
+  assert.equal(btFail.detail.ok, false)
+  assert.equal(btFail.counts, ' · 发现问题')
+  assert.equal(computeToolOk(false, btFail.detail, { details: { ok: false } }), false)
+
+  const epOk = stepDetail(ws, 'test_endpoint', { requests: [{}, {}] }, null, {
+    content: [{ type: 'text', text: '全部接口实测通过（2/2）' }],
+    details: { ok: true, passed: 2, total: 2 },
+  }, false)
+  assert.equal(epOk.detail.ok, true)
+  assert.equal(epOk.counts, ' · 2/2 通过')
+  assert.equal(computeToolOk(false, epOk.detail, { details: { ok: true } }), true)
+
+  const pkgFail = stepDetail(ws, 'install_package', { packageName: 'evil' }, null, {
+    content: [{ type: 'text', text: '拒绝安装：不在白名单' }],
+    details: { ok: false },
+  }, false)
+  assert.equal(computeToolOk(false, pkgFail.detail, { details: { ok: false } }), false)
+
+  const vFail = stepDetail(ws, 'verify_app', {}, null, {
+    content: [{ type: 'text', text: '未通过' }],
+    details: { ok: false, checks: [{ name: '类型检查', ok: false, detail: `${ws}/src/a.ts error` }] },
+  }, false)
+  assert.equal(vFail.detail.kind, 'verify')
+  assert.equal(vFail.counts, ' · 0/1 通过')
+  noAbs(vFail.detail)
+
+  // selectToolsForSession 按技术栈和上下文精准裁剪工具
+  const agentEmpty = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'agent-empty-')))
+  const skillSel = selectToolsForSession({ projectKind: 'skill', agentDir: agentEmpty })
+  assert.ok(!skillSel.tools.includes('typecheck_diagnostics'))
+  assert.ok(!skillSel.tools.includes('code_symbols'))
+  assert.ok(!skillSel.tools.includes('mcp_list'))
+  assert.ok(!skillSel.tools.includes('inspect_source'))
+
+  const staticSel = selectToolsForSession({ projectKind: 'static', agentDir: agentEmpty })
+  assert.ok(staticSel.tools.includes('typecheck_diagnostics'))
+  assert.ok(!staticSel.tools.includes('code_symbols'))
+  assert.ok(!staticSel.tools.includes('mcp_list'))
+  assert.ok(!staticSel.tools.includes('inspect_source'))
+
+  const svcSel = selectToolsForSession({ projectKind: 'service', agentDir: agentEmpty })
+  assert.ok(svcSel.tools.includes('screenshot'))
+  assert.ok(svcSel.tools.includes('browser_test'))
+  assert.ok(svcSel.tools.includes('test_endpoint'))
+  assert.ok(!svcSel.tools.includes('mcp_list'))
+
+  writeFileSync(path.join(agentEmpty, 'mcp-servers.json'), JSON.stringify({ servers: [{ key: 'docs' }] }))
+  writeFileSync(path.join(agentEmpty, 'sources-inspect.json'), JSON.stringify({ sources: [{ key: 'erp' }] }))
+  const withCtx = selectToolsForSession({ projectKind: 'template', agentDir: agentEmpty })
+  assert.ok(withCtx.tools.includes('mcp_list'))
+  assert.ok(withCtx.tools.includes('mcp_call'))
+  assert.ok(withCtx.tools.includes('inspect_source'))
+})

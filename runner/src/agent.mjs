@@ -14,13 +14,55 @@ import { createConfirmExtension, createScreenshotExtension, createTodoExtension,
 import { createSearchExtension, createServiceInspectExtension, createVerifyExtension } from './tools.mjs'
 import { createBrowserTestExtension } from './browser-test.mjs'
 import { createEndpointTestExtension } from './endpoint-test.mjs'
-import { createCodeIntelExtension } from './code-intel.mjs'
+import { createCodeIntelExtension, hasSourceInspectSnapshot } from './code-intel.mjs'
 import { createPackageInstallExtension } from './package-installer.mjs'
-import { createMcpBridgeExtension } from './mcp-bridge.mjs'
+import { createMcpBridgeExtension, readMcpCatalog } from './mcp-bridge.mjs'
 import { createBoundedBashTool } from './safe-bash.mjs'
 
 export { toolSummary }
 import { emitEvent, log, RunnerError, classifyError } from './util.mjs'
+
+/**
+ * 根据项目形态与环境上下文动态裁剪暴露给会话的工具清单，避免给静态页/技能包/无数据源项目塞入无关工具。
+ */
+export function selectToolsForSession({ projectKind = 'template', agentDir = '' } = {}) {
+  const isSkill = projectKind === 'skill'
+  const isScript = projectKind === 'script'
+  const isStatic = projectKind === 'static'
+  const isService = projectKind === 'service'
+  const hasMcp = Boolean(agentDir) && readMcpCatalog(agentDir).length > 0
+  const hasSources = !isSkill && Boolean(agentDir) && hasSourceInspectSnapshot(agentDir)
+  const enableTypecheck = !isSkill
+  const enableSymbols = !isSkill && !isScript && !isStatic
+  const withBrowser = ['template', 'vue', 'static', 'vite', 'service'].includes(projectKind)
+  const withShot = ['template', 'vue', 'static', 'vite', 'service'].includes(projectKind)
+  const withPkg = ['template', 'vue', 'vite', 'service'].includes(projectKind)
+  const tools = [
+    'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files',
+    ...(enableTypecheck ? ['typecheck_diagnostics'] : []),
+    ...(enableSymbols ? ['code_symbols'] : []),
+    ...(hasSources ? ['inspect_source'] : []),
+    ...(hasMcp ? ['mcp_list', 'mcp_call'] : []),
+    'verify_app',
+    ...(isSkill ? [] : ['request_confirm']),
+    ...(withBrowser ? ['browser_test'] : []),
+    ...(withShot ? ['screenshot'] : []),
+    ...(withPkg ? ['install_package'] : []),
+    ...(isService ? ['test_endpoint', 'service_runtime_inspect'] : []),
+  ]
+  return {
+    tools,
+    flags: { isSkill, isScript, isStatic, isService, hasMcp, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg },
+  }
+}
+
+/** 统一判定工具调用是否成功：覆盖 isError 以及 detail.ok / result.details.ok 显式返回 false 的自检/测试工具。 */
+export function computeToolOk(isError, detail, result) {
+  if (isError) return false
+  if (detail && typeof detail.ok === 'boolean' && !detail.ok) return false
+  if (typeof result?.details?.ok === 'boolean' && !result.details.ok) return false
+  return true
+}
 
 const THINKING = { off: 'low', minimal: 'low', low: 'low', medium: 'high', high: 'high', xhigh: 'max', max: 'max' }
 
@@ -129,20 +171,30 @@ export class Agent {
       cacheWarming: 'off',
       quietStartup: true,
     })
-    const withShot = ['template', 'vue', 'static', 'vite'].includes(this.projectKind)
-    const isService = this.projectKind === 'service'
-    const withBrowser = withShot || isService
-    const withPkg = ['template', 'vue', 'vite', 'service'].includes(this.projectKind)
+    const { tools: activeTools, flags } = selectToolsForSession({ projectKind: this.projectKind, agentDir })
+    const { isService, hasMcp, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg } = flags
+    const needCodeIntel = enableTypecheck || enableSymbols || hasSources
     const extensionFactories = [
       { name: 'zhiye-guard', factory: createGuardExtension({ cwd, projectKind: this.projectKind, agentDir, log }) },
       { name: 'zhiye-todo', factory: createTodoExtension({ cwd, onTodo: (items) => this.onTodo(items) }) },
       { name: 'zhiye-confirm', factory: createConfirmExtension({ emit: emitEvent, waiters: this.confirmWaiters, projectKind: this.projectKind, onAccepted: () => '云服务用法：\n' + CLOUD_USAGE }) },
       { name: 'zhiye-search', factory: createSearchExtension({ cwd }) },
-      { name: 'zhiye-code-intel', factory: createCodeIntelExtension({ cwd, projectKind: this.projectKind, agentDir, env }) },
-      { name: 'zhiye-mcp', factory: createMcpBridgeExtension({ agentDir, env }) },
+      ...(needCodeIntel ? [{
+        name: 'zhiye-code-intel',
+        factory: createCodeIntelExtension({
+          cwd,
+          projectKind: this.projectKind,
+          agentDir,
+          env,
+          enableTypecheck,
+          enableSymbols,
+          enableInspectSource: hasSources,
+        }),
+      }] : []),
+      ...(hasMcp ? [{ name: 'zhiye-mcp', factory: createMcpBridgeExtension({ agentDir, env }) }] : []),
       { name: 'zhiye-verify', factory: createVerifyExtension({ cwd, projectKind: this.projectKind, env }) },
       ...(withBrowser ? [{ name: 'zhiye-browser-test', factory: createBrowserTestExtension({ cwd, projectKind: this.projectKind, env }) }] : []),
-      ...(withShot ? [{ name: 'zhiye-screenshot', factory: createScreenshotExtension({ cwd, projectKind: this.projectKind }) }] : []),
+      ...(withShot ? [{ name: 'zhiye-screenshot', factory: createScreenshotExtension({ cwd, projectKind: this.projectKind, env }) }] : []),
       ...(withPkg ? [{ name: 'zhiye-pkg-install', factory: createPackageInstallExtension({ cwd, projectKind: this.projectKind, env }) }] : []),
       ...(isService ? [
         { name: 'zhiye-endpoint-test', factory: createEndpointTestExtension({ cwd, projectKind: this.projectKind, env }) },
@@ -190,15 +242,7 @@ export class Agent {
       modelRuntime,
       resourceLoader,
       customTools: [createBoundedBashTool(cwd, { env })],
-      tools: [
-        'read', 'write', 'edit', 'bash', 'todo_write', 'find_files', 'grep_files',
-        'typecheck_diagnostics', 'code_symbols', 'inspect_source', 'mcp_list', 'mcp_call', 'verify_app',
-        ...(this.projectKind === 'skill' ? [] : ['request_confirm']),
-        ...(withBrowser ? ['browser_test'] : []),
-        ...(withShot ? ['screenshot'] : []),
-        ...(withPkg ? ['install_package'] : []),
-        ...(isService ? ['test_endpoint', 'service_runtime_inspect'] : []),
-      ],
+      tools: activeTools,
       sessionManager,
       settingsManager,
     })
@@ -248,7 +292,7 @@ export class Agent {
         let detail = null, counts = ''
         try { ({ detail, counts } = stepDetail(this.cwd, e.toolName, ts.args, ts.snap, e.result, e.isError)) } catch (err) { log('step detail failed', err) }
         const summary = toolSummary(this.cwd, e.toolName, ts.args, { created: ts.snap ? !ts.snap.existed : undefined }) + counts
-        const toolOk = !e.isError && (e.toolName !== 'verify_app' || detail?.ok === true)
+        const toolOk = computeToolOk(e.isError, detail, e.result)
         emitEvent({ type: 'tool', id: e.toolCallId, name: e.toolName, summary, state: 'end', ok: toolOk, ...(detail ? { detail } : {}) })
         break
       }

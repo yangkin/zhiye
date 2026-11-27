@@ -142,8 +142,16 @@ export async function runTypecheckDiagnostics(cwd, { projectKind = 'template', e
       const r = await run('python3', ['-m', 'py_compile', ...pyFiles], { cwd, env: buildEnv(env), timeoutMs: 15_000 })
       if (r.code !== 0) diagnostics.push({ file: pyFiles[0], line: 1, col: 1, severity: 'error', code: 'PY_SYNTAX', message: (r.out || 'Python 语法错误').trim().slice(0, 400) })
     }
+  } else if (projectKind === 'static') {
+    const files = walkCodeFiles(cwd)
+    const jsFiles = files.filter((f) => /\.(mjs|cjs|js)$/.test(f)).slice(0, 30)
+    for (const rel of jsFiles) {
+      const r = await run(process.execPath, ['--check', rel], { cwd, env: buildEnv(env), timeoutMs: 10_000 })
+      if (r.code !== 0) diagnostics.push({ file: rel, line: 1, col: 1, severity: 'error', code: 'JS_SYNTAX', message: (r.out || '语法错误').trim().slice(0, 400) })
+    }
+    notes.push(jsFiles.length ? `已检查 ${jsFiles.length} 个 JS 文件语法` : '静态 HTML 项目无独立 .js 文件需要语法检查')
   } else {
-    notes.push('静态 HTML 项目无编译期类型检查')
+    notes.push('当前项目形态无编译期类型检查')
   }
 
   const durationMs = Date.now() - t0
@@ -385,66 +393,92 @@ export function readSourceInspectSnapshot(agentDir, key = '') {
   }).join('\n\n')
 }
 
-export function createCodeIntelExtension({ cwd, projectKind, agentDir, env = process.env }) {
+export function hasSourceInspectSnapshot(agentDir) {
+  if (!agentDir) return false
+  const file = path.join(agentDir, 'sources-inspect.json')
+  if (!existsSync(file)) return false
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8'))
+    return Array.isArray(data?.sources) && data.sources.length > 0
+  } catch {
+    return false
+  }
+}
+
+export function createCodeIntelExtension({
+  cwd,
+  projectKind,
+  agentDir,
+  env = process.env,
+  enableTypecheck = true,
+  enableSymbols = true,
+  enableInspectSource = true,
+}) {
   return (pi) => {
-    pi.registerTool({
-      name: 'typecheck_diagnostics',
-      label: '增量类型诊断',
-      description: '秒级运行增量类型检查与语法诊断（比 verify_app 快 5 倍，不跑全量打包与浏览器），返回精准的 文件:行:列 错误清单。改完关键文件后优先用它快速排错。',
-      parameters: Type.Object({}),
-      async execute() {
-        const r = await runTypecheckDiagnostics(cwd, { projectKind, env })
-        return { content: [{ type: 'text', text: r.text }], details: { ok: r.ok, count: r.diagnostics.length, durationMs: r.durationMs } }
-      },
-    })
+    if (enableTypecheck) {
+      pi.registerTool({
+        name: 'typecheck_diagnostics',
+        label: '增量类型诊断',
+        description: '秒级运行增量类型检查与语法诊断（比 verify_app 快 5 倍，不跑全量打包与浏览器），返回精准的 文件:行:列 错误清单。改完关键文件后优先用它快速排错。',
+        parameters: Type.Object({}),
+        async execute() {
+          const r = await runTypecheckDiagnostics(cwd, { projectKind, env })
+          return { content: [{ type: 'text', text: r.text }], details: { ok: r.ok, count: r.diagnostics.length, durationMs: r.durationMs } }
+        },
+      })
+    }
 
-    pi.registerTool({
-      name: 'code_symbols',
-      label: '代码语义大纲',
-      description: '基于 AST 解析项目符号大纲（组件、函数、类型、API 路由、SQL 数据表）或精准查找某个符号的全仓跨文件引用位置，修改大型项目时避免漏改引用。',
-      parameters: Type.Object({
-        action: Type.Union([Type.Literal('outline'), Type.Literal('references')], { description: 'outline（查架构符号大纲）或 references（查符号全仓引用）' }),
-        dir: Type.Optional(Type.String({ description: '可选子目录，如 src 或 server' })),
-        symbol: Type.Optional(Type.String({ description: 'action=references 时必填：要追踪的符号名' })),
-      }),
-      async execute(_id, params) {
-        if (params?.action === 'references') {
-          const r = findSymbolReferences(cwd, params.symbol, { dir: params.dir || '' })
-          if (r.error) return { content: [{ type: 'text', text: r.error }], details: { ok: false } }
-          if (!r.matches.length) return { content: [{ type: 'text', text: `未找到符号「${params.symbol}」的引用。` }], details: { count: 0 } }
-          return {
-            content: [{ type: 'text', text: `符号「${params.symbol}」共找到 ${r.matches.length} 处引用${r.truncated ? '（已截断）' : ''}：\n${r.matches.join('\n')}` }],
-            details: { count: r.matches.length },
+    if (enableSymbols) {
+      pi.registerTool({
+        name: 'code_symbols',
+        label: '代码语义大纲',
+        description: '基于 AST 解析项目符号大纲（组件、函数、类型、API 路由、SQL 数据表）或精准查找某个符号的全仓跨文件引用位置，修改大型项目时避免漏改引用。',
+        parameters: Type.Object({
+          action: Type.Union([Type.Literal('outline'), Type.Literal('references')], { description: 'outline（查架构符号大纲）或 references（查符号全仓引用）' }),
+          dir: Type.Optional(Type.String({ description: '可选子目录，如 src 或 server' })),
+          symbol: Type.Optional(Type.String({ description: 'action=references 时必填：要追踪的符号名' })),
+        }),
+        async execute(_id, params) {
+          if (params?.action === 'references') {
+            const r = findSymbolReferences(cwd, params.symbol, { dir: params.dir || '' })
+            if (r.error) return { content: [{ type: 'text', text: r.error }], details: { ok: false } }
+            if (!r.matches.length) return { content: [{ type: 'text', text: `未找到符号「${params.symbol}」的引用。` }], details: { count: 0 } }
+            return {
+              content: [{ type: 'text', text: `符号「${params.symbol}」共找到 ${r.matches.length} 处引用${r.truncated ? '（已截断）' : ''}：\n${r.matches.join('\n')}` }],
+              details: { count: r.matches.length },
+            }
           }
-        }
-        const info = analyzeWorkspaceCode(cwd, { dir: params?.dir || '' })
-        const lines = []
-        if (info.routes.length) {
-          lines.push('### 后端 API 路由')
-          lines.push(...info.routes.slice(0, 40).map((r) => `- ${r.method} ${r.path} (${r.file}:${r.line})`))
-        }
-        if (info.tables.length) {
-          lines.push('### SQL 数据表')
-          lines.push(...info.tables.slice(0, 30).map((t) => `- ${t.name} (${t.file}:${t.line})`))
-        }
-        lines.push('### 导出符号与组件')
-        const syms = info.symbols.filter((s) => s.exported).slice(0, 60)
-        lines.push(...(syms.length ? syms.map((s) => `- ${s.name} [${s.kind}] — ${s.file}:${s.line}`) : ['（暂无导出符号）']))
-        return { content: [{ type: 'text', text: lines.join('\n') }], details: { symbols: syms.length, routes: info.routes.length, tables: info.tables.length } }
-      },
-    })
+          const info = analyzeWorkspaceCode(cwd, { dir: params?.dir || '' })
+          const lines = []
+          if (info.routes.length) {
+            lines.push('### 后端 API 路由')
+            lines.push(...info.routes.slice(0, 40).map((r) => `- ${r.method} ${r.path} (${r.file}:${r.line})`))
+          }
+          if (info.tables.length) {
+            lines.push('### SQL 数据表')
+            lines.push(...info.tables.slice(0, 30).map((t) => `- ${t.name} (${t.file}:${t.line})`))
+          }
+          lines.push('### 导出符号与组件')
+          const syms = info.symbols.filter((s) => s.exported).slice(0, 60)
+          lines.push(...(syms.length ? syms.map((s) => `- ${s.name} [${s.kind}] — ${s.file}:${s.line}`) : ['（暂无导出符号）']))
+          return { content: [{ type: 'text', text: lines.join('\n') }], details: { symbols: syms.length, routes: info.routes.length, tables: info.tables.length } }
+        },
+      })
+    }
 
-    pi.registerTool({
-      name: 'inspect_source',
-      label: '探测数据源结构',
-      description: '查看当前应用已绑定数据源的真实参数定义与服务端实测返回 JSON 结构，严禁凭空猜测外部接口字段名。',
-      parameters: Type.Object({
-        key: Type.Optional(Type.String({ description: '可选：指定数据源调用名（key）；留空查看全部已绑定数据源' })),
-      }),
-      async execute(_id, params) {
-        const text = readSourceInspectSnapshot(agentDir, params?.key || '')
-        return { content: [{ type: 'text', text }], details: {} }
-      },
-    })
+    if (enableInspectSource) {
+      pi.registerTool({
+        name: 'inspect_source',
+        label: '探测数据源结构',
+        description: '查看当前应用已绑定数据源的真实参数定义与服务端实测返回 JSON 结构，严禁凭空猜测外部接口字段名。',
+        parameters: Type.Object({
+          key: Type.Optional(Type.String({ description: '可选：指定数据源调用名（key）；留空查看全部已绑定数据源' })),
+        }),
+        async execute(_id, params) {
+          const text = readSourceInspectSnapshot(agentDir, params?.key || '')
+          return { content: [{ type: 'text', text }], details: {} }
+        },
+      })
+    }
   }
 }

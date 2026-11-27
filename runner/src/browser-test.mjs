@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url'
 import { Type } from 'typebox'
 import { startStaticServer } from './smoke.mjs'
 import { DEVICES, SHOT_DIR, formatWideLayoutIssue, wideLayoutCheckInPage } from './screenshot.mjs'
-import { buildEnv, viteBuild } from './verify.mjs'
+import { buildEnv, prepareServiceFrontend, viteBuild } from './verify.mjs'
 import { startTempServiceServer } from './endpoint-test.mjs'
 import { log } from './util.mjs'
 
@@ -67,10 +67,10 @@ export async function runBrowserTest(cwd, params = {}, { projectKind = 'template
   const useVite = projectKind === 'template' || projectKind === 'vue' || projectKind === 'vite'
   try {
     if (isService) {
-      // 若有前端构建产物则先保证 dist 存在
-      if (existsSync(path.join(cwd, 'package.json')) && existsSync(path.join(cwd, 'vite.config.ts')) && !existsSync(path.join(cwd, 'dist', 'index.html'))) {
-        const b = await viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: 'dist', minify: false })
-        if (!b.ok) return { ok: false, text: `全栈前端构建失败，无法执行浏览器自测：\n${String(b.detail).slice(0, 3000)}`, stepsResults: [], consoleErrors: [], failedRequests: [] }
+      // 自动识别根目录或 frontend/web/client 子目录并构建最新 dist（Java 项目自动同步到 static/）
+      const prep = await prepareServiceFrontend(cwd, env)
+      if (!prep.ok) {
+        return { ok: false, text: `全栈前端构建失败，无法执行浏览器自测：\n${String(prep.detail).slice(0, 3000)}`, stepsResults: [], consoleErrors: [], failedRequests: [] }
       }
       srv = await startTempServiceServer(cwd, env, { healthPath: params.healthPath || '/api/health' })
     } else {

@@ -186,8 +186,69 @@ export function stepDetail(cwd, toolName, args = {}, snap, result, isError) {
     }
     case 'verify_app': {
       const ok = !isError && result?.details?.ok === true
-      const checks = Array.isArray(result?.details?.checks) ? result.details.checks : []
-      return { detail: { kind: 'verify', ok, checks }, counts: '' }
+      const rawChecks = Array.isArray(result?.details?.checks) ? result.details.checks : []
+      const checks = rawChecks.map((c) => ({
+        name: String(c?.name ?? ''),
+        ok: Boolean(c?.ok),
+        ...(c?.skipped ? { skipped: true } : {}),
+        ...(c?.durationMs !== undefined ? { durationMs: Number(c.durationMs) } : {}),
+        ...(c?.detail ? { detail: sanitizeText(cwd, String(c.detail)).slice(0, 1200) } : {}),
+      }))
+      const ran = checks.filter((c) => !c.skipped)
+      const passed = ran.filter((c) => c.ok).length
+      const counts = ran.length ? ` · ${passed}/${ran.length} 通过` : ''
+      return { detail: { kind: 'verify', ok, checks }, counts }
+    }
+    case 'typecheck_diagnostics': {
+      const ok = !isError && result?.details?.ok !== false
+      const count = Number(result?.details?.count ?? 0)
+      const durationMs = Number(result?.details?.durationMs ?? 0)
+      const { text, truncated } = headText(sanitizeText(cwd, resultText(result)), 80, 6 * 1024)
+      return {
+        detail: {
+          kind: 'tool_output',
+          tool: toolName,
+          ok,
+          output: text,
+          ...(durationMs > 0 ? { durationMs } : {}),
+          ...(truncated ? { truncated: true } : {}),
+        },
+        counts: ok ? ' · 0 处错误' : count > 0 ? ` · ${count} 处错误` : ' · 发现错误',
+      }
+    }
+    case 'browser_test': {
+      const ok = !isError && result?.details?.ok !== false
+      const { text, truncated } = headText(sanitizeText(cwd, resultText(result)), 80, 6 * 1024)
+      return {
+        detail: { kind: 'tool_output', tool: toolName, ok, output: text, ...(truncated ? { truncated: true } : {}) },
+        counts: ok ? ' · 通过' : ' · 发现问题',
+      }
+    }
+    case 'test_endpoint': {
+      const ok = !isError && result?.details?.ok !== false
+      const passed = result?.details?.passed
+      const total = result?.details?.total
+      const { text, truncated } = headText(sanitizeText(cwd, resultText(result)), 80, 6 * 1024)
+      const counts = typeof passed === 'number' && typeof total === 'number' && total > 0
+        ? ` · ${passed}/${total} 通过`
+        : ok ? ' · 通过' : ' · 未通过'
+      return {
+        detail: { kind: 'tool_output', tool: toolName, ok, output: text, ...(truncated ? { truncated: true } : {}) },
+        counts,
+      }
+    }
+    case 'install_package':
+    case 'screenshot':
+    case 'mcp_list':
+    case 'mcp_call':
+    case 'inspect_source':
+    case 'service_runtime_inspect': {
+      const ok = !isError && result?.details?.ok !== false
+      const { text, truncated } = headText(sanitizeText(cwd, resultText(result)), 80, 5 * 1024)
+      return {
+        detail: text ? { kind: 'tool_output', tool: toolName, ok, output: text, ...(truncated ? { truncated: true } : {}) } : null,
+        counts: '',
+      }
     }
     default:
       return { detail: null, counts: '' }

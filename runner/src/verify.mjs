@@ -1,5 +1,5 @@
 // verify：类型检查、两套构建、冒烟测试、全栈起服探活。
-import { realpathSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, lstatSync, copyFileSync, readFileSync, writeFileSync, cpSync, promises as fsp } from 'node:fs'
+import { realpathSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, lstatSync, statSync, copyFileSync, readFileSync, writeFileSync, cpSync, promises as fsp } from 'node:fs'
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import net from 'node:net'
@@ -32,6 +32,96 @@ async function step(name, fn) {
   flushLogs()
   log(`verify ${name}: ${r.ok ? 'ok' : 'FAIL'}${r.skipped ? ' (skipped)' : ''} ${Date.now() - t}ms`)
   return { ...r, name, durationMs: Date.now() - t }
+}
+
+function hasMainGo(dir) {
+  if (!existsSync(dir)) return false
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.go') || name.endsWith('_test.go')) continue
+      const src = readFileSync(path.join(dir, name), 'utf8')
+      if (/^\s*package\s+main\b/m.test(src)) return true
+    }
+  } catch {}
+  return false
+}
+
+/** 识别 Go 项目编译入口：优先根目录 package main，其次 cmd/<server|api|app|*>/ 下的 package main。 */
+export function detectGoBuildTarget(goDir) {
+  if (hasMainGo(goDir)) return '.'
+  const cmdRoot = path.join(goDir, 'cmd')
+  if (existsSync(cmdRoot)) {
+    try {
+      const subs = readdirSync(cmdRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+      const preferred = ['server', 'api', 'app', 'web', ...subs.filter((s) => !['server', 'api', 'app', 'web'].includes(s)).sort()]
+      for (const s of [...new Set(preferred)]) {
+        if (subs.includes(s) && hasMainGo(path.join(cmdRoot, s))) return `./cmd/${s}`
+      }
+    } catch {}
+  }
+  return '.'
+}
+
+function newestMtimeMs(target, depth = 0) {
+  if (depth > 6 || !existsSync(target)) return 0
+  let st
+  try { st = statSync(target) } catch { return 0 }
+  if (st.isFile()) return st.mtimeMs
+  if (!st.isDirectory()) return 0
+  let max = st.mtimeMs
+  try {
+    for (const name of readdirSync(target)) {
+      if (name === 'node_modules' || name === 'dist' || name === '.git') continue
+      const t = newestMtimeMs(path.join(target, name), depth + 1)
+      if (t > max) max = t
+    }
+  } catch {}
+  return max
+}
+
+/**
+ * 为全栈 service 项目的浏览器自测 / 截图准备前端产物：
+ * 自动识别根目录或 frontend/web/client 子目录；若 dist 缺失或源码已更新则构建 dist，
+ * 并在 Java (Maven/Gradle) 仓库中同步拷贝到 src/main/resources/static。
+ */
+export async function prepareServiceFrontend(cwd, env = process.env) {
+  const layout = discoverWorkspaceLayout(cwd)
+  if (layout.frontendDir === null) return { ok: true, built: false, frontendDir: null }
+  const frontAbs = layout.frontendDir ? path.join(cwd, layout.frontendDir) : cwd
+  const hasVite = Boolean(viteBin(frontAbs)) && existsSync(path.join(frontAbs, 'node_modules'))
+  if (!hasVite) return { ok: true, built: false, frontendDir: layout.frontendDir }
+
+  const distIndex = path.join(frontAbs, 'dist', 'index.html')
+  let needBuild = !existsSync(distIndex)
+  if (!needBuild) {
+    try {
+      const distTime = statSync(distIndex).mtimeMs
+      const srcTime = Math.max(
+        newestMtimeMs(path.join(frontAbs, 'src')),
+        newestMtimeMs(path.join(frontAbs, 'index.html')),
+        newestMtimeMs(path.join(frontAbs, 'public')),
+      )
+      if (srcTime > distTime) needBuild = true
+    } catch {
+      needBuild = true
+    }
+  }
+  let built = false
+  if (needBuild) {
+    const b = await viteBuild(frontAbs, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: 'dist', minify: false })
+    if (!b.ok) return { ok: false, built: false, frontendDir: layout.frontendDir, detail: String(b.detail || '前端构建失败') }
+    built = true
+  }
+  if ((layout.backend?.runtime === 'java-maven' || layout.backend?.runtime === 'java-gradle') && existsSync(distIndex)) {
+    const javaDir = layout.backend.dir ? path.join(cwd, layout.backend.dir) : cwd
+    const staticTarget = path.join(javaDir, 'src', 'main', 'resources', 'static')
+    try {
+      rmSync(staticTarget, { recursive: true, force: true })
+      mkdirSync(staticTarget, { recursive: true })
+      cpSync(path.join(frontAbs, 'dist'), staticTarget, { recursive: true })
+    } catch {}
+  }
+  return { ok: true, built, frontendDir: layout.frontendDir }
 }
 
 export function buildEnv(env, extra = {}) {
@@ -647,10 +737,11 @@ async function verifyService(cwd, env) {
 
   if (goDir) {
     checks.push(await step('Go 编译构建', async () => {
-      const r = await run('go', ['build', '-o', 'app', '.'], { cwd: goDir, env: bEnv, timeoutMs: 120_000 })
+      const target = detectGoBuildTarget(goDir)
+      const r = await run('go', ['build', '-o', 'app', target], { cwd: goDir, env: bEnv, timeoutMs: 120_000 })
       if (r.timedOut) return { ok: false, detail: 'go build 超时' }
       if (r.code !== 0) return { ok: false, detail: String(r.out || `go build exit=${r.code}`).slice(-1200) }
-      return { ok: true, detail: 'go build 编译通过' }
+      return { ok: true, detail: `go build -o app ${target} 编译通过` }
     }))
     const prevOk = checks.every((c) => c.ok)
     checks.push(prevOk

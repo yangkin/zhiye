@@ -286,3 +286,45 @@ test('install_package detects preinstalled packages and restores node_modules sy
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('static typecheck_diagnostics checks JS syntax, FastAPI detects custom instance/factory, Go detects cmd/*/main.go', async () => {
+  const { detectFastApiTarget } = await import('../src/endpoint-test.mjs')
+  const { detectGoBuildTarget } = await import('../src/verify.mjs')
+
+  // 1. static JS syntax checking
+  const sdir = tmpDir('zhiye-static-diag-')
+  try {
+    writeFileSync(path.join(sdir, 'index.html'), '<h1>hi</h1><script src="app.js"></script>')
+    writeFileSync(path.join(sdir, 'app.js'), 'const x = 1;\nconsole.log(x);\n')
+    const okDiag = await runTypecheckDiagnostics(sdir, { projectKind: 'static' })
+    assert.equal(okDiag.ok, true, okDiag.text)
+    assert.match(okDiag.text, /已检查 1 个 JS 文件语法/)
+
+    writeFileSync(path.join(sdir, 'app.js'), 'function broken( {\n')
+    const badDiag = await runTypecheckDiagnostics(sdir, { projectKind: 'static' })
+    assert.equal(badDiag.ok, false)
+    assert.equal(badDiag.diagnostics[0].code, 'JS_SYNTAX')
+  } finally {
+    rmSync(sdir, { recursive: true, force: true })
+  }
+
+  // 2. FastAPI dynamic symbol & factory detection
+  assert.deepEqual(detectFastApiTarget('from fastapi import FastAPI\napplication = FastAPI()\n', 'main'), { target: 'main:application', factory: false })
+  assert.deepEqual(detectFastApiTarget('api: FastAPI = fastapi.FastAPI(title="x")\n', 'server'), { target: 'server:api', factory: false })
+  assert.deepEqual(detectFastApiTarget('def create_app():\n    return FastAPI()\n', 'app'), { target: 'app:create_app', factory: true })
+  assert.deepEqual(detectFastApiTarget('FastAPI()', 'main'), { target: 'main:app', factory: false })
+
+  // 3. Go cmd/*/main.go detection
+  const gdir = tmpDir('zhiye-go-target-')
+  try {
+    mkdirSync(path.join(gdir, 'cmd', 'server'), { recursive: true })
+    writeFileSync(path.join(gdir, 'go.mod'), 'module demo\n')
+    writeFileSync(path.join(gdir, 'cmd', 'server', 'main.go'), 'package main\nfunc main() {}\n')
+    assert.equal(detectGoBuildTarget(gdir), './cmd/server')
+
+    writeFileSync(path.join(gdir, 'main.go'), 'package main\nfunc main() {}\n')
+    assert.equal(detectGoBuildTarget(gdir), '.')
+  } finally {
+    rmSync(gdir, { recursive: true, force: true })
+  }
+})

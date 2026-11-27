@@ -666,7 +666,7 @@ public class TaskExecutor {
         JsonNode passed = null;
         List<String> fixes = new ArrayList<>();
         for (int round = 0; ; round++) {
-            phase(ctx, "VERIFYING", "正在校验：类型检查、构建、冒烟测试", 70);
+            phase(ctx, "VERIFYING", verifyPhaseLabel(app.projectKind()), 70);
             JsonNode baseVerify;
             if (round == 0 && canReuseAgentVerify(ctx, app)) {
                 ObjectNode reused = Json.obj().put("ok", true);
@@ -1986,6 +1986,17 @@ public class TaskExecutor {
             ctx.thinking.setLength(0);
             events.emit(ctx.id(), "thinking_end", Map.of("blockSeq", blockSeq, "durationMs", d));
         }
+    }
+
+    static String verifyPhaseLabel(String projectKind) {
+        if (projectKind == null) return "正在校验：类型检查、构建、冒烟测试";
+        return switch (projectKind) {
+            case "skill" -> "正在校验：技能规范、引用与安全检查";
+            case "script" -> "正在校验：脚本入口、README 与语法检查";
+            case "static" -> "正在校验：入口文件、语法与冒烟测试";
+            case "service" -> "正在校验：编译打包、服务启动与健康探活";
+            default -> "正在校验：类型检查、构建、冒烟测试";
+        };
     }
 
     private static ObjectNode thinkingPayload(String text, boolean done, Long durationMs) {

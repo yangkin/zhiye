@@ -9,6 +9,8 @@ import { Markdown, splitNext } from '../lib/markdown';
 const TOOL_ICON: Record<string, string> = {
   write: '✦', edit: '✎', read: '☰', bash: '>_', ls: '☰', grep: '⌕', find: '⌕',
   find_files: '⌕', grep_files: '⌕', verify_app: '✓', service_runtime_inspect: '◉',
+  typecheck_diagnostics: '⚡', browser_test: '▶', test_endpoint: '⇄', code_symbols: '◈',
+  inspect_source: '⛁', install_package: '⊞', mcp_list: '◇', mcp_call: '◇',
   skill: '◆', read_skill: '◆', source: '⛁', request_confirm: '☁', screenshot: '▣',
 };
 
@@ -91,17 +93,29 @@ function groupRows(items: TimelineItem[], tools: Map<string, ToolItem>): Row[] {
   return out;
 }
 
+const READ_TOOLS = new Set(['read', 'ls', 'grep', 'find', 'find_files', 'grep_files', 'code_symbols']);
+const CHECK_TOOLS = new Set(['typecheck_diagnostics', 'browser_test', 'test_endpoint', 'verify_app']);
+const PROBE_TOOLS = new Set(['inspect_source', 'service_runtime_inspect', 'mcp_list', 'mcp_call']);
+
 function groupLabel(list: ToolItem[]) {
   const files = list.filter((t) => t.name === 'write' || t.name === 'edit');
   const { created, edited, added, removed } = fileStats(files);
-  const reads = list.filter((t) => t.name === 'read' || t.name === 'ls' || t.name === 'grep' || t.name === 'find').length;
+  const readItems = list.filter((t) => READ_TOOLS.has(t.name));
+  const reads = readItems.length;
+  const pureFileReads = reads > 0 && readItems.every((t) => t.name === 'read');
   const cmds = list.filter((t) => t.name === 'bash').length;
-  const other = list.length - files.length - reads - cmds;
+  const checks = list.filter((t) => CHECK_TOOLS.has(t.name)).length;
+  const deps = list.filter((t) => t.name === 'install_package').length;
+  const probes = list.filter((t) => PROBE_TOOLS.has(t.name)).length;
+  const other = list.length - files.length - reads - cmds - checks - deps - probes;
   const parts = [
     created ? `创建 ${created} 个文件` : '',
     edited ? `编辑 ${edited} 个文件` : '',
-    reads ? `阅读 ${reads} 个文件` : '',
+    reads ? (pureFileReads ? `阅读 ${reads} 个文件` : `查阅 ${reads} 项代码`) : '',
     cmds ? `执行 ${cmds} 条命令` : '',
+    checks ? `校验 ${checks} 项` : '',
+    deps ? `安装 ${deps} 个依赖` : '',
+    probes ? `探测 ${probes} 项上下文` : '',
     other ? `${other} 个其他步骤` : '',
   ].filter(Boolean);
   return { text: parts.join('，'), added, removed, files: files.length };
@@ -485,6 +499,41 @@ function DetailView({ d }: { d: StepDetail | string | null }) {
           <code>{d.path}</code>
           {d.lines ? <small>{d.lines} 行</small> : null}
         </div>
+      );
+    case 'verify': {
+      const checks = Array.isArray(d.checks) ? d.checks : [];
+      if (!checks.length) return <p className="muted-note">{d.ok === false ? '自检未通过，无详细检查项。' : '自检已通过。'}</p>;
+      return (
+        <div className="tl-verify tl-verify-inline">
+          {checks.map((c, idx) => (
+            <div key={`${c.name}-${idx}`} className={`tl-step ${c.skipped ? 'skip' : c.ok ? 'ok' : 'bad'}`} title={c.detail}>
+              <span className={`tl-mark ${c.skipped ? 'skip' : c.ok ? 'ok' : 'bad'}`} aria-hidden="true">
+                {c.skipped ? '–' : c.ok ? '✓' : '×'}
+              </span>
+              <span className="tl-step-text">
+                {c.name}
+                {c.durationMs && c.durationMs >= 100 ? <small className="tl-dur"> ({(c.durationMs / 1000).toFixed(1)}s)</small> : null}
+              </span>
+              {c.skipped ? (
+                <small className="tl-check-detail">已跳过</small>
+              ) : c.detail ? (
+                <small className="tl-check-detail">{c.detail}</small>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case 'tool_output':
+      return (
+        <>
+          <div className="tl-detail-head">
+            <span className={`tl-out-badge ${d.ok === false ? 'bad' : 'ok'}`}>{d.ok === false ? '未通过' : '已通过'}</span>
+            {d.durationMs && d.durationMs >= 10 ? <small>{d.durationMs < 1000 ? `${d.durationMs}ms` : `${(d.durationMs / 1000).toFixed(1)}s`}</small> : null}
+          </div>
+          {d.output ? <pre className="tl-pre tl-output">{d.output}</pre> : <p className="muted-note">无输出详情。</p>}
+          {d.truncated ? <p className="muted-note">输出较长，只显示前一部分。</p> : null}
+        </>
       );
   }
 }

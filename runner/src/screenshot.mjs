@@ -5,7 +5,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { startStaticServer } from './smoke.mjs'
-import { buildEnv, viteBuild } from './verify.mjs'
+import { buildEnv, prepareServiceFrontend, viteBuild } from './verify.mjs'
 
 export const SHOT_DIR = '.zhiye/dist-shot'
 export const DEVICES = {
@@ -49,9 +49,18 @@ export function wideLayoutCheckInPage() {
     const cs = getComputedStyle(el)
     return b.width > 0 && b.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none'
   }
-  const aside = Array.from(document.querySelectorAll('aside')).find((el) => visible(el) && el.getBoundingClientRect().width >= 120 && el.getBoundingClientRect().width <= 420)
-  const hasTable = Array.from(document.querySelectorAll('table')).some((el) => visible(el))
-  if (!aside && !hasTable) return null
+  const aside = Array.from(document.querySelectorAll('aside, nav[class*="sidebar"], [class*="sidebar"]')).find((el) => {
+    if (!visible(el)) return false
+    const b = el.getBoundingClientRect()
+    return b.width >= 120 && b.width <= 420 && b.height >= window.innerHeight * 0.45
+  })
+  const hasWideBusinessTable = Array.from(document.querySelectorAll('table')).some((el) => {
+    if (!visible(el)) return false
+    const rows = Array.from(el.querySelectorAll('tr')).slice(0, 3)
+    const maxCols = rows.reduce((m, tr) => Math.max(m, tr.querySelectorAll('th, td').length), 0)
+    return maxCols >= 5
+  })
+  if (!aside && !hasWideBusinessTable) return null
 
   const all = Array.from(document.body.querySelectorAll('*')).filter((el) => !el.closest('[data-zhiye-editor-ui]') && visible(el))
   const isContentTag = (tag) =>
@@ -129,18 +138,30 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
   if (!chromePath || !existsSync(chromePath)) return { ok: false, text: '截图不可用：当前环境没有浏览器，请用类型检查和构建结果自查。' }
   let root = cwd
   let srv = null
+  const isService = projectKind === 'service'
   const useVite = projectKind === 'template' || projectKind === 'vue' || projectKind === 'vite'
-  if (useVite && existsSync(path.join(cwd, 'index.html'))) {
-    srv = await startViteDevServer(cwd)
-  }
-  if (!srv) {
-    if (useVite) {
-      const b = await viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: SHOT_DIR, minify: false })
-      if (!b.ok) return { ok: false, text: `构建失败，先修好再截图：\n${String(b.detail).slice(0, 3000)}` }
-      root = path.join(cwd, SHOT_DIR)
+  if (isService) {
+    const prep = await prepareServiceFrontend(cwd, env)
+    if (!prep.ok) return { ok: false, text: `全栈前端构建失败，先修好再截图：\n${String(prep.detail).slice(0, 3000)}` }
+    try {
+      const { startTempServiceServer } = await import('./endpoint-test.mjs')
+      srv = await startTempServiceServer(cwd, env, { healthPath: '/api/health' })
+    } catch (e) {
+      return { ok: false, text: `无法启动本地全栈服务进行截图：${e.message}` }
     }
-    if (!existsSync(path.join(root, 'index.html'))) return { ok: false, text: '没有 index.html，无法截图' }
-    srv = await startStaticServer(root)
+  } else {
+    if (useVite && existsSync(path.join(cwd, 'index.html'))) {
+      srv = await startViteDevServer(cwd)
+    }
+    if (!srv) {
+      if (useVite) {
+        const b = await viteBuild(cwd, buildEnv(env, { ZHIYE_LOC_PLUGIN: '' }), { outDir: SHOT_DIR, minify: false })
+        if (!b.ok) return { ok: false, text: `构建失败，先修好再截图：\n${String(b.detail).slice(0, 3000)}` }
+        root = path.join(cwd, SHOT_DIR)
+      }
+      if (!existsSync(path.join(root, 'index.html'))) return { ok: false, text: '没有 index.html，无法截图' }
+      srv = await startStaticServer(root)
+    }
   }
   const dev = DEVICES[device] || DEVICES.desktop
   const { chromium } = await import('playwright-core')
@@ -164,7 +185,9 @@ export async function takeScreenshot(cwd, { projectKind = 'template', route = ''
     page.on('pageerror', (e) => errors.push(`页面脚本错误：${e.message}`))
     page.on('console', (m) => { if (m.type() === 'error' && !/ERR_BLOCKED_BY_CLIENT|favicon/.test(m.text())) errors.push(`控制台错误：${m.text()}`) })
     const r = String(route || '').trim()
-    const target = r.startsWith('#') ? `${origin}/index.html${r}` : r.startsWith('/') && projectKind === 'static' ? origin + r : `${origin}/index.html`
+    const target = isService
+      ? (r.startsWith('#') ? `${origin}/${r}` : r.startsWith('/') ? origin + r : `${origin}/`)
+      : (r.startsWith('#') ? `${origin}/index.html${r}` : r.startsWith('/') && projectKind === 'static' ? origin + r : `${origin}/index.html`)
     await page.goto(target, { waitUntil: 'load', timeout: 30000 }).catch((e) => errors.push(`页面打开失败：${String(e.message).split('\n')[0]}`))
     await page.waitForTimeout(1200)
     const info = await page.evaluate(() => {

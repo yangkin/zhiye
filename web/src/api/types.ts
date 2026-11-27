@@ -270,7 +270,9 @@ export type StepDetail =
   | { kind: 'write'; path: string; created?: boolean; lines?: number; preview?: string; truncated?: boolean; error?: string }
   | { kind: 'edit'; path: string; added?: number; removed?: number; diff?: string; truncated?: boolean; error?: string }
   | { kind: 'read'; path: string; lines?: number; error?: string }
-  | { kind: 'bash'; command: string; exitCode?: number | null; output?: string; truncated?: boolean; blocked?: boolean };
+  | { kind: 'bash'; command: string; exitCode?: number | null; output?: string; truncated?: boolean; blocked?: boolean }
+  | { kind: 'verify'; ok?: boolean; checks?: (VerifyCheck & { durationMs?: number })[] }
+  | { kind: 'tool_output'; tool?: string; ok?: boolean; output?: string; durationMs?: number; truncated?: boolean };
 
 /** GET /api/apps/{id}/versions/{vid}/changes */
 export interface FileChange {

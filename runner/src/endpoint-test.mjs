@@ -49,6 +49,16 @@ function findBuiltJavaJar(dir) {
   return null
 }
 
+/** 从 Python 源码中识别 FastAPI 实例变量名（如 app / application）或工厂函数（如 create_app）。 */
+export function detectFastApiTarget(src, mod) {
+  const s = String(src || '')
+  const assign = /(?:^|\n)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=\n]+)?=\s*(?:fastapi\.)?FastAPI\s*\(/.exec(s)
+  if (assign) return { target: `${mod}:${assign[1]}`, factory: false }
+  const factory = /(?:^|\n)\s*def\s+(create_app|make_app|get_app)\s*\(/.exec(s)
+  if (factory) return { target: `${mod}:${factory[1]}`, factory: true }
+  return { target: `${mod}:app`, factory: false }
+}
+
 function detectLaunchSpec(cwd) {
   // 0. 项目自声明工作流（zhiye.yaml -> start.command）拥有最高优先级，不写死任何框架或入口
   const wf = loadProjectWorkflow(cwd)
@@ -117,7 +127,9 @@ function detectLaunchSpec(cwd) {
       const src = readFileSync(full, 'utf8')
       if (/FastAPI\s*\(/.test(src)) {
         const mod = py.replace(/\.py$/, '')
-        return { cmd: 'python3', args: ['-m', 'uvicorn', `${mod}:app`, '--host', '127.0.0.1', '--port', '__PORT__'], cwd: base, label: `uvicorn ${mod}:app` }
+        const fa = detectFastApiTarget(src, mod)
+        const uvArgs = ['-m', 'uvicorn', fa.target, ...(fa.factory ? ['--factory'] : []), '--host', '127.0.0.1', '--port', '__PORT__']
+        return { cmd: 'python3', args: uvArgs, cwd: base, label: `uvicorn ${fa.target}${fa.factory ? ' --factory' : ''}` }
       }
       return { cmd: 'python3', args: [py], cwd: base, label: `python3 ${py}` }
     }
@@ -196,6 +208,10 @@ export async function startTempServiceServer(cwd, env = process.env, { healthPat
   const layout = discoverWorkspaceLayout(cwd)
   const frontDist = layout.frontendDir ? path.join(cwd, layout.frontendDir, 'dist') : null
   const staticCandidate = (frontDist && existsSync(frontDist)) ? frontDist : existsSync(path.join(cwd, 'frontend', 'dist')) ? path.join(cwd, 'frontend', 'dist') : path.join(cwd, 'dist')
+  if (spec.cmd === 'java' && existsSync(path.join(staticCandidate, 'index.html'))) {
+    const fileUrl = `file:${staticCandidate.replace(/\\/g, '/')}/`
+    args.push(`--spring.web.resources.static-locations=${fileUrl},classpath:/static/`)
+  }
   const effectiveHealth = spec.healthPath || healthPath || '/api/health'
   const logs = []
   const pushLog = (prefix, chunk) => {
