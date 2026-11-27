@@ -449,6 +449,7 @@ function TrashList({ query, startDate, endDate }: { query: string; startDate: st
 /** 会话摘要里去掉文件正文和界面标记，文件只留名字 */
 const snippet = (text = '') =>
   text
+    .replace(/\n*【已选企业生态能力[^】]*】[\s\S]*$/g, '')
     .replace(/\[\[file:([^\]\n]+)\]\][\s\S]*?(\[\[\/file\]\]|$)/g, '〔文件 $1〕')
     .replace(/^\s*\[\[next\]\].*$/gm, '')
     .replace(/\[\[build(?::[^\]]*)?\]\]/g, '')

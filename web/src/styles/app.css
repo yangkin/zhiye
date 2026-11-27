@@ -2296,6 +2296,8 @@ fieldset.ze-edit-body:disabled{opacity:.6}
 .msg-skills{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
 .msg-skills .skill-chip{font-size:11px;padding:2px 7px;border-radius:6px;background:#efeafc;color:#5a3fbf;border:1px solid #d3c6f5}
 .msg-skills .skill-chip .icon{width:11px;height:11px}
+.msg-eco-chips .msg-eco-chip.is-mcp{background:#eef2ff;color:#4338ca;border-color:#c7d2fe}
+.msg-eco-chips .msg-eco-chip.is-feishu_bitable,.msg-eco-chips .msg-eco-chip.is-feishu_bot{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
 a.skill-chip{text-decoration:none}
 /* 消息里的图片素材：缩略图内联，点开大图 */
 .msg-asset-img{padding:0;border:1px solid #e3ddf5;border-radius:10px;overflow:hidden;cursor:zoom-in;background:#fff;display:block;line-height:0;max-width:220px}

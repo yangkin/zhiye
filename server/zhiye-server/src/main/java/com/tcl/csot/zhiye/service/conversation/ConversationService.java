@@ -219,8 +219,17 @@ public class ConversationService {
         return content == null ? "" : content.replaceFirst("^(\\s*\\[\\[build(?::[^\\]]*)?\\]\\]\\s*)+", "");
     }
 
+    private static final java.util.regex.Pattern ECO_BLOCK = java.util.regex.Pattern.compile("\\n*【已选企业生态能力[^】]*】[\\s\\S]*$");
+
+    /** 剥离前端自动附加的【已选企业生态能力】指令块，避免污染会话标题、应用简介与版本标题。 */
+    public static String stripEcosystemBlock(String text) {
+        if (text == null || text.isEmpty()) return "";
+        return ECO_BLOCK.matcher(text).replaceFirst("").trim();
+    }
+
     public static String title(String content) {
-        String t = content == null ? "" : content.replaceAll("\\s+", " ").trim();
+        String clean = stripEcosystemBlock(content);
+        String t = (clean.isEmpty() && content != null ? content : clean).replaceAll("\\s+", " ").trim();
         if (t.isEmpty()) return ConversationRepository.DEFAULT_TITLE;
         return cap(t, AUTO_TITLE_CHARS);
     }

@@ -76,4 +76,11 @@ class InferTypeTest {
                 msg("assistant", "好的，可以立即开始。"));
         assertThat(ConversationService.inferType(descriptiveBackendPage, "开发网站")).isEqualTo("开发网站");
     }
+
+    @Test
+    void stripEcosystemBlockKeepsTitlesClean() {
+        String raw = "什么是五星ai岛\n\n【已选企业生态能力（免密直连，对话/开发均可直接调用）】\n- 企业知识与工具 MCP「测试」（serverKey: `kb-17kf6m`）：对话与开发时均可直接调用 `mcp_call` 实时查询";
+        assertThat(ConversationService.stripEcosystemBlock(raw)).isEqualTo("什么是五星ai岛");
+        assertThat(ConversationService.title(raw)).isEqualTo("什么是五星ai岛");
+    }
 }

@@ -14,7 +14,7 @@ import { AssetChips, type ChatAsset } from '../components/AssetChips';
 import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
 import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { MAX_SKILLS, ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, useMySkills } from '../components/ComposerPopovers';
-import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
+import { EcosystemChips, EcosystemPickerModal, MessageEcosystemBadges, appendEcosystemContext, parseEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { styleFor } from '../components/Thumbnail';
 import { isQuestion, quickRoute } from '../pages/CreatePage';
 import { PlanCard } from './PlanCard';
@@ -825,6 +825,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   cloudEnabled={phase === 'ready' ? cloudEnabled : null}
                   onEnableCloud={phase === 'ready' ? onEnableCloud : undefined}
                   onRestoreVersion={onRestoreVersion}
+                  onRestoreEcosystems={setEcosystems}
                   steps={mergedTaskId && m.role === 'assistant' && m.taskId === mergedTaskId && (stream.timeline.length > 0 || stream.tools.length > 0) ? <Timeline stream={stream} finished summaryOnly /> : null}
                   next={idx === lastAssistant && !asking && !runningTaskId && (phase === 'ready' || phase === 'plan') ? (s) => void send(s) : undefined}
                 />
@@ -1439,6 +1440,7 @@ function UserBubble({
   canEdit,
   skills = [],
   assets = [],
+  onRestoreEcosystems,
 }: {
   content: string;
   elementContext?: ElementContext | null;
@@ -1449,9 +1451,11 @@ function UserBubble({
   canEdit: boolean;
   skills?: { id: string; name: string }[];
   assets?: ChatAsset[];
+  onRestoreEcosystems?: (items: EcosystemItem[]) => void;
 }) {
   const user = useMeta().data?.auth?.user ?? null;
   const name = user?.realName || '我';
+  const parsed = parseEcosystemContext(content);
   return (
     <div className="user-message msg-row" tabIndex={-1}>
       <span className="mini-avatar" aria-hidden="true">
@@ -1477,14 +1481,15 @@ function UserBubble({
               ))}
             </span>
           ) : null}
+          <MessageEcosystemBadges items={parsed.items} />
           <AssetChips assets={assets} />
-          {content}
+          {parsed.text}
           {files}
           {failed ? <small className="message-failed">未完成</small> : null}
         </div>
         <div className="msg-actions">
           <time dateTime={createdAt}>{msgTime(createdAt)}</time>
-          <button type="button" aria-label="复制消息" title="复制" onClick={() => void copyMessage(content)}>
+          <button type="button" aria-label="复制消息" title="复制" onClick={() => void copyMessage(parsed.text)}>
             <Icon name="copy" />
             复制
           </button>
@@ -1495,9 +1500,10 @@ function UserBubble({
               title="编辑后重新发送"
               onClick={() => {
                 const chat = useChat.getState();
-                chat.setDraft(content);
+                chat.setDraft(parsed.text);
                 chat.setElementContext(elementContext && elementContext.appId === chat.appId ? elementContext : null);
                 if (skills.length) chat.setSkills(skills.filter((k) => k.name !== '已删除的技能').slice(0, MAX_SKILLS));
+                if (parsed.items.length) onRestoreEcosystems?.(parsed.items);
                 chat.requestFocus();
               }}
             >
@@ -1523,6 +1529,7 @@ function MessageItem({
   cloudEnabled,
   onEnableCloud,
   onRestoreVersion,
+  onRestoreEcosystems,
   next,
   steps,
 }: {
@@ -1543,6 +1550,7 @@ function MessageItem({
   cloudEnabled?: boolean | null;
   onEnableCloud?: () => void;
   onRestoreVersion?: (version: Version) => void;
+  onRestoreEcosystems?: (items: EcosystemItem[]) => void;
 }) {
   const { body, next: nextItems } = splitNext(m.content);
   if (m.role === 'system' && (m.content.startsWith('织页的回复被用户取消') || m.content.startsWith('已停止，')))
@@ -1570,6 +1578,7 @@ function MessageItem({
           canEdit={canEdit}
           skills={(m.skillAppIds ?? []).map((sid) => ({ id: sid, name: skillNames.get(sid) ?? '已删除的技能' }))}
           assets={m.assets ?? []}
+          onRestoreEcosystems={onRestoreEcosystems}
         />
         {draftNote ? <p className="draft-note msg-draft-note">将先保存你的 {draftNote} 处手动修改，再进行 AI 修改</p> : null}
       </>

@@ -36,6 +36,58 @@ export function appendEcosystemContext(prompt: string, items: EcosystemItem[]): 
   return `${prompt.trim()}\n\n【已选企业生态能力（免密直连，对话/开发均可直接调用）】\n${lines.join('\n')}`;
 }
 
+const ECO_BLOCK_RE = /\n*【已选企业生态能力[^】]*】\n([\s\S]*)$/;
+
+/** 从用户消息里剥离系统自动附带的【已选企业生态能力】说明块，还原干净正文与结构化生态胶囊（兼容历史消息）。 */
+export function parseEcosystemContext(raw: string): { text: string; items: EcosystemItem[] } {
+  if (!raw) return { text: '', items: [] };
+  const m = ECO_BLOCK_RE.exec(raw);
+  if (!m) return { text: raw, items: [] };
+  const text = raw.slice(0, m.index).trimEnd();
+  const items: EcosystemItem[] = [];
+  for (const line of m[1].split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('-')) continue;
+    const mcpM = /MCP「([^」]+)」[（(]serverKey:\s*`?([^`)）]+)`?[）)]/.exec(trimmed);
+    if (mcpM) {
+      items.push({ id: mcpM[2].trim(), category: 'mcp', name: mcpM[1].trim() });
+      continue;
+    }
+    const bitableM = /飞书多维表格「([^」]+)」[（(]connectorId:\s*`?([^`)）]+)`?[）)]/.exec(trimmed);
+    if (bitableM) {
+      items.push({ id: bitableM[2].trim(), category: 'feishu_bitable', name: bitableM[1].trim() });
+      continue;
+    }
+    const botM = /飞书机器人「([^」]+)」[（(]connectorId:\s*`?([^`)）]+)`?[）)]/.exec(trimmed);
+    if (botM) {
+      items.push({ id: botM[2].trim(), category: 'feishu_bot', name: botM[1].trim() });
+    }
+  }
+  return { text, items };
+}
+
+/** 对话气泡内展示的精简只读生态胶囊（替代冗长的系统指令文本） */
+export function MessageEcosystemBadges({ items }: { items: EcosystemItem[] }) {
+  if (!items.length) return null;
+  return (
+    <span className="msg-skills msg-eco-chips" aria-label="已选企业生态">
+      {items.map((it) => {
+        const prefix = it.category === 'mcp' ? 'MCP' : it.category === 'feishu_bitable' ? '多维表格' : '飞书机器人';
+        return (
+          <span
+            key={`${it.category}:${it.id}`}
+            className={`skill-chip msg-eco-chip is-${it.category}`}
+            title={`${prefix} · ${it.name}（${it.id}）`}
+          >
+            <Icon name={it.category === 'feishu_bitable' ? 'database' : it.category === 'mcp' ? 'spark' : 'globe'} />
+            {prefix} · {it.name}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 export function EcosystemChips({
   items,
   onRemove,

@@ -784,7 +784,8 @@ public class TaskExecutor {
     }
 
     static String modifyTitle(String content) {
-        String c = content.trim().replaceAll("\\s+", " ");
+        String clean = com.tcl.csot.zhiye.service.conversation.ConversationService.stripEcosystemBlock(content);
+        String c = (clean.isEmpty() ? content : clean).trim().replaceAll("\\s+", " ");
         return c.length() > 24 ? c.substring(0, 24) + "…" : c;
     }
 

@@ -163,12 +163,17 @@ public class AppService {
 
     /** 从对话创建时 prompt 是「请根据以下…多轮对话…」的整理稿：名称和简介取首条用户消息，而不是这句固定开头 */
     static String userText(String prompt) {
-        if (!prompt.startsWith("请根据以下按时间顺序排列的多轮对话")) return prompt;
+        if (!prompt.startsWith("请根据以下按时间顺序排列的多轮对话")) {
+            String stripped = com.tcl.csot.zhiye.service.conversation.ConversationService.stripEcosystemBlock(prompt);
+            return stripped.isEmpty() ? prompt : stripped;
+        }
         int i = prompt.indexOf("user（用户）：");
         if (i < 0) return prompt;
         String rest = prompt.substring(i + "user（用户）：".length()).strip();
         int end = rest.indexOf("\n\nassistant（助手）：");
-        return end > 0 ? rest.substring(0, end).strip() : rest;
+        String first = end > 0 ? rest.substring(0, end).strip() : rest;
+        String stripped = com.tcl.csot.zhiye.service.conversation.ConversationService.stripEcosystemBlock(first);
+        return stripped.isEmpty() ? first : stripped;
     }
 
     static String placeholderName(String prompt) {

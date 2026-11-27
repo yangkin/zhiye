@@ -11,7 +11,7 @@ import { AssetChips } from '../components/AssetChips';
 import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
 import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, type SkillRef } from '../components/ComposerPopovers';
-import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
+import { EcosystemChips, EcosystemPickerModal, MessageEcosystemBadges, appendEcosystemContext, parseEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
@@ -371,7 +371,8 @@ export function ChatPage() {
       const wantsBuild = /\[\[build(?::[^\]]*)?\]\]/.test(answer) || (START_REQUEST.test(content) && STARTED_CLAIM.test(answer));
       setMessages((list) => list.map((m) => (m.id === assistantId ? { ...m, content: stripBuildMarker(answer), pending: false, builtApp: wantsBuild } : m)));
       // 后端在首个用户消息时自动命名；这里同步一下标题，避免停留在「新会话」
-      setTitle((t) => (t === '新会话' || t === '新对话' ? content.replace(/\s+/g, ' ').slice(0, 20) : t));
+      const cleanTitleText = parseEcosystemContext(content).text || content;
+      setTitle((t) => (t === '新会话' || t === '新对话' ? cleanTitleText.replace(/\s+/g, ' ').slice(0, 20) : t));
       void qc.invalidateQueries({ queryKey: filesKey(id) });
       // 这一轮写出了文件：和 meoo 一样在右侧直接打开最后一个
       const written = splitFiles(splitNext(stripBuildMarker(answer)).body).filter((p) => p.kind === 'file' && p.done);
@@ -482,7 +483,9 @@ export function ChatPage() {
             </div>
           ) : null}
           {messages.map((message, index) =>
-            message.role === 'user' ? (
+            message.role === 'user' ? (() => {
+              const parsed = parseEcosystemContext(message.content);
+              return (
               <article className="chat-msg user msg-row" key={message.id}>
                 <div className="chat-msg-meta">
                   <span className="chat-avatar user" aria-hidden="true">{userName.slice(0, 1)}</span>
@@ -490,13 +493,14 @@ export function ChatPage() {
                 </div>
                 <div className="chat-bubble">
                   {message.skillAppIds?.length ? <span className="chat-skill-note">使用 {message.skillAppIds.length} 个技能</span> : null}
+                  <MessageEcosystemBadges items={parsed.items} />
                   <AssetChips assets={message.assets ?? []} />
-                  {message.content}
+                  {parsed.text}
                 </div>
                 {message.pending ? null : (
                   <div className="msg-actions">
                     {message.createdAt ? <time dateTime={message.createdAt}>{msgTime(message.createdAt)}</time> : null}
-                    <button type="button" aria-label="复制消息" title="复制" onClick={() => void copyMessage(message.content)}>
+                    <button type="button" aria-label="复制消息" title="复制" onClick={() => void copyMessage(parsed.text)}>
                       <Icon name="copy" />
                       复制
                     </button>
@@ -506,7 +510,8 @@ export function ChatPage() {
                       title="放回输入框，改完再发送"
                       disabled={busy}
                       onClick={() => {
-                        setPrompt(message.content);
+                        setPrompt(parsed.text);
+                        if (parsed.items.length) setEcosystems(parsed.items);
                         requestAnimationFrame(() => textarea.current?.focus());
                       }}
                     >
@@ -516,7 +521,8 @@ export function ChatPage() {
                   </div>
                 )}
               </article>
-            ) : (
+              );
+            })() : (
               <article className="chat-msg assistant msg-row" key={message.id}>
                 <span className="chat-avatar"><img src="/brand.svg" alt="" /></span>
                 <div className="chat-body">
