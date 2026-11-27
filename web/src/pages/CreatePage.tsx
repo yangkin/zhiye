@@ -289,7 +289,7 @@ export function CreatePage() {
         skills: f.skills,
         sources: f.sources,
       };
-      f.set({ prompt: '', attachments: [], skills: [], sources: [], typeChosen: false });
+      f.set({ type: '开发网站', prompt: '', attachments: [], skills: [], sources: [], typeChosen: false });
       setEcosystems([]);
       composer.dismissPasteNotice();
       navigate('/chat/' + conv.id, { state });

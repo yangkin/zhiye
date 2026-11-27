@@ -16,8 +16,8 @@ const PAGE = 50;
 
 export const ACCESS_OPTIONS: { value: AccessLevel; label: string; hint: string }[] = [
   { value: 'public', label: '内网公开', hint: '公司内网打开链接就能用，不需要登录。适合看板、展示页、计算器' },
-  { value: 'login', label: '员工登录', hint: '先用公司账号登录，应用能知道是谁在用。适合申请、审批、个人数据' },
-  { value: 'members', label: '指定人员', hint: '登录后只有名单里的人能打开。适合敏感数据' },
+  { value: 'login', label: '员工登录', hint: '公司任意员工用统一账号登录后即可访问（无需开通织页创作平台权限）。适合申请、审批、个人数据' },
+  { value: 'members', label: '指定人员', hint: '仅名单里的员工登录后可打开（支持任意公司 SSO 工号，无需开通织页创作平台权限）。适合敏感数据' },
 ];
 
 const accessKey = (appId: string) => ['access', appId];
@@ -140,6 +140,7 @@ export function AccessForm({
         <label className="cc-field">
           <span>可以打开的人（公司登录名，一行一个或用逗号分隔）</span>
           <textarea rows={compact ? 2 : 3} value={members} onChange={(e) => setMembers(e.target.value)} placeholder="每行一个员工登录名或工号" />
+          <small className="cc-hint">支持填写未开通织页创作平台权限的公司员工工号；对方通过公司统一认证后仅可访问本应用，无法进入织页创作平台。</small>
         </label>
       ) : null}
       {mismatch && !compact ? (

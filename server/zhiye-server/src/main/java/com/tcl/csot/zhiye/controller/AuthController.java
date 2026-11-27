@@ -22,7 +22,7 @@ public class AuthController {
 
     public AuthController(AuthService auth) { this.auth = auth; }
 
-    public record CallbackBody(String accessToken, Long expiresIn) {}
+    public record CallbackBody(String accessToken, Long expiresIn, String redirect) {}
 
     /** 跳转到统一认证网关登录页 */
     @GetMapping("/sso/login")
@@ -31,11 +31,11 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(auth.loginUrl())).build();
     }
 
-    /** 前端 /access_token 页面拿到网关令牌后调用：校验令牌并建立织页会话 */
+    /** 前端 /access_token 页面拿到网关令牌后调用：校验令牌并建立织页会话（非平台白名单员工访问已发布应用时仅签发站点一次性授权码） */
     @PostMapping("/sso/callback")
     public Map<String, Object> callback(@RequestBody CallbackBody body, HttpServletRequest req, HttpServletResponse res) {
         requireSso();
-        return Map.of("user", auth.login(body.accessToken(), req, res).view());
+        return auth.callback(body.accessToken(), body.redirect(), req, res);
     }
 
     @PostMapping("/logout")

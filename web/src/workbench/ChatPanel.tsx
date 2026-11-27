@@ -5,7 +5,7 @@ import { api, errorMessage, newIdempotencyKey } from '../api/client';
 import { api as convApi } from '../api/conversation';
 import { qk, useMessages, useMeta } from '../api/queries';
 import type { TaskStreamState } from '../api/sse';
-import { isTerminal, type AppDetail, type ElementContext, type Message, type QueuedMessage, type Task, type Version } from '../api/types';
+import { isScriptApp, isServiceApp, isTerminal, type AppDetail, type ElementContext, type Message, type QueuedMessage, type Task, type Version } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText, fmtDate, fmtTime, shortDay } from '../lib/format';
 import { toast, useChat } from '../lib/store';
@@ -169,7 +169,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   const cloudQuery = useQuery({
     queryKey: ['cloud', app.id],
     queryFn: () => api.cloudStatus(app.id),
-    enabled: app.phase === 'ready' && !skill,
+    enabled: app.phase === 'ready' && !skill && !isServiceApp(app) && !isScriptApp(app),
   });
   const queued = queuedQuery.data ?? [];
   const cloudEnabled = skill ? null : (cloudQuery.data?.enabled ?? null);

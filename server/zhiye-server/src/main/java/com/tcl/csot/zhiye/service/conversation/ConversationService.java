@@ -453,7 +453,7 @@ public class ConversationService {
         return "assistant".equals(role) ? "assistant（助手）" : "user（用户）";
     }
 
-    private static final java.util.regex.Pattern BUILD_TYPE = java.util.regex.Pattern.compile("^\\s*\\[\\[build:\\s*([^\\]]+?)\\s*\\]\\]");
+    private static final java.util.regex.Pattern BUILD_TYPE = java.util.regex.Pattern.compile("\\[\\[build:\\s*([^\\]]+?)\\s*\\]\\]");
 
     /**
      * 类型优先听模型的：最近一条 [[build:类型]] 是模型按整段对话（含截图）判断的成品形态。
@@ -470,11 +470,18 @@ public class ConversationService {
             if ("user".equals(msg.role())) user.append(' ').append(msg.content());
             if ("assistant".equals(msg.role())) {
                 var m = BUILD_TYPE.matcher(msg.content());
-                if (m.find() && Catalog.TYPES.contains(m.group(1))) declared = m.group(1);
+                while (m.find()) {
+                    if (Catalog.TYPES.contains(m.group(1))) declared = m.group(1);
+                }
             }
         }
+        String userText = user.toString();
+        // 用户未主动选择「全栈应用」且需求本身是纯页面/不要后端时，不让模型误输出的 [[build:全栈应用]] 劫持成服务托管
+        if (Catalog.FULLSTACK_TYPE.equals(declared) && Catalog.isPureHtmlOrNoBackendIntent(userText)) {
+            declared = null;
+        }
         if (declared != null) return declared;
-        String inferred = inferTypeText(user.toString());
+        String inferred = inferTypeText(userText);
         if (inferred != null) return inferred;
         return requested == null || requested.isBlank() ? Catalog.DEFAULT_TYPE : requested;
     }
@@ -486,7 +493,7 @@ public class ConversationService {
             return "开发网站";
         }
         if (Catalog.shouldForceFullstack(raw)
-                || containsAny(text, "全栈应用", "全栈", "前后端一体", "前后端分离", "后端接口", "服务端接口", "自定义api", "自定义 api", "express 后端", "node 后端", "spring boot", "springboot", "java 后端", "java后端", "fastapi", "flask", "django"))
+                || containsAny(text, "全栈应用", "前后端一体", "前后端分离", "express 后端", "node 后端", "spring boot", "springboot", "java 后端", "java后端", "fastapi", "flask", "django"))
             return Catalog.FULLSTACK_TYPE;
         if (containsAny(text, "开发skill", "skill.md", "技能包", "技能应用", "做一个 skill", "生成 skill")) return Catalog.SKILL_TYPE;
         if (containsAny(text, "技术文档", "文档站", "文档网站", "开发文档", "使用文档", "api 文档", "api文档", "markdown 文档", "知识库"))

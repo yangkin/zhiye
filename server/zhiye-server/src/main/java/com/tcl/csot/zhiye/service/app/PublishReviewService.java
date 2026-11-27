@@ -47,6 +47,10 @@ public class PublishReviewService {
 
     @Autowired(required = false)
     private PlatformLogService platformLogs;
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.config.AuthProperties authProps;
+    @Autowired(required = false)
+    private com.tcl.csot.zhiye.service.admin.AdminAuthService adminAuth;
 
     public PublishReviewService(JdbcClient jdbc,
                                 AppRepository apps,
@@ -113,6 +117,7 @@ public class PublishReviewService {
                 order by created_at desc
                 limit 20
                 """).params(app.id(), ws).query((rs, i) -> mapRequest(rs)).list();
+        enrichAccessMembers(history);
 
         Map<String, Object> pending = history.stream().filter(r -> "pending".equals(r.get("status"))).findFirst().orElse(null);
         Map<String, Object> latest = history.isEmpty() ? null : history.get(0);
@@ -143,21 +148,17 @@ public class PublishReviewService {
                 .orElseThrow(() -> ApiException.notFound("版本"));
 
         // 静态/云应用前置校验构建产物与表权限，避免无效单流入管理员队列
-        String accessLevel = "public";
+        AccessService.Access acc = accessService.get(app.id());
+        String accessLevel = acc.level();
         if (!app.isService()) {
             if (versions.build(ver.buildId()).isEmpty()) {
                 throw ApiException.conflict("BUILD_MISSING", "当前版本缺少构建产物，无法提交发布申请");
             }
-            var acc = accessService.get(app.id());
-            accessLevel = acc.level();
             List<String> needLogin = acc.needsLogin() ? List.of() : accessService.tablesNeedingLogin(app.id());
             if (!needLogin.isEmpty()) {
                 throw ApiException.conflict("ACCESS_MISMATCH", "数据表 " + String.join("、", needLogin)
                         + " 的权限需要登录身份，请先在访问范围中改为「员工登录」后再提交发布审核");
             }
-        } else {
-            var acc = accessService.get(app.id());
-            accessLevel = acc.level();
         }
 
         // 防止同应用并发提交多条 pending 申请
@@ -192,6 +193,9 @@ public class PublishReviewService {
         formMap.put("contacts", contacts);
         formMap.put("expectedUntil", expectedUntil);
         formMap.put("techAndData", techAndData);
+        formMap.put("accessLevel", accessLevel);
+        formMap.put("accessMembers", acc.members());
+        formMap.put("accessAdmins", acc.admins());
 
         String id = Ids.newId("preq");
         String submitterId = user != null ? user.id() : null;
@@ -212,9 +216,16 @@ public class PublishReviewService {
         ).update();
 
         if (platformLogs != null) {
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("requestId", id);
+            meta.put("versionId", ver.id());
+            meta.put("department", department);
+            meta.put("contacts", contacts);
+            meta.put("accessLevel", accessLevel);
+            meta.put("accessMembers", acc.members());
             platformLogs.info("lifecycle", "PUBLISH_REVIEW_SUBMIT", ws, null, app.id(), null,
                     "提交发布审核申请（V" + ver.number() + " · " + appName + " · 部门：" + department + "）",
-                    null, Map.of("requestId", id, "versionId", ver.id(), "department", department, "contacts", contacts));
+                    null, meta);
         }
         return getById(id);
     }
@@ -284,6 +295,7 @@ public class PublishReviewService {
             m.put("ownerRealName", rs.getString("owner_real_name"));
             return m;
         }).list();
+        enrichAccessMembers(all);
 
         long pendingCount = all.stream().filter(x -> "pending".equals(x.get("status"))).count();
         long approvedCount = all.stream().filter(x -> "approved".equals(x.get("status"))).count();
@@ -300,7 +312,8 @@ public class PublishReviewService {
                     Objects.toString(x.get("contacts"), ""),
                     Objects.toString(x.get("submitterName"), ""),
                     Objects.toString(x.get("businessBg"), ""),
-                    Objects.toString(x.get("id"), "")
+                    Objects.toString(x.get("id"), ""),
+                    memberSearchText(x)
             ).toLowerCase(Locale.ROOT);
             return hay.contains(kw);
         }).toList();
@@ -325,26 +338,38 @@ public class PublishReviewService {
         String appId = String.valueOf(existing.get("appId"));
         String versionId = String.valueOf(existing.get("versionId"));
 
+        // 审批通过前固化当前实时访问权限快照，确保历史审批记录与实际生效权限一致
+        AccessService.Access liveAcc = accessService.get(appId);
         // 真正执行发布上线（支持静态/云应用与单体全栈服务）
         Map<String, Object> pubRes = appService.publishApproved(ws, appId, versionId);
         String siteUrl = Objects.toString(pubRes.get("siteUrl"), "");
         String cleanComment = comment == null ? "" : comment.trim();
         if (cleanComment.length() > 1000) cleanComment = cleanComment.substring(0, 1000);
 
+        String accessPatchJson = Json.write(Map.of(
+                "accessLevel", liveAcc.level(),
+                "accessMembers", liveAcc.members(),
+                "accessAdmins", liveAcc.admins()));
+
         jdbc.sql("""
                 update publish_request
                 set status = 'approved', reviewer_actor = ?, review_comment = ?, reviewed_at = now(),
-                    published_site_url = ?, updated_at = now()
+                    published_site_url = ?, access_level = ?,
+                    form_json = coalesce(form_json, '{}'::jsonb) || ?::jsonb,
+                    updated_at = now()
                 where id = ?
-                """).params(actor, cleanComment, siteUrl, reqId).update();
+                """).params(actor, cleanComment, siteUrl, liveAcc.level(), accessPatchJson, reqId).update();
 
-        audit(actor, "PUBLISH_APPROVE", "publish_request", reqId, Map.of(
-                "appId", appId,
-                "appName", Objects.toString(existing.get("appName"), ""),
-                "department", Objects.toString(existing.get("department"), ""),
-                "versionId", versionId,
-                "siteUrl", siteUrl,
-                "comment", cleanComment));
+        Map<String, Object> auditDetail = new LinkedHashMap<>();
+        auditDetail.put("appId", appId);
+        auditDetail.put("appName", Objects.toString(existing.get("appName"), ""));
+        auditDetail.put("department", Objects.toString(existing.get("department"), ""));
+        auditDetail.put("versionId", versionId);
+        auditDetail.put("siteUrl", siteUrl);
+        auditDetail.put("accessLevel", liveAcc.level());
+        auditDetail.put("accessMembers", liveAcc.members());
+        auditDetail.put("comment", cleanComment);
+        audit(actor, "PUBLISH_APPROVE", "publish_request", reqId, auditDetail);
 
         if (platformLogs != null) {
             platformLogs.info("lifecycle", "APP_PUBLISH", ws, null, appId, null,
@@ -400,9 +425,164 @@ public class PublishReviewService {
     }
 
     private Map<String, Object> getById(String id) {
-        return jdbc.sql("select * from publish_request where id = ?").param(id)
+        Map<String, Object> m = jdbc.sql("select * from publish_request where id = ?").param(id)
                 .query((rs, i) -> mapRequest(rs)).optional()
                 .orElseThrow(() -> ApiException.notFound("发布审核申请"));
+        enrichAccessMembers(List.of(m));
+        return m;
+    }
+
+    /**
+     * 为发布审核单补充「指定人员 / 管理员」完整名单与身份摘要：
+     * - 待审核单（pending）实时对齐 app_site_access，避免作者审批前增减人员导致审核页看到的不是最终生效名单；
+     * - 历史已处理单（approved / rejected / cancelled）优先保留 form_json 中的审批时快照，老数据缺失时兜底读实时配置；
+     * - 批量反查 app_user 与 platform_login_allowlist，无 N+1 查询，并标记非平台白名单的「仅应用访客」员工。
+     */
+    private void enrichAccessMembers(List<Map<String, Object>> items) {
+        if (items == null || items.isEmpty()) return;
+        Set<String> needLiveAppIds = new LinkedHashSet<>();
+        Set<String> allAppIds = new LinkedHashSet<>();
+        for (Map<String, Object> it : items) {
+            String appId = Objects.toString(it.get("appId"), "");
+            if (!appId.isBlank()) {
+                allAppIds.add(appId);
+                boolean pending = "pending".equals(it.get("status"));
+                boolean hasSnap = Boolean.TRUE.equals(it.get("_hasAccessSnapshot"));
+                if (pending || !hasSnap) needLiveAppIds.add(appId);
+            }
+        }
+        Map<String, AccessService.Access> liveAccessByApp = new HashMap<>();
+        if (!needLiveAppIds.isEmpty()) {
+            jdbc.sql("select app_id, level, members, admins from app_site_access where app_id in (:ids)")
+                    .param("ids", List.copyOf(needLiveAppIds))
+                    .query(rs -> {
+                        String aid = rs.getString("app_id");
+                        List<String> m = Json.read(rs.getString("members"), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+                        List<String> a = Json.read(rs.getString("admins"), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+                        liveAccessByApp.put(aid, new AccessService.Access(rs.getString("level"), m == null ? List.of() : m, a == null ? List.of() : a));
+                    });
+        }
+        Map<String, Map<String, Object>> authorByApp = new HashMap<>();
+        if (!allAppIds.isEmpty()) {
+            jdbc.sql("""
+                    select a.id as app_id, u.login_name, u.real_name
+                    from app a
+                    join workspace w on w.id = a.workspace_id
+                    join app_user u on u.id = w.owner_user_id
+                    where a.id in (:ids)
+                    """).param("ids", List.copyOf(allAppIds)).query(rs -> {
+                String login = rs.getString("login_name");
+                if (login != null && !login.isBlank()) {
+                    Map<String, Object> au = new LinkedHashMap<>();
+                    au.put("loginName", login);
+                    au.put("realName", rs.getString("real_name"));
+                    authorByApp.put(rs.getString("app_id"), au);
+                }
+            });
+        }
+
+        Set<String> allLowerLogins = new LinkedHashSet<>();
+        for (Map<String, Object> it : items) {
+            String appId = Objects.toString(it.get("appId"), "");
+            boolean pending = "pending".equals(it.get("status"));
+            boolean hasSnap = Boolean.TRUE.equals(it.get("_hasAccessSnapshot"));
+            List<String> members;
+            List<String> admins;
+            if (pending || !hasSnap) {
+                AccessService.Access live = liveAccessByApp.get(appId);
+                if (live != null) {
+                    if (pending) it.put("accessLevel", live.level());
+                    members = live.members();
+                    admins = live.admins();
+                } else {
+                    members = stringList(it.get("_snapshotMembers"));
+                    admins = stringList(it.get("_snapshotAdmins"));
+                }
+            } else {
+                members = stringList(it.get("_snapshotMembers"));
+                admins = stringList(it.get("_snapshotAdmins"));
+            }
+            it.put("accessMembers", members);
+            it.put("accessAdmins", admins);
+            it.put("accessAuthor", authorByApp.get(appId));
+            it.remove("_hasAccessSnapshot");
+            it.remove("_snapshotMembers");
+            it.remove("_snapshotAdmins");
+            for (String l : members) allLowerLogins.add(l.toLowerCase(Locale.ROOT));
+            for (String l : admins) allLowerLogins.add(l.toLowerCase(Locale.ROOT));
+        }
+
+        boolean allowlistActive = authProps != null && authProps.ssoEnabled() && authProps.loginAllowlistEnabled();
+        Map<String, String> realNameByLower = new HashMap<>();
+        Set<String> adminUserLowers = new HashSet<>();
+        Set<String> allowlistedLowers = new HashSet<>();
+        if (!allLowerLogins.isEmpty()) {
+            List<String> lowers = List.copyOf(allLowerLogins);
+            jdbc.sql("select lower(login_name) as k, real_name, role from app_user where lower(login_name) in (:logins)")
+                    .param("logins", lowers).query(rs -> {
+                String k = rs.getString("k");
+                String rn = rs.getString("real_name");
+                if (rn != null && !rn.isBlank()) realNameByLower.put(k, rn);
+                if ("admin".equals(rs.getString("role"))) adminUserLowers.add(k);
+            });
+            jdbc.sql("select lower(login_name) as k, real_name, enabled from platform_login_allowlist where lower(login_name) in (:logins)")
+                    .param("logins", lowers).query(rs -> {
+                String k = rs.getString("k");
+                String rn = rs.getString("real_name");
+                if (rn != null && !rn.isBlank()) realNameByLower.putIfAbsent(k, rn);
+                if (rs.getBoolean("enabled")) allowlistedLowers.add(k);
+            });
+        }
+
+        for (Map<String, Object> it : items) {
+            it.put("accessMemberDetails", buildMemberDetails(stringList(it.get("accessMembers")), realNameByLower, allowlistActive, allowlistedLowers, adminUserLowers));
+            it.put("accessAdminDetails", buildMemberDetails(stringList(it.get("accessAdmins")), realNameByLower, allowlistActive, allowlistedLowers, adminUserLowers));
+        }
+    }
+
+    private List<Map<String, Object>> buildMemberDetails(List<String> logins, Map<String, String> realNameByLower,
+                                                         boolean allowlistActive, Set<String> allowlistedLowers, Set<String> adminUserLowers) {
+        if (logins == null || logins.isEmpty()) return List.of();
+        List<Map<String, Object>> out = new ArrayList<>(logins.size());
+        for (String login : logins) {
+            String lower = login.toLowerCase(Locale.ROOT);
+            Map<String, Object> d = new LinkedHashMap<>();
+            d.put("loginName", login);
+            String rn = realNameByLower.get(lower);
+            d.put("realName", rn != null && !rn.isBlank() ? rn : null);
+            if (allowlistActive) {
+                boolean allowed = allowlistedLowers.contains(lower)
+                        || adminUserLowers.contains(lower)
+                        || (adminAuth != null && adminAuth.isAllowlistedLogin(login));
+                d.put("inPlatformAllowlist", allowed);
+            }
+            out.add(d);
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> stringList(Object obj) {
+        if (!(obj instanceof List<?> raw) || raw.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>(raw.size());
+        for (Object x : raw) {
+            if (x != null && !String.valueOf(x).isBlank()) out.add(String.valueOf(x));
+        }
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String memberSearchText(Map<String, Object> item) {
+        StringBuilder sb = new StringBuilder();
+        for (String m : stringList(item.get("accessMembers"))) sb.append(' ').append(m);
+        for (String a : stringList(item.get("accessAdmins"))) sb.append(' ').append(a);
+        Object details = item.get("accessMemberDetails");
+        if (details instanceof List<?> list) {
+            for (Object d : list) {
+                if (d instanceof Map<?, ?> dm && dm.get("realName") != null) sb.append(' ').append(dm.get("realName"));
+            }
+        }
+        return sb.toString();
     }
 
     private Map<String, Object> buildDefaults(AppRow app, Map<String, Object> latest, SsoUser user) {
@@ -492,7 +672,27 @@ public class PublishReviewService {
         m.put("publishedSiteUrl", rs.getString("published_site_url"));
         m.put("createdAt", Db.iso(Db.ts(rs, "created_at")));
         m.put("updatedAt", Db.iso(Db.ts(rs, "updated_at")));
+        String formJson = rs.getString("form_json");
+        if (formJson != null && !formJson.isBlank()) {
+            try {
+                JsonNode fj = Json.M.readTree(formJson);
+                if (fj != null && fj.has("accessMembers")) {
+                    m.put("_hasAccessSnapshot", true);
+                    m.put("_snapshotMembers", jsonStringList(fj.get("accessMembers")));
+                    m.put("_snapshotAdmins", jsonStringList(fj.get("accessAdmins")));
+                }
+            } catch (Exception ignored) { }
+        }
         return m;
+    }
+
+    private static List<String> jsonStringList(JsonNode arr) {
+        if (arr == null || !arr.isArray() || arr.isEmpty()) return List.of();
+        List<String> out = new ArrayList<>(arr.size());
+        for (JsonNode n : arr) {
+            if (n.isTextual() && !n.asText().isBlank()) out.add(n.asText());
+        }
+        return out;
     }
 
     private static String requireField(JsonNode form, String key, String label, int maxLen) {

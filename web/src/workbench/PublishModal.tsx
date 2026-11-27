@@ -8,6 +8,7 @@ import {
   isServiceApp,
   isSkillApp,
   type AppDetail,
+  type PublishAccessMember,
   type PublishRegistrationForm,
   type PublishRequestItem,
   type Task,
@@ -24,6 +25,77 @@ export function formatChineseDate(iso: string | null | undefined): string {
   const m = String(iso).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return iso;
   return `${m[1]} 年 ${Number(m[2])} 月 ${Number(m[3])} 日`;
+}
+
+/** 展示发布审核单的「指定访问人员 / 管理员」完整名单（管理员审批抽屉与申请人待审态共用） */
+export function PublishAccessSummaryCard({ item }: { item: PublishRequestItem }) {
+  const members: PublishAccessMember[] = item.accessMemberDetails?.length
+    ? item.accessMemberDetails
+    : (item.accessMembers ?? []).map((loginName) => ({ loginName }));
+  const admins: PublishAccessMember[] = item.accessAdminDetails?.length
+    ? item.accessAdminDetails
+    : (item.accessAdmins ?? []).map((loginName) => ({ loginName }));
+  const show = item.accessLevel === 'members' || members.length > 0 || admins.length > 0;
+  if (!show) return null;
+
+  return (
+    <div className="review-access-card" aria-label="指定访问人员名单">
+      <div className="review-access-head">
+        <span className="review-access-title">
+          <Icon name="lock" />
+          指定访问人员名单（共 {members.length} 人）
+        </span>
+        <span className="review-access-sub">
+          {item.accessAuthor
+            ? `创建者 ${item.accessAuthor.realName ? `${item.accessAuthor.realName}（${item.accessAuthor.loginName}）` : item.accessAuthor.loginName} 默认可访问`
+            : '应用创建者默认可访问'}
+        </span>
+      </div>
+      <div className="review-access-group">
+        {members.length ? (
+          <div className="review-access-chips">
+            {members.map((m) => (
+              <span key={m.loginName} className="review-access-chip">
+                {m.realName ? <b>{m.realName}</b> : null}
+                <code>{m.loginName}</code>
+                {m.inPlatformAllowlist === false ? (
+                  <span
+                    className="review-access-ext-tag"
+                    title="该员工未开通织页创作平台权限，通过公司统一认证后仅可访问此已发布应用"
+                  >
+                    仅应用访客
+                  </span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="review-access-empty">未填写指定访问人员名单</span>
+        )}
+      </div>
+      {admins.length ? (
+        <div className="review-access-group">
+          <span className="review-access-group-label">应用管理员（{admins.length} 人）</span>
+          <div className="review-access-chips">
+            {admins.map((a) => (
+              <span key={a.loginName} className="review-access-chip is-admin">
+                {a.realName ? <b>{a.realName}</b> : null}
+                <code>{a.loginName}</code>
+                {a.inPlatformAllowlist === false ? (
+                  <span
+                    className="review-access-ext-tag"
+                    title="该员工未开通织页创作平台权限，通过公司统一认证后仅可访问此已发布应用"
+                  >
+                    仅应用访客
+                  </span>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /** 只读渲染《Vibe Coding 应用登记表》（用于待审核展示与管理员审批详情） */
@@ -425,6 +497,7 @@ export function PublishModal({ app, hasLocalDraft, commitDraft, onTaskStarted, o
             {error}
           </p>
         ) : null}
+        <PublishAccessSummaryCard item={activePending} />
         <VibeRegistrationReadonlyTable item={activePending} />
       </Modal>
     );

@@ -124,6 +124,13 @@ export interface PublishRegistrationForm {
   techAndData: string;
 }
 
+export interface PublishAccessMember {
+  loginName: string;
+  realName?: string | null;
+  /** 仅在开启平台登录白名单时返回：false 表示该员工未开通织页创作平台权限，仅可通过公司 SSO 访问此已发布应用 */
+  inPlatformAllowlist?: boolean | null;
+}
+
 export interface PublishRequestItem extends PublishRegistrationForm {
   id: string;
   appId: string;
@@ -131,6 +138,11 @@ export interface PublishRequestItem extends PublishRegistrationForm {
   versionId: string;
   versionNumber: number;
   accessLevel: string;
+  accessMembers?: string[];
+  accessAdmins?: string[];
+  accessMemberDetails?: PublishAccessMember[];
+  accessAdminDetails?: PublishAccessMember[];
+  accessAuthor?: { loginName: string; realName?: string | null } | null;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   submitterId?: string | null;
   submitterName?: string | null;

@@ -8,7 +8,7 @@ import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
 import { DetailDrawer } from './DetailDrawer';
 import { DashEmptyBox, DashPanelHead } from './DashboardCharts';
-import { VibeRegistrationReadonlyTable, formatChineseDate } from '../workbench/PublishModal';
+import { PublishAccessSummaryCard, VibeRegistrationReadonlyTable, formatChineseDate } from '../workbench/PublishModal';
 
 const STATUS_META: Record<string, { label: string; tone: string }> = {
   pending: { label: '待审核', tone: 'warn' },
@@ -20,8 +20,25 @@ const STATUS_META: Record<string, { label: string; tone: string }> = {
 const ACCESS_LABELS: Record<string, string> = {
   public: '内网公开',
   login: '员工登录',
-  members: '指定成员',
+  members: '指定人员',
 };
+
+function formatMemberName(m: { loginName: string; realName?: string | null }) {
+  return m.realName ? `${m.realName}(${m.loginName})` : m.loginName;
+}
+
+function membersPreview(item: AdminPublishRequestItem): { summary: string; title: string } | null {
+  if (item.accessLevel !== 'members') return null;
+  const list = item.accessMemberDetails?.length
+    ? item.accessMemberDetails.map(formatMemberName)
+    : (item.accessMembers ?? []);
+  if (!list.length) return { summary: '未填写名单', title: '未填写指定访问人员名单' };
+  const head = list.slice(0, 3).join('、');
+  return {
+    summary: list.length > 3 ? `${head} 等 ${list.length} 人` : head,
+    title: `指定人员（${list.length} 人）：${list.join('、')}`,
+  };
+}
 
 export function AdminPublishReviewPanel({ onReviewed }: { onReviewed?: () => void }) {
   const qc = useQueryClient();
@@ -135,7 +152,7 @@ export function AdminPublishReviewPanel({ onReviewed }: { onReviewed?: () => voi
             type="search"
             className="review-search-input"
             aria-label="检索发布审核单"
-            placeholder="搜索应用名称 / 所属部门 / 联系人 / 单号…"
+            placeholder="搜索应用名称 / 所属部门 / 联系人 / 指定人员 / 单号…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -185,10 +202,24 @@ export function AdminPublishReviewPanel({ onReviewed }: { onReviewed?: () => voi
                       <td>{it.department}</td>
                       <td>{it.targetUsers}</td>
                       <td>
-                        <div className="review-app-cell">
-                          <span>{it.deployMode}</span>
-                          <small>{ACCESS_LABELS[it.accessLevel] ?? it.accessLevel}</small>
-                        </div>
+                        {(() => {
+                          const mp = membersPreview(it);
+                          const cnt = it.accessMemberDetails?.length ?? it.accessMembers?.length ?? 0;
+                          return (
+                            <div className="review-app-cell">
+                              <span>{it.deployMode}</span>
+                              <small>
+                                {ACCESS_LABELS[it.accessLevel] ?? it.accessLevel}
+                                {it.accessLevel === 'members' ? `（${cnt} 人）` : ''}
+                              </small>
+                              {mp ? (
+                                <span className="review-members-preview" title={mp.title}>
+                                  {mp.summary}
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td>
                         <div className="review-app-cell">
@@ -295,7 +326,12 @@ export function AdminPublishReviewPanel({ onReviewed }: { onReviewed?: () => voi
               </div>
               <div>
                 <span>上线访问权限</span>
-                <b>{ACCESS_LABELS[selected.accessLevel] ?? selected.accessLevel}</b>
+                <b>
+                  {ACCESS_LABELS[selected.accessLevel] ?? selected.accessLevel}
+                  {selected.accessLevel === 'members'
+                    ? `（${selected.accessMemberDetails?.length ?? selected.accessMembers?.length ?? 0} 人）`
+                    : ''}
+                </b>
               </div>
               <div className="review-drawer-links">
                 {selected.previewUrl ? (
@@ -316,6 +352,8 @@ export function AdminPublishReviewPanel({ onReviewed }: { onReviewed?: () => voi
                 </button>
               </div>
             </div>
+
+            <PublishAccessSummaryCard item={selected} />
 
             <VibeRegistrationReadonlyTable item={selected} />
 

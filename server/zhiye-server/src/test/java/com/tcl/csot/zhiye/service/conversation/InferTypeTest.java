@@ -59,5 +59,21 @@ class InferTypeTest {
                 msg("user", "帮我根据下面 Word 文档内容生成一个 HTML 展示页面：\n系统总体架构基于 Spring Boot 后端接口与 FastAPI 推理服务……"),
                 msg("assistant", "好的，我来整理成静态展示页。"));
         assertThat(ConversationService.inferType(wordToHtml, "开发网站")).isEqualTo("开发网站");
+
+        // 回归：助手在正文中间输出 [[build:开发网站]] 也能识别；模型误输出 [[build:全栈应用]] 时不得劫持纯页面请求
+        var midTag = List.of(
+                msg("user", "帮我写一个介绍我们后端接口规范与全栈架构的展示页面"),
+                msg("assistant", "好的，马上开始\n[[build:开发网站]]\n这是一个展示页面。"));
+        assertThat(ConversationService.inferType(midTag, "开发网站")).isEqualTo("开发网站");
+
+        var hallucinatedFullstack = List.of(
+                msg("user", "帮我写一个 HTML 页面展示个人周报，不需要后端"),
+                msg("assistant", "[[build:全栈应用]]\n好的，开始制作。"));
+        assertThat(ConversationService.inferType(hallucinatedFullstack, "开发网站")).isEqualTo("开发网站");
+
+        var descriptiveBackendPage = List.of(
+                msg("user", "帮我写一个页面，用来介绍部门后端接口规范与全栈研发流程"),
+                msg("assistant", "好的，可以立即开始。"));
+        assertThat(ConversationService.inferType(descriptiveBackendPage, "开发网站")).isEqualTo("开发网站");
     }
 }

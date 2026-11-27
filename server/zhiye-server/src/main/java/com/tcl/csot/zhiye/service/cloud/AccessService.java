@@ -93,17 +93,39 @@ public class AccessService {
                 .optional();
     }
 
+    private static boolean containsLoginIgnoreCase(List<String> list, String loginName) {
+        if (list == null || list.isEmpty() || loginName == null || loginName.isBlank()) return false;
+        for (String item : list) {
+            if (item != null && item.equalsIgnoreCase(loginName)) return true;
+        }
+        return false;
+    }
+
     public boolean isAdmin(String appId, SsoUser user) {
         if (user == null) return false;
-        if (author(appId).map(a -> a.id().equals(user.id())).orElse(false)) return true;
-        return get(appId).admins().contains(user.loginName());
+        if (author(appId).map(a -> a.id().equals(user.id())
+                || (a.loginName() != null && a.loginName().equalsIgnoreCase(user.loginName()))).orElse(false)) return true;
+        return containsLoginIgnoreCase(get(appId).admins(), user.loginName());
     }
 
     public boolean canVisit(String appId, Access access, SsoUser user) {
         if (!access.needsLogin()) return true;
         if (user == null) return false;
         if ("login".equals(access.level())) return true;
-        return access.members().contains(user.loginName()) || isAdmin(appId, user);
+        return containsLoginIgnoreCase(access.members(), user.loginName())
+                || containsLoginIgnoreCase(access.admins(), user.loginName())
+                || isAdmin(appId, user);
+    }
+
+    /** 仅凭 SSO 登录名判断是否允许访问该已发布应用（用于非平台白名单员工的站点免平台直连鉴权） */
+    public boolean canVisitLogin(String appId, Access access, String loginName) {
+        if (!access.needsLogin()) return true;
+        if (loginName == null || loginName.isBlank()) return false;
+        if ("login".equals(access.level())) return true;
+        if (containsLoginIgnoreCase(access.members(), loginName) || containsLoginIgnoreCase(access.admins(), loginName)) {
+            return true;
+        }
+        return author(appId).map(a -> a.loginName() != null && a.loginName().equalsIgnoreCase(loginName)).orElse(false);
     }
 
     public CloudPolicy.Who who(String appId, SsoUser user) {

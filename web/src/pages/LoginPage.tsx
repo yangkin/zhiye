@@ -72,14 +72,33 @@ export function LoginPage() {
             <h2>{forSite ? '验证员工身份' : '登录织页 AI'}</h2>
             <p className="login-sub">
               {forSite
-                ? '该发布应用需要员工登录，完成验证后将自动返回应用页面。'
+                ? '该发布应用需要员工登录，完成公司统一认证后将自动返回应用页面（无需开通织页创作平台权限）。'
                 : ssoEnabled
                   ? '使用华星统一账号登录，管理并继续创作你的个人应用，无需单独注册密码。'
                   : '当前为本地免登录模式，可直接进入工作空间开始创作。'}
             </p>
           </div>
 
-          {error === 'platform_access_denied' ? (
+          {error === 'site_access_denied' ? (
+            <div className="login-denied" role="alert">
+              <h3>没有该应用的访问权限</h3>
+              <p>{params.get('msg') ?? '你的公司账号已通过统一认证，但不在该应用的指定访问名单中。'}</p>
+              <ol className="login-denied-steps">
+                <li>
+                  <b>公司统一账号认证</b>
+                  <span>已完成，无需开通织页创作平台权限</span>
+                </li>
+                <li>
+                  <b>联系该应用作者添加访问权限</b>
+                  <span>请将你的公司工号告知应用作者，由其在「发布 / 访问与登录 → 指定人员」中添加</span>
+                </li>
+                <li>
+                  <b>重新验证进入应用</b>
+                  <span>添加完成后点击下方按钮重新验证即可打开应用</span>
+                </li>
+              </ol>
+            </div>
+          ) : error === 'platform_access_denied' ? (
             <div className="login-denied" role="alert">
               <h3>暂时还没有平台使用权限</h3>
               <p>{params.get('msg') ?? '你的公司账号已通过统一认证，但还没有开通织页使用权限。按下面步骤开通后就能登录：'}</p>
@@ -163,18 +182,25 @@ export function SsoCallbackPage() {
     sessionStorage.removeItem('zhiye-login-redirect');
     // 立即从地址栏移除令牌
     window.history.replaceState(null, '', '/access_token');
+    const siteFlag = redirect.startsWith('/api/auth/site/') ? '&site=1' : '';
     if (error || !token) {
-      window.location.replace(`/login?error=${encodeURIComponent(error || 'invalid_token')}&redirect=${encodeURIComponent(redirect)}`);
+      window.location.replace(`/login?error=${encodeURIComponent(error || 'invalid_token')}${siteFlag}&redirect=${encodeURIComponent(redirect)}`);
       return;
     }
     fetch('/api/auth/sso/callback', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accessToken: token, expiresIn: Number(params.get('expires_in')) || null }),
+      body: JSON.stringify({ accessToken: token, expiresIn: Number(params.get('expires_in')) || null, redirect }),
     })
       .then(async (res) => {
         if (res.ok) {
+          const body = await res.json().catch(() => null);
+          // 非平台白名单员工访问已发布应用：仅跳转到目标站点完成站点级会话，不写入平台令牌
+          if (body?.siteRedirectUrl && typeof body.siteRedirectUrl === 'string') {
+            window.location.replace(body.siteRedirectUrl);
+            return;
+          }
           setPlatformToken(token);
           window.location.replace(redirect);
           return;
@@ -182,11 +208,13 @@ export function SsoCallbackPage() {
         const body = await res.json().catch(() => null);
         const code = body?.code === 'SSO_UNREACHABLE' ? 'sso_unreachable'
           : body?.code === 'AUTH_DISABLED' ? 'sso_disabled'
-            : body?.code === 'PLATFORM_ACCESS_DENIED' ? 'platform_access_denied' : 'invalid_token';
-        const msg = code === 'platform_access_denied' && body?.message ? `&msg=${encodeURIComponent(body.message)}` : '';
-        window.location.replace(`/login?error=${code}${msg}&redirect=${encodeURIComponent(redirect)}`);
+            : body?.code === 'SITE_ACCESS_DENIED' ? 'site_access_denied'
+              : body?.code === 'PLATFORM_ACCESS_DENIED' ? 'platform_access_denied' : 'invalid_token';
+        const msg = (code === 'platform_access_denied' || code === 'site_access_denied') && body?.message
+          ? `&msg=${encodeURIComponent(body.message)}` : '';
+        window.location.replace(`/login?error=${code}${siteFlag}${msg}&redirect=${encodeURIComponent(redirect)}`);
       })
-      .catch(() => window.location.replace(`/login?error=sso_unreachable&redirect=${encodeURIComponent(redirect)}`));
+      .catch(() => window.location.replace(`/login?error=sso_unreachable${siteFlag}&redirect=${encodeURIComponent(redirect)}`));
   }, [location.search]);
 
   return (

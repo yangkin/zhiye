@@ -84,9 +84,11 @@ function Workbench({ id }: { id: string }) {
     else if (script) setTab('run');
   }, [skill, script, app?.id]);
   useEffect(() => {
-    if (skill && (tab === 'cloud' || tab === 'run')) setTab('code');
-    if (script && (tab === 'cloud' || tab === 'preview' || tab === 'service')) setTab('run');
-  }, [skill, script, tab]);
+    if (skill && (tab === 'cloud' || tab === 'run' || tab === 'service' || tab === 'preview')) setTab('code');
+    else if (script && (tab === 'cloud' || tab === 'preview' || tab === 'service')) setTab('run');
+    else if (service && tab === 'cloud') setTab('service');
+    else if (!service && tab === 'service') setTab('cloud');
+  }, [skill, script, service, tab]);
   // 时间线 / 消息里的「在代码中打开」「查看改动」：切到代码页
   useEffect(() => {
     const openCode = () => setTab('code');
@@ -1121,9 +1123,9 @@ function Workbench({ id }: { id: string }) {
             />
           ) : tab === 'service' && service ? (
             <ServiceRuntimePane app={app} focusSub={serviceEnvTick ? 'env' : undefined} focusTick={serviceEnvTick} />
-          ) : (
+          ) : tab === 'cloud' && !service && !skill && !script ? (
             <CloudPane appId={app.id} />
-          )}
+          ) : null}
           {liveDockOpen && ready ? <LiveWorkspaceDock appId={app.id} onClose={() => setLiveDockOpen(false)} /> : null}
         </section>
         ) : null}

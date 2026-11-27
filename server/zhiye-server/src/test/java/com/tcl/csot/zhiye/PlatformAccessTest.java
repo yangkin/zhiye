@@ -14,7 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.url=jdbc:postgresql://127.0.0.1:5433/zhiye_test?currentSchema=ctx_access", "spring.flyway.schemas=ctx_access",
         "zhiye.auth.mode=sso", "zhiye.auth.sso.user-info-url={self}/test-sso/self",
         "zhiye.auth.sso.gateway-url={self}/test-sso",
-        "zhiye.auth.login-allowlist-enabled=true", "zhiye.admin.allow-login-names=admin"})
+        "zhiye.auth.login-allowlist-enabled=true", "zhiye.admin.allow-login-names=admin",
+        "zhiye.workspace.max-apps=1000"})
 class PlatformAccessTest extends IntegrationTest {
 
     private Client.Res callback(Client c, String who) {
@@ -107,5 +108,84 @@ class PlatformAccessTest extends IntegrationTest {
         // 非管理员不能搜索；没带平台令牌时提示先登录
         Client nobody = client();
         assertThat(nobody.send("GET", "/api/admin/employees/search?q=杨", null, token).status()).isEqualTo(401);
+    }
+
+    @Test
+    void nonPlatformEmployeeCanAccessAuthorizedPublishedAppWithoutPlatformAccess() {
+        Client admin = client();
+        assertThat(callback(admin, "admin").status()).isEqualTo(200);
+
+        // 管理员发布一个「指定人员」应用，授权给未开通平台白名单的普通员工 ext_lisi（验证大小写不敏感）
+        var up = admin.ok(admin.upload("/api/imports/upload", "site-only.html", "text/html",
+                ImportFlowTest.GARDEN.getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of()));
+        var imp = admin.ok(admin.post("/api/imports", Map.of("uploadId", up.path("uploadId").asText(), "name", "跨白名单站点测试")));
+        String appId = imp.path("app").path("id").asText();
+        assertThat(admin.waitTask(imp.path("task").path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+        admin.ok(admin.put("/api/apps/" + appId + "/access", Map.of("level", "members", "members", java.util.List.of("EXT_LISI"))));
+        var pub = admin.ok(admin.post("/api/apps/" + appId + "/publish", Map.of()));
+        String host = pub.path("siteUrl").asText().replace("http://", "").replace("/", "").replace(":8083", ":" + port);
+
+        // 1. ext_lisi 尝试直接登录织页创作平台 → 被平台白名单拒绝（403 PLATFORM_ACCESS_DENIED）
+        Client extLisi = client();
+        var platDenied = extLisi.send("POST", "/api/auth/sso/callback",
+                Map.of("accessToken", "tok-ext_lisi", "redirect", "/create"), Map.of());
+        assertThat(platDenied.status()).isEqualTo(403);
+        assertThat(platDenied.body()).contains("PLATFORM_ACCESS_DENIED");
+        assertThat(extLisi.get("/api/apps").status()).isEqualTo(401);
+
+        // 2. ext_lisi 访问已发布应用 → 重定向到 /api/auth/site/start → /login?site=1&redirect=...
+        var r1 = extLisi.getWithHost("/?tab=overview", host);
+        assertThat(r1.status()).isEqualTo(302);
+        String startUrl = r1.raw().headers().firstValue("Location").orElseThrow();
+        var startUri = java.net.URI.create(startUrl);
+        String startPath = startUri.getRawPath() + "?" + startUri.getRawQuery();
+        assertThat(startPath).startsWith("/api/auth/site/start?app=" + appId);
+
+        var r2 = extLisi.get(startPath);
+        assertThat(r2.status()).isEqualTo(302);
+        assertThat(r2.raw().headers().firstValue("Location").orElseThrow()).startsWith("/login?site=1&redirect=");
+
+        // 3. ext_lisi 完成公司 SSO 回调（携带 redirect=/api/auth/site/start?...）→ 仅签发一次性站点授权码，绝不发平台会话 Cookie
+        var cb = extLisi.send("POST", "/api/auth/sso/callback",
+                Map.of("accessToken", "tok-ext_lisi", "redirect", startPath), Map.of());
+        assertThat(cb.status()).isEqualTo(200);
+        assertThat(cb.raw().headers().allValues("Set-Cookie")).isEmpty();
+        var cbJson = cb.json();
+        assertThat(cbJson.path("siteOnly").asBoolean()).isTrue();
+        String finishUrl = cbJson.path("siteRedirectUrl").asText();
+        assertThat(finishUrl).contains("/__zhiye/auth/finish?code=");
+
+        // 4. 严格隔离断言：ext_lisi 仍完全无法进入织页创作平台，也未建立任何平台 workspace
+        assertThat(extLisi.ok(extLisi.get("/api/meta")).path("auth").path("user").isNull()).isTrue();
+        assertThat(extLisi.get("/api/apps").status()).isEqualTo(401);
+
+        // 5. 回到发布站点换取站点级 zhiye_site cookie → 成功打开已发布应用且注入其身份
+        var finishUri = java.net.URI.create(finishUrl);
+        String finishPath = finishUri.getRawPath() + "?" + finishUri.getRawQuery();
+        var back = extLisi.getWithHost(finishPath, host);
+        assertThat(back.status()).isEqualTo(302);
+        assertThat(back.raw().headers().firstValue("Set-Cookie").orElseThrow()).contains("zhiye_site=");
+        var page = extLisi.getWithHost("/", host);
+        assertThat(page.status()).isEqualTo(200);
+        assertThat(page.body()).contains("种下一份灵感").contains("\"loginName\":\"ext_lisi\"");
+
+        // 6. 未在指定人员名单里的非平台员工 ext_stranger → 返回 403 SITE_ACCESS_DENIED
+        Client stranger = client();
+        var siteDenied = stranger.send("POST", "/api/auth/sso/callback",
+                Map.of("accessToken", "tok-ext_stranger", "redirect", startPath), Map.of());
+        assertThat(siteDenied.status()).isEqualTo(403);
+        assertThat(siteDenied.body()).contains("SITE_ACCESS_DENIED");
+        assertThat(siteDenied.raw().headers().allValues("Set-Cookie")).isEmpty();
+
+        // 7. 改为「员工登录」（全员 SSO 可用）→ ext_stranger 也可免平台白名单直接访问应用，且仍无法登录创作平台
+        admin.ok(admin.put("/api/apps/" + appId + "/access", Map.of("level", "login")));
+        var strangerCb = stranger.send("POST", "/api/auth/sso/callback",
+                Map.of("accessToken", "tok-ext_stranger", "redirect", startPath), Map.of());
+        assertThat(strangerCb.status()).isEqualTo(200);
+        assertThat(strangerCb.json().path("siteOnly").asBoolean()).isTrue();
+        assertThat(stranger.get("/api/apps").status()).isEqualTo(401);
+        var sFinishUri = java.net.URI.create(strangerCb.json().path("siteRedirectUrl").asText());
+        assertThat(stranger.getWithHost(sFinishUri.getRawPath() + "?" + sFinishUri.getRawQuery(), host).status()).isEqualTo(302);
+        assertThat(stranger.getWithHost("/", host).status()).isEqualTo(200);
     }
 }

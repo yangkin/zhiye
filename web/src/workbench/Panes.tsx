@@ -423,6 +423,29 @@ export function CloudPane({ appId }: { appId: string }) {
     }
   };
 
+  if (status.isLoading && !status.data)
+    return (
+      <>
+        <div className="studio-pane-title">
+          <Icon name="cloud" />
+          <span>云服务</span>
+          <small>读取状态中…</small>
+        </div>
+        <LoadingState label="正在读取云服务状态…" />
+      </>
+    );
+
+  if (status.error && !status.data)
+    return (
+      <>
+        <div className="studio-pane-title">
+          <Icon name="cloud" />
+          <span>云服务</span>
+        </div>
+        <ErrorState message={errorMessage(status.error)} onRetry={() => void status.refetch()} />
+      </>
+    );
+
   if (enabled)
     return (
       <>
