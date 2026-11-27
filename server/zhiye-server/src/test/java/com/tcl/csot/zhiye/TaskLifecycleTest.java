@@ -57,48 +57,84 @@ class TaskLifecycleTest extends IntegrationTest {
     com.tcl.csot.zhiye.repository.TaskRepository taskRepo;
 
     @Test
-    void stoppedModifyIsContinuedByNextMessage() {
+    void stoppedModifyStartsCleanOnNewMessageAndSupportsExplicitResumeOrDiscard() {
         Client c = client();
         JsonNode app = c.createApp("做一个极简待办清单");
         String id = app.path("id").asText();
         assertThat(c.waitTask(c.ok(c.post("/api/apps/" + id + "/generate", Map.of())).path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
 
+        // 1. 中途停止修改任务：保留中断前快照与可继续检查点
         JsonNode posted = c.ok(c.post("/api/apps/" + id + "/messages", Map.of("content", "把按钮改成蓝色 [slow]")));
         String first = posted.path("task").path("id").asText();
         c.waitUntil(first, t -> "RUNNING".equals(t.path("status").asText()));
         c.ok(c.post("/api/tasks/" + first + "/cancel", Map.of()));
         JsonNode stopped = c.waitTask(first);
         assertThat(stopped.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(stopped.path("resumable").asBoolean()).isTrue();
+        assertThat(stopped.path("discarded").asBoolean()).isFalse();
         assertThat(stopped.path("resultVersionId").isTextual()).as("中断前自动保存的版本记在任务上").isTrue();
         JsonNode msgs = c.ok(c.get("/api/apps/" + id + "/messages"));
         assertThat(msgs.findValuesAsText("content")).anyMatch(t -> t.startsWith("织页的回复被用户取消") && t.contains("自动保存"));
 
-        // 下一句话沿用上一轮的工作区：先补完上一轮，上一轮不能再点「继续」
+        // 2. 用户直接发一条全新修改需求：不自动复活已停止任务，而是从当前稳定版本干净开始并清理旧检查点
         JsonNode next = c.ok(c.post("/api/apps/" + id + "/messages", Map.of("content", "再把标题改成今日待办")));
         String second = next.path("task").path("id").asText();
         JsonNode input = taskRepo.findById(second).orElseThrow().input();
-        assertThat(input.path("continueFromTask").asText()).isEqualTo(first);
-        assertThat(input.path("continueContent").asText()).contains("按钮改成蓝色");
-        assertThat(input.path("resume").path("workspaceDir").asText()).isNotBlank();
-        assertThat(c.ok(c.get("/api/tasks/" + first)).path("resumable").asBoolean()).isFalse();
+        assertThat(input.has("continueFromTask")).as("新修改需求绝不静默复活已停止任务").isFalse();
+        assertThat(input.has("resume")).isFalse();
+        JsonNode firstAfter = c.ok(c.get("/api/tasks/" + first));
+        assertThat(firstAfter.path("resumable").asBoolean()).isFalse();
+        assertThat(firstAfter.path("discarded").asBoolean()).isTrue();
         JsonNode done = c.waitTask(second);
         assertThat(done.path("status").asText()).as(done.toString()).isEqualTo("SUCCEEDED");
         JsonNode cur = c.ok(c.get("/api/apps/" + id)).path("currentVersion");
         assertThat(cur.path("id").asText()).isEqualTo(done.path("resultVersionId").asText());
         assertThat(c.ok(c.get("/api/apps/" + id + "/messages")).findValuesAsText("content"))
-                .as("接着做成功后，旧的「被用户取消」提示不再挂着").noneMatch(t -> t.startsWith("织页的回复被用户取消"));
+                .as("新任务成功后，旧的「被用户取消」提示不再挂着").noneMatch(t -> t.startsWith("织页的回复被用户取消"));
 
-        // 再停一次后先「回到」别的版本：版本变了，不再续做
+        // 3. 再次中途停止后主动点「放弃」（POST /discard）：清除检查点、标记 discarded，并收口系统提示
         JsonNode third = c.ok(c.post("/api/apps/" + id + "/messages", Map.of("content", "加一个清空按钮 [slow]")));
         String tid = third.path("task").path("id").asText();
         c.waitUntil(tid, t -> "RUNNING".equals(t.path("status").asText()));
         c.ok(c.post("/api/tasks/" + tid + "/cancel", Map.of()));
         c.waitTask(tid);
-        String v1 = c.ok(c.get("/api/apps/" + id + "/versions")).findValuesAsText("id").stream().reduce((a, b) -> b).orElseThrow();
-        c.ok(c.post("/api/versions/" + v1 + "/restore", Map.of()));
-        JsonNode fourth = c.ok(c.post("/api/apps/" + id + "/messages", Map.of("content", "标题加粗")));
-        assertThat(taskRepo.findById(fourth.path("task").path("id").asText()).orElseThrow().input().has("continueFromTask")).isFalse();
-        c.waitTask(fourth.path("task").path("id").asText());
+        JsonNode discarded = c.ok(c.post("/api/tasks/" + tid + "/discard", Map.of()));
+        assertThat(discarded.path("discarded").asBoolean()).isTrue();
+        assertThat(discarded.path("resumable").asBoolean()).isFalse();
+        assertThat(c.post("/api/tasks/" + tid + "/resume", Map.of()).status()).isEqualTo(409);
+        assertThat(c.ok(c.get("/api/apps/" + id + "/messages")).findValuesAsText("content"))
+                .anyMatch(t -> t.contains("已放弃未完成进度"));
+
+        // 4. 再次中途停止后显式点「继续」（带补充说明）：沿用检查点并记录 resumeNote
+        JsonNode fourth = c.ok(c.post("/api/apps/" + id + "/messages", Map.of("content", "标题加粗 [slow]")));
+        String fid = fourth.path("task").path("id").asText();
+        c.waitUntil(fid, t -> "RUNNING".equals(t.path("status").asText()));
+        c.ok(c.post("/api/tasks/" + fid + "/cancel", Map.of()));
+        c.waitTask(fid);
+        JsonNode resumed = c.ok(c.post("/api/tasks/" + fid + "/resume", Map.of("content", "顺便把字号调大一点")));
+        assertThat(taskRepo.findById(resumed.path("id").asText()).orElseThrow().input().path("resumeNote").asText())
+                .isEqualTo("顺便把字号调大一点");
+        assertThat(c.waitTask(resumed.path("id").asText()).path("status").asText()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void discardStoppedGenerateReturnsToPlanPhase() {
+        Client c = client();
+        JsonNode app = c.createApp("做一个项目进度看板 [slow]");
+        String id = app.path("id").asText();
+        JsonNode task = c.ok(c.post("/api/apps/" + id + "/generate", Map.of()));
+        String tid = task.path("id").asText();
+        c.waitUntil(tid, t -> "RUNNING".equals(t.path("status").asText()));
+        c.ok(c.post("/api/tasks/" + tid + "/cancel", Map.of()));
+        JsonNode stopped = c.waitTask(tid);
+        assertThat(stopped.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(c.ok(c.get("/api/apps/" + id)).path("phase").asText()).isEqualTo("stopped");
+
+        // 放弃未完成的首次生成 → 回到 plan 阶段可继续调整计划
+        JsonNode discarded = c.ok(c.post("/api/tasks/" + tid + "/discard", Map.of()));
+        assertThat(discarded.path("discarded").asBoolean()).isTrue();
+        assertThat(discarded.path("resumable").asBoolean()).isFalse();
+        assertThat(c.ok(c.get("/api/apps/" + id)).path("phase").asText()).isEqualTo("plan");
     }
 
     @Test

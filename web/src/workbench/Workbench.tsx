@@ -146,6 +146,7 @@ function Workbench({ id }: { id: string }) {
   const [modal, setModal] = useState<ModalKind>(null);
   const [restoreTarget, setRestoreTarget] = useState<Version | null>(null);
   const [trackedId, setTrackedId] = useState<string | null>(null);
+  const dismissedIdsRef = useRef<Set<string>>(new Set());
   // 手动微调「应用」产生的 visual_save 任务：成功弹出「修改已保存」，失败把 runner 的说明显示在底部条
   const [visualTaskId, setVisualTaskId] = useState<string | null>(null);
   const visualTaskRef = useRef<{ id: string; resolve: (t: Task) => void } | null>(null);
@@ -155,6 +156,7 @@ function Workbench({ id }: { id: string }) {
   // 深色工作台 + 切换应用时清掉上一个应用的元素上下文
   useEffect(() => {
     document.body.classList.add('studio-mode');
+    dismissedIdsRef.current.clear();
     useChat.getState().resetFor(id);
     useCode.getState().resetFor(id);
     const restored = useCode.getState().restored;
@@ -165,7 +167,7 @@ function Workbench({ id }: { id: string }) {
     return () => document.body.classList.remove('studio-mode');
   }, [id]);
 
-  // 任务跟踪：优先进行中的任务；否则展示最近一次失败/停止的任务（用于「继续」「重试」）
+  // 任务跟踪：优先进行中的任务；否则展示最近一次仍可继续/可重试且未被放弃的停止/失败任务
   const activeId = app?.activeTask?.id ?? null;
   const [historicalId, setHistoricalId] = useState<string | null>(null);
   useEffect(() => {
@@ -184,7 +186,11 @@ function Workbench({ id }: { id: string }) {
     if (trackedId || activeId || !tasksQ.data?.length || !app) return;
     const latest = [...tasksQ.data].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
     const newerThanVersion = !app.currentVersion || latest.createdAt > app.currentVersion.createdAt;
-    if ((latest.status === 'FAILED' || latest.status === 'CANCELLED') && newerThanVersion) {
+    const actionable =
+      !latest.discarded &&
+      !dismissedIdsRef.current.has(latest.id) &&
+      ((latest.status === 'CANCELLED' && latest.resumable) || (latest.status === 'FAILED' && latest.retryable));
+    if (actionable && newerThanVersion) {
       setTrackedId(latest.id);
       setHistoricalId(latest.id);
     }
@@ -332,7 +338,7 @@ function Workbench({ id }: { id: string }) {
       } else if (task.status === 'FAILED') {
         toast(task.error?.message || '任务没有完成，可以重试。', 'error');
       } else if (task.status === 'CANCELLED') {
-        toast(task.resumable ? '已停止，当前进度已保存，可以继续。' : '已停止。');
+        toast(task.resumable ? '已停止，进度已保存。可点「继续」接着做、点「放弃」清除，或直接发新需求。' : '已停止。');
       }
     },
     [id, invalidate, qc],
@@ -356,6 +362,28 @@ function Workbench({ id }: { id: string }) {
       invalidate(id);
     },
     [id, invalidate, qc],
+  );
+
+  const onDismissTask = useCallback(
+    (tid: string) => {
+      dismissedIdsRef.current.add(tid);
+      setTrackedId((cur) => (cur === tid ? null : cur));
+      setHistoricalId((cur) => (cur === tid ? null : cur));
+      qc.setQueryData<Task[]>(qk.appTasks(id), (old) =>
+        old ? old.map((t) => (t.id === tid ? { ...t, discarded: true, resumable: false, retryable: false } : t)) : old,
+      );
+      invalidate(id);
+    },
+    [id, invalidate, qc],
+  );
+
+  const onCancelRequested = useCallback(
+    (tid: string) => {
+      qc.setQueryData(qk.app(id), (old: typeof app) =>
+        old && old.activeTask?.id === tid ? { ...old, activeTask: { ...old.activeTask, status: 'CANCELLING' as const } } : old,
+      );
+    },
+    [id, qc],
   );
 
   // 生成中但暂时拿不到 activeTask 时，低频刷新应用状态（不用于进度展示）
@@ -686,6 +714,8 @@ function Workbench({ id }: { id: string }) {
           currentVersion={currentVersion}
           versions={versions}
           onTaskStarted={onTaskStarted}
+          onDismissTask={onDismissTask}
+          onCancelRequested={onCancelRequested}
           onEnableCloud={service || script ? undefined : () => useChat.getState().setCloudAsk(true)}
           onOpenCloud={() => setTab(service ? 'service' : 'cloud')}
           onRestoreVersion={(v) => setRestoreTarget(v)}

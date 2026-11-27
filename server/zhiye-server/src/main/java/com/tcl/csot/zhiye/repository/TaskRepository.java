@@ -197,4 +197,13 @@ public class TaskRepository {
     }
 
     public void deleteCheckpoint(String taskId) { jdbc.sql("delete from checkpoint where task_id = ?").param(taskId).update(); }
+
+    /** 标记已停止/失败的任务为已放弃，后续刷新页面不再自动弹出恢复/重试卡片 */
+    public void markDiscarded(String id) {
+        jdbc.sql("""
+                update task
+                   set result = jsonb_set(coalesce(result, '{}'::jsonb), '{discarded}', 'true'::jsonb, true)
+                 where id = ? and status in ('CANCELLED', 'FAILED')
+                """).param(id).update();
+    }
 }

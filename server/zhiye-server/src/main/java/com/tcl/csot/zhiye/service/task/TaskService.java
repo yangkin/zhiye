@@ -119,21 +119,88 @@ public class TaskService {
 
     // ---------- 继续 ----------
     public TaskRow resume(String ws, String id, String idemKey) {
+        return resume(ws, id, idemKey, null);
+    }
+
+    public TaskRow resume(String ws, String id, String idemKey, String extraContent) {
         Optional<TaskRow> dup = byIdem(ws, idemKey);
         if (dup.isPresent()) return dup.get();
         TaskRow old = get(ws, id);
+        boolean discarded = old.result() != null && old.result().path("discarded").asBoolean(false);
         var cp = tasks.checkpoint(id);
-        if (!"CANCELLED".equals(old.status()) || cp.isEmpty())
+        if (!"CANCELLED".equals(old.status()) || discarded || cp.isEmpty())
             throw ApiException.conflict("NOT_RESUMABLE", "这个任务没有可以继续的进度");
         AppRow app = apps.find(ws, old.appId()).orElseThrow(() -> ApiException.notFound("应用"));
         ObjectNode input = old.input().deepCopy();
         input.set("resume", checkpointJson(cp.get(), false));
+        String note = extraContent == null ? "" : extraContent.trim();
+        if (!note.isEmpty()) input.put("resumeNote", note);
+        else input.remove("resumeNote");
         // 手动修改已经保存成版本时，从那个版本继续（不再写回草稿）
         String base = input.hasNonNull("manualVersionId") ? input.path("manualVersionId").asText() : old.baseVersionId();
         TaskRow t = create(ws, app.id(), old.type(), base, input, idemKey, old.attempt(), old.id());
         tasks.deleteCheckpoint(old.id());
         onRestart(app, old, t);
         return t;
+    }
+
+    // ---------- 放弃 / 清除已停止或失败的任务进度 ----------
+    public TaskRow discard(String ws, String id) {
+        TaskRow t = get(ws, id);
+        if (!t.terminal())
+            throw ApiException.conflict("TASK_ACTIVE", "任务正在进行中，请先停止后再放弃");
+        cleanupCheckpoint(t.id());
+        tasks.markDiscarded(t.id());
+        Optional<AppRow> appOpt = apps.find(ws, t.appId());
+        if (appOpt.isPresent()) {
+            AppRow app = appOpt.get();
+            if ("generate".equals(t.type()) && app.currentVersionId() == null
+                    && ("stopped".equals(app.phase()) || "failed".equals(app.phase()))) {
+                if (!app.isSkill() && app.planDoc() != null && !app.planDoc().isBlank()) {
+                    apps.setPhase(app.id(), "plan");
+                }
+                messages.replaceSystemForTask(app.id(), t.id(), null);
+            } else if ("CANCELLED".equals(t.status())) {
+                messages.replaceSystemForTask(app.id(), t.id(), "已停止，已放弃未完成进度。");
+            } else if ("FAILED".equals(t.status())) {
+                messages.replaceSystemForTask(app.id(), t.id(), null);
+            }
+        }
+        return tasks.findById(id).orElse(t);
+    }
+
+    /** 发起全新修改/生成时，自动收口上一轮被停止或失败的遗留检查点，避免旧进度污染或反复弹出。 */
+    public void discardPendingStoppedCheckpoints(String appId) {
+        TaskRow last = tasks.latestForApp(appId).orElse(null);
+        if (last == null) return;
+        if (!"CANCELLED".equals(last.status()) && !"FAILED".equals(last.status())) return;
+        cleanupCheckpoint(last.id());
+        tasks.markDiscarded(last.id());
+    }
+
+    private void cleanupCheckpoint(String taskId) {
+        var cpOpt = tasks.checkpoint(taskId);
+        tasks.deleteCheckpoint(taskId);
+        if (cpOpt.isEmpty()) return;
+        TaskRepository.Checkpoint cp = cpOpt.get();
+        deleteIfInsideRuntime(cp.workspaceDir());
+        deleteIfInsideRuntime(cp.agentDir());
+    }
+
+    private void deleteIfInsideRuntime(String dir) {
+        if (dir == null || dir.isBlank()) return;
+        try {
+            Path root = props.runtimePath().toAbsolutePath().normalize();
+            Path target = Path.of(dir).toAbsolutePath().normalize();
+            if (!target.startsWith(root) || target.equals(root) || !java.nio.file.Files.exists(target)) return;
+            try (var walk = java.nio.file.Files.walk(target)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try { java.nio.file.Files.deleteIfExists(p); } catch (Exception ignored) { }
+                });
+            }
+        } catch (Exception e) {
+            log.debug("清理已放弃任务目录 {} 忽略：{}", dir, e.getMessage());
+        }
     }
 
     // ---------- 重试 ----------
@@ -236,7 +303,7 @@ public class TaskService {
                 case "modify" -> {
                     messages.setStatusByTask(t.id(), "failed");
                     String text = errorMessage != null && errorMessage.startsWith("你的手动修改") ? errorMessage
-                            : cancelled ? autoSaved ? "织页的回复被用户取消。中断前的改动已自动保存；直接说下一句，我会先把这一轮补完。" : "织页的回复被用户取消。没有生成新版本。"
+                            : cancelled ? autoSaved ? "织页的回复被用户取消。中断前的改动已自动保存（未覆盖当前版本）；点「继续」可接着做，点「放弃」或直接发新需求将从当前版本重新开始。" : "织页的回复被用户取消。没有生成新版本。"
                             : "修改失败：" + errorMessage + "。没有生成新版本，你的输入已保留。";
                     messages.insert(app.id(), "system", text, null, t.id(), "ok");
                 }

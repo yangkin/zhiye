@@ -345,6 +345,7 @@ public class AppService {
         if (tasks.activeForApp(app.id()).isPresent()) throw ApiException.busy();
         if (!"plan".equals(app.phase()) && !"failed".equals(app.phase()) && !"stopped".equals(app.phase()))
             throw ApiException.conflict("INVALID_PHASE", "当前阶段不能执行生成");
+        taskService.discardPendingStoppedCheckpoints(app.id());
         TaskRow t = taskService.create(ws, app.id(), "generate", app.currentVersionId(), Json.obj(), idemKey, 1, null);
         apps.setPhase(app.id(), "generating");
         return views.task(t);
@@ -394,11 +395,9 @@ public class AppService {
         if (billing != null) input.put("modelBilling", billing);
         if (!msgAssets.isEmpty()) input.set("assetIds", Json.M.valueToTree(msgAssets));
         if (!msgSkills.isEmpty()) input.set("skillAppIds", Json.M.valueToTree(msgSkills));
-        // 上一轮被停止：没有手动修改草稿和选中元素时，沿用上一轮的工作区先补完再做这句
-        ObjectNode cont = ctx == null && !input.has("draftPatches") ? taskService.continuation(app) : null;
-        if (cont != null) input.setAll(cont);
+        // 用户发起全新修改时，收口上一轮已停止/失败的遗留检查点，始终从当前稳定版本干净开始（想接着做请点「继续」）
+        taskService.discardPendingStoppedCheckpoints(app.id());
         TaskRow t = taskService.create(ws, app.id(), "modify", base.id(), input, idemKey, 1, null);
-        if (cont != null && t.input().has("continueFromTask")) taskService.consumeCheckpoint(cont.path("continueFromTask").asText());
         var msg = messages.insert(app.id(), "user", content, ctx, t.id(), "pending", msgAssets.isEmpty() ? null : msgAssets,
                 msgSkills.isEmpty() ? null : msgSkills);
         if (memories != null) memories.learnFromPrompt(ws, content);

@@ -79,6 +79,27 @@ public class MessageRepository {
         jdbc.sql("update message set task_id = ?, status = 'pending' where task_id = ? and role = 'user' and not steer").params(newTaskId, oldTaskId).update();
     }
 
+    /** 原地替换指定任务关联的系统提示消息（保留原 created_at，避免放弃提示跑到后续聊天下面；content 为空则删除） */
+    public void replaceSystemForTask(String appId, String taskId, String content) {
+        if (content == null || content.isBlank()) {
+            jdbc.sql("delete from message where app_id = ? and task_id = ? and role = 'system'")
+                    .params(appId, taskId).update();
+            return;
+        }
+        int updated = jdbc.sql("""
+                update message
+                   set content = ?
+                 where id = (
+                     select id from message
+                      where app_id = ? and task_id = ? and role = 'system'
+                      order by created_at desc limit 1
+                 )
+                """).params(content, appId, taskId).update();
+        if (updated == 0) {
+            insert(appId, "system", content, null, taskId, "ok");
+        }
+    }
+
     /** 成功之后清掉同一应用里遗留的失败提示（重试成功的场景） */
     public int deleteFailures(String appId) {
         return jdbc.sql("""

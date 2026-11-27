@@ -21,14 +21,20 @@ interface Props {
   stream: TaskStreamState;
   type?: TaskType;
   onNewTask: (t: Task) => void;
+  /** 停止/失败任务被用户主动「放弃 / 关闭」后通知外层收起卡片并刷新状态 */
+  onDismiss?: (taskId: string) => void;
+  /** 点击「停止」时立即通知外层进入 stopping/CANCELLING 状态，避免重复点击 */
+  onCancelRequested?: (taskId: string) => void;
+  /** 首次生成被停止且有计划文档时，点「放弃」会回到计划阶段继续调整 */
+  canReturnToPlan?: boolean;
   compact?: boolean;
   /** 这次修改前先保存了 N 处手动修改（后端先存为一个版本，再做 AI 修改） */
   savedDraftFirst?: number;
 }
 
 
-export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: Props) {
-  const [busy, setBusy] = useState<null | 'cancel' | 'resume' | 'retry'>(null);
+export function TaskCard({ stream, type, onNewTask, onDismiss, onCancelRequested, canReturnToPlan = false, compact, savedDraftFirst }: Props) {
+  const [busy, setBusy] = useState<null | 'cancel' | 'resume' | 'retry' | 'discard'>(null);
   const task = stream.task;
   const t = type ?? task?.type ?? 'generate';
   const status = stream.status ?? task?.status ?? 'QUEUED';
@@ -42,7 +48,9 @@ export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: 
     : failed
       ? titles[t][2]
       : cancelled
-        ? '已停止，进度已保存'
+        ? task?.resumable
+          ? '已停止 · 已保存'
+          : '任务已停止'
         : cancelling
           ? '正在停止…'
           : titles[t][0];
@@ -52,12 +60,17 @@ export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: 
   // 有 runner 事件（文字/思考/步骤/检查）时用交错时间线，否则退回旧的阶段列表
   const timeline = stream.timeline.length > 0 || stream.tools.length > 0;
 
-  const act = async (kind: 'cancel' | 'resume' | 'retry') => {
+  const act = async (kind: 'cancel' | 'resume' | 'retry' | 'discard') => {
     if (!stream.taskId) return;
     setBusy(kind);
     try {
       if (kind === 'cancel') {
+        onCancelRequested?.(stream.taskId);
         await api.cancelTask(stream.taskId);
+      } else if (kind === 'discard') {
+        await api.discardTask(stream.taskId);
+        onDismiss?.(stream.taskId);
+        toast(canReturnToPlan && t === 'generate' ? '已放弃本次未完成生成，已返回「创造计划」。' : '已放弃未完成的任务进度。');
       } else {
         const next = kind === 'resume' ? await api.resumeTask(stream.taskId) : await api.retryTask(stream.taskId);
         onNewTask(next);
@@ -70,9 +83,9 @@ export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: 
   };
 
   return (
-    <div className={`progress-card task-card ${failed ? 'is-failed' : ''} ${ok ? 'is-done' : ''} ${compact ? 'compact' : ''}`}>
+    <div className={`progress-card task-card ${failed ? 'is-failed' : ''} ${ok ? 'is-done' : ''} ${cancelled ? 'is-cancelled' : ''} ${compact ? 'compact' : ''}`}>
       <div className="progress-title">
-        <span className={!done && !cancelling ? 'spinning' : ''}>
+        <span className={!done ? 'spinning' : ''}>
           <Icon name={ok ? 'check' : failed ? 'alert' : cancelled ? 'stop' : 'refresh'} />
         </span>
         <b>{title}</b>
@@ -84,8 +97,14 @@ export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: 
               {busy === 'cancel' ? '停止中' : '停止'}
             </button>
           ) : null}
+          {cancelling ? (
+            <button type="button" className="task-pill" aria-label="正在停止" disabled>
+              <Icon name="refresh" className="spinning" />
+              停止中
+            </button>
+          ) : null}
           {done && task?.resumable ? (
-            <button type="button" className="task-pill" aria-label="继续" disabled={!!busy} onClick={() => void act('resume')}>
+            <button type="button" className="task-pill accent" aria-label="继续" disabled={!!busy} onClick={() => void act('resume')}>
               <i className="pill-play" aria-hidden="true" />
               {busy === 'resume' ? '继续中' : '继续'}
             </button>
@@ -94,6 +113,30 @@ export function TaskCard({ stream, type, onNewTask, compact, savedDraftFirst }: 
             <button type="button" className="task-pill accent" aria-label="重试" disabled={!!busy} onClick={() => void act('retry')}>
               <Icon name="refresh" />
               {busy === 'retry' ? '重试中' : '重试'}
+            </button>
+          ) : null}
+          {done && (cancelled || failed) && onDismiss ? (
+            <button
+              type="button"
+              className="task-pill ghost"
+              aria-label={canReturnToPlan && t === 'generate' ? '返回修改计划' : cancelled && task?.resumable ? '放弃任务' : '关闭卡片'}
+              title={
+                canReturnToPlan && t === 'generate'
+                  ? '放弃未完成的进度，返回调整创造计划'
+                  : cancelled && task?.resumable
+                    ? '放弃未完成的进度（当前稳定版本不受影响）'
+                    : '关闭此任务卡片'
+              }
+              disabled={!!busy}
+              onClick={() => void act('discard')}
+            >
+              {busy === 'discard'
+                ? '处理中'
+                : canReturnToPlan && t === 'generate'
+                  ? '返回修改计划'
+                  : cancelled && task?.resumable
+                    ? '放弃'
+                    : '关闭'}
             </button>
           ) : null}
         </span>

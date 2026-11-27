@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { api, errorMessage, newIdempotencyKey } from '../api/client';
 import { api as convApi } from '../api/conversation';
 import { qk, useMessages, useMeta } from '../api/queries';
 import type { TaskStreamState } from '../api/sse';
-import type { AppDetail, ElementContext, Message, QueuedMessage, Task, Version } from '../api/types';
+import { isTerminal, type AppDetail, type ElementContext, type Message, type QueuedMessage, type Task, type Version } from '../api/types';
 import { Icon } from '../lib/icons';
 import { copyText, fmtDate, fmtTime, shortDay } from '../lib/format';
 import { toast, useChat } from '../lib/store';
@@ -29,6 +29,10 @@ interface Props {
   currentVersion: Version | undefined;
   versions: Version[];
   onTaskStarted: (t: Task) => void;
+  /** 用户主动放弃/关闭已停止或失败任务卡片 */
+  onDismissTask?: (taskId: string) => void;
+  /** 点击停止按钮时同步进入 CANCELLING 乐观状态 */
+  onCancelRequested?: (taskId: string) => void;
   onEnableCloud?: () => void;
   onRestoreVersion: (version: Version) => void;
   /** 切到「云服务」页 */
@@ -50,6 +54,14 @@ interface Props {
 
 /** 可能是「另做一个应用」的说法；命中后由模型判断（加页面、加模块仍算修改） */
 const NEW_APP_HINT = /(再|另外|另|重新|新)(帮我)?(做|写|建|开发|搭|搞)(一个|一套|个)|(做|写|开发|搭建?|建)(一个|一套|个)[^，。,.]{0,12}(网站|系统|应用|平台|小程序|app|APP|工具)/;
+
+/** 当存在可恢复/可重试的已停止或失败任务时，用户明确说放弃/取消直接放弃，不误触发新的编码任务 */
+const DISCARD_TASK_RE =
+  /^(放弃|算了|不要做|不做|先不做|别做|取消|丢弃|关闭)(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧|了)?[。！!～~]*$/;
+
+/** 当存在可恢复的已停止任务时，用户明确说「继续 / 接着做（可附带补充）」直接走 resume */
+const RESUME_TASK_RE =
+  /^(继续|接着做|继续做|恢复)(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧)?(?:[，,。.:：\s]+([\s\S]+))?$/;
 
 /** 启用云服务后自动发给 AI 的那句话 */
 const CLOUD_DESIGN_PROMPT = '云服务已启用。请按这个应用现在的功能设计表结构和数据权限，把数据改成云端读写。';
@@ -83,7 +95,7 @@ export function orderMessagesWithSteers(list: Message[]): Message[] {
   return out;
 }
 
-export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted, onEnableCloud, onOpenCloud, onRestoreVersion, onPublish, onFocusPreview, skill = false, runningTaskId = null, otherBusy = null, beforeSend, pendingManual = 0, previewVisible = true }: Props) {
+export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted, onDismissTask, onCancelRequested, onEnableCloud, onOpenCloud, onRestoreVersion, onPublish, onFocusPreview, skill = false, runningTaskId = null, otherBusy = null, beforeSend, pendingManual = 0, previewVisible = true }: Props) {
   const qc = useQueryClient();
   const { data: messages } = useMessages(app.id);
   // 从对话创建的应用：把那段对话显示在应用消息之前，对话和应用在同一个工作台里
@@ -389,6 +401,50 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
     // 只是一句问题：直接回答，不改代码、不建任务（工作台里也可以聊天）
     const ctxForRoute = useChat.getState().elementContext;
     const hasElement = !!ctxForRoute && ctxForRoute.appId === app.id;
+    // 若当前存在可恢复/可重试的已停止或失败任务，用户明确输入「放弃/继续」直接执行，不误触发新的编码任务
+    const pendingStopped =
+      !forceModify &&
+      !hasElement &&
+      stream.taskId &&
+      stream.task &&
+      !stream.task.discarded &&
+      ((stream.task.status === 'CANCELLED' && stream.task.resumable) || (stream.task.status === 'FAILED' && stream.task.retryable))
+        ? stream.task
+        : null;
+    if (pendingStopped && DISCARD_TASK_RE.test(content)) {
+      setSending(true);
+      setError('');
+      try {
+        await api.discardTask(pendingStopped.id);
+        setDraft('');
+        onDismissTask?.(pendingStopped.id);
+        toast('已放弃未完成的任务，随时可以开始新需求。');
+      } catch (err) {
+        setError(errorMessage(err));
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+    if (pendingStopped && pendingStopped.status === 'CANCELLED' && pendingStopped.resumable && !otherBusy) {
+      const rm = RESUME_TASK_RE.exec(content);
+      if (rm) {
+        const extra = (rm[5] ?? '').trim();
+        setSending(true);
+        setError('');
+        try {
+          const next = await api.resumeTask(pendingStopped.id, extra || undefined);
+          setDraft('');
+          onTaskStarted(next);
+          toast(extra ? '已带着你的补充继续刚才的任务。' : '好的，继续完成刚才的任务。');
+        } catch (err) {
+          setError(errorMessage(err));
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
+    }
     let route: ReturnType<typeof quickRoute> | 'new' = forceModify ? 'modify' : quickRoute(content, hasElement);
     // 「再做一个 / 写一个 xx 网站」这类，快速规则会当成修改；交给模型判断是不是另一个应用
     if (route === 'modify' && !forceModify && !hasElement && skill === false && NEW_APP_HINT.test(content)) route = 'model';
@@ -417,6 +473,8 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         .slice(-24)
         .map((m) => ({ role: m.role, content: m.content.slice(0, m.content.includes('[[file:') ? 40000 : 2000) }));
       let handoffReq: { summary?: string; instruction: string } | null = null;
+      const ctrl = new AbortController();
+      askAbortRef.current = ctrl;
       try {
         await api.ask(
           {
@@ -429,7 +487,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),
           },
           (t) => setAsking((r) => (r ? { ...r, a: r.a + t } : r)),
-          undefined,
+          ctrl.signal,
           (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
           (h) => { handoffReq = h; },
         );
@@ -437,9 +495,15 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         useChat.getState().setAssets([]);
         await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
       } catch (err) {
-        setDraft(content);
-        setError(errorMessage(err));
+        if ((err as { name?: string })?.name === 'AbortError') {
+          await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
+          toast('已停止本次回答。');
+        } else {
+          setDraft(content);
+          setError(errorMessage(err));
+        }
       } finally {
+        if (askAbortRef.current === ctrl) askAbortRef.current = null;
         setAsking(null);
         setSending(false);
       }
@@ -531,13 +595,33 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
   );
   const phase = app.phase;
   const task = stream.task;
+  const isCancelling = stopping || stream.status === 'CANCELLING' || app.activeTask?.status === 'CANCELLING';
   const lastAssistant = list.reduce((acc, m, i) => (m.role === 'assistant' ? i : m.role === 'user' ? -1 : acc), -1);
   // 成功结束的修改任务：进度收成「已处理 N 个任务 · 耗时」一行，挂在它的回复上方（回复自带回退/查看改动/复制/时间），不再在底部重复一张卡片
-  const streamSucceeded = (stream.status ?? task?.status) === 'SUCCEEDED';
+  const streamStatus = stream.status ?? task?.status ?? null;
+  const streamTerminal = isTerminal(streamStatus);
+  const streamSucceeded = streamStatus === 'SUCCEEDED';
+  const streamDiscarded = !!task?.discarded;
   const mergedTaskId =
     streamSucceeded && stream.taskId && list.some((m) => m.role === 'assistant' && m.taskId === stream.taskId) ? stream.taskId : null;
-  const showWriteTask =
-    phase === 'ready' && !!stream.taskId && !!(task || stream.status) && (task?.type ?? 'modify') !== 'plan' && task?.type !== 'generate' && !mergedTaskId;
+  const rawShowWriteTask =
+    phase === 'ready' &&
+    !!stream.taskId &&
+    !!(task || stream.status) &&
+    (task?.type ?? 'modify') !== 'plan' &&
+    task?.type !== 'generate' &&
+    !mergedTaskId &&
+    !streamDiscarded;
+  // 定位该写任务在消息时间线中的原始位置：已停止/失败的任务就地留在原消息下方，绝不跟着后续新聊天反复跳到最底部！
+  const writeTaskAnchorIdx =
+    rawShowWriteTask && stream.taskId ? list.reduce((acc, m, i) => (m.taskId === stream.taskId ? i : acc), -1) : -1;
+  const taskTime = task?.finishedAt || task?.createdAt || '';
+  const hasNewerChatAfterTask =
+    streamTerminal &&
+    !!taskTime &&
+    list.some((m) => (m.role === 'user' || m.role === 'assistant') && m.taskId !== stream.taskId && m.createdAt > taskTime);
+  const inlineWriteTaskIdx = rawShowWriteTask && streamTerminal && writeTaskAnchorIdx >= 0 ? writeTaskAnchorIdx : -1;
+  const showBottomWriteTask = rawShowWriteTask && inlineWriteTaskIdx < 0 && !(streamTerminal && hasNewerChatAfterTask);
   const assistantText =
     phase === 'planning'
       ? '收到你的想法，正在为你整理一份实现计划。'
@@ -620,7 +704,14 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             {convMessages.length ? null : <p>{assistantText}</p>}
             {phase === 'planning' || phase === 'generating' || phase === 'failed' || phase === 'stopped' ? (
               stream.taskId ? (
-                <TaskCard stream={stream} type={phase === 'planning' ? 'plan' : undefined} onNewTask={onTaskStarted} />
+                <TaskCard
+                  stream={stream}
+                  type={phase === 'planning' ? 'plan' : undefined}
+                  onNewTask={onTaskStarted}
+                  onDismiss={onDismissTask}
+                  onCancelRequested={onCancelRequested}
+                  canReturnToPlan={!skill && !!app.planDoc}
+                />
               ) : phase === 'failed' || phase === 'stopped' ? (
                 <FailedNoTask app={app} onTaskStarted={onTaskStarted} />
               ) : (
@@ -655,23 +746,49 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             ? (versions.find((v) => v.id === m.versionId) ?? (currentVersion?.id === m.versionId ? currentVersion : undefined))
             : undefined;
           const versionNumber = version?.number ?? (m.versionId && app.currentVersion?.id === m.versionId ? app.currentVersion?.number : undefined);
+          // 当前就地渲染该任务的停止/失败卡片时，隐藏紧邻的重复系统取消/失败条，避免双卡片重叠
+          const hideDupSystem =
+            inlineWriteTaskIdx >= 0 &&
+            m.role === 'system' &&
+            m.taskId === stream.taskId &&
+            (m.content.startsWith('织页的回复被用户取消') || m.content.startsWith('修改失败：'));
           return (
-            <MessageItem
-              key={m.id}
-              m={m}
-              canEdit={phase === 'ready' || phase === 'plan'}
-              draftNote={draftNotes[m.id]}
-              skillNames={skillNames}
-              version={version}
-              versionNumber={versionNumber}
-              currentVersionId={currentVersion?.id ?? app.currentVersion?.id ?? null}
-              busy={!!runningTaskId || !!otherBusy}
-              cloudEnabled={phase === 'ready' ? cloudEnabled : null}
-              onEnableCloud={phase === 'ready' ? onEnableCloud : undefined}
-              onRestoreVersion={onRestoreVersion}
-              steps={mergedTaskId && m.role === 'assistant' && m.taskId === mergedTaskId && (stream.timeline.length > 0 || stream.tools.length > 0) ? <Timeline stream={stream} finished summaryOnly /> : null}
-              next={idx === lastAssistant && !asking && !runningTaskId && (phase === 'ready' || phase === 'plan') ? (s) => void send(s) : undefined}
-            />
+            <Fragment key={m.id}>
+              {hideDupSystem ? null : (
+                <MessageItem
+                  m={m}
+                  canEdit={phase === 'ready' || phase === 'plan'}
+                  draftNote={draftNotes[m.id]}
+                  skillNames={skillNames}
+                  version={version}
+                  versionNumber={versionNumber}
+                  currentVersionId={currentVersion?.id ?? app.currentVersion?.id ?? null}
+                  busy={!!runningTaskId || !!otherBusy}
+                  cloudEnabled={phase === 'ready' ? cloudEnabled : null}
+                  onEnableCloud={phase === 'ready' ? onEnableCloud : undefined}
+                  onRestoreVersion={onRestoreVersion}
+                  steps={mergedTaskId && m.role === 'assistant' && m.taskId === mergedTaskId && (stream.timeline.length > 0 || stream.tools.length > 0) ? <Timeline stream={stream} finished summaryOnly /> : null}
+                  next={idx === lastAssistant && !asking && !runningTaskId && (phase === 'ready' || phase === 'plan') ? (s) => void send(s) : undefined}
+                />
+              )}
+              {idx === inlineWriteTaskIdx ? (
+                <div className="assistant-message">
+                  <span className="assistant-avatar">
+                    <img src="/brand.svg" alt="" />
+                  </span>
+                  <div className="assistant-content">
+                    <TaskCard
+                      stream={stream}
+                      onNewTask={onTaskStarted}
+                      onDismiss={onDismissTask}
+                      onCancelRequested={onCancelRequested}
+                      compact
+                      savedDraftFirst={stream.taskId ? draftNotes[stream.taskId] : undefined}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </Fragment>
           );
         })}
         {asking ? (
@@ -702,13 +819,20 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             </div>
           </>
         ) : null}
-        {showWriteTask ? (
+        {showBottomWriteTask ? (
           <div className="assistant-message">
             <span className="assistant-avatar">
               <img src="/brand.svg" alt="" />
             </span>
             <div className="assistant-content">
-              <TaskCard stream={stream} onNewTask={onTaskStarted} compact savedDraftFirst={stream.taskId ? draftNotes[stream.taskId] : undefined} />
+              <TaskCard
+                stream={stream}
+                onNewTask={onTaskStarted}
+                onDismiss={onDismissTask}
+                onCancelRequested={onCancelRequested}
+                compact
+                savedDraftFirst={stream.taskId ? draftNotes[stream.taskId] : undefined}
+              />
             </div>
           </div>
         ) : null}
@@ -970,11 +1094,12 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                 {runningTaskId ? (
                   <button
                     className="send-button stop-button"
-                    aria-label="停止当前任务"
-                    title="停止当前任务（输入的内容会保留）"
-                    disabled={stopping}
+                    aria-label={isCancelling ? '正在停止任务' : '停止当前任务'}
+                    title={isCancelling ? '正在停止当前任务…' : '停止当前任务（输入的内容会保留）'}
+                    disabled={isCancelling}
                     onClick={async () => {
                       setStopping(true);
+                      onCancelRequested?.(runningTaskId);
                       try {
                         await api.cancelTask(runningTaskId);
                       } catch (err) {
@@ -983,6 +1108,16 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                         setStopping(false);
                       }
                     }}
+                  >
+                    {isCancelling ? <Icon name="refresh" className="spinning" /> : <i className="stop-glyph" aria-hidden="true" />}
+                  </button>
+                ) : asking ? (
+                  <button
+                    type="button"
+                    className="send-button stop-button"
+                    aria-label="停止回复"
+                    title="停止当前回答"
+                    onClick={() => askAbortRef.current?.abort()}
                   >
                     <i className="stop-glyph" aria-hidden="true" />
                   </button>
@@ -1065,9 +1200,74 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
             <Icon name="alert" /> 可以在上方重试生成，或修改计划后再试。
           </span>
         ) : phase === 'stopped' ? (
-          <span>
-            <Icon name="stop" /> 已停止，可以在上方点「继续」接着做。
-          </span>
+          <div className="stopped-composer-bar">
+            <span>
+              <Icon name="stop" /> 生成已停止
+            </span>
+            <div className="stopped-composer-actions">
+              {stream.taskId && task?.resumable ? (
+                <button
+                  type="button"
+                  className="task-pill accent"
+                  disabled={sending}
+                  onClick={async () => {
+                    if (!stream.taskId) return;
+                    setSending(true);
+                    try {
+                      onTaskStarted(await api.resumeTask(stream.taskId));
+                    } catch (err) {
+                      toast(errorMessage(err), 'error');
+                    } finally {
+                      setSending(false);
+                    }
+                  }}
+                >
+                  <i className="pill-play" aria-hidden="true" />
+                  继续生成
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="task-pill"
+                disabled={sending}
+                onClick={async () => {
+                  setSending(true);
+                  try {
+                    onTaskStarted(await api.generate(app.id));
+                  } catch (err) {
+                    toast(errorMessage(err), 'error');
+                  } finally {
+                    setSending(false);
+                  }
+                }}
+              >
+                <Icon name="refresh" />
+                重新生成
+              </button>
+              {!skill && app.planDoc && stream.taskId ? (
+                <button
+                  type="button"
+                  className="task-pill ghost"
+                  disabled={sending}
+                  onClick={async () => {
+                    if (!stream.taskId) return;
+                    setSending(true);
+                    try {
+                      await api.discardTask(stream.taskId);
+                      onDismissTask?.(stream.taskId);
+                      toast('已放弃未完成进度，已返回「创造计划」。');
+                    } catch (err) {
+                      toast(errorMessage(err), 'error');
+                    } finally {
+                      setSending(false);
+                    }
+                  }}
+                >
+                  返回修改计划
+                </button>
+              ) : null}
+            </div>
+          </div>
         ) : (
           <span>
             <Icon name="spark" /> {stream.phaseLabel || '任务进行中，完成后可以继续修改。'}
@@ -1209,7 +1409,7 @@ function MessageItem({
   onRestoreVersion?: (version: Version) => void;
 }) {
   const { body, next: nextItems } = splitNext(m.content);
-  if (m.role === 'system' && m.content.startsWith('织页的回复被用户取消'))
+  if (m.role === 'system' && (m.content.startsWith('织页的回复被用户取消') || m.content.startsWith('已停止，')))
     return (
       <p className="stop-note">
         <Icon name="stop" />

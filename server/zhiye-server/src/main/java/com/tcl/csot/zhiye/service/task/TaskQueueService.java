@@ -103,7 +103,10 @@ public class TaskQueueService {
                 }
             }
             var input = Json.obj().put("content", next.content()).put("queuedMessageId", next.id());
-            TaskRow created = taskService.create(current.workspaceId(), app.id(), "modify", current.resultVersionId(),
+            String baseVer = "SUCCEEDED".equals(current.status()) && current.resultVersionId() != null
+                    ? current.resultVersionId()
+                    : app.currentVersionId();
+            TaskRow created = taskService.create(current.workspaceId(), app.id(), "modify", baseVer,
                     input, null, 1, current.id());
             messages.insert(app.id(), "user", next.content(), null, created.id(), "pending");
             if (!queued.markSent(current.workspaceId(), next.id(), created.id()))

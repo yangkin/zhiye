@@ -64,6 +64,9 @@ useCreateForm.subscribe((s) => {
  */
 const BUILD_WORDS = /(帮我做|做一个|做个|做出来|实现|生成|搭建|创建|开发|写一个|写个|设计一|改一下|优化一下|部署|上线|重构|替换|加上|增加一个)/;
 const QUESTION_WORDS = /(\?|？|吗|呢|怎么|如何|为什么|什么|干嘛|干吗|介绍|能不能|可不可以|区别|用处|用途|有哪些|支持|适合|是不是)/;
+/** 闲聊打招呼、确认状态或纯粹表示放弃/取消：绝不误触发代码修改任务 */
+const CASUAL_OR_ABORT_RE =
+  /^(在吗|在不在|你好|您好|哈喽|hello|hi|hey|谢谢|多谢|好的|好吧|知道了|明白|收到|没事|不用了|算了|先不做了|不用做了|不要做了|别做了|停了吧|取消吧|放弃吧|放弃(这个|那个|刚才的?|上个|上一轮|当前)?(任务|修改|生成)?(吧|了)?)[。！!？?～~]*$/i;
 /** 明确「现在就要做」：有生产动词，且不是在问问题 */
 export function isIntentToBuild(text: string): boolean {
   const t = text.trim();
@@ -75,6 +78,7 @@ export function isIntentToBuild(text: string): boolean {
 export function isQuestion(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 160) return false;
+  if (CASUAL_OR_ABORT_RE.test(t)) return true;
   // 以问号结尾通常是提问，即使句子里有「实现/生成」这类词（例如「顶栏是怎么实现的？」）；
   // 明确以「帮我/给我/请」开头的命令句仍按需求处理。
   if (/[?？]\s*$/.test(t) && !/^(帮我|给我|请|帮忙)/.test(t)) return true;
@@ -88,7 +92,7 @@ export function quickRoute(text: string, hasElement = false): Route {
   const t = text.trim();
   const asked = /[?？]\s*$/.test(t) && !/^(帮我|给我|请|帮忙)/.test(t);
   if (hasElement) return asked ? 'model' : 'modify';
-  if (asked) return 'ask';
+  if (asked || CASUAL_OR_ABORT_RE.test(t)) return 'ask';
   if (t.length <= 80 && BUILD_WORDS.test(t) && !QUESTION_WORDS.test(t)) return 'modify';
   if (t.length <= 80 && QUESTION_WORDS.test(t) && !BUILD_WORDS.test(t)) return 'ask';
   return 'model';

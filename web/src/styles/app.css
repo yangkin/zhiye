@@ -2126,10 +2126,11 @@ body.studio-mode,.studio-shell,.studio-main.main-workspace,.studio-header{backgr
 .collection-controls .zy-select{max-width:140px;height:34px}
 .ze-edit-panel .zy-select.field{height:32px;font-size:12px;background:var(--st-bg);border-color:var(--st-line-strong)}
 
-/* ===== 任务卡右上角的停止 / 继续 / 重试 ===== */
-.task-card .progress-title{align-items:center}
-.task-pills{display:inline-flex;gap:6px;margin-left:8px;flex:none}
-.task-pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px 0 8px;border-radius:999px;border:1px solid var(--st-line-strong,#d9d6e2);background:var(--st-bg,#fff);color:var(--st-ink-2,#45414f);font-size:12px;font-weight:500;line-height:1;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+/* ===== 任务卡右上角的停止 / 继续 / 重试 / 放弃 ===== */
+.task-card .progress-title{align-items:center;gap:6px}
+.task-card .progress-title>b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.task-pills{display:inline-flex;gap:5px;margin-left:6px;flex:none}
+.task-pill{display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 10px 0 7px;border-radius:999px;border:1px solid var(--st-line-strong,#d9d6e2);background:var(--st-bg,#fff);color:var(--st-ink-2,#45414f);font-size:12px;font-weight:500;line-height:1;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
 .task-pill:hover:not(:disabled){background:var(--st-raised,#f1f0f5);border-color:#c9c4d6;color:var(--st-ink,#22202a)}
 .task-pill:disabled{opacity:.55;cursor:not-allowed}
 .task-pill .icon{width:14px;height:14px}
@@ -2139,7 +2140,13 @@ body.studio-mode,.studio-shell,.studio-main.main-workspace,.studio-header{backgr
 .task-pill:hover:not(:disabled) .pill-stop,.task-pill:hover:not(:disabled) .pill-play{background:#e6e3ee}
 .task-pill.accent{background:var(--st-accent-soft,#efeafc);border-color:var(--st-accent-line,#d3c6f5);color:var(--st-accent-ink,#5a3fbf)}
 .task-pill.accent:hover:not(:disabled){background:#e4dcfa;color:var(--st-accent-ink,#5a3fbf)}
-.task-card .progress-title>small{margin-left:auto}
+.task-pill.ghost{background:transparent;border-color:transparent;color:var(--st-muted,#625d70);padding:0 8px}
+.task-pill.ghost:hover:not(:disabled){background:var(--st-raised,#f1f0f5);border-color:var(--st-line,#e5e2ee);color:var(--st-ink,#22202a)}
+.task-card .progress-title>small{margin-left:auto;flex:none}
+.assistant-message + .user-message,.stop-note + .user-message{margin-top:18px}
+.stopped-composer-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%}
+.stopped-composer-bar>span{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--st-muted,#625d70)}
+.stopped-composer-actions{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 
 /* ===== 消息悬停操作 ===== */
 .msg-col{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:0;max-width:100%}

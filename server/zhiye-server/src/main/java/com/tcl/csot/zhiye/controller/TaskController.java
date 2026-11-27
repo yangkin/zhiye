@@ -202,8 +202,17 @@ public class TaskController {
     public Map<String, Object> cancel(@PathVariable String id) { return views.task(tasks.cancel(principal.workspaceId(), id)); }
 
     @PostMapping("/{id}/resume")
-    public Map<String, Object> resume(@PathVariable String id, @RequestHeader(value = "Idempotency-Key", required = false) String key) {
-        return views.task(tasks.resume(principal.workspaceId(), id, key));
+    public Map<String, Object> resume(@PathVariable String id,
+                                      @RequestHeader(value = "Idempotency-Key", required = false) String key,
+                                      @RequestBody(required = false) JsonNode body) {
+        String note = body == null ? null : body.path("content").asText(body.path("note").asText("")).trim();
+        if (note != null && note.length() > 2000) throw ApiException.validation("补充内容最多 2000 字");
+        return views.task(tasks.resume(principal.workspaceId(), id, key, note));
+    }
+
+    @PostMapping("/{id}/discard")
+    public Map<String, Object> discard(@PathVariable String id) {
+        return views.task(tasks.discard(principal.workspaceId(), id));
     }
 
     @PostMapping("/{id}/retry")

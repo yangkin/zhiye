@@ -43,6 +43,8 @@ export interface Task extends TaskRef {
   resultVersionId: string | null;
   result?: Record<string, unknown> | null;
   resumable: boolean;
+  /** 用户已主动放弃或已被新任务替代的已停止/失败任务 */
+  discarded?: boolean;
   /** 最新的待办清单（todo 事件） */
   todos?: TodoItem[] | null;
   retryable: boolean;

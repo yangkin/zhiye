@@ -540,7 +540,9 @@ export const api = {
   getTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}`),
   taskEventsUrl: (id: string, after?: number) => `/api/tasks/${enc(id)}/events` + qs({ after: after ? String(after) : undefined }),
   cancelTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/cancel`, { method: 'POST' }),
-  resumeTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/resume`, { method: 'POST' }),
+  resumeTask: (id: string, content?: string) =>
+    request<Task>(`/api/tasks/${enc(id)}/resume`, { method: 'POST', ...(content?.trim() ? { body: { content: content.trim() } } : {}) }),
+  discardTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/discard`, { method: 'POST' }),
   retryTask: (id: string) => request<Task>(`/api/tasks/${enc(id)}/retry`, { method: 'POST' }),
 
   // 版本与历史

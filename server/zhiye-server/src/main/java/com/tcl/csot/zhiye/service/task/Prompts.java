@@ -193,7 +193,13 @@ public final class Prompts {
     }
 
     static String resume(String original) {
-        return "上次的工作被中断了。请先查看当前项目的实际状态，然后继续完成下面的任务（已经完成的部分不用重做）。\n\n---\n" + original;
+        return resume(original, null);
+    }
+
+    static String resume(String original, String extraNote) {
+        String extra = extraNote == null ? "" : extraNote.trim();
+        String extraSection = extra.isEmpty() ? "" : "\n\n用户恢复任务时同时补充了要求：" + extra;
+        return "上次的工作被中断了。请先查看当前项目的实际状态，然后继续完成下面的任务（已经完成的部分不用重做）。" + extraSection + "\n\n---\n" + original;
     }
 
     /** 上一轮被用户停止，这一句接着同一个工作区做：先补完上一轮，再做新要求 */

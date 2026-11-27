@@ -256,7 +256,7 @@ public class TaskExecutor {
         if ("prompt".equals(ctx.currentCommand)) {
             r.abort();
             Threads.start(() -> {
-                try { Thread.sleep(15_000); } catch (InterruptedException ignored) { }
+                try { Thread.sleep(3_000); } catch (InterruptedException ignored) { }
                 if ("prompt".equals(ctx.currentCommand) && r.alive()) r.kill();
             });
         } else {
@@ -655,8 +655,9 @@ public class TaskExecutor {
             String memSection = memories.promptSection(app.workspaceId());
             if (!memSection.isBlank()) instruction += memSection;
         }
+        String resumeNote = input.hasNonNull("resumeNote") ? input.path("resumeNote").asText("") : "";
         String text = continuing && resumed ? Prompts.continuePrevious(input.path("continueContent").asText(), instruction)
-                : resumed && (!retry || resume.path("continueWork").asBoolean(false)) ? Prompts.resume(instruction) : instruction;
+                : resumed && (!retry || resume.path("continueWork").asBoolean(false)) ? Prompts.resume(instruction, resumeNote) : instruction;
         String summary = prompt(ctx, text);
 
         int fixRounds = props.task().verifyFixRounds();
