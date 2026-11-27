@@ -300,8 +300,8 @@ button.pet { position: relative; padding: 0; border: 0; background: transparent;
   .tpl-gal-nav { border-right: 0; border-bottom: 1px solid #efecf7; max-height: 160px; flex-direction: row; flex-wrap: wrap; }
   .tpl-gal-grid { grid-template-columns: 1fr; }
 }
-.scene-thumb-watermark { position: absolute; right: -18px; bottom: -22px; opacity: .08; pointer-events: none; }
-.scene-thumb-icon { box-shadow: 0 6px 16px #2a1f4a26; }
+.scene-thumb-watermark { position: absolute; right: -18px; bottom: -22px; opacity: .045; pointer-events: none; }
+.scene-thumb-icon { box-shadow: 0 4px 12px rgba(28, 20, 56, 0.14); }
 .inspiration-card:hover .scene-thumb-icon { transform: translateY(-2px) rotate(-4deg); transition: transform .25s; }
 
 /* ---------- 小织帮助抽屉 ---------- */

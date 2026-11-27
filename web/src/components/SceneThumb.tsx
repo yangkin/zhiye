@@ -8,52 +8,61 @@ interface Palette {
   accentSoft: string;
   ink: string;
   orb: string;
+  dark?: boolean;
 }
 
-const PALETTES: Record<SceneTemplate['style'], Palette> = {
-  lavender: {
-    mesh: 'radial-gradient(120% 90% at 92% 8%, rgba(167, 139, 250, 0.34), transparent 55%), radial-gradient(90% 80% at 6% 96%, rgba(196, 181, 253, 0.30), transparent 60%), linear-gradient(155deg, #f8f5ff 0%, #ede6ff 100%)',
-    accent: '#6d28d9',
-    accentSoft: '#ede9fe',
-    ink: '#1e1635',
-    orb: '#8b5cf6',
+/** 方案 A：统一纯净画布 + 按 5 种应用形态收敛语义色（仅深色大屏提示词使用真实深曜石画布，彻底消除彩虹杂乱感） */
+const TYPE_PALETTES: Record<SceneTemplate['type'], Palette> = {
+  日常开发: {
+    mesh: 'radial-gradient(88% 72% at 96% 0%, rgba(109, 77, 224, 0.10), transparent 62%), linear-gradient(168deg, #ffffff 0%, #faf9fe 58%, #f4f1fb 100%)',
+    accent: '#6d4de0',
+    accentSoft: '#f2edff',
+    ink: '#1f1936',
+    orb: '#8b6cf6',
   },
-  mint: {
-    mesh: 'radial-gradient(120% 90% at 90% 10%, rgba(52, 211, 153, 0.28), transparent 55%), radial-gradient(90% 80% at 8% 95%, rgba(110, 231, 183, 0.26), transparent 60%), linear-gradient(155deg, #f0fdf8 0%, #dcf7ec 100%)',
-    accent: '#047857',
-    accentSoft: '#d1fae5',
-    ink: '#0d2b22',
-    orb: '#10b981',
+  全栈应用: {
+    mesh: 'radial-gradient(88% 72% at 96% 0%, rgba(37, 99, 235, 0.10), transparent 62%), linear-gradient(168deg, #ffffff 0%, #f8faff 58%, #f0f5ff 100%)',
+    accent: '#2563eb',
+    accentSoft: '#eff6ff',
+    ink: '#16213e',
+    orb: '#3b82f6',
   },
-  sand: {
-    mesh: 'radial-gradient(120% 90% at 92% 8%, rgba(251, 191, 36, 0.28), transparent 55%), radial-gradient(90% 80% at 8% 96%, rgba(253, 211, 145, 0.30), transparent 60%), linear-gradient(155deg, #fffaf0 0%, #feefd6 100%)',
-    accent: '#b45309',
-    accentSoft: '#fef3c7',
-    ink: '#311e0c',
+  开发网站: {
+    mesh: 'radial-gradient(88% 72% at 96% 0%, rgba(13, 148, 136, 0.095), transparent 62%), linear-gradient(168deg, #ffffff 0%, #f7fcfb 58%, #eef9f6 100%)',
+    accent: '#0d9488',
+    accentSoft: '#ecfdf5',
+    ink: '#132a26',
+    orb: '#14b8a6',
+  },
+  开发skill: {
+    mesh: 'radial-gradient(88% 72% at 96% 0%, rgba(217, 119, 6, 0.095), transparent 62%), linear-gradient(168deg, #ffffff 0%, #fdfcf9 58%, #f8f5ee 100%)',
+    accent: '#d97706',
+    accentSoft: '#fffbeb',
+    ink: '#292014',
     orb: '#f59e0b',
   },
-  rose: {
-    mesh: 'radial-gradient(120% 90% at 90% 10%, rgba(251, 113, 133, 0.26), transparent 55%), radial-gradient(90% 80% at 10% 95%, rgba(253, 164, 175, 0.28), transparent 60%), linear-gradient(155deg, #fff3f6 0%, #fde3ea 100%)',
-    accent: '#be123c',
-    accentSoft: '#ffe4e6',
-    ink: '#35121d',
-    orb: '#f43f5e',
-  },
-  ink: {
-    mesh: 'radial-gradient(120% 90% at 92% 8%, rgba(99, 102, 241, 0.28), transparent 55%), radial-gradient(90% 80% at 8% 96%, rgba(147, 197, 253, 0.30), transparent 60%), linear-gradient(155deg, #f2f5ff 0%, #e1e8ff 100%)',
-    accent: '#3730a3',
-    accentSoft: '#e0e7ff',
-    ink: '#151b38',
-    orb: '#4f46e5',
-  },
-  cyber: {
-    mesh: 'radial-gradient(120% 90% at 90% 10%, rgba(129, 140, 248, 0.34), transparent 55%), radial-gradient(90% 80% at 10% 96%, rgba(56, 189, 248, 0.24), transparent 60%), linear-gradient(155deg, #f1f0ff 0%, #e1dcff 100%)',
-    accent: '#4f46e5',
-    accentSoft: '#e0e7ff',
-    ink: '#18143b',
-    orb: '#6366f1',
+  技术文档: {
+    mesh: 'radial-gradient(88% 72% at 96% 0%, rgba(71, 85, 105, 0.08), transparent 62%), linear-gradient(168deg, #ffffff 0%, #fafbfc 58%, #f2f4f8 100%)',
+    accent: '#475569',
+    accentSoft: '#f1f5f9',
+    ink: '#1e293b',
+    orb: '#64748b',
   },
 };
+
+const DARK_SCREEN_PALETTE: Palette = {
+  mesh: 'radial-gradient(92% 74% at 94% 4%, rgba(56, 189, 248, 0.22), transparent 58%), radial-gradient(75% 70% at 6% 96%, rgba(99, 102, 241, 0.20), transparent 60%), linear-gradient(160deg, #0b1120 0%, #141c33 56%, #0f172a 100%)',
+  accent: '#38bdf8',
+  accentSoft: 'rgba(56, 189, 248, 0.16)',
+  ink: '#f8fafc',
+  orb: '#818cf8',
+  dark: true,
+};
+
+/** 提示词明确要求深色大屏/暗黑投屏的模板，封面真实呈现深色大屏形态（所见即所得） */
+function isDarkScreenTemplate(t: SceneTemplate): boolean {
+  return /深色大屏|暗黑大屏|默认深色/.test(t.prompt);
+}
 
 function renderMiniUi(t: SceneTemplate, p: Palette): ReactNode {
   const gradId = `sg-${t.id.replace(/[^a-z0-9]/gi, '')}`;
@@ -546,7 +555,7 @@ function renderMiniUi(t: SceneTemplate, p: Palette): ReactNode {
         'doc-incident': ['预案', 'P0 响应 · 回滚 · 复盘', '故障应急指挥手册'],
         'doc-equipment-manual': ['保养', '日检 · 周保 · 备件清单', '设备标准操作卡'],
       };
-      const [tag, outline, sub] = docMeta[t.id] ?? ['.docx', '章节目录 · 表格 · 流程图', '支持导出 Word'];
+      const [tag, outline, sub] = docMeta[t.id] ?? ['文档', '章节目录 · 检索 · 交互工具', '在线技术文档站'];
       return (
         <div className="st-doc">
           <div className="st-doc-toc">
@@ -565,10 +574,19 @@ function renderMiniUi(t: SceneTemplate, p: Palette): ReactNode {
   }
 }
 
-/** 场景模板封面卡片：55 个模板各具专属业务微型界面插画，拒绝千篇一律。 */
+/** 场景模板封面卡片：统一纯净画布 + 5 形态语义色点缀 + 深色大屏真深色预览 + 专属业务微型界面插画。 */
 export function SceneThumb({ t }: { t: SceneTemplate }) {
-  const p = PALETTES[t.style] ?? PALETTES.lavender;
-  const variant = t.type === '开发skill' ? 'skill' : t.type === '全栈应用' ? 'fullstack' : 'default';
+  const dark = isDarkScreenTemplate(t);
+  const p = dark ? DARK_SCREEN_PALETTE : (TYPE_PALETTES[t.type] ?? TYPE_PALETTES['日常开发']);
+  const variant = dark
+    ? 'dark'
+    : t.type === '开发skill'
+      ? 'skill'
+      : t.type === '技术文档'
+        ? 'doc'
+        : t.type === '全栈应用'
+          ? 'fullstack'
+          : 'default';
 
   const cssVars = {
     '--st-accent': p.accent,
@@ -581,16 +599,16 @@ export function SceneThumb({ t }: { t: SceneTemplate }) {
   return (
     <div className={`thumbnail scene-thumb is-${variant}`} style={cssVars} aria-hidden="true">
       <span className="scene-thumb-watermark">
-        <TemplateIcon id={t.id} size={108} />
+        <TemplateIcon id={t.id} size={102} />
       </span>
 
       <div className="scene-thumb-top">
         <span className="scene-thumb-icon" style={{ background: `linear-gradient(135deg, ${p.accent}, ${p.orb})` }}>
-          <TemplateIcon id={t.id} size={16} />
+          <TemplateIcon id={t.id} size={15} />
         </span>
         <span className="scene-thumb-type-pill">
           <i />
-          {t.type}
+          {dark ? '深色大屏' : t.type}
         </span>
       </div>
 

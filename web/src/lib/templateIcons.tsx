@@ -57,6 +57,20 @@ export const TEMPLATE_ICONS: Record<string, string> = {
   'doc-hr-handbook': 'M5 3h12a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2zM5 19a2 2 0 0 1 2-2h12M12 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM8.5 15c.6-1.4 1.9-2.2 3.5-2.2s2.9.8 3.5 2.2',
   'doc-incident': 'M7 18v-6a5 5 0 0 1 10 0v6M4 18h16v3H4zM12 3v2M4.5 6.5L6 8M19.5 6.5L18 8M12 11v3',
   'doc-equipment-manual': 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1',
+  // 全栈应用
+  'fs-yield-8d': 'M3 4h18v16H3zM3 9h18M7 16l3-3 3 2 4-4',
+  'fs-equip-spare': 'M4 5h16v6H4zM4 13h7v6H4zM13 13h7v6h-7zM7.5 8h4',
+  'fs-rd-tracker': 'M6 4v16M6 6h12v4H6zM6 13h8v4H6zM16.5 15l1.8 1.8 3.2-3.2',
+  'fs-customer-complaint': 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM12 8v4.5M12 15.5v.5',
+  'fs-doc-report-hub': 'M3 5h18l-7 7v6l-4 2v-8z',
+  'fs-meeting-action': 'M4 6.5l1.5 1.5L8.5 5M12 6.5h8M4 12.5l1.5 1.5L8.5 11M12 12.5h8M4 18.5h4.5M12 18.5h8',
+  // 企业生态联动
+  'eco-agw-feishu-alert': 'M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 0 0 3.4 0',
+  'eco-feishu-bitable-inspect': 'M3 5h18v14H3zM3 10h18M9 10v9M13 13.5h5l-1.5-1.5M18 16.5h-5l1.5 1.5',
+  'eco-feishu-approval-hub': 'M20 12a8 8 0 1 1-4.5-7.2M9 11.5l2.5 2.5L21 4.5',
+  'eco-meeting-feishu-ai': 'M4 5h16v11H9l-5 4zM12 7.5l1 2.2 2.2 1-2.2 1-1 2.2-1-2.2-2.2-1 2.2-1z',
+  'eco-weekly-report-bot': 'M4 10v4h3l7 4V6l-7 4zM7 14l1 5h2.5l-.8-5M17.5 9a3.5 3.5 0 0 1 0 6',
+  'eco-spare-feishu-dispatch': 'M3 7l9-4 9 4v6M3 7l9 4 9-4M3 7v10l9 4 2-.9M12 11v10M18 14v3M18 19.5v.5',
 };
 
 export function TemplateIcon({ id, size = 18 }: { id: string; size?: number }) {

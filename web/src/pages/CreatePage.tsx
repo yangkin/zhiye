@@ -9,7 +9,7 @@ import { api, errorMessage } from '../api/client';
 import { TaskLimitLink, errorCode } from '../components/LimitNotice';
 import { useActiveTask, useMeta } from '../api/queries';
 import { APP_TYPES, type AppType, type Asset, type Mode } from '../api/types';
-import { TEMPLATES, domainOf, featuredTemplates, templatesOf, type SceneTemplate } from '../lib/templates';
+import { TEMPLATES, domainOf, featuredTemplates, homeFeaturedTemplates, templatesOf, type SceneTemplate } from '../lib/templates';
 import { SceneThumb } from '../components/SceneThumb';
 import { Pet } from '../components/Pet';
 import { TemplateIcon } from '../lib/templateIcons';
@@ -349,11 +349,11 @@ export function CreatePage() {
       );
     });
   }, [activeTemplates, domain, templateQuery]);
-  // 首页精选：默认只展示 8 张高价值卡片（2×4 网格），完整 60+ 模板收口进宽幅分类抽屉，保持首页清爽与社区曝光
+  // 首页精选：默认展示 8 张跨全形态高价值卡片（覆盖全栈/生态/深色大屏/看板/业务系统/Skill/技术文档站），完整 61 个模板收口进分类抽屉
   const HOME_TEMPLATE_LIMIT = 8;
   const homeTemplates = useMemo(() => {
     if (domain === '全部' && !templateQuery.trim() && !typeChosen) {
-      const picks = featuredTemplates();
+      const picks = homeFeaturedTemplates();
       const pickedIds = new Set(picks.map((p) => p.id));
       const rest = shownTemplates.filter((t) => !pickedIds.has(t.id));
       return [...picks, ...rest].slice(0, HOME_TEMPLATE_LIMIT);
