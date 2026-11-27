@@ -36,6 +36,8 @@ export async function invokeMcpTool(agentDir, { server, tool, arguments: toolArg
     const avail = catalog.map((s) => s.key).join(', ')
     return { ok: false, text: `未找到已授权的 MCP 服务「${server}」。当前可用：${avail || '（无）'}` }
   }
+  const effectiveTool = String(tool || '').trim()
+    || (srv.transport === 'knowledge' ? 'search_knowledge' : String(srv.tools?.[0]?.name || '').trim())
   const endpoint = mcpEndpointUrl(env)
   const token = env.ZHIYE_TASK_TOKEN
   if (!endpoint || !token) {
@@ -45,7 +47,7 @@ export async function invokeMcpTool(agentDir, { server, tool, arguments: toolArg
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ serverKey: srv.key, tool, arguments: toolArgs || {} }),
+      body: JSON.stringify({ serverKey: srv.key, tool: effectiveTool, arguments: toolArgs || {} }),
       signal: AbortSignal.timeout(25_000),
     })
     const raw = await res.text()
@@ -58,11 +60,21 @@ export async function invokeMcpTool(agentDir, { server, tool, arguments: toolArg
     const text = typeof data === 'object' && data !== null
       ? (typeof data.content === 'string' ? data.content : JSON.stringify(data.result ?? data, null, 2))
       : String(data)
-    log(`mcp_call ${srv.key}.${tool} ok`)
+    log(`mcp_call ${srv.key}.${effectiveTool} ok`)
     return { ok: true, text: text.slice(0, 12_000) }
   } catch (e) {
     return { ok: false, text: `MCP 代理调用异常：${e.message}` }
   }
+}
+
+function formatSchemaHint(schema) {
+  if (!schema || typeof schema !== 'object' || !schema.properties || typeof schema.properties !== 'object') return ''
+  const req = new Set(Array.isArray(schema.required) ? schema.required : [])
+  const fields = Object.entries(schema.properties).slice(0, 6).map(([k, v]) => {
+    const t = v && typeof v === 'object' && v.type ? `:${v.type}` : ''
+    return `${k}${req.has(k) ? '*' : ''}${t}`
+  })
+  return fields.length ? ` 参数(${fields.join(', ')})` : ''
 }
 
 export function createMcpBridgeExtension({ agentDir, env = process.env }) {
@@ -77,7 +89,7 @@ export function createMcpBridgeExtension({ agentDir, env = process.env }) {
         if (!catalog.length) return { content: [{ type: 'text', text: '当前未配置或未启用任何企业 MCP 服务。' }], details: { count: 0 } }
         const lines = catalog.map((s) => {
           const tools = Array.isArray(s.tools) && s.tools.length
-            ? s.tools.map((t) => `  - \`${t.name}\`: ${t.description || ''}`).join('\n')
+            ? s.tools.map((t) => `  - \`${t.name}\`${formatSchemaHint(t.inputSchema)}: ${t.description || ''}`).join('\n')
             : '  - （通用工具调用）'
           return `### ${s.name} (\`${s.key}\` · ${s.transport || 'http'})\n${s.description || ''}\n${tools}`
         })
@@ -91,7 +103,7 @@ export function createMcpBridgeExtension({ agentDir, env = process.env }) {
       description: '通过织页安全代理调用管理员白名单内的企业 MCP 工具，获取公司文档、接口契约或内部上下文。所有凭证由服务端托管并审计。',
       parameters: Type.Object({
         server: Type.String({ description: 'MCP 服务标识（server key，可先通过 mcp_list 查看）' }),
-        tool: Type.String({ description: '工具名称' }),
+        tool: Type.Optional(Type.String({ description: '工具名称（知识库默认 search_knowledge）' })),
         arguments: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: '传给 MCP 工具的参数对象' })),
       }),
       async execute(_id, params) {

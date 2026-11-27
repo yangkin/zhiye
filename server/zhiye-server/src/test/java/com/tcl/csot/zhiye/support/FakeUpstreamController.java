@@ -53,17 +53,34 @@ public class FakeUpstreamController {
                 : user.contains("用户需求")
                 ? "好的：\n```json\n{" + shape + "\"name\": \"点击计数器\", \"planDoc\": \"# 点击计数器\\n\\n## 应用目标\\n显示点击次数，可以加一和重置。\\n\\n## 验收标准\\n- 按钮可用\"}\n```"
                 : "好";
-        // 问答的工具循环：带 [read_skill] 的问题先让「模型」调用 read_skill，拿到结果后把结果开头回显出来
+        // 问答的工具循环：带 [read_skill] 或 [mcp_call:server:tool:query] 的问题先让「模型」调用工具，拿到结果后把结果回显出来
         JsonNode last = body.path("messages").get(body.path("messages").size() - 1);
         boolean wantsSkill = body.toString().contains("[read_skill]") && body.path("tools").toString().contains("read_skill");
-        if (body.path("stream").asBoolean(false) && (wantsSkill || "tool".equals(last.path("role").asText()))) {
+        var mcpMatcher = java.util.regex.Pattern.compile("\\[mcp_call:([^:\\]]+):([^:\\]]*):([^\\]]*)\\]").matcher(body.toString());
+        boolean wantsMcp = mcpMatcher.find() && body.path("tools").toString().contains("mcp_call");
+        if (body.path("stream").asBoolean(false) && (wantsSkill || wantsMcp || "tool".equals(last.path("role").asText()))) {
             res.setContentType("text/event-stream");
             var out = res.getOutputStream();
             String chunk;
             if ("tool".equals(last.path("role").asText())) {
                 String r = last.path("content").asText();
+                String prefix = body.toString().contains("[mcp_call:") ? "MCP返回：" : "技能内容：";
+                int cap = body.toString().contains("[mcp_call:") ? 400 : 40;
                 chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0)
-                        .set("delta", Json.obj().put("content", "技能内容：" + r.substring(0, Math.min(r.length(), 40)))))));
+                        .set("delta", Json.obj().put("content", prefix + r.substring(0, Math.min(r.length(), cap)))))));
+            } else if (wantsMcp) {
+                String srv = mcpMatcher.group(1);
+                String tool = mcpMatcher.group(2);
+                String query = mcpMatcher.group(3);
+                var fnArgs = Json.obj().put("server", srv);
+                if (!tool.isBlank()) fnArgs.put("tool", tool);
+                fnArgs.putObject("arguments").put("query", query);
+                var tc = Json.obj().put("index", 0).put("id", "mcp_c1").put("type", "function");
+                tc.putObject("function").put("name", "mcp_call").put("arguments", Json.write(fnArgs));
+                var delta = Json.obj();
+                delta.put("reasoning_content", "先调用企业 MCP 查证。");
+                delta.putArray("tool_calls").add(tc);
+                chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0).set("delta", delta))));
             } else {
                 chunk = "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"read_skill\",\"arguments\":\"{\\\"name\\\":\\\"charts-dashboard\\\"}\"}}]}}]}";
             }

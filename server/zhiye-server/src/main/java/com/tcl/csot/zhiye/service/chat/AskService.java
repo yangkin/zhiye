@@ -77,7 +77,7 @@ public class AskService {
             - **不要为了凑回合硬提问**：如果用户已经说清楚了想做什么（例如贴了完整文档/大纲、附了参考截图、描述了具体页面内容，或明确说「帮我做一个 / 生成一个 / 开始做 / 就这样做 / 直接生成」），**直接在回答第一行单独输出 `[[build:类型]]`**，第二行开始用 2～3 句话简明说明实现方案，系统会立刻进入创建，无需让用户再催一次！
             - 回答末尾可以单独一行输出 [[next]] 建议一 | 建议二（2～3 个用户最可能的下一句话，用用户口吻，每个不超过 14 个字），
               系统会显示成可点击的按钮；没有合适的就不要输出。这一行不要放进代码块。
-            - 只依据下面的产品知识和用户附上的技能包文件回答；不知道就说不知道，不要编造按钮、入口、日期。
+            - 只依据下面的产品知识、用户附上的技能包文件以及通过 `mcp_call` / `mcp_list` 实时获取的企业知识库与 MCP 工具返回内容回答；**当当前工作空间已配置或用户勾选了企业知识库 / MCP 服务（尤其是询问公司内部系统、产品、规范、文档或实时数据时），必须先调用 `mcp_call`（不确定工具名时先调 `mcp_list`）查证后再回答，绝不要声称自己没有调用 MCP 的能力**；确实查不到时再如实说明，不要编造按钮、入口、日期。
             - 用户附上了技能包时，依据文件内容说明它是做什么的、怎么用、有哪些文件；没附就按产品知识回答。
             - 用户附上的技能包是用户自己生成或导入的；「织页内置技能」是平台提供的，问题涉及时可以用 read_skill 读取后再回答。
             - 输出 `[[build:类型]]` 时，标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——那样系统不会开始创建，用户会以为卡住了。如果真的还缺影响实现的关键信息，先问清楚，不要输出 `[[build]]`。
@@ -180,6 +180,9 @@ public class AskService {
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.runtime.MonolithServiceManager monolithService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.mcp.McpRegistryService mcpRegistry;
 
     public interface Sink {
         void event(String name, Object data) throws Exception;
@@ -330,7 +333,7 @@ public class AskService {
                                    java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext) {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
-        String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
+        String context = builtinContext() + mcpContext(ws) + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
         boolean explicitBackend = conversation && com.tcl.csot.zhiye.service.app.Catalog.shouldForceFullstack(content);
         if (conversation) {
             if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type) || explicitBackend) {
@@ -487,6 +490,7 @@ public class AskService {
                        java.util.function.Consumer<Reply> done, Sink sink) {
         boolean hasApp = appId != null && !appId.isBlank();
         boolean builtins = !skillRefs.builtinCatalog().isEmpty();
+        boolean hasMcp = mcpRegistry != null && !mcpRegistry.listEnabledForWorkspace(ws).isEmpty();
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
         try {
             route = router.forWorkspace(ws, modelRef == null ? com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO : modelRef, billingType);
@@ -498,7 +502,7 @@ public class AskService {
             try { emit(sink, "error", Json.obj().put("message", e.getMessage())); } catch (Exception ignored) { }
             return;
         }
-        if (!hasApp && !builtins) {
+        if (!hasApp && !builtins && !hasMcp) {
             run(route, body(route, ws, content, skillAppIds, appId, history, type, assets, sourceContext), done, sink);
             return;
         }
@@ -509,7 +513,7 @@ public class AskService {
         StringBuilder answer = new StringBuilder();
         try {
             for (int round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-                boolean allowTools = (commit != null || builtins) && round < MAX_TOOL_ROUNDS;
+                boolean allowTools = (commit != null || builtins || hasMcp) && round < MAX_TOOL_ROUNDS;
                 ObjectNode req = Json.obj();
                 req.put("model", route.model());
                 req.put("stream", true);
@@ -517,11 +521,11 @@ public class AskService {
                 req.put("reasoning_effort", hasApp ? "low" : "medium");
                 req.putObject("stream_options").put("include_usage", true);
                 req.set("messages", msgs.deepCopy());
-                if (allowTools) req.set("tools", toolDefs(commit != null, builtins, appId));
+                if (allowTools) req.set("tools", toolDefs(commit != null, builtins, hasMcp, appId));
 
-                ObjectNode acc = Json.obj();
                 ArrayNode toolCalls = Json.M.createArrayNode();
                 StringBuilder text = new StringBuilder();
+                StringBuilder roundThinking = new StringBuilder();
                 HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(req).getBytes(StandardCharsets.UTF_8));
                 try (InputStream in = res.body()) {
                     if (res.statusCode() >= 400) {
@@ -542,6 +546,10 @@ public class AskService {
                         JsonNode tc = delta.get("tool_calls");
                         boolean hasTool = tc != null && tc.isArray() && !tc.isEmpty();
                         if (hasTool) mergeToolCalls(toolCalls, tc);
+                        JsonNode rc = delta.get("reasoning_content");
+                        if (rc != null && rc.isTextual() && !rc.asText().isEmpty()) {
+                            roundThinking.append(rc.asText());
+                        }
                         streamThinking(delta, thinking, sink);
                         JsonNode cont = delta.get("content");
                         if (cont != null && cont.isTextual() && !cont.asText().isEmpty()) {
@@ -584,16 +592,22 @@ public class AskService {
                         }
                     }
                 }
-                // 把 assistant 的 tool_calls 原样放回历史，再追加每个工具结果
+                // 把 assistant 的 tool_calls（及 thinking 模型的 reasoning_content）原样放回历史，再追加每个工具结果
+                normalizeToolCalls(toolCalls);
                 ObjectNode assistant = msgs.addObject().put("role", "assistant");
                 if (text.length() > 0) assistant.put("content", text.toString()); else assistant.putNull("content");
+                if (roundThinking.length() > 0) assistant.put("reasoning_content", roundThinking.toString());
                 assistant.set("tool_calls", toolCalls.deepCopy());
                 for (JsonNode call : toolCalls) {
                     String id = call.path("id").asText("");
                     String name = call.path("function").path("name").asText("");
                     String args = call.path("function").path("arguments").asText("{}");
-                    String result = execTool(appId, commit, name, args);
+                    String result = execTool(ws, appId, commit, name, args, thinking, sink);
                     msgs.addObject().put("role", "tool").put("tool_call_id", id).put("content", result);
+                }
+                if (answer.length() > 0 && !answer.toString().endsWith("\n")) {
+                    answer.append("\n\n");
+                    emit(sink, "delta", Json.obj().put("text", "\n\n"));
                 }
             }
             // 工具轮次用完：已经流出去的内容就是回答；没有任何内容才报错
@@ -638,6 +652,19 @@ public class AskService {
             if (!name.isEmpty()) fn.put("name", name);
             String args = d.path("function").path("arguments").asText("");
             if (!args.isEmpty()) fn.put("arguments", (fn.path("arguments").asText("") + args));
+        }
+    }
+
+    /** 保证回传给上游模型的 tool_calls 每条都含有效 id 与合法 JSON 字符串 arguments（避免无参工具报 400）。 */
+    private static void normalizeToolCalls(ArrayNode toolCalls) {
+        for (int i = 0; i < toolCalls.size(); i++) {
+            if (!(toolCalls.get(i) instanceof ObjectNode cur)) continue;
+            if (cur.path("id").asText("").isBlank()) cur.put("id", "call_" + i);
+            cur.put("type", "function");
+            ObjectNode fn = cur.has("function") && cur.get("function").isObject()
+                    ? (ObjectNode) cur.get("function") : cur.putObject("function");
+            String a = fn.path("arguments").asText("").trim();
+            if (a.isEmpty()) fn.put("arguments", "{}");
         }
     }
 
@@ -697,13 +724,32 @@ public class AskService {
         return sb.toString();
     }
 
-    private ArrayNode toolDefs(boolean appTools, boolean skillTool, String appId) {
+    /** 工作空间可用企业知识库 / MCP 目录，引导模型通过 mcp_call 实时查证 */
+    String mcpContext(String ws) {
+        if (mcpRegistry == null) return "";
+        try {
+            return mcpRegistry.promptGuideForWorkspace(ws, true);
+        } catch (Exception e) {
+            log.warn("读取 MCP 目录失败：{}", e.getMessage());
+            return "";
+        }
+    }
+
+    private ArrayNode toolDefs(boolean appTools, boolean skillTool, boolean mcpTools, String appId) {
         ArrayNode tools = Json.M.createArrayNode();
         if (skillTool) {
             ObjectNode p0 = Json.obj();
             p0.putObject("name").put("type", "string").put("description", "内置技能名，例如 charts-dashboard");
             p0.putObject("path").put("type", "string").put("description", "技能里的文件，默认 SKILL.md，也可以是 references/ 下的文件");
             tools.add(tool("read_skill", "读取一个织页内置技能的说明文件", p0, "name"));
+        }
+        if (mcpTools) {
+            tools.add(tool("mcp_list", "列出当前工作空间可用的企业知识库与受控 MCP 服务清单（含 serverKey、工具名与参数说明）", Json.obj(), null));
+            ObjectNode pm = Json.obj();
+            pm.putObject("server").put("type", "string").put("description", "MCP 服务标识 serverKey（如 kb-17kf6m，或先调 mcp_list 查看）");
+            pm.putObject("tool").put("type", "string").put("description", "工具名称（知识库默认 search_knowledge；HTTP MCP 传 tools/list 里的工具名）");
+            pm.putObject("arguments").put("type", "object").put("description", "传给 MCP 工具的参数对象，例如知识库检索传 {\"query\": \"关键词\"}");
+            tools.add(tool("mcp_call", "实时调用当前工作空间已授权的企业知识库或受控 HTTP MCP 工具，获取真实内部资料或接口数据", pm, "server"));
         }
         if (!appTools) return tools;
 
@@ -754,7 +800,8 @@ public class AskService {
         return !path.startsWith(".git/") && !path.startsWith(".zhiye/") && !path.contains("node_modules/");
     }
 
-    private String execTool(String appId, String commit, String name, String argsJson) {
+    private String execTool(String ws, String appId, String commit, String name, String argsJson,
+                            StringBuilder thinking, Sink sink) {
         try {
             JsonNode args = argsJson == null || argsJson.isBlank() ? Json.obj() : Json.M.readTree(argsJson);
             return switch (name) {
@@ -764,6 +811,31 @@ public class AskService {
                 case "read_skill" -> {
                     String text = skillRefs.readBuiltin(args.path("name").asText(""), args.path("path").asText("SKILL.md"));
                     yield text == null ? "没有这个内置技能或文件" : text.length() > 12000 ? text.substring(0, 12000) + "\n…（已截断）" : text;
+                }
+                case "mcp_list" -> {
+                    if (mcpRegistry == null) yield "当前环境未启用企业 MCP 注册中心。";
+                    String note = "正在查看当前工作空间可用的企业知识库与 MCP 服务…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    yield mcpRegistry.formatCatalogTextForWorkspace(ws);
+                }
+                case "mcp_call" -> {
+                    if (mcpRegistry == null) yield "当前环境未启用企业 MCP 注册中心。";
+                    String server = args.path("server").asText(args.path("serverKey").asText("")).trim();
+                    String tool = args.path("tool").asText(args.path("toolName").asText("")).trim();
+                    JsonNode toolArgs = args.has("arguments") && args.get("arguments").isObject()
+                            ? args.get("arguments")
+                            : (args.has("params") && args.get("params").isObject() ? args.get("params") : args);
+                    String note = "正在调用企业 MCP「" + server + "」" + (tool.isEmpty() ? "" : "（" + tool + "）") + "…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    Map<String, Object> res = mcpRegistry.callToolForWorkspace(
+                            ws, server, tool, toolArgs, appId != null && !appId.isBlank() ? "ask-app" : "ask-chat", appId);
+                    String content = res.get("content") == null ? Json.write(res) : String.valueOf(res.get("content"));
+                    String doneNote = "已从企业 MCP「" + res.getOrDefault("serverName", server) + "」获取到真实返回（" + content.length() + " 字）。\n";
+                    if (thinking.length() < 20000) thinking.append(doneNote);
+                    emit(sink, "thinking", Json.obj().put("text", doneNote));
+                    yield content.length() > 12000 ? content.substring(0, 12000) + "\n…（已截断）" : content;
                 }
                 case "search" -> searchTool(appId, commit, args.path("pattern").asText(""), args.path("prefix").asText(""));
                 case "cloud_data" -> cloud == null ? "云服务不可用"
@@ -1030,9 +1102,12 @@ public class AskService {
         }
         String sk = skillContext(ws, skillAppIds);
         if (!sk.isBlank()) ctx.append(sk).append('\n');
+        String mcpCtx = mcpContext(ws);
+        if (!mcpCtx.isBlank()) ctx.append(mcpCtx).append('\n');
         ctx.append("\n【当前创造计划全文】\n");
         ctx.append(app.planDoc() == null || app.planDoc().isBlank() ? "（当前计划为空）" : cap(app.planDoc(), 12000));
 
+        boolean hasMcp = mcpRegistry != null && !mcpRegistry.listEnabledForWorkspace(ws).isEmpty();
         ArrayNode msgs = Json.M.createArrayNode();
         String sys = PLAN_CHAT_SYSTEM + (app.isSkill() ? "" : "\n" + com.tcl.csot.zhiye.constants.Capabilities.PLAN) + ctx;
         msgs.addObject().put("role", "system").put("content", sys);
@@ -1046,113 +1121,142 @@ public class AskService {
         for (JsonNode h : norm) msgs.add(h);
         msgs.add(userMessage(mergedUser, assets));
 
-        ObjectNode body = Json.obj();
-        body.put("model", route.model());
-        body.put("stream", true);
-        body.put("max_tokens", 8192);
-        body.put("reasoning_effort", "medium");
-        body.putObject("stream_options").put("include_usage", true);
-        body.set("messages", msgs);
-
         try {
             if (faults.llmError()) throw new java.io.IOException("注入的模型故障");
             if (stopped.getAsBoolean()) return;
-            HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes(StandardCharsets.UTF_8));
-            try (InputStream in = res.body()) {
-                if (onStreamOpen != null) onStreamOpen.accept(in);
+            StringBuilder thinking = new StringBuilder();
+            StringBuilder raw = new StringBuilder();
+            for (int round = 0; round <= MAX_TOOL_ROUNDS; round++) {
                 if (stopped.getAsBoolean()) return;
-                if (res.statusCode() >= 400) {
-                    emit(sink, "error", Json.obj().put("message", upstreamError(res.statusCode(), in.readAllBytes())));
-                    return;
-                }
-                BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
-                String line;
-                StringBuilder raw = new StringBuilder();
-                StringBuilder thinking = new StringBuilder();
+                boolean allowMcp = hasMcp && round < MAX_TOOL_ROUNDS;
+                ObjectNode body = Json.obj();
+                body.put("model", route.model());
+                body.put("stream", true);
+                body.put("max_tokens", 8192);
+                body.put("reasoning_effort", "medium");
+                body.putObject("stream_options").put("include_usage", true);
+                body.set("messages", msgs.deepCopy());
+                if (allowMcp) body.set("tools", toolDefs(false, false, true, null));
+
+                HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes(StandardCharsets.UTF_8));
+                ArrayNode toolCalls = Json.M.createArrayNode();
+                StringBuilder roundText = new StringBuilder();
+                StringBuilder roundThinking = new StringBuilder();
                 StringBuilder pending = new StringBuilder();
                 boolean inPlan = false;
                 boolean planClosed = false;
                 final int guard = PLAN_OPEN.length();
 
-                while ((line = r.readLine()) != null) {
+                try (InputStream in = res.body()) {
+                    if (onStreamOpen != null) onStreamOpen.accept(in);
                     if (stopped.getAsBoolean()) return;
-                    line = line.trim();
-                    if (!line.startsWith("data:")) continue;
-                    String data = line.substring(5).trim();
-                    if (data.equals("[DONE]")) break;
-                    if (data.isEmpty()) continue;
-                    JsonNode n;
-                    try { n = Json.M.readTree(data); } catch (Exception e) { continue; }
-                    JsonNode delta = n.path("choices").path(0).path("delta");
-                    streamThinking(delta, thinking, sink);
-                    if (stopped.getAsBoolean()) return;
-                    JsonNode cont = delta.get("content");
-                    if (cont == null || !cont.isTextual() || cont.asText().isEmpty()) continue;
-                    String piece = cont.asText();
-                    raw.append(piece);
-                    if (!inPlan) {
-                        pending.append(piece);
-                        int idx = pending.indexOf(PLAN_OPEN);
-                        if (idx >= 0) {
-                            String before = pending.substring(0, idx);
-                            if (!before.isEmpty()) emit(sink, "delta", Json.obj().put("text", before));
-                            String tail = pending.substring(idx + PLAN_OPEN.length());
-                            pending.setLength(0);
-                            pending.append(tail);
-                            inPlan = true;
-                            emit(sink, "plan_updating", Json.obj());
+                    if (res.statusCode() >= 400) {
+                        emit(sink, "error", Json.obj().put("message", upstreamError(res.statusCode(), in.readAllBytes())));
+                        return;
+                    }
+                    BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        if (stopped.getAsBoolean()) return;
+                        line = line.trim();
+                        if (!line.startsWith("data:")) continue;
+                        String data = line.substring(5).trim();
+                        if (data.equals("[DONE]")) break;
+                        if (data.isEmpty()) continue;
+                        JsonNode n;
+                        try { n = Json.M.readTree(data); } catch (Exception e) { continue; }
+                        JsonNode delta = n.path("choices").path(0).path("delta");
+                        JsonNode tc = delta.get("tool_calls");
+                        if (tc != null && tc.isArray() && !tc.isEmpty()) mergeToolCalls(toolCalls, tc);
+                        JsonNode rc = delta.get("reasoning_content");
+                        if (rc != null && rc.isTextual() && !rc.asText().isEmpty()) roundThinking.append(rc.asText());
+                        streamThinking(delta, thinking, sink);
+                        if (stopped.getAsBoolean()) return;
+                        JsonNode cont = delta.get("content");
+                        if (cont == null || !cont.isTextual() || cont.asText().isEmpty()) continue;
+                        String piece = cont.asText();
+                        roundText.append(piece);
+                        if (!toolCalls.isEmpty()) continue;
+                        raw.append(piece);
+                        if (!inPlan) {
+                            pending.append(piece);
+                            int idx = pending.indexOf(PLAN_OPEN);
+                            if (idx >= 0) {
+                                String before = pending.substring(0, idx);
+                                if (!before.isEmpty()) emit(sink, "delta", Json.obj().put("text", before));
+                                String tail = pending.substring(idx + PLAN_OPEN.length());
+                                pending.setLength(0);
+                                pending.append(tail);
+                                inPlan = true;
+                                emit(sink, "plan_updating", Json.obj());
+                                int closeIdx = pending.indexOf(PLAN_CLOSE);
+                                if (closeIdx >= 0) {
+                                    planClosed = true;
+                                    String after = pending.substring(closeIdx + PLAN_CLOSE.length());
+                                    pending.setLength(0);
+                                    if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                                }
+                            } else if (pending.length() > guard) {
+                                String flush = pending.substring(0, pending.length() - guard);
+                                pending.delete(0, pending.length() - guard);
+                                emit(sink, "delta", Json.obj().put("text", flush));
+                            }
+                        } else if (!planClosed) {
+                            pending.append(piece);
                             int closeIdx = pending.indexOf(PLAN_CLOSE);
                             if (closeIdx >= 0) {
                                 planClosed = true;
                                 String after = pending.substring(closeIdx + PLAN_CLOSE.length());
                                 pending.setLength(0);
                                 if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
+                            } else if (pending.length() > PLAN_CLOSE.length() + 16) {
+                                pending.delete(0, pending.length() - PLAN_CLOSE.length());
                             }
-                        } else if (pending.length() > guard) {
-                            String flush = pending.substring(0, pending.length() - guard);
-                            pending.delete(0, pending.length() - guard);
-                            emit(sink, "delta", Json.obj().put("text", flush));
+                        } else {
+                            emit(sink, "delta", Json.obj().put("text", piece));
                         }
-                    } else if (!planClosed) {
-                        pending.append(piece);
-                        int closeIdx = pending.indexOf(PLAN_CLOSE);
-                        if (closeIdx >= 0) {
-                            planClosed = true;
-                            String after = pending.substring(closeIdx + PLAN_CLOSE.length());
-                            pending.setLength(0);
-                            if (!after.isEmpty()) emit(sink, "delta", Json.obj().put("text", after));
-                        } else if (pending.length() > PLAN_CLOSE.length() + 16) {
-                            pending.delete(0, pending.length() - PLAN_CLOSE.length());
-                        }
-                    } else {
-                        emit(sink, "delta", Json.obj().put("text", piece));
+                        if (stopped.getAsBoolean()) return;
                     }
                     if (stopped.getAsBoolean()) return;
+                    if (toolCalls.isEmpty()) {
+                        if (!inPlan && !pending.isEmpty()) {
+                            emit(sink, "delta", Json.obj().put("text", pending.toString()));
+                            pending.setLength(0);
+                        }
+                        break;
+                    }
                 }
-                if (stopped.getAsBoolean()) return;
-                if (!inPlan && !pending.isEmpty()) {
-                    emit(sink, "delta", Json.obj().put("text", pending.toString()));
-                    pending.setLength(0);
+                normalizeToolCalls(toolCalls);
+                ObjectNode assistant = msgs.addObject().put("role", "assistant");
+                if (roundText.length() > 0) assistant.put("content", roundText.toString()); else assistant.putNull("content");
+                if (roundThinking.length() > 0) assistant.put("reasoning_content", roundThinking.toString());
+                assistant.set("tool_calls", toolCalls.deepCopy());
+                for (JsonNode call : toolCalls) {
+                    String id = call.path("id").asText("");
+                    String name = call.path("function").path("name").asText("");
+                    String args = call.path("function").path("arguments").asText("{}");
+                    String result = execTool(ws, app.id(), null, name, args, thinking, sink);
+                    msgs.addObject().put("role", "tool").put("tool_call_id", id).put("content", result);
                 }
-                if (stopped.getAsBoolean()) return;
-                if (raw.isEmpty()) {
-                    emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR));
-                    return;
-                }
-                PlanChatResult parsed = parsePlanReply(raw.toString(), thinking.toString());
-                if (stopped.getAsBoolean()) return;
-                Map<String, Object> updatedApp = null;
-                try {
-                    updatedApp = onComplete.apply(parsed);
-                } catch (Exception e) {
-                    log.warn("保存计划对话结果失败：{}", e.toString());
-                }
-                if (stopped.getAsBoolean()) return;
-                if (updatedApp != null) {
-                    emit(sink, "plan_updated", updatedApp);
-                }
-                emit(sink, "done", Json.obj().put("planUpdated", updatedApp != null));
             }
+            if (stopped.getAsBoolean()) return;
+            if (raw.isEmpty()) {
+                emit(sink, "error", Json.obj().put("message", UPSTREAM_ERROR));
+                return;
+            }
+            PlanChatResult parsed = parsePlanReply(raw.toString(), thinking.toString());
+            if (stopped.getAsBoolean()) return;
+            Map<String, Object> updatedApp = null;
+            try {
+                updatedApp = onComplete.apply(parsed);
+            } catch (Exception e) {
+                log.warn("保存计划对话结果失败：{}", e.toString());
+            }
+            if (stopped.getAsBoolean()) return;
+            if (updatedApp != null) {
+                emit(sink, "plan_updated", updatedApp);
+            }
+            emit(sink, "done", Json.obj().put("planUpdated", updatedApp != null));
         } catch (Exception e) {
             if (stopped.getAsBoolean()) return;
             log.warn("计划对话失败：{}", e.toString());

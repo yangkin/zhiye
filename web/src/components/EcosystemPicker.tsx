@@ -23,7 +23,7 @@ export function appendEcosystemContext(prompt: string, items: EcosystemItem[]): 
       return `- 飞书多维表格「${it.name}」（connectorId: \`${it.id}\`）：实现读取与写入同步（云函数用 ctx.bitable，全栈后端用 ZHIYE_CONNECTOR_API/bitable）`;
     }
     if (it.category === 'mcp') {
-      return `- 企业知识与工具 MCP「${it.name}」（serverKey: \`${it.id}\`）：开发时按需调用 \`mcp_call\` 获取真实规范或数据`;
+      return `- 企业知识与工具 MCP「${it.name}」（serverKey: \`${it.id}\`）：请通过 \`mcp_call\` 实时查询或调用获取真实规范与数据`;
     }
     return `- 飞书机器人「${it.name}」（connectorId: \`${it.id}\`）：在关键提交/告警/审批节点推送飞书交互卡片（云函数用 ctx.feishu.sendCard，全栈后端用 ZHIYE_CONNECTOR_API/feishu/send-card）`;
   });

@@ -403,6 +403,96 @@ public class McpRegistryService {
         }
     }
 
+    /**
+     * 为对话助手或编码智能体生成脱敏的「当前工作空间可用企业 MCP / 知识库清单」提示段落（不含任何 URL/密钥）。
+     */
+    public String promptGuideForWorkspace(String ws, boolean chatMode) {
+        List<Map<String, Object>> servers = listEnabledForWorkspace(ws);
+        if (servers.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        if (chatMode) {
+            sb.append("\n\n【企业知识库与受控 MCP 工具】（可通过 `mcp_call` 实时查询，严禁凭空编造或声称无法调用 MCP）\n");
+            sb.append("当用户询问下方知识库/MCP 可能涵盖的内部系统、名词、文档、规范、数据，或消息中已勾选某个 MCP 时，必须先调用 `mcp_call` 获取真实内容再作答：\n");
+        } else {
+            sb.append("\n\n## 当前工作空间已授权企业知识库与 MCP 服务（可通过 `mcp_list` / `mcp_call` 免密直连调用）\n");
+        }
+        for (Map<String, Object> s : servers) {
+            String key = String.valueOf(s.get("serverKey"));
+            String name = String.valueOf(s.get("name"));
+            String transport = String.valueOf(s.get("transport"));
+            String desc = s.get("description") == null ? "" : String.valueOf(s.get("description")).trim();
+            sb.append("- `").append(key).append("` — **").append(name).append("**（")
+                    .append("knowledge".equals(transport) ? "知识库" : "HTTP MCP").append("）");
+            if (!desc.isEmpty()) sb.append("：").append(desc.length() > 100 ? desc.substring(0, 100) + "…" : desc);
+            Object toolsObj = s.get("tools");
+            if (toolsObj instanceof JsonNode tn && tn.isArray() && !tn.isEmpty()) {
+                List<String> toolParts = new ArrayList<>();
+                for (JsonNode t : tn) {
+                    String tName = t.path("name").asText("").trim();
+                    if (tName.isEmpty()) continue;
+                    String paramsHint = summarizeInputSchema(t.path("inputSchema"));
+                    toolParts.add(paramsHint.isEmpty() ? "`" + tName + "`" : "`" + tName + "(" + paramsHint + ")`");
+                    if (toolParts.size() >= 6) break;
+                }
+                if (!toolParts.isEmpty()) sb.append("；工具：").append(String.join("、", toolParts));
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 格式化工作空间可见的 MCP 目录（供对话工具 mcp_list 返回）。 */
+    public String formatCatalogTextForWorkspace(String ws) {
+        List<Map<String, Object>> servers = listEnabledForWorkspace(ws);
+        if (servers.isEmpty()) return "当前工作空间未配置或未启用任何企业知识库或 MCP 服务。";
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> s : servers) {
+            String key = String.valueOf(s.get("serverKey"));
+            String name = String.valueOf(s.get("name"));
+            String transport = String.valueOf(s.get("transport"));
+            String desc = s.get("description") == null ? "" : String.valueOf(s.get("description")).trim();
+            sb.append("### ").append(name).append(" (`").append(key).append("` · ")
+                    .append("knowledge".equals(transport) ? "知识库" : "http").append(")\n");
+            if (!desc.isEmpty()) sb.append(desc).append('\n');
+            Object toolsObj = s.get("tools");
+            if (toolsObj instanceof JsonNode tn && tn.isArray() && !tn.isEmpty()) {
+                for (JsonNode t : tn) {
+                    String tName = t.path("name").asText("").trim();
+                    if (tName.isEmpty()) continue;
+                    String tDesc = t.path("description").asText("").trim();
+                    String paramsHint = summarizeInputSchema(t.path("inputSchema"));
+                    sb.append("  - `").append(tName).append('`');
+                    if (!paramsHint.isEmpty()) sb.append(" 参数(").append(paramsHint).append(')');
+                    if (!tDesc.isEmpty()) sb.append("：").append(tDesc);
+                    sb.append('\n');
+                }
+            } else if ("knowledge".equals(transport)) {
+                sb.append("  - `search_knowledge` 参数(query)：按关键词检索知识库内容\n");
+            } else {
+                sb.append("  - （通用工具调用）\n");
+            }
+            sb.append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private static String summarizeInputSchema(JsonNode schema) {
+        if (schema == null || !schema.isObject()) return "";
+        JsonNode props = schema.path("properties");
+        if (!props.isObject() || props.isEmpty()) return "";
+        Set<String> req = new HashSet<>();
+        JsonNode reqNode = schema.path("required");
+        if (reqNode.isArray()) reqNode.forEach(n -> req.add(n.asText("")));
+        List<String> fields = new ArrayList<>();
+        props.fields().forEachRemaining(e -> {
+            if (fields.size() >= 6) return;
+            String k = e.getKey();
+            String type = e.getValue().path("type").asText("");
+            fields.add(k + (req.contains(k) ? "*" : "") + (type.isEmpty() ? "" : ":" + type));
+        });
+        return String.join(", ", fields);
+    }
+
     /** 管理员/受信任内部代理执行 MCP 工具调用并记录完整审计日志。 */
     public Map<String, Object> callTool(String serverKey, String toolName, JsonNode arguments, String taskId, String appId) {
         return callToolInternal(null, false, serverKey, toolName, arguments, taskId, appId);
@@ -416,17 +506,39 @@ public class McpRegistryService {
     private Map<String, Object> callToolInternal(String callerWs, boolean enforceWorkspace,
                                                  String serverKey, String toolName, JsonNode arguments, String taskId, String appId) {
         long t0 = System.currentTimeMillis();
-        String key = serverKey == null ? "" : serverKey.trim().toLowerCase(Locale.ROOT);
-        String tool = toolName == null ? "" : toolName.trim();
-        if (key.isEmpty() || tool.isEmpty()) throw ApiException.validation("缺少 serverKey 或 tool");
+        String rawKey = serverKey == null ? "" : serverKey.trim();
+        String key = rawKey.toLowerCase(Locale.ROOT);
+        if (key.isEmpty()) throw ApiException.validation("缺少 serverKey");
 
-        ServerRow srv = jdbc.sql("select * from enterprise_mcp_server where server_key = ?")
-                .param(key).query(ServerRow::map).optional()
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "MCP_NOT_FOUND", "未找到 MCP 服务：" + key));
+        Optional<ServerRow> optSrv = jdbc.sql("select * from enterprise_mcp_server where server_key = ?")
+                .param(key).query(ServerRow::map).optional();
+        // 兼容模型偶尔直接传服务显示名（仅在当前工作空间可见服务里精确匹配）
+        if (optSrv.isEmpty()) {
+            String ownerTag = callerWs != null && !callerWs.isBlank() ? "ws:" + callerWs : "";
+            optSrv = jdbc.sql("""
+                    select * from enterprise_mcp_server
+                     where lower(name) = ?
+                       and (? = false or created_by is null or created_by not like 'ws:%' or created_by = ?)
+                     order by enabled desc, created_at desc
+                     limit 1
+                    """).params(key, enforceWorkspace, ownerTag).query(ServerRow::map).optional();
+        }
+        ServerRow srv = optSrv.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "MCP_NOT_FOUND", "未找到 MCP 服务：" + rawKey));
+        key = srv.serverKey();
         if (enforceWorkspace && !isVisibleToWorkspace(srv, callerWs)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "MCP_FORBIDDEN", "无权调用其他工作空间的私有知识库或 MCP 服务");
         }
         if (!srv.enabled()) throw new ApiException(HttpStatus.FORBIDDEN, "MCP_DISABLED", "MCP 服务「" + key + "」已被管理员停用");
+
+        String tool = toolName == null ? "" : toolName.trim();
+        if (tool.isEmpty()) {
+            if ("knowledge".equals(srv.transport())) {
+                tool = "search_knowledge";
+            } else if (srv.toolsJson() != null && srv.toolsJson().isArray() && srv.toolsJson().size() == 1) {
+                tool = srv.toolsJson().get(0).path("name").asText("").trim();
+            }
+        }
+        if (tool.isEmpty()) throw ApiException.validation("缺少 tool（请先通过 mcp_list 查看该 MCP 支持的工具名）");
 
         try {
             String content = "knowledge".equals(srv.transport())
@@ -437,6 +549,7 @@ public class McpRegistryService {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("ok", true);
             out.put("serverKey", key);
+            out.put("serverName", srv.name());
             out.put("tool", tool);
             out.put("durationMs", ms);
             out.put("content", content);
@@ -451,7 +564,7 @@ public class McpRegistryService {
         }
     }
 
-    /** 向远端 Streamable HTTP / JSON-RPC 2.0 MCP 服务发 tools/list 探测，返回标准工具列表。 */
+    /** 向远端 Streamable HTTP / JSON-RPC 2.0 MCP 服务发 tools/list 探测，返回标准工具列表（保留紧凑 inputSchema）。 */
     public JsonNode discoverRemoteTools(String endpointUrl, String authHeader, String secret) throws Exception {
         validateMcpEndpointUrl(endpointUrl, true);
         String sessionId = tryInitializeSession(endpointUrl, authHeader, secret);
@@ -470,6 +583,13 @@ public class McpRegistryService {
                 item.put("name", t.path("name").asText(""));
                 String desc = t.path("description").asText("");
                 item.put("description", desc.length() > 160 ? desc.substring(0, 160) + "…" : desc);
+                JsonNode schema = t.get("inputSchema");
+                if (schema != null && schema.isObject()) {
+                    String serialized = Json.write(schema);
+                    if (serialized.length() <= 1600) {
+                        item.set("inputSchema", schema);
+                    }
+                }
             }
         }
         return out;
@@ -543,7 +663,27 @@ public class McpRegistryService {
                 rb.header(authHeader == null || authHeader.isBlank() ? "Authorization" : authHeader, secret);
             }
             HttpResponse<String> res = http.send(rb.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            return res.headers().firstValue("mcp-session-id").orElse(null);
+            String sessionId = res.headers().firstValue("mcp-session-id").orElse(null);
+            // 严格遵守 MCP 2025-03-26 Streamable HTTP 握手：initialize 后补发 notifications/initialized（尽力发送，失败不阻断）
+            if (res.statusCode() >= 200 && res.statusCode() < 300) {
+                try {
+                    ObjectNode notif = Json.obj();
+                    notif.put("jsonrpc", "2.0");
+                    notif.put("method", "notifications/initialized");
+                    HttpRequest.Builder nb = HttpRequest.newBuilder(URI.create(endpointUrl))
+                            .timeout(Duration.ofSeconds(6))
+                            .header("Content-Type", "application/json")
+                            .header("Accept", "application/json, text/event-stream")
+                            .header("MCP-Protocol-Version", "2025-03-26")
+                            .POST(HttpRequest.BodyPublishers.ofString(Json.write(notif), StandardCharsets.UTF_8));
+                    if (sessionId != null && !sessionId.isBlank()) nb.header("Mcp-Session-Id", sessionId);
+                    if (secret != null && !secret.isBlank()) {
+                        nb.header(authHeader == null || authHeader.isBlank() ? "Authorization" : authHeader, secret);
+                    }
+                    http.send(nb.build(), HttpResponse.BodyHandlers.discarding());
+                } catch (Exception ignored) {}
+            }
+            return sessionId;
         } catch (Exception ignored) {
             return null;
         }
@@ -622,24 +762,53 @@ public class McpRegistryService {
         return Json.write(result);
     }
 
-    /** 检索团队私有知识库（真实用户录入的 Markdown / 文档内容，按空行分段匹配）。 */
+    /** 检索团队私有知识库（真实用户录入的 Markdown / 文档内容，支持多关键词分词相关性排序）。 */
     private String executeKnowledgeBase(ServerRow srv, String tool, JsonNode args) {
         if (srv.endpointUrl() == null || !srv.endpointUrl().startsWith("kb:")) {
             throw ApiException.validation("知识库「" + srv.name() + "」尚未录入正文内容");
         }
         String body = srv.endpointUrl().substring(3).trim();
-        String query = args != null ? args.path("query").asText(args.path("q").asText("")).trim().toLowerCase(Locale.ROOT) : "";
-        if (!query.isEmpty() && body.length() > 1500) {
-            StringBuilder matched = new StringBuilder();
-            for (String para : body.split("\\r?\\n\\s*\\r?\\n")) {
-                if (para.toLowerCase(Locale.ROOT).contains(query)) {
-                    if (!matched.isEmpty()) matched.append("\n\n");
-                    matched.append(para.trim());
-                }
+        String query = "";
+        if (args != null && args.isObject()) {
+            for (String field : List.of("query", "q", "keyword", "keywords", "search", "topic", "question", "text")) {
+                String v = args.path(field).asText("").trim();
+                if (!v.isEmpty()) { query = v.toLowerCase(Locale.ROOT); break; }
             }
-            if (!matched.isEmpty()) return "【知识库：" + srv.name() + "】\n" + matched;
         }
-        return "【知识库：" + srv.name() + "】\n" + (body.length() > 4000 ? body.substring(0, 4000) + "\n…(已截断)" : body);
+        if (!query.isEmpty() && body.length() > 6000) {
+            final String qFinal = query;
+            String[] tokens = Arrays.stream(qFinal.split("[\\s,，、；;]+"))
+                    .map(String::trim).filter(s -> s.length() >= 2 || qFinal.length() < 4).toArray(String[]::new);
+            if (tokens.length == 0) tokens = new String[]{query};
+            record Scored(int score, int idx, String text) {}
+            String[] paras = body.split("\\r?\\n\\s*\\r?\\n");
+            List<Scored> scored = new ArrayList<>();
+            for (int i = 0; i < paras.length; i++) {
+                String p = paras[i].trim();
+                if (p.isEmpty()) continue;
+                String low = p.toLowerCase(Locale.ROOT);
+                int hits = 0;
+                if (low.contains(query)) hits += 5;
+                for (String tk : tokens) {
+                    if (!tk.isEmpty() && low.contains(tk)) hits++;
+                }
+                if (hits > 0) scored.add(new Scored(hits, i, p));
+            }
+            if (!scored.isEmpty()) {
+                scored.sort(Comparator.comparingInt(Scored::score).reversed().thenComparingInt(Scored::idx));
+                StringBuilder matched = new StringBuilder();
+                for (Scored sc : scored) {
+                    if (matched.length() + sc.text().length() > 6000 && !matched.isEmpty()) break;
+                    if (!matched.isEmpty()) matched.append("\n\n");
+                    matched.append(sc.text());
+                }
+                return "【知识库：" + srv.name() + "】\n" + matched;
+            }
+        }
+        if (body.length() <= 6000) {
+            return "【知识库：" + srv.name() + "（已返回完整正文，共 " + body.length() + " 字，无需重复检索）】\n" + body;
+        }
+        return "【知识库：" + srv.name() + "】\n" + body.substring(0, 6000) + "\n…(已截断)";
     }
 
     private void audit(String serverKey, String tool, String taskId, String appId, boolean ok, int durationMs, String err) {

@@ -657,6 +657,10 @@ public class TaskExecutor {
             String memSection = memories.promptSection(app.workspaceId());
             if (!memSection.isBlank()) instruction += memSection;
         }
+        if (mcpRegistry != null) {
+            String mcpGuide = mcpRegistry.promptGuideForWorkspace(app.workspaceId(), false);
+            if (!mcpGuide.isBlank()) instruction += mcpGuide;
+        }
         String resumeNote = input.hasNonNull("resumeNote") ? input.path("resumeNote").asText("") : "";
         String text = continuing && resumed ? Prompts.continuePrevious(input.path("continueContent").asText(), instruction)
                 : resumed && (!retry || resume.path("continueWork").asBoolean(false)) ? Prompts.resume(instruction, resumeNote) : instruction;
