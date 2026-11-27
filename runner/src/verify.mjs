@@ -359,6 +359,16 @@ export function absoluteAssetRefs(html) {
   return /(?:src|href)\s*=\s*["']\/(?!\/)[^"']+\.(?:js|mjs|css)(?:[?#][^"']*)?["']/i.test(html)
 }
 
+const POSTCSS_CONFIGS = [
+  '.postcssrc', '.postcssrc.json', '.postcssrc.yaml', '.postcssrc.yml', '.postcssrc.js', '.postcssrc.cjs', '.postcssrc.mjs', '.postcssrc.ts',
+  'postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', 'postcss.config.ts', 'postcss.config.cts', 'postcss.config.mts',
+]
+
+export function hasLocalPostcssConfig(cwd, pkg) {
+  if (pkg && typeof pkg === 'object' && Object.prototype.hasOwnProperty.call(pkg, 'postcss')) return true
+  return POSTCSS_CONFIGS.some((f) => existsSync(path.join(cwd, f)))
+}
+
 async function verifyVite(cwd, env) {
   const checks = []
   const notes = []
@@ -387,13 +397,22 @@ async function verifyVite(cwd, env) {
       return p.cmd === 'vite' ? run(process.execPath, [vite, ...p.args], { cwd, env: benv, timeoutMs: 300_000, onLine: emitLog })
         : run(p.cmd, p.args, { cwd, env: benv, timeoutMs: 300_000, onLine: emitLog })
     }
+    // 沙箱禁止访问工作区之外的父目录；未配置 PostCSS 的 Vite 项目在构建时会向上搜索父级 package.json 触发 EPERM，
+    // 临时放一个空的 .postcssrc.json 截断向上查找，构建结束立即删除不污染项目仓库。
+    const tempPostcss = !hasLocalPostcssConfig(cwd, pkg) ? path.join(cwd, '.postcssrc.json') : null
+    if (tempPostcss) writeFileSync(tempPostcss, '{}\n', 'utf8')
     const since = Date.now()
-    let r = await exec(plan)
-    if (r.code !== 0 && !r.timedOut && plan.fallback) {
-      const first = r.out
-      r = await exec(plan.fallback)
-      if (r.code === 0) notes.push(plan.fallback.note)
-      else r = { ...r, out: `${first}\n\n--- 跳过前置步骤直接 vite build 也失败了 ---\n${r.out}` }
+    let r
+    try {
+      r = await exec(plan)
+      if (r.code !== 0 && !r.timedOut && plan.fallback) {
+        const first = r.out
+        r = await exec(plan.fallback)
+        if (r.code === 0) notes.push(plan.fallback.note)
+        else r = { ...r, out: `${first}\n\n--- 跳过前置步骤直接 vite build 也失败了 ---\n${r.out}` }
+      }
+    } finally {
+      if (tempPostcss) rmSync(tempPostcss, { force: true })
     }
     if (r.timedOut) return { ok: false, detail: `构建超时（5 分钟）\n${r.out}` }
     if (r.code !== 0) return { ok: false, detail: `构建失败（退出码 ${r.code}）：\n${r.out}` }

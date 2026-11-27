@@ -956,19 +956,50 @@ public class TaskExecutor {
             if (monolithService == null) {
                 throw new TaskContext.Fail("SERVICE_RUNTIME_DISABLED", "当前环境未启用单体应用托管服务");
             }
+            com.tcl.csot.zhiye.service.runtime.MonolithServiceManager.ServiceRow svc = null;
+            String deployError = null;
             try {
-                monolithService.initializeAndDeploy(app, ver);
+                svc = monolithService.initializeAndDeploy(app, ver);
             } catch (Exception e) {
-                throw new TaskContext.Fail("BUILD_FAILED", "单体服务部署失败：" + e.getMessage());
+                deployError = e.getMessage();
+                svc = monolithService.find(app.id()).orElse(null);
+                log.warn("复刻单体模板首次启动未就绪（保留 V1 供用户在「服务托管」补全环境变量后重启）app={}: {}", app.id(), deployError);
             }
-            versionService.publishInternal(app.id(), ver.id());
-            jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
-            succeed(ctx, ver.id(), Json.obj().put("files", count).put("projectKind", "service"));
+            String fw = svc != null && svc.framework() != null && !svc.framework().isBlank() ? svc.framework() : app.framework();
+            if (deployError == null) {
+                events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
+                        "summary", "单体服务启动就绪（" + (fw == null ? "service" : fw) + "）", "state", "end", "ok", true));
+                versionService.publishInternal(app.id(), ver.id());
+            } else {
+                events.emit(ctx.id(), "tool", Map.of("id", "svc-deploy", "name", "deploy",
+                        "summary", "模板源码已复刻为 V1，但首次启动未就绪，请补全环境变量或配置后重新部署",
+                        "detail", deployError, "state", "end", "ok", false));
+                String shortErr = deployError.length() > 600 ? deployError.substring(0, 600) + "…" : deployError;
+                messages.insert(app.id(), "assistant",
+                        "模板源码已复刻保存为 **V1**（原作者密钥、环境变量值与业务数据已自动隔离），但首次启动未就绪：\n\n```\n" + shortErr
+                                + "\n```\n\n请按上方配置指引或切换到 **「服务托管 → 环境变量」** 补齐所需变量后点击 **「保存并重启生效」**。",
+                        null, ctx.id(), "ok");
+            }
+            jdbc.sql("update app set visible = true, phase = 'ready', framework = coalesce(?, framework), updated_at = now() where id = ?")
+                    .params(fw, app.id()).update();
+            succeed(ctx, ver.id(), Json.obj()
+                    .put("files", count)
+                    .put("projectKind", "service")
+                    .put("status", deployError == null ? "running" : "failed")
+                    .put("deployPending", deployError != null));
             return;
         }
-        startRunner(ctx, false);
+        if (app.isScript()) {
+            phase(ctx, "COMMITTING", "正在保存脚本版本", 75);
+            VersionRow ver = commit(ctx, app, "从模板「" + t.input().path("templateName").asText("") + "」复刻", "import", false);
+            jdbc.sql("update app set visible = true, phase = 'ready', updated_at = now() where id = ?").param(app.id()).update();
+            succeed(ctx, ver.id(), Json.obj().put("files", count).put("projectKind", "script"));
+            return;
+        }
+        boolean viteClone = "vite".equals(app.projectKind());
+        startRunner(ctx, viteClone);
         ctx.prepared = true;
-        if ("vite".equals(app.projectKind())) {
+        if (viteClone) {
             phase(ctx, "RUNNING", "正在安装依赖", 35);
             JsonNode ins = call(ctx, "install", Json.obj());
             if (ins.has("ok") && !ins.path("ok").asBoolean()) throw new TaskContext.Fail("INSTALL_FAILED", "安装依赖失败：" + ins.path("log").asText(""));

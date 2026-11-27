@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, existsSync, readFil
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { verify, buildPlan, absoluteAssetRefs, PREVIEW_DIR } from '../src/verify.mjs'
+import { verify, buildPlan, absoluteAssetRefs, hasLocalPostcssConfig, PREVIEW_DIR } from '../src/verify.mjs'
 
 const ZHIYE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const CACHE = path.join(ZHIYE, 'runtime/template-cache/node_modules')
@@ -45,7 +45,16 @@ test('默认 base 的 Vite 项目：构建产物用相对路径（预览挂在 /
   assert.match(html, /src="\.\/assets\/index-[^"]+\.js"/)
   assert.equal(absoluteAssetRefs(html), false)
   assert.equal(existsSync(path.join(ws, 'dist')), false)
+  assert.equal(existsSync(path.join(ws, '.postcssrc.json')), false)
   assert.equal(r.notes, undefined)
+})
+
+test('hasLocalPostcssConfig：识别项目级 PostCSS 配置并在缺失时放行临时隔离', () => {
+  const emptyWs = project({ 'package.json': '{}' }, false)
+  assert.equal(hasLocalPostcssConfig(emptyWs, {}), false)
+  assert.equal(hasLocalPostcssConfig(emptyWs, { postcss: {} }), true)
+  const cfgWs = project({ 'package.json': '{}', 'postcss.config.js': 'export default {}\n' }, false)
+  assert.equal(hasLocalPostcssConfig(cfgWs, {}), true)
 })
 
 test('build 脚本的前置步骤（类型检查）失败：跳过后直接 vite build，并给出提示', { skip: noCache, timeout: 120_000 }, async () => {
