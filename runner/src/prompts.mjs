@@ -72,9 +72,9 @@ const SCRIPT = `
 - 写完后务必在沙箱里用 \`python3 main.py --help\` / \`node index.mjs --help\` 及小样例数据实际运行验证，确认退出码为 0、输出正确，并清理临时自测产物。`
 
 const STATIC = `
-## 项目结构（静态 HTML 站点）
-- 这是导入的静态网页项目，入口是 index.html；直接修改 HTML / CSS / JS 文件。
-- 保留原有的交互和脚本（例如 onclick 属性），不要引入构建工具或框架。`
+## 项目结构（纯静态 HTML 网页）
+- 这是纯静态 HTML 网页项目（零构建、无后端服务），入口是 index.html；直接编写或修改 HTML / CSS / 原生 JS 文件。
+- 保留原有的交互和脚本（例如 onclick 属性），不要引入构建工具、package.json、Vite 或 Node.js 后端服务。`
 
 const VITE = `
 ## 项目结构（导入的前端项目）

@@ -67,11 +67,54 @@ public final class Catalog {
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private static final java.util.regex.Pattern CUSTOM_STACK_HINT = java.util.regex.Pattern.compile(
-            "(fastapi|flask|django|python\\s*(后端|全栈|服务|api)|golang|\\bgo\\b\\s*(后端|全栈|服务|gin|echo|fiber)|gin\\b|nestjs|fastify|next\\.?js|nuxt|rust|不要模板|不用模板|从零搭建|自定义架构|自由架构)",
+            "(\\bfastapi\\b|\\bflask\\b|\\bdjango\\b|python\\s*(后端|全栈|服务|api)|\\bgolang\\b|\\bgo\\b\\s*(后端|全栈|服务|gin|echo|fiber)|\\bgin\\s*(框架|后端|服务|api)|\\bnestjs\\b|\\bfastify\\b|\\bnext\\.?js\\b|\\bnuxt\\b|\\brust\\b\\s*(后端|全栈|服务|api|axum|actix)|(?:用|采用|使用)\\s*rust\\b|不要模板|不用模板|从零搭建|自定义架构|自由架构)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private static final java.util.regex.Pattern EXPLICIT_NO_BACKEND = java.util.regex.Pattern.compile(
+            "(不要后端|不需要后端|无需后端|无后端|不写后端|不要服务端|不需要服务端|无需服务端|不要\\s*node|不需要\\s*node|不要服务托管|纯前端|纯静态|纯\\s*html|单个?\\s*html|静态\\s*html)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private static final java.util.regex.Pattern PURE_HTML_INTENT = java.util.regex.Pattern.compile(
+            "(写|做|生成|转成|转为|做成|输出|制作|整理成).{0,24}(html\\s*页面|html\\s*网页|html5?\\s*单页|静态\\s*html|静态网页|静态页面|\\bhtml\\b)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    private static final java.util.regex.Pattern EXPLICIT_BUILD_BACKEND_ACTION = java.util.regex.Pattern.compile(
+            "((?:请|帮我|我想|我要|需要|同时|并且|并)?(?:用|采用|使用|搭建|开发|写一个|做一个|实现一个|构建一个)\\s*(?:全栈|前后端分离|前后端一体|后端\\s*api|后端服务|服务端接口|spring\\s*boot|springboot|fastapi|flask|django|express|nestjs|fastify|go\\s*gin|java\\s*后端|python\\s*后端|node\\s*后端)|(?:同时|并且|并|还要|需要).{0,8}(?:写后端|做后端|后端服务|后端接口|服务托管|全栈应用))",
             java.util.regex.Pattern.CASE_INSENSITIVE);
 
     private static final java.util.regex.Pattern REACT_HINT = java.util.regex.Pattern.compile("\\breact\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
     private static final java.util.regex.Pattern VUE_HINT = java.util.regex.Pattern.compile("\\bvue(?:\\s*3)?\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** 从 ConversationService 整理的多轮对话稿里只抽取用户发言，避免助手回复中的技术名词误触发栈识别。 */
+    public static String extractUserOnlyText(String prompt) {
+        if (prompt == null || prompt.isBlank()) return "";
+        if (!prompt.startsWith("请根据以下按时间顺序排列的多轮对话")) return prompt;
+        StringBuilder sb = new StringBuilder();
+        String[] blocks = prompt.split("\\n\\n(?=user（用户）：|assistant（助手）：)");
+        for (String b : blocks) {
+            if (b.startsWith("user（用户）：")) {
+                if (!sb.isEmpty()) sb.append('\n');
+                sb.append(b.substring("user（用户）：".length()).trim());
+            }
+        }
+        return sb.isEmpty() ? prompt : sb.toString();
+    }
+
+    /** 用户明确表示只要纯前端 / 纯 HTML / 静态页，且没有明确要求搭建后端服务。 */
+    public static boolean isPureHtmlOrNoBackendIntent(String raw) {
+        String text = extractUserOnlyText(raw);
+        if (text.isBlank()) return false;
+        if (EXPLICIT_NO_BACKEND.matcher(text).find()) return true;
+        return PURE_HTML_INTENT.matcher(text).find() && !EXPLICIT_BUILD_BACKEND_ACTION.matcher(text).find();
+    }
+
+    /** 判断用户是否明确要求搭建独立后端 / 全栈服务（过滤助手回复与「只要 HTML/不要后端」的场景）。 */
+    public static boolean shouldForceFullstack(String prompt) {
+        String userText = extractUserOnlyText(prompt);
+        if (userText.isBlank()) return false;
+        if (isPureHtmlOrNoBackendIntent(userText)) return false;
+        return looksLikeVueSpringBoot(userText) || prefersCleanWorkspace(userText);
+    }
 
     /** 用户明确要求 Java / Spring Boot 后端时返回 true。 */
     public static boolean looksLikeJavaBackend(String prompt) {

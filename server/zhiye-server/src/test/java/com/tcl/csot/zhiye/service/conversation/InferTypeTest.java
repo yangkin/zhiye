@@ -47,4 +47,17 @@ class InferTypeTest {
                 msg("assistant", "好的，可以立即开始。"));
         assertThat(ConversationService.inferType(messages, "开发网站")).isEqualTo("全栈应用");
     }
+
+    @Test
+    void htmlPageWithLoginMarginOrDocKeywordsDoesNotBecomeFullstack() {
+        var loginHtml = List.of(
+                msg("user", "帮我写一个 HTML 登录页面，包含 login 表单、margin 布局调整、origin 校验和 trust 品牌徽章"),
+                msg("assistant", "好的，我来帮你制作这个页面。"));
+        assertThat(ConversationService.inferType(loginHtml, "开发网站")).isEqualTo("开发网站");
+
+        var wordToHtml = List.of(
+                msg("user", "帮我根据下面 Word 文档内容生成一个 HTML 展示页面：\n系统总体架构基于 Spring Boot 后端接口与 FastAPI 推理服务……"),
+                msg("assistant", "好的，我来整理成静态展示页。"));
+        assertThat(ConversationService.inferType(wordToHtml, "开发网站")).isEqualTo("开发网站");
+    }
 }

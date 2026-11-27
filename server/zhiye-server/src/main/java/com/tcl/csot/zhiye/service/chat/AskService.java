@@ -87,10 +87,10 @@ public class AskService {
               在回答**第一行**单独输出标记 [[build:类型]]，第二行开始再用两三句话说明你准备怎么做。其他任何时候都不要输出这个标记。
             - 标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——
               那样系统不会开始创建，用户会以为卡住了。
-            - [[build:类型]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一，例如 [[build:日常开发]] 或 [[build:全栈应用]]：
-              · 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（纯前端或结合内置云服务）；
-              · 开发网站：多角色、带状态流转的业务系统，或官网、活动页这类重视觉的站点；
-              · 全栈应用：用户明确要「前后端一体 / 前后端分离 / 自定义后端 API / Vue + Java (Spring Boot) / React + Node Express / Python (FastAPI·Flask) / Go / 文件读写持久化」的完整应用（全部支持对话直接生成、编译与托管）；
+            - [[build:类型]] 里的类型由你按**用户要的成品**判断，只能是 日常开发 / 开发网站 / 全栈应用 / 开发skill / 技术文档 之一，例如 [[build:日常开发]] 或 [[build:开发网站]]：
+              · 日常开发：工作台、管理系统、看板、录入/查询/审批、小工具（纯前端或结合内置共享云服务，无需独立后端服务托管）；
+              · 开发网站：官网、活动页、展示页、单页 HTML / 静态网页（含根据 Word 文档、报告或截图生成 HTML 页面），或多角色前端站点；
+              · 全栈应用：**仅当用户明确要求**「前后端一体 / 前后端分离 / 自定义后端 API / Vue + Java (Spring Boot) / React + Node Express / Python (FastAPI·Flask) / Go / 服务端持久化」时才选；**如果用户只是要写一个 HTML 页面、静态页、展示页、看板，或把 Word/图片生成 HTML，绝不要选 `[[build:全栈应用]]`（不要擅自引入 Node.js 后端和服务托管）**；
               · 开发skill：用户明确要一个给 AI 用的技能包（SKILL.md），产物没有页面；
               · 技术文档：用户明确要「文档网站」。
               用户发截图让你照着做时，按截图里**这个界面是什么**来判断；截图里出现的按钮、标签文字（比如「开发skill」「技术文档」）不代表用户要做那种东西。
@@ -337,8 +337,7 @@ public class AskService {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
         String context = builtinContext() + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
-        boolean explicitBackend = conversation && (com.tcl.csot.zhiye.service.app.Catalog.looksLikeVueSpringBoot(content)
-                || com.tcl.csot.zhiye.service.app.Catalog.prefersCleanWorkspace(content));
+        boolean explicitBackend = conversation && com.tcl.csot.zhiye.service.app.Catalog.shouldForceFullstack(content);
         if (conversation) {
             if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type) || explicitBackend) {
                 context += "\n\n【重要约束】当前为「全栈应用」需求（织页原生支持 Vue 3 + Java Spring Boot、React + Node.js Express、Python FastAPI/Flask、Go 等多技术栈在对话中直接生成、离线编译并托管，支持独立后端 API、/data 持久化存储与独立 PostgreSQL Schema）。"

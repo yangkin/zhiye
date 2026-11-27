@@ -111,13 +111,15 @@ public class AppService {
         boolean script = ("日常开发".equals(type) && Catalog.looksLikeScript(prompt))
                 || (!skill && !Catalog.FULLSTACK_TYPE.equals(type) && Catalog.explicitlyNoPageScript(prompt));
         // 用户明确要求 Vue+Java / Spring Boot / FastAPI / Go 等后端全栈栈，即使未手动切到「全栈应用」也自动按全栈服务初始化
-        boolean explicitBackendStack = !skill && !script && (Catalog.looksLikeVueSpringBoot(prompt) || Catalog.prefersCleanWorkspace(prompt));
+        // 只检查用户发言且尊重「纯 HTML / 不要后端」意图，避免粘贴文档/助手回复里的关键词误触发服务托管
+        String userIntent = Catalog.extractUserOnlyText(prompt);
+        boolean explicitBackendStack = !skill && !script && Catalog.shouldForceFullstack(userIntent);
         if (explicitBackendStack && !Catalog.FULLSTACK_TYPE.equals(type)) {
             type = Catalog.FULLSTACK_TYPE;
         }
         String kind = script ? "script" : Catalog.projectKindFor(type);
-        boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(prompt);
-        boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(prompt);
+        boolean cleanWorkspace = "service".equals(kind) && Catalog.prefersCleanWorkspace(userIntent);
+        boolean vueSpringBoot = "service".equals(kind) && !cleanWorkspace && Catalog.looksLikeVueSpringBoot(userIntent);
         String desc = userText(prompt);
         AppRow row = new AppRow(id, ws, name, named, type, desc.length() > 60 ? desc.substring(0, 60) : desc, prompt,
                 skill ? prompt : "", "lavender", false, mode, model, false,

@@ -398,7 +398,7 @@ public class TaskExecutor {
                 形态只能是下面五种之一，自己按需求判断，不要被用户选的类型限制：
                 - "web"：需要界面和交互的网页应用（Vite + React + Tailwind），网页应用默认选这个；
                 - "vue"：用户**明确要求用 Vue** 开发的网页应用（Vite + Vue 3 + Tailwind）；用户没提 Vue 时不要选；
-                - "static"：内容简单、不需要构建的静态页面（单页官网、活动页、说明页）；
+                - "static"：纯静态 HTML 页面（用户明确要求写单个/纯 HTML 页面、静态网页、展示页，或把 Word/汇报文档做成直接打开的 HTML 页面），直接交付 index.html + styles.css + app.js，零构建、无后端服务托管；
                 - "script"：无页面的 Python 3 或 Node.js (JS/MJS) 命令行程序 / 数据处理脚本 / 自动化任务，支持工作台直接在线运行并交付可运行代码，没有网页页面；
                 - "doc"：用户明确要**网页形式**的文档站（带目录、搜索的在线文档网站）；只是要一份文档时不会走到这里（会话里直接写成文件）。
                 只输出一个 JSON 对象，不要输出其他文字：
@@ -454,8 +454,9 @@ public class TaskExecutor {
         // 形态由模型决定：web/doc 用 React 模板，vue 用 Vue 模板，static 用静态模板，script 用脚本模板，service 用全栈模板
         String shape = j == null ? null : Json.text(j, "shape");
         String kind = kindForShape(shape);
-        // 用户显式选择了「全栈应用」时，不降级回纯前端模板
+        // 用户显式选择了「全栈应用」时，不降级回纯前端模板；反之非全栈应用绝不擅自升格成带 Node/服务托管的 service
         if (app.isService() && !"service".equals(kind)) kind = null;
+        if (!app.isService() && "service".equals(kind)) kind = "template";
         // 只在还没有任何版本时换模板（换模板会覆盖仓库的初始提交）
         if (kind != null && app.currentVersionId() != null) kind = null;
         if (kind != null && !kind.equals(app.projectKind())) {
@@ -1271,7 +1272,11 @@ public class TaskExecutor {
         return out;
     }
 
-    static String assetDir(AppRow app) { return app.isSkill() ? "references/assets/" : "public/assets/"; }
+    static String assetDir(AppRow app) {
+        if (app.isSkill()) return "references/assets/";
+        if ("static".equals(app.projectKind())) return "assets/";
+        return "public/assets/";
+    }
 
     static String safeName(String n) {
         String s = n.replaceAll("[\\\\/:*?\"<>|\\s]+", "-");

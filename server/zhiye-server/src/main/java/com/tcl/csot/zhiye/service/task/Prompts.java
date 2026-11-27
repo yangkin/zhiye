@@ -52,6 +52,7 @@ public final class Prompts {
     public static String generate(AppRow app, List<String> assetPaths) {
         if (app.isSkill()) return generateSkill(app, assetPaths);
         if (app.isService()) return generateService(app, assetPaths);
+        if ("static".equals(app.projectKind())) return generateStatic(app, assetPaths);
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
         StringBuilder sb = new StringBuilder();
         boolean vue = app.isVue();
@@ -80,11 +81,33 @@ public final class Prompts {
         return sb.toString();
     }
 
+    static String generateStatic(AppRow app, List<String> assetPaths) {
+        Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
+        StringBuilder sb = new StringBuilder();
+        sb.append("请在当前纯静态 HTML 网页模板（`index.html`、`styles.css`、`app.js`，零构建步骤，不要引入 Vite、React、package.json 或 Node.js 后端）中实现下面这个页面，替换掉模板里的占位内容。\n\n");
+        sb.append("## 应用类型与指引\n").append(Catalog.typeHint(app.type())).append("\n\n");
+        sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
+        if (app.planDoc() != null && !app.planDoc().isBlank()) sb.append("## 创造计划（用户已确认）\n").append(app.planDoc()).append("\n\n");
+        sb.append("## 设计风格\n").append(st.label()).append("：").append(st.desc())
+                .append("。主色 ").append(st.accent()).append("，浅色背景 ").append(st.light()).append("。\n\n");
+        appendAssetSection(sb, assetPaths);
+        sb.append("""
+                ## 交付要求
+                - 直接编写根目录的 `index.html`、`styles.css`、`app.js`（或拆分子页 HTML / 样式表），静态资源放在 `assets/` 下用 `./assets/...` 相对路径引用
+                - 不要创建 `package.json`、`server/` 或启动任何 Node.js 后端进程；面向桌面宽屏与移动端自适应排版，视觉精致克制
+                - 收尾总结之前，务必先调用 `verify_app` 检查 HTML/CSS/JS 无报错，并调用 `screenshot`（`device: "wide"`）确认最终视觉效果
+                """);
+        sb.append(com.tcl.csot.zhiye.constants.Capabilities.GENERATE);
+        sb.append(GENERATE_SUMMARY);
+        return sb.toString();
+    }
+
     static String generateService(AppRow app, List<String> assetPaths) {
         Catalog.Style st = Catalog.STYLES.getOrDefault(app.style(), Catalog.STYLES.get("lavender"));
-        boolean cleanWs = Catalog.prefersCleanWorkspace(app.prompt());
+        String userIntent = Catalog.extractUserOnlyText(app.prompt());
+        boolean cleanWs = Catalog.prefersCleanWorkspace(userIntent);
         boolean vueSpring = !cleanWs && ((app.framework() != null && app.framework().toLowerCase().contains("spring"))
-                || Catalog.looksLikeVueSpringBoot(app.prompt()));
+                || Catalog.looksLikeVueSpringBoot(userIntent));
         StringBuilder sb = new StringBuilder();
         if (cleanWs) {
             sb.append("当前是一个干净的自由全栈工作区（未预塞固定模板）。请严格按照用户指定的技术栈与架构自主规划目录并完整实现。\n\n");

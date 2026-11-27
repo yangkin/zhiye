@@ -464,7 +464,11 @@ public class ConversationService {
 
     private static String inferTypeText(String raw) {
         String text = raw.toLowerCase(Locale.ROOT);
-        if (Catalog.looksLikeVueSpringBoot(raw) || Catalog.prefersCleanWorkspace(raw)
+        if (Catalog.isPureHtmlOrNoBackendIntent(raw)) {
+            if (containsAny(text, "工作台", "管理系统", "看板", "小工具", "计算器", "点检", "巡检", "效率工具")) return "日常开发";
+            return "开发网站";
+        }
+        if (Catalog.shouldForceFullstack(raw)
                 || containsAny(text, "全栈应用", "全栈", "前后端一体", "前后端分离", "后端接口", "服务端接口", "自定义api", "自定义 api", "express 后端", "node 后端", "spring boot", "springboot", "java 后端", "java后端", "fastapi", "flask", "django"))
             return Catalog.FULLSTACK_TYPE;
         if (containsAny(text, "开发skill", "skill.md", "技能包", "技能应用", "做一个 skill", "生成 skill")) return Catalog.SKILL_TYPE;
@@ -472,7 +476,7 @@ public class ConversationService {
             return "技术文档";
         if (containsAny(text, "日常开发", "工作台", "管理系统", "后台", "小工具", "计算器", "看板", "点检", "巡检", "命令行", "数据清洗", "表格清洗", "脚本", "效率工具"))
             return "日常开发";
-        if (containsAny(text, "开发网站", "官网", "官方网站", "活动页", "落地页", "门户", "宣传页", "展示网站", "公司网站", "首页"))
+        if (containsAny(text, "开发网站", "官网", "官方网站", "活动页", "落地页", "门户", "宣传页", "展示网站", "公司网站", "首页", "html 页面", "html页面", "html 网页", "静态页面", "静态网页"))
             return "开发网站";
         return null;
     }
