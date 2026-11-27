@@ -33,9 +33,10 @@ public final class ImportInspector {
     private record Entry(String name, int method, long csize, long usize, long localOffset, boolean dir, boolean symlink) {}
 
     private static final Set<String> SKIP_DIRS = Set.of(
-            "node_modules", ".git", "__MACOSX", ".venv", "venv", "__pycache__",
-            ".pytest_cache", ".mypy_cache", ".idea", ".vscode", ".turbo"
+            "node_modules", ".git", ".svn", ".hg", "__MACOSX", ".venv", "venv", "__pycache__",
+            ".pytest_cache", ".mypy_cache", ".idea", ".vscode", ".turbo", ".gradle", ".next", ".nuxt", ".parcel-cache"
     );
+    private static final Set<String> SKIP_FILES = Set.of(".DS_Store", "Thumbs.db", "desktop.ini");
 
     /** 不应被当作「外层冗余壳目录」剥离的标准项目内部目录名 */
     private static final Set<String> KEEP_TOP_DIRS = Set.of(
@@ -169,7 +170,7 @@ public final class ImportInspector {
         String[] parts = n.split("/");
         for (int i = 0; i < parts.length - 1; i++) if (SKIP_DIRS.contains(parts[i])) return true;
         String last = parts[parts.length - 1];
-        return last.equals(".DS_Store") || SKIP_DIRS.contains(last);
+        return SKIP_FILES.contains(last) || last.startsWith("._") || SKIP_DIRS.contains(last);
     }
 
     private static String commonTopDir(List<Entry> files) {

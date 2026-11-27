@@ -1,5 +1,6 @@
-.code-import-backdrop{padding:32px;background:#21192e45;backdrop-filter:blur(8px);z-index:120}
-.code-import-dialog{position:relative;width:min(1100px,100%);max-height:92dvh;overflow:auto;background:#fff;border:1px solid #f0edf7;border-radius:26px;padding:26px;color:#242332;box-shadow:0 28px 100px #36204c20;font-size:14px}
+.code-import-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(24,18,40,.46);overscroll-behavior:contain;z-index:260}
+.code-import-dialog{position:relative;width:min(860px,100%);max-height:90dvh;overflow:auto;overscroll-behavior:contain;isolation:isolate;background:#fff;border:1px solid #e7e1f4;border-radius:24px;padding:26px;color:#242332;box-shadow:0 24px 64px rgba(24,16,46,.22);font-size:14px}
+.code-import-dialog:focus{outline:none}
 .code-import-close{position:absolute;right:20px;top:15px;width:34px;height:34px;border-radius:50%;font-size:27px;line-height:1;color:#858491;z-index:2;background:transparent}
 .code-import-close:hover{color:#6743b7;background:#f3edf9}
 .code-import-dropzone{border:2px dashed #e5dcff;border-radius:22px;background:linear-gradient(120deg,#fff,#fcfbff);padding:40px 32px 42px;text-align:center;transition:border-color .16s,background .16s}

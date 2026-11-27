@@ -224,4 +224,21 @@ class ImportInspectorTest {
         )), LIMITS);
         assertThat(brokenPkg.deployable()).isFalse();
     }
+
+    @Test
+    void skipsExtendedCacheDirsAndSupportsDockerfileOnlyRepo() throws Exception {
+        var r = ImportInspector.inspectZip(zip(m(
+                "svc/Dockerfile", "FROM alpine:3.20\nEXPOSE 9090\nCMD [\"/bin/sh\"]\n",
+                "svc/start.sh", "#!/bin/sh\necho ok\n",
+                "svc/.next/cache/a.bin", "cache",
+                "svc/.gradle/caches/b.bin", "cache",
+                "svc/.svn/entries", "svn",
+                "svc/Thumbs.db", "win",
+                "svc/._Dockerfile", "mac"
+        )), LIMITS);
+        assertThat(r.deployable()).isTrue();
+        assertThat(r.projectKind()).isEqualTo("service");
+        assertThat(r.files()).extracting(ImportInspector.FileInfo::path)
+                .containsExactlyInAnyOrder("Dockerfile", "start.sh");
+    }
 }

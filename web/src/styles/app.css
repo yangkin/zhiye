@@ -2570,7 +2570,7 @@ a.skill-chip{text-decoration:none}
 .msg-retry .text-button .icon{width:13px;height:13px}
 .send-button.is-stop{background:#1f1c29;color:#fff}
 .send-button.is-stop .icon{width:12px;height:12px}
-#toasts{top:18px;bottom:auto;left:50%;transform:translateX(-50%);z-index:130}
+#toasts{top:18px;bottom:auto;left:50%;transform:translateX(-50%);z-index:1300}
 .toast{background:#fffffffa;border:1px solid #e6e0f2;color:#2c253d;border-radius:12px;padding:10px 16px;min-width:auto;max-width:460px;box-shadow:0 10px 30px rgba(34,22,64,.12);backdrop-filter:blur(10px)}
 .toast-action{pointer-events:auto;margin-left:6px;padding:3px 8px;border-radius:6px;font-size:12px;font-weight:600;color:#6f52d4;background:#f1edfb}
 .toast-action:hover{background:#e6defa}

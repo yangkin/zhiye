@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
@@ -10,7 +10,8 @@ import { APP_TYPES, type AppType, type ImportCandidate, type ImportManifest, typ
 import { sizeLabel } from '../lib/format';
 import { toast, useUi } from '../lib/store';
 import { TaskLimitLink, errorCode } from '../components/LimitNotice';
-import { DEFAULT_LIMITS, buildUpload, droppedFiles, precheck, type Limits } from './precheck';
+import { useEscape } from '../components/Modal';
+import { DEFAULT_LIMITS, buildUpload, droppedFiles, precheck, type Limits, type PrecheckOptions } from './precheck';
 import { Select } from '../components/Select';
 
 type Phase = 'select' | 'reading' | 'uploading' | 'review' | 'deploying';
@@ -190,14 +191,18 @@ function Dialog() {
   const [task, setTask] = useState<{ id: string; appId: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const folderRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement | null>(null);
+  const backdropDown = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const token = useRef(0);
   const keyRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    folderRef.current?.setAttribute('webkitdirectory', '');
-    folderRef.current?.setAttribute('directory', '');
+  const setFolderInput = useCallback((el: HTMLInputElement | null) => {
+    folderRef.current = el;
+    if (el) {
+      el.setAttribute('webkitdirectory', '');
+      el.setAttribute('directory', '');
+    }
   }, []);
 
   const onFinished = useCallback(
@@ -243,7 +248,7 @@ function Dialog() {
     keyRef.current = null;
   };
 
-  const read = async (input: Promise<File[]> | File[]) => {
+  const read = async (input: Promise<File[]> | File[], options?: PrecheckOptions) => {
     if (phase === 'uploading' || phase === 'deploying') return;
     const my = ++token.current;
     setError('');
@@ -251,7 +256,7 @@ function Dialog() {
     setPhase('reading');
     try {
       const files = await input;
-      const checked = await precheck(files, limits);
+      const checked = await precheck(files, limits, options);
       if (my !== token.current) return;
       setPhase('uploading');
       const upload = await buildUpload(checked);
@@ -311,17 +316,25 @@ function Dialog() {
     }
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+  useEscape(() => {
+    if (phase !== 'deploying') close();
   });
 
   const busy = phase === 'reading' || phase === 'uploading';
   const steps = stream.phases.length ? stream.phases : [stream.phaseLabel || '正在排队'];
 
   return createPortal(
-    <div className="modal-backdrop code-import-backdrop" onClick={(e) => e.target === e.currentTarget && phase !== 'deploying' && close()}>
+    <div
+      className="code-import-backdrop"
+      onPointerDown={(e) => {
+        backdropDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const shouldClose = backdropDown.current && e.target === e.currentTarget && phase !== 'deploying';
+        backdropDown.current = false;
+        if (shouldClose) close();
+      }}
+    >
       <section ref={dialogBox} className="code-import-dialog" role="dialog" aria-modal="true" aria-label="导入代码并部署">
         <button type="button" className="code-import-close" aria-label="关闭代码导入" onClick={close}>
           ×
@@ -332,18 +345,20 @@ function Dialog() {
           accept=".zip,.html,.htm,.py,.js,.mjs,.cjs"
           hidden
           onChange={(e) => {
-            void read(Array.from(e.target.files ?? []));
+            const picked = Array.from(e.target.files ?? []);
             e.target.value = '';
+            if (picked.length) void read(picked);
           }}
         />
         <input
-          ref={folderRef}
+          ref={setFolderInput}
           type="file"
           multiple
           hidden
           onChange={(e) => {
-            void read(Array.from(e.target.files ?? []));
+            const picked = Array.from(e.target.files ?? []);
             e.target.value = '';
+            void read(picked, { fromFolderPicker: true });
           }}
         />
         {phase === 'deploying' ? (
@@ -395,7 +410,7 @@ function Dialog() {
             >
               <FolderArt />
               <h2>代码导入</h2>
-              <p>支持静态网页、前端工程、Python / Node.js / Java / Go 单体服务，以及无页面 Python / JS 脚本（.py / .js / .mjs）</p>
+              <p>支持静态网页、前端工程、Python / Node.js / Java / Go / Dockerfile 单体服务，以及纯脚本（.py / .js / .mjs）</p>
               <p>自动识别运行形态：网页与全栈自动托管，纯脚本导入后可直接在线运行传参、查看输出与 AI 迭代</p>
               <p>
                 拖拽项目文件夹、.zip、.html 或 .py / .js 脚本到这里，或{' '}
@@ -408,7 +423,7 @@ function Dialog() {
                 </button>
               </p>
               <p className="code-limits">
-                最多 {Math.round(limits.maxBytes / 1048576)} MB、{limits.maxFiles} 个文件，自动跳过 node_modules、.git
+                最多 {Math.round(limits.maxBytes / 1048576)} MB、{limits.maxFiles} 个文件，自动跳过 node_modules、.git、.venv、__pycache__ 等缓存目录
               </p>
               {phase === 'reading' ? (
                 <span className="code-reading" role="status">

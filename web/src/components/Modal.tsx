@@ -16,9 +16,20 @@ interface ModalProps {
 export function Modal({ title, children, footer, wide, onClose, overline = '', className = '' }: ModalProps) {
   useEscape(onClose);
   const box = useRef<HTMLElement>(null);
+  const backdropDown = useRef(false);
   useDialogFocus(box);
   return createPortal(
-    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="modal-backdrop"
+      onPointerDown={(e) => {
+        backdropDown.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const shouldClose = backdropDown.current && e.target === e.currentTarget;
+        backdropDown.current = false;
+        if (shouldClose) onClose();
+      }}
+    >
       <section ref={box} className={`modal ${wide ? 'modal-wide' : ''} ${className}`} role="dialog" aria-modal="true" aria-label={title}>
         <header>
           <div>
@@ -50,6 +61,7 @@ export function useEscape(handler: () => void, active = true) {
     const me = ref;
     escStack.push(me);
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
       if (e.key === 'Escape' && escStack[escStack.length - 1] === me) me.current();
     };
     window.addEventListener('keydown', onKey);
