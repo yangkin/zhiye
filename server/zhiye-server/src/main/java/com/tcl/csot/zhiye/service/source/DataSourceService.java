@@ -158,6 +158,39 @@ public class DataSourceService {
         return call(requireVisible(ws, id), params, null, "test");
     }
 
+    /** 对话 / 编码探查实时调用：严格按当前工作空间可见范围校验（支持按 key、id 或精确名称匹配）。 */
+    public Map<String, Object> queryForWorkspace(String ws, String keyOrId, JsonNode params, String appId, String origin) {
+        String target = keyOrId == null ? "" : keyOrId.trim();
+        if (target.isEmpty()) throw ApiException.validation("请指定要调用的数据源调用名（key）或名称");
+        Source s = findVisibleByKeyOrIdOrName(ws, target)
+                .orElseThrow(() -> ApiException.notFound("数据源「" + target + "」"));
+        Map<String, Object> raw = call(s, params, appId, origin == null || origin.isBlank() ? "ask_chat" : origin);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("id", s.id());
+        out.put("key", s.key());
+        out.put("name", s.name());
+        out.put("method", s.method());
+        out.put("status", raw.get("status"));
+        out.put("data", raw.get("data"));
+        return out;
+    }
+
+    /** 当前工作空间可见的数据源列表（含平台托管与当前工作空间私有，严格隔离其他工作空间）。 */
+    public List<Source> listVisibleSources(String ws) {
+        if (ws == null || ws.isBlank()) return List.of();
+        return visible(ws);
+    }
+
+    private Optional<Source> findVisibleByKeyOrIdOrName(String ws, String keyOrId) {
+        if (ws == null || ws.isBlank() || keyOrId == null || keyOrId.isBlank()) return Optional.empty();
+        String q = keyOrId.trim();
+        List<Source> vis = visible(ws);
+        for (Source s : vis) if (s.key().equalsIgnoreCase(q) || s.id().equals(q)) return Optional.of(s);
+        for (Source s : vis) if (s.name() != null && s.name().trim().equalsIgnoreCase(q)) return Optional.of(s);
+        return Optional.empty();
+    }
+
     public List<Map<String, Object>> recentCalls(String ws, String id) {
         requireVisible(ws, id);
         return jdbc.sql("select app_id, origin, status, ok, duration_ms, error, created_at from data_source_call where source_id = ? order by id desc limit 20")
@@ -661,12 +694,66 @@ public class DataSourceService {
         return visibleSelection(ws, ids).stream().map(s -> view(s, ws)).toList();
     }
 
-    /** 创造页会话：模型可以据此规划真实数据接入，但不能把说明当成已经执行过的查询结果。 */
+    /** 创造页会话：模型既可直接调 source_query 获取实时数据，又能在创建应用时自动绑定。 */
     public String conversationSummary(String ws, List<String> ids) {
         List<Source> list = visibleSelection(ws, ids);
         if (list.isEmpty()) return "";
-        return summary(list, "本会话已连接的数据源（创建应用时会自动绑定）")
-                + "用户提到这些接口或真实数据时，按上述能力设计和回答；当前问答没有执行接口调用，不要声称已经查到实时结果。生成应用时通过 window.zhiye.source.query 调用。\n";
+        return summary(list, "本会话已连接的数据源（对话中可随时用 source_query 实时调用，创建应用时也会自动绑定）")
+                + "当用户要求直接调用、查看字段、分析实时数据或基于返回内容制作看板时，请先调用 `source_query` 获取真实数据后再回答或进入构建；不要声称无法调用数据源。生成应用时通过 `window.zhiye.source.query`（或全栈 `ZHIYE_CONNECTOR_API/source/query`）接入。\n";
+    }
+
+    /** 供对话助手查看当前工作空间全部可用数据源的脱敏目录（不含地址、请求头与密钥）。 */
+    public String formatCatalogTextForWorkspace(String ws) {
+        List<Source> list = listVisibleSources(ws);
+        if (list.isEmpty()) return "当前工作空间暂未配置可用的企业数据源（可在左侧「生态」→「AGW 企业接口」中添加）。";
+        StringBuilder sb = new StringBuilder();
+        for (Source s : list) {
+            sb.append("### ").append(s.name()).append("（key: `").append(s.key()).append("` · ").append(s.method()).append("）\n");
+            if (s.description() != null && !s.description().isBlank()) sb.append(s.description()).append('\n');
+            if (s.params().isEmpty()) {
+                sb.append("- 参数：无\n");
+            } else {
+                sb.append("- 参数：\n");
+                for (Param p : s.params()) {
+                    sb.append("  - `").append(p.name()).append("`（").append(p.type())
+                            .append(p.required() ? "，必填" : "，可选").append("）")
+                            .append(p.description().isBlank() ? "" : "：" + p.description())
+                            .append(p.example().isBlank() ? "" : "，示例 `" + p.example() + "`").append('\n');
+                }
+            }
+            sb.append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /** 注入对话系统提示词的精简数据源目录（脱敏，绝不含 URL/密钥；最多列出前 25 条，其余通过 source_list 查询）。 */
+    public String promptGuideForWorkspace(String ws) {
+        List<Source> list = listVisibleSources(ws);
+        if (list.isEmpty()) return "";
+        // 优先展示工作空间私有数据源，再展示平台共享数据源
+        List<Source> ordered = new ArrayList<>(list);
+        ordered.sort(Comparator.comparing(Source::platform));
+        int limit = 25;
+        StringBuilder sb = new StringBuilder("\n\n【当前工作空间可用企业数据源（AGW/HTTP，免密托管，可随时直接调用）】\n");
+        sb.append("当用户提到以下数据源、要求「帮我调用一下 / 查一下数据 / 看看有哪些字段」，或要求「把返回内容做成看板/应用」时，**请直接调用 `source_query`（不确定参数或查看更多接口时先调 `source_list`）获取真实字段和最新数据**，再回答或输出 `[[build:类型]]` 开始搭建：\n");
+        for (int i = 0; i < Math.min(limit, ordered.size()); i++) {
+            Source s = ordered.get(i);
+            sb.append("- **").append(s.name()).append("**（key: `").append(s.key()).append("`，").append(s.method()).append("）");
+            if (s.description() != null && !s.description().isBlank()) {
+                String d = s.description().replaceAll("\\s+", " ").trim();
+                sb.append("：").append(d.length() > 100 ? d.substring(0, 100) + "…" : d);
+            }
+            if (!s.params().isEmpty()) {
+                sb.append("；参数：").append(String.join("、", s.params().stream()
+                        .map(p -> p.name() + (p.required() ? "*" : "") + (p.example().isBlank() ? "" : "(例:" + p.example() + ")"))
+                        .toList()));
+            }
+            sb.append('\n');
+        }
+        if (ordered.size() > limit) {
+            sb.append("- …另有 ").append(ordered.size() - limit).append(" 个数据源，可调用 `source_list` 查看完整清单。\n");
+        }
+        return sb.toString();
     }
 
     private static String summary(List<Source> list, String heading) {

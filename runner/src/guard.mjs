@@ -448,6 +448,7 @@ export function checkToolCall(toolName, input, { cwd, projectKind = 'template', 
     case 'typecheck_diagnostics':
     case 'code_symbols':
     case 'inspect_source':
+    case 'inspect_bitable':
     case 'install_package':
     case 'mcp_list':
     case 'mcp_call':

@@ -253,10 +253,36 @@ test('toolSummary formats all Harness V2 tools cleanly', () => {
   assert.match(toolSummary('/tmp', 'code_symbols', { action: 'references', symbol: 'OrderCard' }), /追踪符号引用 · OrderCard/)
   assert.match(toolSummary('/tmp', 'install_package', { packageName: 'echarts' }), /安装白名单依赖 · echarts/)
   assert.match(toolSummary('/tmp', 'mcp_call', { server: 'csot-docs', tool: 'search' }), /调用企业 MCP · csot-docs\/search/)
-  for (const name of ['browser_test', 'test_endpoint', 'typecheck_diagnostics', 'code_symbols', 'inspect_source', 'install_package', 'mcp_list', 'mcp_call']) {
+  assert.match(toolSummary('/tmp', 'inspect_bitable', { connectorId: 'conn_123' }), /探测飞书多维表格结构 · conn_123/)
+  for (const name of ['browser_test', 'test_endpoint', 'typecheck_diagnostics', 'code_symbols', 'inspect_source', 'inspect_bitable', 'install_package', 'mcp_list', 'mcp_call']) {
     assert.equal(checkToolCall(name, {}, { cwd: '/tmp', projectKind: 'template', agentDir: '/tmp' }), null, `guard should allow ${name}`)
   }
   assert.notEqual(checkToolCall('evil_unregistered_tool', {}, { cwd: '/tmp', projectKind: 'template', agentDir: '/tmp' }), null)
+})
+
+test('inspect_bitable is exposed only when connectors.json has a feishu_bitable connector', async () => {
+  const { selectToolsForSession } = await import('../src/agent.mjs')
+  const { hasBitableConnectors } = await import('../src/mcp-bridge.mjs')
+  const dir = tmpDir('zhiye-bitable-sel-')
+  try {
+    assert.equal(hasBitableConnectors(dir), false)
+    assert.ok(!selectToolsForSession({ projectKind: 'template', agentDir: dir }).tools.includes('inspect_bitable'))
+
+    writeFileSync(path.join(dir, 'connectors.json'), JSON.stringify({
+      connectors: [{ id: 'conn_bot', name: '告警群机器人', kind: 'feishu_bot', enabled: true }],
+    }))
+    assert.equal(hasBitableConnectors(dir), false)
+    assert.ok(!selectToolsForSession({ projectKind: 'template', agentDir: dir }).tools.includes('inspect_bitable'))
+
+    writeFileSync(path.join(dir, 'connectors.json'), JSON.stringify({
+      connectors: [{ id: 'conn_bt', name: '点检多维表格', kind: 'feishu_bitable', enabled: true }],
+    }))
+    assert.equal(hasBitableConnectors(dir), true)
+    assert.ok(selectToolsForSession({ projectKind: 'template', agentDir: dir }).tools.includes('inspect_bitable'))
+    assert.ok(!selectToolsForSession({ projectKind: 'skill', agentDir: dir }).tools.includes('inspect_bitable'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('install_package detects preinstalled packages and restores node_modules symlink on failure', async () => {

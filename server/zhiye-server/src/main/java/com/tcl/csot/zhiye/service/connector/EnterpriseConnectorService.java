@@ -131,6 +131,10 @@ public class EnterpriseConnectorService {
             sb.append("- `").append(c.get("id")).append("` — **").append(c.get("name")).append("**")
                     .append("（类型：`").append(c.get("kind")).append("`，模式：`").append(c.get("mode")).append("`）\n");
         }
+        boolean hasBitable = enabled.stream().anyMatch(c -> "feishu_bitable".equals(c.get("kind")) || "feishu_app".equals(c.get("kind")));
+        if (hasBitable) {
+            sb.append("- **开发前字段探测（强烈推荐）**：接入飞书多维表格前，请先调用 `inspect_bitable` 读取真实表头列名与样例记录，严禁凭空猜测中英文列名！\n");
+        }
         if (isService) {
             sb.append("""
                     - **单体全栈后端调用方式（已自动注入环境变量 `ZHIYE_CONNECTOR_API` 与 `ZHIYE_CONNECTOR_TOKEN`，无需用户手动配密钥）**：
@@ -151,6 +155,78 @@ public class EnterpriseConnectorService {
     }
 
     // ==================== CRUD 管理 ====================
+
+    public List<Map<String, Object>> listEnabledForWorkspace(String ws) {
+        if (ws == null || ws.isBlank()) return List.of();
+        return list(ws).stream().filter(c -> Boolean.TRUE.equals(c.get("enabled"))).toList();
+    }
+
+    /** 供对话助手查阅的脱敏飞书连接器目录（严禁暴露 Webhook、AppSecret 等密钥）。 */
+    public String formatCatalogTextForWorkspace(String ws) {
+        List<Map<String, Object>> enabled = listEnabledForWorkspace(ws);
+        if (enabled.isEmpty()) return "当前工作空间暂未配置可用的飞书连接器（可在左侧「生态」→「飞书与多维表格」中添加）。";
+        StringBuilder sb = new StringBuilder();
+        for (Map<String, Object> c : enabled) {
+            String kind = String.valueOf(c.getOrDefault("kind", ""));
+            String kindLabel = "feishu_bitable".equals(kind) ? "飞书多维表格（支持 bitable_list 读取 / bitable_create 写入）"
+                    : "feishu_app".equals(kind) ? "飞书开放应用（支持多维表格与卡片通知）"
+                    : "飞书群机器人（支持 feishu_send_card 发交互卡片）";
+            sb.append("- **").append(c.get("name")).append("**（connectorId: `").append(c.get("id")).append("`）— ")
+                    .append(kindLabel).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /** 注入对话系统提示词的精简飞书生态引导（脱敏，绝不含密钥/Webhook）。 */
+    public String promptGuideForChat(String ws) {
+        List<Map<String, Object>> enabled = listEnabledForWorkspace(ws);
+        if (enabled.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder("\n\n【当前工作空间可用飞书生态连接器（免密托管，对话可随时调用）】\n");
+        sb.append("当用户要求读取/查询/统计飞书多维表格，或要求基于多维表格做成看板/应用时，**请直接调用 `bitable_list` 读取真实字段和记录**；仅当用户明确要求写入记录或发送群通知时，再调用 `bitable_create` 或 `feishu_send_card`：\n");
+        for (Map<String, Object> c : enabled) {
+            String kind = String.valueOf(c.getOrDefault("kind", ""));
+            String label = "feishu_bitable".equals(kind) ? "飞书多维表格" : "feishu_app".equals(kind) ? "飞书开放应用" : "飞书群机器人";
+            sb.append("- **").append(c.get("name")).append("**（connectorId: `").append(c.get("id")).append("`，").append(label).append("）\n");
+        }
+        return sb.toString();
+    }
+
+    /** 将多维表格返回结果整理为「真实字段名清单 + 样本记录」便于模型精准分析或基于真实字段搭建看板。 */
+    public static String formatBitableResultForModel(Map<String, Object> res) {
+        if (res == null) return "未获取到多维表格数据。";
+        String connName = String.valueOf(res.getOrDefault("connectorName", res.getOrDefault("connectorId", "")));
+        int total = res.get("total") instanceof Number n ? n.intValue() : 0;
+        JsonNode items = res.get("items") instanceof JsonNode jn ? jn : Json.M.valueToTree(res.get("items"));
+        LinkedHashSet<String> fieldNames = new LinkedHashSet<>();
+        List<Map<String, Object>> previewRows = new ArrayList<>();
+        if (items != null && items.isArray()) {
+            for (JsonNode it : items) {
+                JsonNode f = it.path("fields");
+                if (f != null && f.isObject()) {
+                    f.fieldNames().forEachRemaining(fieldNames::add);
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    String rid = it.path("record_id").asText(it.path("id").asText(""));
+                    if (!rid.isBlank()) row.put("record_id", rid);
+                    row.put("fields", f);
+                    previewRows.add(row);
+                }
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("飞书多维表格「").append(connName).append("」查询成功：总记录数 ").append(total)
+                .append("，本次返回 ").append(previewRows.size()).append(" 条。\n");
+        if (!fieldNames.isEmpty()) {
+            sb.append("真实字段名（表头）：").append(String.join("、", fieldNames)).append('\n');
+        }
+        if (previewRows.isEmpty()) {
+            sb.append("当前表格暂无记录。");
+        } else {
+            String json = Json.write(previewRows);
+            if (json.length() > 9500) json = json.substring(0, 9500) + "\n…（已截断）";
+            sb.append("样本记录：\n```json\n").append(json).append("\n```");
+        }
+        return sb.toString();
+    }
 
     public List<Map<String, Object>> list(String ws) {
         return jdbc.sql("""
@@ -318,6 +394,21 @@ public class EnterpriseConnectorService {
                                               String templateColor, List<Map<String, String>> fields,
                                               List<Map<String, Object>> buttons) {
         ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bot", "feishu_app");
+        return executeSendFeishuCard(conn, appId, title, content, templateColor, fields, buttons);
+    }
+
+    /** 对话 / 工作空间级安全调用：严格校验工作空间隔离后发送飞书交互卡片。 */
+    public Map<String, Object> sendFeishuCardForWorkspace(String ws, String connectorIdOrName, String appId,
+                                                          String title, String content, String templateColor,
+                                                          List<Map<String, String>> fields,
+                                                          List<Map<String, Object>> buttons) {
+        ConnectorRow conn = resolveConnectorForWorkspace(ws, connectorIdOrName, "feishu_bot", "feishu_app");
+        return executeSendFeishuCard(conn, appId, title, content, templateColor, fields, buttons);
+    }
+
+    private Map<String, Object> executeSendFeishuCard(ConnectorRow conn, String appId, String title, String content,
+                                                      String templateColor, List<Map<String, String>> fields,
+                                                      List<Map<String, Object>> buttons) {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
 
@@ -350,7 +441,7 @@ public class EnterpriseConnectorService {
                 if (code != 0) {
                     throw new IllegalStateException("飞书机器人返回错误码 " + code + ": " + parsed.path("msg").asText(resp.body()));
                 }
-                Map<String, Object> out = Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "response", parsed == null ? resp.body() : parsed);
+                Map<String, Object> out = Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "connectorName", conn.name(), "response", parsed == null ? resp.body() : parsed);
                 recordAudit(conn.id(), appId, "feishu.sendCard", "ok", System.currentTimeMillis() - t0, reqSummary, truncate(resp.body(), 300), null);
                 return out;
             }
@@ -374,7 +465,7 @@ public class EnterpriseConnectorService {
             }
             String messageId = parsed.path("data").path("message_id").asText("");
             recordAudit(conn.id(), appId, "feishu.sendCard", "ok", System.currentTimeMillis() - t0, reqSummary, "messageId=" + messageId, null);
-            return Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "messageId", messageId);
+            return Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "connectorName", conn.name(), "messageId", messageId);
         } catch (Exception e) {
             recordAudit(conn.id(), appId, "feishu.sendCard", "error", System.currentTimeMillis() - t0, reqSummary, null, e.getMessage());
             throw e instanceof ApiException ae ? ae : new ApiException(HttpStatus.BAD_GATEWAY, "CONNECTOR_CALL_FAILED", e.getMessage());
@@ -385,6 +476,16 @@ public class EnterpriseConnectorService {
 
     public Map<String, Object> bitableList(String connectorId, String appId, Map<String, Object> opts) {
         ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bitable", "feishu_app");
+        return executeBitableList(conn, appId, opts);
+    }
+
+    /** 对话 / Runner 安全只读探查：严格按当前工作空间隔离。 */
+    public Map<String, Object> bitableListForWorkspace(String ws, String connectorIdOrName, String appId, Map<String, Object> opts) {
+        ConnectorRow conn = resolveConnectorForWorkspace(ws, connectorIdOrName, "feishu_bitable", "feishu_app");
+        return executeBitableList(conn, appId, opts);
+    }
+
+    private Map<String, Object> executeBitableList(ConnectorRow conn, String appId, Map<String, Object> opts) {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
@@ -394,7 +495,7 @@ public class EnterpriseConnectorService {
             String appToken = optStr(opts, "appToken", conn.config().path("bitableAppToken").asText(conn.config().path("appToken").asText("")));
             String tableId = optStr(opts, "tableId", conn.config().path("bitableTableId").asText(conn.config().path("tableId").asText("")));
             if (appToken.isBlank() || tableId.isBlank()) throw ApiException.validation("缺少多维表格 bitableAppToken 或 bitableTableId");
-            int pageSize = Math.max(1, Math.min(100, Integer.parseInt(String.valueOf(opts.getOrDefault("pageSize", 20)))));
+            int pageSize = Math.max(1, Math.min(100, Integer.parseInt(String.valueOf(opts == null ? 20 : opts.getOrDefault("pageSize", 20)))));
             String url = apiBase + "/open-apis/bitable/v1/apps/" + appToken + "/tables/" + tableId + "/records?page_size=" + pageSize;
             validateOutboundUrl(url, conn.config());
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(12))
@@ -411,6 +512,7 @@ public class EnterpriseConnectorService {
             out.put("ok", true);
             out.put("mode", "live");
             out.put("connectorId", conn.id());
+            out.put("connectorName", conn.name());
             out.put("total", total);
             out.put("items", dataNode.path("items"));
             out.put("data", dataNode);
@@ -423,6 +525,17 @@ public class EnterpriseConnectorService {
 
     public Map<String, Object> bitableCreate(String connectorId, String appId, Map<String, Object> fields, Map<String, Object> opts) {
         ConnectorRow conn = resolveConnector(connectorId, appId, "feishu_bitable", "feishu_app");
+        return executeBitableCreate(conn, appId, fields, opts);
+    }
+
+    /** 对话中按用户明确要求写入多维表格记录：严格按当前工作空间隔离。 */
+    public Map<String, Object> bitableCreateForWorkspace(String ws, String connectorIdOrName, String appId,
+                                                         Map<String, Object> fields, Map<String, Object> opts) {
+        ConnectorRow conn = resolveConnectorForWorkspace(ws, connectorIdOrName, "feishu_bitable", "feishu_app");
+        return executeBitableCreate(conn, appId, fields, opts);
+    }
+
+    private Map<String, Object> executeBitableCreate(ConnectorRow conn, String appId, Map<String, Object> fields, Map<String, Object> opts) {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
         try {
@@ -446,6 +559,7 @@ public class EnterpriseConnectorService {
             out.put("ok", true);
             out.put("mode", "live");
             out.put("connectorId", conn.id());
+            out.put("connectorName", conn.name());
             out.put("record_id", recId);
             out.put("recordId", recId);
             out.put("fields", recNode.path("fields"));
@@ -593,6 +707,53 @@ public class EnterpriseConnectorService {
                     """).params(primaryKind, fallbackKind).query((rs, i) -> mapRow(rs)).optional();
         }
         return found.orElseThrow(() -> ApiException.notFound("可用的 " + primaryKind + " 连接器"));
+    }
+
+    /** 严格按工作空间可见性解析连接器（支持传 ID、精确名称或留空自动取工作空间默认同类型连接器）。 */
+    private ConnectorRow resolveConnectorForWorkspace(String ws, String connectorIdOrName, String primaryKind, String fallbackKind) {
+        if (ws == null || ws.isBlank()) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_FORBIDDEN", "缺少工作空间上下文");
+        }
+        String target = connectorIdOrName == null ? "" : connectorIdOrName.trim();
+        if (!target.isEmpty()) {
+            Optional<ConnectorRow> byId = findById(target);
+            if (byId.isPresent()) {
+                ConnectorRow conn = byId.get();
+                if (!isVisibleToWorkspace(conn, ws)) {
+                    throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_FORBIDDEN", "无权调用其他工作空间的私有连接器");
+                }
+                if (!conn.enabled()) {
+                    throw ApiException.conflict("CONNECTOR_DISABLED", "该企业连接器已禁用：" + conn.name());
+                }
+                if (!primaryKind.equals(conn.kind()) && !fallbackKind.equals(conn.kind())) {
+                    throw ApiException.validation("连接器「" + conn.name() + "」类型为 " + conn.kind() + "，不支持当前操作");
+                }
+                return conn;
+            }
+            Optional<ConnectorRow> byName = jdbc.sql("""
+                    select * from enterprise_connector
+                     where enabled = true and lower(name) = lower(?)
+                       and (workspace_id is null or workspace_id = ?)
+                     order by (workspace_id = ?) desc, updated_at desc
+                     limit 1
+                    """).params(target, ws, ws).query((rs, i) -> mapRow(rs)).optional();
+            if (byName.isPresent()) {
+                ConnectorRow conn = byName.get();
+                if (!primaryKind.equals(conn.kind()) && !fallbackKind.equals(conn.kind())) {
+                    throw ApiException.validation("连接器「" + conn.name() + "」类型为 " + conn.kind() + "，不支持当前操作");
+                }
+                return conn;
+            }
+            throw ApiException.notFound("企业连接器「" + target + "」");
+        }
+        return jdbc.sql("""
+                select * from enterprise_connector
+                 where enabled = true and kind in (?, ?)
+                   and (workspace_id is null or workspace_id = ?)
+                 order by (workspace_id = ?) desc, (mode = 'live') desc, updated_at desc
+                 limit 1
+                """).params(primaryKind, fallbackKind, ws, ws).query((rs, i) -> mapRow(rs)).optional()
+                .orElseThrow(() -> ApiException.notFound("可用的 " + primaryKind + " 连接器"));
     }
 
     private ConnectorRow requireEnabledConnector(String id) {

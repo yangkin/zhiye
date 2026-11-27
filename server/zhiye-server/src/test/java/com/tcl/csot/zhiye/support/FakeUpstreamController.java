@@ -53,19 +53,29 @@ public class FakeUpstreamController {
                 : user.contains("用户需求")
                 ? "好的：\n```json\n{" + shape + "\"name\": \"点击计数器\", \"planDoc\": \"# 点击计数器\\n\\n## 应用目标\\n显示点击次数，可以加一和重置。\\n\\n## 验收标准\\n- 按钮可用\"}\n```"
                 : "好";
-        // 问答的工具循环：带 [read_skill] 或 [mcp_call:server:tool:query] 的问题先让「模型」调用工具，拿到结果后把结果回显出来
+        // 问答的工具循环：支持 [read_skill]、[mcp_call:...]、[source_query:key]、[connector_list]、[bitable_list:connId]
         JsonNode last = body.path("messages").get(body.path("messages").size() - 1);
-        boolean wantsSkill = body.toString().contains("[read_skill]") && body.path("tools").toString().contains("read_skill");
-        var mcpMatcher = java.util.regex.Pattern.compile("\\[mcp_call:([^:\\]]+):([^:\\]]*):([^\\]]*)\\]").matcher(body.toString());
-        boolean wantsMcp = mcpMatcher.find() && body.path("tools").toString().contains("mcp_call");
-        if (body.path("stream").asBoolean(false) && (wantsSkill || wantsMcp || "tool".equals(last.path("role").asText()))) {
+        String bodyStr = body.toString();
+        String toolsStr = body.path("tools").toString();
+        boolean wantsSkill = bodyStr.contains("[read_skill]") && toolsStr.contains("read_skill");
+        var mcpMatcher = java.util.regex.Pattern.compile("\\[mcp_call:([^:\\]]+):([^:\\]]*):([^\\]]*)\\]").matcher(bodyStr);
+        boolean wantsMcp = mcpMatcher.find() && toolsStr.contains("mcp_call");
+        var srcMatcher = java.util.regex.Pattern.compile("\\[source_query:([^\\]]+)\\]").matcher(bodyStr);
+        boolean wantsSource = srcMatcher.find() && toolsStr.contains("source_query");
+        boolean wantsConnList = bodyStr.contains("[connector_list]") && toolsStr.contains("connector_list");
+        var bitableMatcher = java.util.regex.Pattern.compile("\\[bitable_list:([^\\]]*)\\]").matcher(bodyStr);
+        boolean wantsBitable = bitableMatcher.find() && toolsStr.contains("bitable_list");
+        if (body.path("stream").asBoolean(false) && (wantsSkill || wantsMcp || wantsSource || wantsConnList || wantsBitable || "tool".equals(last.path("role").asText()))) {
             res.setContentType("text/event-stream");
             var out = res.getOutputStream();
             String chunk;
             if ("tool".equals(last.path("role").asText())) {
                 String r = last.path("content").asText();
-                String prefix = body.toString().contains("[mcp_call:") ? "MCP返回：" : "技能内容：";
-                int cap = body.toString().contains("[mcp_call:") ? 400 : 40;
+                String prefix = bodyStr.contains("[mcp_call:") ? "MCP返回："
+                        : bodyStr.contains("[source_query:") ? "数据源返回："
+                        : (bodyStr.contains("[connector_list]") || bodyStr.contains("[bitable_list:")) ? "飞书连接器返回："
+                        : "技能内容：";
+                int cap = (bodyStr.contains("[mcp_call:") || bodyStr.contains("[source_query:") || bodyStr.contains("[connector_list]") || bodyStr.contains("[bitable_list:")) ? 600 : 40;
                 chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0)
                         .set("delta", Json.obj().put("content", prefix + r.substring(0, Math.min(r.length(), cap)))))));
             } else if (wantsMcp) {
@@ -79,6 +89,31 @@ public class FakeUpstreamController {
                 tc.putObject("function").put("name", "mcp_call").put("arguments", Json.write(fnArgs));
                 var delta = Json.obj();
                 delta.put("reasoning_content", "先调用企业 MCP 查证。");
+                delta.putArray("tool_calls").add(tc);
+                chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0).set("delta", delta))));
+            } else if (wantsSource) {
+                String key = srcMatcher.group(1);
+                var fnArgs = Json.obj().put("key", key);
+                var tc = Json.obj().put("index", 0).put("id", "src_c1").put("type", "function");
+                tc.putObject("function").put("name", "source_query").put("arguments", Json.write(fnArgs));
+                var delta = Json.obj();
+                delta.put("reasoning_content", "先调用企业数据源获取实时数据。");
+                delta.putArray("tool_calls").add(tc);
+                chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0).set("delta", delta))));
+            } else if (wantsConnList) {
+                var tc = Json.obj().put("index", 0).put("id", "conn_c1").put("type", "function");
+                tc.putObject("function").put("name", "connector_list").put("arguments", "{}");
+                var delta = Json.obj();
+                delta.put("reasoning_content", "先查看工作空间可用的飞书连接器。");
+                delta.putArray("tool_calls").add(tc);
+                chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0).set("delta", delta))));
+            } else if (wantsBitable) {
+                String cid = bitableMatcher.group(1);
+                var fnArgs = Json.obj().put("connectorId", cid).put("pageSize", 10);
+                var tc = Json.obj().put("index", 0).put("id", "bit_c1").put("type", "function");
+                tc.putObject("function").put("name", "bitable_list").put("arguments", Json.write(fnArgs));
+                var delta = Json.obj();
+                delta.put("reasoning_content", "先读取飞书多维表格真实字段与数据。");
                 delta.putArray("tool_calls").add(tc);
                 chunk = Json.write(Json.obj().set("choices", Json.M.createArrayNode().add(Json.obj().put("index", 0).set("delta", delta))));
             } else {

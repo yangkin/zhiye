@@ -77,6 +77,84 @@ function formatSchemaHint(schema) {
   return fields.length ? ` 参数(${fields.join(', ')})` : ''
 }
 
+export function readConnectorCatalog(agentDir) {
+  const file = path.join(agentDir, 'connectors.json')
+  if (!existsSync(file)) return []
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    return Array.isArray(parsed?.connectors) ? parsed.connectors : []
+  } catch {
+    return []
+  }
+}
+
+export function hasBitableConnectors(agentDir) {
+  return readConnectorCatalog(agentDir).some((c) => c && (c.kind === 'feishu_bitable' || c.kind === 'feishu_app'))
+}
+
+function internalProxyUrl(suffix, env = process.env) {
+  const gw = String(env.ZHIYE_GATEWAY_URL || '').trim()
+  if (!gw) return ''
+  try {
+    const u = new URL(gw)
+    return `${u.origin}${suffix}`
+  } catch {
+    return ''
+  }
+}
+
+export async function invokeBitableInspect(agentDir, { connectorId = '', pageSize = 15 } = {}, env = process.env) {
+  const catalog = readConnectorCatalog(agentDir).filter((c) => c.kind === 'feishu_bitable' || c.kind === 'feishu_app')
+  if (!catalog.length) {
+    return { ok: false, text: '当前工作空间未启用任何飞书多维表格连接器。' }
+  }
+  const endpoint = env.ZHIYE_BITABLE_INSPECT_URL || internalProxyUrl('/internal/connectors/bitable/inspect', env)
+  const token = env.ZHIYE_TASK_TOKEN
+  if (!endpoint || !token) {
+    return { ok: false, text: '当前运行环境未配置连接器探测代理地址或任务令牌。' }
+  }
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ connectorId: String(connectorId || '').trim(), pageSize: Math.max(1, Math.min(20, Number(pageSize) || 15)) }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    const raw = await res.text()
+    let data = raw
+    try { data = JSON.parse(raw) } catch {}
+    if (!res.ok) {
+      const msg = typeof data === 'object' && data?.message ? data.message : raw.slice(0, 400)
+      return { ok: false, text: `飞书多维表格探测失败（HTTP ${res.status}）：${msg}` }
+    }
+    const text = typeof data === 'object' && data !== null
+      ? (typeof data.formatted === 'string' && data.formatted ? data.formatted : JSON.stringify(data, null, 2))
+      : String(data)
+    log(`inspect_bitable ${connectorId || 'default'} ok`)
+    return { ok: true, text: text.slice(0, 12_000) }
+  } catch (e) {
+    return { ok: false, text: `飞书多维表格探测异常：${e.message}` }
+  }
+}
+
+export function createBitableInspectExtension({ agentDir, env = process.env }) {
+  return (pi) => {
+    pi.registerTool({
+      name: 'inspect_bitable',
+      label: '探测飞书多维表格结构',
+      description: '实时只读探测当前工作空间飞书多维表格的真实表头字段名与样本记录（密钥托管在服务端），开发接入多维表格看板/台账前请先调用它，严禁凭空猜测中英文列名。',
+      parameters: Type.Object({
+        connectorId: Type.Optional(Type.String({ description: '飞书多维表格连接器 ID 或名称；留空则探测工作空间默认多维表格' })),
+        pageSize: Type.Optional(Type.Integer({ description: '返回样本记录条数（默认 15，最多 20）' })),
+      }),
+      async execute(_id, params) {
+        const r = await invokeBitableInspect(agentDir, params || {}, env)
+        return { content: [{ type: 'text', text: r.text }], details: { ok: r.ok } }
+      },
+    })
+  }
+}
+
 export function createMcpBridgeExtension({ agentDir, env = process.env }) {
   return (pi) => {
     pi.registerTool({

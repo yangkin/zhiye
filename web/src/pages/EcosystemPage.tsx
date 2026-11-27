@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import { qk } from '../api/queries';
@@ -9,13 +10,16 @@ import { Modal } from '../components/Modal';
 import { confirmDialog } from '../components/ConfirmDialog';
 import { AgwCatalog } from '../components/AgwCatalog';
 import { SourceForm, SourceTest, useSources } from '../components/DataSourceDialog';
+import type { EcosystemPrefillState } from '../components/EcosystemPicker';
 
 type EcoTab = 'feishu' | 'agw' | 'mcp';
 type AgwModal = null | { kind: 'catalog' } | { kind: 'edit'; source: DataSourceInfo | null } | { kind: 'test'; source: DataSourceInfo };
 
 /** 独立一级页面：生态管理（统一维护飞书连接器、AGW 企业接口与企业知识 MCP；聊天栏只管一键勾选使用）。 */
 export function EcosystemPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
+  const goUse = (state: EcosystemPrefillState) => navigate('/create', { state });
   const [tab, setTab] = useState<EcoTab>('feishu');
   const [query, setQuery] = useState('');
   const [feishuModal, setFeishuModal] = useState<null | { existing: Record<string, unknown> | null }>(null);
@@ -120,7 +124,7 @@ export function EcosystemPage() {
       <div className="page-heading">
         <div>
           <h1>生态管理</h1>
-          <p>统一维护飞书机器人、多维表格、AGW 企业接口与知识库 MCP；配好后在「创造」和工作台聊天栏直接勾选即用。</p>
+          <p>统一维护飞书机器人、多维表格、AGW 企业接口与知识库 MCP；配好后既可在对话中随时直接调用查数，也能一键做成交互式数据看板与应用。</p>
         </div>
         {tab === 'feishu' ? (
           <button type="button" className="primary-button" onClick={() => setFeishuModal({ existing: null })}>
@@ -146,7 +150,7 @@ export function EcosystemPage() {
           <span className="eco-stat-orb is-green"><Icon name="globe" /></span>
           <span className="eco-stat-meta">
             <b>飞书与多维表格</b>
-            <small>群卡片通知 · 多维表格同步读写</small>
+            <small>对话直查表格/发卡 · 应用双向同步</small>
           </span>
           <span className="eco-stat-num">{connQ.data?.length ?? 0}</span>
         </button>
@@ -155,7 +159,7 @@ export function EcosystemPage() {
           <span className="eco-stat-orb"><Icon name="database" /></span>
           <span className="eco-stat-meta">
             <b>AGW 企业接口</b>
-            <small>MES / 设备 / 经营数据真实查询</small>
+            <small>对话实时查数 · 一键生成数据看板</small>
           </span>
           <span className="eco-stat-num">{sourcesQ.data?.length ?? 0}</span>
         </button>
@@ -164,7 +168,7 @@ export function EcosystemPage() {
           <span className="eco-stat-orb is-indigo"><Icon name="spark" /></span>
           <span className="eco-stat-meta">
             <b>企业知识与工具 (MCP)</b>
-            <small>编码时实时检索公司规范与契约</small>
+            <small>对话与编码全程实时检索与调用</small>
           </span>
           <span className="eco-stat-num">{mcpQ.data?.length ?? 0}</span>
         </button>
@@ -242,6 +246,36 @@ export function EcosystemPage() {
                       {tr.ok ? '✓ ' : '✗ '}{tr.text}
                     </div>
                   ) : null}
+                  <div className="eco-card-use-bar">
+                    <button
+                      type="button"
+                      className="eco-use-btn is-primary"
+                      onClick={() =>
+                        goUse({
+                          prefillEcosystem: { id, category: isBitable ? 'feishu_bitable' : 'feishu_bot', name },
+                          prefillPrompt: isBitable
+                            ? `帮我调用飞书多维表格「${name}」，读取真实字段名和最新记录并整理成表格展示`
+                            : `帮我用飞书机器人「${name}」整理并发送一条测试工作汇报卡片`,
+                        })
+                      }
+                    >
+                      <Icon name="spark" /> {isBitable ? '去对话调用' : '去对话发卡'}
+                    </button>
+                    <button
+                      type="button"
+                      className="eco-use-btn"
+                      onClick={() =>
+                        goUse({
+                          prefillEcosystem: { id, category: isBitable ? 'feishu_bitable' : 'feishu_bot', name },
+                          prefillPrompt: isBitable
+                            ? `先实时调用飞书多维表格「${name}」获取真实字段与样本数据，再基于真实结构帮我把返回内容做成交互式数据看板应用`
+                            : `帮我做一个带提交与异常告警功能的应用，关键节点自动通过飞书机器人「${name}」推送交互卡片`,
+                        })
+                      }
+                    >
+                      <Icon name="grid" /> {isBitable ? '做成看板' : '接入应用'}
+                    </button>
+                  </div>
                   <div className="eco-card-foot">
                     <span className="eco-card-id" title={id}>{id}</span>
                     <div className="eco-card-actions">
@@ -295,6 +329,32 @@ export function EcosystemPage() {
                     </div>
                     {s.description || s.url ? <p className="eco-card-sub">{s.description || s.url}</p> : null}
                   </div>
+                </div>
+                <div className="eco-card-use-bar">
+                  <button
+                    type="button"
+                    className="eco-use-btn is-primary"
+                    onClick={() =>
+                      goUse({
+                        prefillSource: { id: s.id, name: s.name },
+                        prefillPrompt: `帮我实时调用数据源「${s.name}」，展示返回的主要字段和最新数据摘要`,
+                      })
+                    }
+                  >
+                    <Icon name="spark" /> 去对话调用
+                  </button>
+                  <button
+                    type="button"
+                    className="eco-use-btn"
+                    onClick={() =>
+                      goUse({
+                        prefillSource: { id: s.id, name: s.name },
+                        prefillPrompt: `先实时调用数据源「${s.name}」查看真实返回字段与数据，再基于真实结构帮我把返回内容做成交互式数据看板`,
+                      })
+                    }
+                  >
+                    <Icon name="grid" /> 做成看板
+                  </button>
                 </div>
                 <div className="eco-card-foot">
                   <span className="eco-card-id" title={s.url}>{s.url || s.id}</span>
@@ -373,6 +433,34 @@ export function EcosystemPage() {
                       {tr.ok ? '✓ ' : '✗ '}{tr.text}
                     </div>
                   ) : null}
+                  <div className="eco-card-use-bar">
+                    <button
+                      type="button"
+                      className="eco-use-btn is-primary"
+                      onClick={() =>
+                        goUse({
+                          prefillEcosystem: { id: key, category: 'mcp', name, subtitle: desc },
+                          prefillPrompt: isKb
+                            ? `帮我查询知识库「${name}」里的核心规范与关键要点`
+                            : `帮我调用 MCP「${name}」查询相关内容并整理展示`,
+                        })
+                      }
+                    >
+                      <Icon name="spark" /> 去对话调用
+                    </button>
+                    <button
+                      type="button"
+                      className="eco-use-btn"
+                      onClick={() =>
+                        goUse({
+                          prefillEcosystem: { id: key, category: 'mcp', name, subtitle: desc },
+                          prefillPrompt: `先调用「${name}」获取真实内容与结构，再帮我把返回内容整理并搭建成一个可视化展示看板应用`,
+                        })
+                      }
+                    >
+                      <Icon name="grid" /> 做成看板
+                    </button>
+                  </div>
                   <div className="eco-card-foot">
                     <span className="eco-card-id" title={key}>{key}</span>
                     <div className="eco-card-actions">

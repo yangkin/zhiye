@@ -262,6 +262,86 @@
   flex: none;
 }
 
+.eco-card-use-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.eco-use-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 9px;
+  border: 1px solid #dfd7f7;
+  background: #faf8ff;
+  color: #5b3fd1;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+
+.eco-use-btn:hover {
+  background: #f1ebff;
+  border-color: #bfaef0;
+  color: #462bb8;
+}
+
+.eco-use-btn.is-primary {
+  background: linear-gradient(135deg, #6d4de0 0%, #5b3fd1 100%);
+  border-color: #5b3fd1;
+  color: #fff;
+}
+
+.eco-use-btn.is-primary:hover {
+  filter: brightness(1.05);
+  color: #fff;
+}
+
+.eco-use-btn .icon {
+  width: 13px;
+  height: 13px;
+}
+
+/* 对话输入框内的生态快捷提示条（仅勾选生态且输入为空时显示） */
+.eco-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 14px 8px;
+}
+
+.eco-quick-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #e4dcf7;
+  background: #faf8ff;
+  color: #5b3fd1;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.eco-quick-pill:hover {
+  background: #f0eaff;
+  border-color: #c5b4f0;
+}
+
+.eco-quick-pill .icon {
+  width: 12px;
+  height: 12px;
+}
+
 .eco-empty-card {
   background: #fff;
   border: 1px dashed #dcd6ee;

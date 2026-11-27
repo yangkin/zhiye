@@ -11,6 +11,7 @@ import { AssetChips } from '../components/AssetChips';
 import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
 import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { ModelModeButton, SkillChips, SkillPicker, billingOf, mentionAt, useModelList, type SkillRef } from '../components/ComposerPopovers';
+import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
 import { ErrorState, LoadingState } from '../components/EmptyState';
 import { Icon } from '../lib/icons';
 import { toast } from '../lib/store';
@@ -109,12 +110,17 @@ export function ChatPage() {
   const files = useQuery({ queryKey: filesKey(id), queryFn: () => api.conversationFiles(id), enabled: !!id });
   const fileCount = files.data?.length ?? 0;
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
+  const [ecoOpen, setEcoOpen] = useState(false);
+  const [ecosystems, setEcosystems] = useState<EcosystemItem[]>([]);
+  const toggleEco = (item: EcosystemItem) =>
+    setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev.filter((x) => x.id !== item.id) : [...prev, item]));
   const textarea = useRef<HTMLTextAreaElement>(null);
   const promptRef = useRef(prompt);
   promptRef.current = prompt;
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const skillBtn = useRef<HTMLButtonElement>(null);
+  const ecoBtn = useRef<HTMLButtonElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const askAbort = useRef<AbortController | null>(null);
   /** 本轮发送的时间：停止按钮就在发送按钮原来的位置，刚发出 1 秒内的点击多半是连点，不当成停止 */
@@ -190,6 +196,8 @@ export function ChatPage() {
     setAttachments(initial?.attachments ?? []);
     setSkills(initial?.skills ?? []);
     setSources(initial?.sources ?? []);
+    setEcosystems([]);
+    setEcoOpen(false);
     setFilesOpen(false);
     setOpenFile(null);
     composer.dismissPasteNotice();
@@ -284,14 +292,16 @@ export function ChatPage() {
     }
     const sentAssets = again ? again.assets : attachments;
     const rawContent = (override ?? prompt).trim();
-    const content = rawContent || (sentAssets.length ? '请根据我附上的参考内容帮我处理' : '');
-    if (!id || !content || action.current || sourceSaving) return;
+    const baseContent = rawContent || (sentAssets.length ? '请根据我附上的参考内容帮我处理' : '');
+    if (!id || !baseContent || action.current || sourceSaving) return;
+    const content = again || override !== undefined ? baseContent : appendEcosystemContext(baseContent, ecosystems);
     // 重试：去掉失败的那一问一答，用原来的文字、技能、附件重新发
     if (again) setMessages((list) => list.filter((m) => !again.replace.includes(m.id)));
     action.current = 'ask';
     setAsking(true);
     setActionError('');
     setPicker(null);
+    setEcoOpen(false);
     composer.dismissPasteNotice();
     const stamp = Date.now();
     sentAt.current = stamp;
@@ -316,6 +326,7 @@ export function ChatPage() {
       setPrompt('');
       if (id) saveDraft('chat:' + id, null);
       setAttachments([]);
+      if (override === undefined) setEcosystems([]);
     }
     const ctrl = new AbortController();
     askAbort.current?.abort();
@@ -612,18 +623,43 @@ export function ChatPage() {
             />
             {sources.length ? (
               <div className="source-context" aria-label="本会话的应用数据源">
-                <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>创建后持续可用</small></span>
+                <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>对话可直调 · 创建后持续可用</small></span>
                 <SourceChips sources={sources} onRemove={(sid) => void changeSources(sources.filter((s) => s.id !== sid))} />
               </div>
             ) : null}
-            {attachments.length || composer.pending.length || skills.length ? (
+            {attachments.length || composer.pending.length || skills.length || ecosystems.length ? (
               <div className="attachments">
+                <EcosystemChips items={ecosystems} onRemove={(eid) => setEcosystems((prev) => prev.filter((x) => x.id !== eid))} />
                 <SkillChips skills={skills} onRemove={(skillId) => setSkills((list) => list.filter((s) => s.id !== skillId))} />
                 <ComposerAttachmentList
                   assets={attachments}
                   pending={composer.pending}
                   onRemove={(assetId) => setAttachments((list) => list.filter((a) => a.id !== assetId))}
                 />
+              </div>
+            ) : null}
+            {!asking && !prompt.trim() && ecosystems.length > 0 ? (
+              <div className="eco-quick-bar" aria-label="生态快捷指令">
+                <button
+                  type="button"
+                  className="eco-quick-pill"
+                  onClick={() => {
+                    setPrompt('帮我实时调用已选的生态能力，展示真实字段与最新数据摘要');
+                    requestAnimationFrame(() => textarea.current?.focus());
+                  }}
+                >
+                  <Icon name="spark" /> 直接调用查看数据
+                </button>
+                <button
+                  type="button"
+                  className="eco-quick-pill"
+                  onClick={() => {
+                    setPrompt('先实时调用已选的生态能力获取真实字段与样本数据，再基于真实结构帮我把返回内容做成交互式数据看板');
+                    requestAnimationFrame(() => textarea.current?.focus());
+                  }}
+                >
+                  <Icon name="grid" /> 把返回内容做成看板
+                </button>
               </div>
             ) : null}
             {actionError ? <p className="inline-error conversation-error" role="alert">{actionError}</p> : null}
@@ -641,6 +677,18 @@ export function ChatPage() {
                 <ModelModeButton models={models} modes={modes} model={model} mode={mode} onModel={(m) => { modelTouched.current = true; setModel(m); }} onMode={setMode} />
                 <button ref={skillBtn} type="button" className="skill-button" aria-label="选择技能" aria-expanded={picker !== null} onClick={() => setPicker(picker ? null : { via: 'button' })}>
                   <Icon name="book" /> 技能
+                </button>
+                <button
+                  ref={ecoBtn}
+                  type="button"
+                  className={`skill-button${ecosystems.length ? ' on' : ''}`}
+                  aria-label="选择企业生态能力"
+                  aria-expanded={ecoOpen}
+                  title="随时勾选飞书多维表格、飞书机器人、知识库 MCP 或 AGW 数据源，在对话中直接调用或做成看板"
+                  onClick={() => setEcoOpen((v) => !v)}
+                >
+                  <Icon name="globe" />
+                  {ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}
                 </button>
               </div>
               <div className="composer-actions">
@@ -691,6 +739,16 @@ export function ChatPage() {
           setSkills((list) => [...list, skill]);
           setPicker(null);
         }}
+      />
+      <EcosystemPickerModal
+        open={ecoOpen}
+        anchor={ecoBtn}
+        onClose={() => setEcoOpen(false)}
+        selected={ecosystems}
+        onToggle={toggleEco}
+        pickedSourceIds={sources.map((s) => s.id)}
+        onPickSource={(s) => void changeSources(sources.some((x) => x.id === s.id) ? sources : [...sources, { id: s.id, name: s.name }])}
+        onRemoveSource={(sid) => void changeSources(sources.filter((s) => s.id !== sid))}
       />
     </div>
   );

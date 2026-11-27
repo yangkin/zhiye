@@ -395,10 +395,11 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       return;
     }
     if (app.phase === 'plan') {
+      const planContent = appendEcosystemContext(content, ecosystems);
       setSending(true);
       setError('');
       setDraft('');
-      setAsking({ q: content, a: '', thinking: '', planUpdating: false });
+      setAsking({ q: planContent, a: '', thinking: '', planUpdating: false });
       const history = (messages ?? [])
         .filter((m, i) => !(i === 0 && m.role === 'user' && m.content.trim() === app.prompt.trim()))
         .filter((m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim() && m.status !== 'failed' && m.status !== 'cancelled')
@@ -410,7 +411,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
         await api.planChat(
           app.id,
           {
-            content,
+            content: planContent,
             ...(history.length ? { history } : {}),
             ...(chatSkills.length ? { skillAppIds: chatSkills.map((k) => k.id) } : {}),
             ...(chatAssets.length ? { assetIds: chatAssets.map((a) => a.id) } : {}),
@@ -427,6 +428,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           },
           ctrl.signal,
         );
+        setEcosystems([]);
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
         await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
@@ -508,10 +510,11 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       return;
     }
     if (route === 'ask') {
+      const askContent = appendEcosystemContext(content, ecosystems);
       setSending(true);
       setError('');
       setDraft('');
-      setAsking({ q: content, a: '', thinking: '', planUpdating: false });
+      setAsking({ q: askContent, a: '', thinking: '', planUpdating: false });
       // 带上本应用已有的对话，追问才有上下文：只留 user/assistant、非空、非失败，最近 24 条交服务端合并归一化为 12 轮
       // 首条用户消息是应用最初需求（界面上已单独展示），不再重复喂给模型
       const history = (messages ?? [])
@@ -525,7 +528,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
       try {
         await api.ask(
           {
-            content,
+            content: askContent,
             appId: app.id,
             model: app.model ?? 'auto',
             ...(billingOf(modelList, app.model ?? 'auto') ? { billingType: billingOf(modelList, app.model ?? 'auto')! } : {}),
@@ -538,6 +541,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           (t) => setAsking((r) => (r ? { ...r, thinking: r.thinking + t } : r)),
           (h) => { handoffReq = h; },
         );
+        setEcosystems([]);
         useChat.getState().setSkills([]);
         useChat.getState().setAssets([]);
         await qc.invalidateQueries({ queryKey: qk.messages(app.id) });
@@ -1091,6 +1095,10 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   onToggle={toggleEco}
                   pickedSourceIds={boundSources.map((s) => s.id)}
                   onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+                  onRemoveSource={skill ? undefined : (sid) => {
+                    const found = boundSources.find((x) => x.id === sid);
+                    void changeSource('unbind', sid, found?.name ?? sid);
+                  }}
                 />
                 <SkillPicker
                   open={picker !== null}

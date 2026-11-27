@@ -77,7 +77,14 @@ public class AskService {
             - **不要为了凑回合硬提问**：如果用户已经说清楚了想做什么（例如贴了完整文档/大纲、附了参考截图、描述了具体页面内容，或明确说「帮我做一个 / 生成一个 / 开始做 / 就这样做 / 直接生成」），**直接在回答第一行单独输出 `[[build:类型]]`**，第二行开始用 2～3 句话简明说明实现方案，系统会立刻进入创建，无需让用户再催一次！
             - 回答末尾可以单独一行输出 [[next]] 建议一 | 建议二（2～3 个用户最可能的下一句话，用用户口吻，每个不超过 14 个字），
               系统会显示成可点击的按钮；没有合适的就不要输出。这一行不要放进代码块。
-            - 只依据下面的产品知识、用户附上的技能包文件以及通过 `mcp_call` / `mcp_list` 实时获取的企业知识库与 MCP 工具返回内容回答；**当当前工作空间已配置或用户勾选了企业知识库 / MCP 服务（尤其是询问公司内部系统、产品、规范、文档或实时数据时），必须先调用 `mcp_call`（不确定工具名时先调 `mcp_list`）查证后再回答，绝不要声称自己没有调用 MCP 的能力**；确实查不到时再如实说明，不要编造按钮、入口、日期。
+            - **企业生态实时调用能力（数据源 · 飞书多维表格/机器人 · 企业知识/MCP）**：
+              1. 只依据产品知识、用户附上的技能包文件以及通过工具实时获取的真实返回回答。**当当前工作空间已配置或用户勾选/提到企业数据源（AGW/HTTP）、飞书多维表格、飞书机器人或企业知识库/MCP 服务时，绝不要声称自己没有调用能力**：
+                 · 数据源查询：直接调用 `source_query`（不确定 key 或参数时先调 `source_list`）；
+                 · 飞书多维表格读取：直接调用 `bitable_list`（不确定 connectorId 时先调 `connector_list`）；
+                 · 知识库 / HTTP MCP：直接调用 `mcp_call`（不确定工具名时先调 `mcp_list`）；
+                 · 写入多维表格（`bitable_create`）与发送飞书卡片（`feishu_send_card`）**仅在用户明确要求新增记录或发通知时才调用**。
+              2. **直接调用与分析场景**（如「帮我调用一下 / 查一下数据 / 看看有哪些字段」）：立刻调用对应只读工具，拿到真实数据后直接用清晰的 Markdown 表格或要点总结呈现；确实查不到或接口报错时如实反馈原因，绝不编造数据。
+              3. **做成看板 / 搭建应用场景**（如「帮我把返回内容做成看板 / 基于这个数据源或飞书多维表格做一个应用」）：**务必先调用只读工具（`source_query` / `bitable_list` / `mcp_call`）探测真实字段名与样本记录**，再在同一轮回答的第一行单独输出 `[[build:日常开发]]`（明确需要自定义后端时输出 `[[build:全栈应用]]`），第二行起简明列出实测发现的真实字段结构与看板设计方案，系统会立刻带上真实字段进入应用搭建！
             - 用户附上了技能包时，依据文件内容说明它是做什么的、怎么用、有哪些文件；没附就按产品知识回答。
             - 用户附上的技能包是用户自己生成或导入的；「织页内置技能」是平台提供的，问题涉及时可以用 read_skill 读取后再回答。
             - 输出 `[[build:类型]]` 时，标记必须是整段回答的**第一个字符**，前面不能有任何文字（连「好」「可以」「开始动手」都不行）；也不要只写「开始动手 / 直接搭建」却不输出标记——那样系统不会开始创建，用户会以为卡住了。如果真的还缺影响实现的关键信息，先问清楚，不要输出 `[[build]]`。
@@ -184,6 +191,9 @@ public class AskService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.tcl.csot.zhiye.service.mcp.McpRegistryService mcpRegistry;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService enterpriseConnectors;
+
     public interface Sink {
         void event(String name, Object data) throws Exception;
     }
@@ -253,7 +263,7 @@ public class AskService {
             你在织页的应用工作台里，判断用户这句话是要「直接修改应用」、「另做一个应用」还是「先提问/先排查（排查确认需要改时再自动转入修改）」。
             - modify：要求改代码、改界面、加功能、加页面或模块、调整样式/布局/文案、删改元素、替换数据；**包括委婉提问式修改请求**（如「能不能把标题调小一点？」「可以把按钮换成蓝色吗？」「图片能不能居中？」「这里的数据不对，帮我改下吧」），只要用户表达了对页面/功能的修改意图，一律判 modify，不要只动嘴不动手。
             - new：要做一个和当前应用无关的、全新的应用或网站（例如当前是待办清单，用户说「再帮我写一个招聘网站」）。只要能算当前应用的一部分（新页面、新模块、相关功能），都算 modify。
-            - ask：纯询问原理、实现方式、使用方法、对比建议、让你解释或评估；闲聊打招呼（如「在吗」「你好」「谢谢」）、确认状态、或表示放弃/取消/暂不做某事（如「放弃那个任务」「算了」「先不做了」「停了吧」）；或者明确要求「先帮我查一下为什么不对/报错，不要直接改」这类先查再改的请求。
+            - ask：纯询问原理、实现方式、使用方法、对比建议、让你解释或评估；闲聊打招呼（如「在吗」「你好」「谢谢」）、确认状态、或表示放弃/取消/暂不做某事（如「放弃那个任务」「算了」「先不做了」「停了吧」）；或者明确要求「先帮我查一下为什么不对/报错，不要直接改」这类先查再改的请求；或者仅仅要求调用已配置的数据源、飞书多维表格、飞书机器人或企业 MCP 查一下实时数据/发一条消息（不要求修改应用代码）。
             只输出一个单词：modify、new 或 ask。
             """;
 
@@ -333,7 +343,8 @@ public class AskService {
                                    java.util.List<JsonNode> history, String type, List<AskAttachments.Attached> assets, String sourceContext) {
         boolean conversation = appId == null || appId.isBlank();
         // 静态内容前置（SYSTEM + 规则 + 内置技能目录），最大化上游前缀 KV Cache 命中率
-        String context = builtinContext() + mcpContext(ws) + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
+        String context = builtinContext() + mcpContext(ws) + sourceCatalogContext(ws) + connectorCatalogContext(ws)
+                + skillContext(ws, skillAppIds) + appContext(ws, appId) + (sourceContext == null ? "" : sourceContext);
         boolean explicitBackend = conversation && com.tcl.csot.zhiye.service.app.Catalog.shouldForceFullstack(content);
         if (conversation) {
             if (com.tcl.csot.zhiye.service.app.Catalog.FULLSTACK_TYPE.equals(type) || explicitBackend) {
@@ -491,6 +502,8 @@ public class AskService {
         boolean hasApp = appId != null && !appId.isBlank();
         boolean builtins = !skillRefs.builtinCatalog().isEmpty();
         boolean hasMcp = mcpRegistry != null && !mcpRegistry.listEnabledForWorkspace(ws).isEmpty();
+        boolean hasSources = dataSources != null && !dataSources.listVisibleSources(ws).isEmpty();
+        boolean hasConnectors = enterpriseConnectors != null && !enterpriseConnectors.listEnabledForWorkspace(ws).isEmpty();
         com.tcl.csot.zhiye.service.llm.LlmRoute route;
         try {
             route = router.forWorkspace(ws, modelRef == null ? com.tcl.csot.zhiye.service.llm.LlmRouter.AUTO : modelRef, billingType);
@@ -502,7 +515,7 @@ public class AskService {
             try { emit(sink, "error", Json.obj().put("message", e.getMessage())); } catch (Exception ignored) { }
             return;
         }
-        if (!hasApp && !builtins && !hasMcp) {
+        if (!hasApp && !builtins && !hasMcp && !hasSources && !hasConnectors) {
             run(route, body(route, ws, content, skillAppIds, appId, history, type, assets, sourceContext), done, sink);
             return;
         }
@@ -513,7 +526,7 @@ public class AskService {
         StringBuilder answer = new StringBuilder();
         try {
             for (int round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-                boolean allowTools = (commit != null || builtins || hasMcp) && round < MAX_TOOL_ROUNDS;
+                boolean allowTools = (commit != null || builtins || hasMcp || hasSources || hasConnectors) && round < MAX_TOOL_ROUNDS;
                 ObjectNode req = Json.obj();
                 req.put("model", route.model());
                 req.put("stream", true);
@@ -521,7 +534,7 @@ public class AskService {
                 req.put("reasoning_effort", hasApp ? "low" : "medium");
                 req.putObject("stream_options").put("include_usage", true);
                 req.set("messages", msgs.deepCopy());
-                if (allowTools) req.set("tools", toolDefs(commit != null, builtins, hasMcp, appId));
+                if (allowTools) req.set("tools", toolDefs(commit != null, builtins, hasMcp, hasSources, hasConnectors, true, appId));
 
                 ArrayNode toolCalls = Json.M.createArrayNode();
                 StringBuilder text = new StringBuilder();
@@ -735,7 +748,31 @@ public class AskService {
         }
     }
 
-    private ArrayNode toolDefs(boolean appTools, boolean skillTool, boolean mcpTools, String appId) {
+    /** 工作空间可用企业数据源（AGW/HTTP）目录，引导模型通过 source_query 实时调用 */
+    String sourceCatalogContext(String ws) {
+        if (dataSources == null) return "";
+        try {
+            return dataSources.promptGuideForWorkspace(ws);
+        } catch (Exception e) {
+            log.warn("读取数据源目录失败：{}", e.getMessage());
+            return "";
+        }
+    }
+
+    /** 工作空间可用飞书多维表格与机器人目录，引导模型通过 bitable_list / feishu_send_card 实时调用 */
+    String connectorCatalogContext(String ws) {
+        if (enterpriseConnectors == null) return "";
+        try {
+            return enterpriseConnectors.promptGuideForChat(ws);
+        } catch (Exception e) {
+            log.warn("读取企业连接器目录失败：{}", e.getMessage());
+            return "";
+        }
+    }
+
+    private ArrayNode toolDefs(boolean appTools, boolean skillTool, boolean mcpTools,
+                               boolean sourceTools, boolean connectorTools, boolean allowWriteConnectors,
+                               String appId) {
         ArrayNode tools = Json.M.createArrayNode();
         if (skillTool) {
             ObjectNode p0 = Json.obj();
@@ -750,6 +787,34 @@ public class AskService {
             pm.putObject("tool").put("type", "string").put("description", "工具名称（知识库默认 search_knowledge；HTTP MCP 传 tools/list 里的工具名）");
             pm.putObject("arguments").put("type", "object").put("description", "传给 MCP 工具的参数对象，例如知识库检索传 {\"query\": \"关键词\"}");
             tools.add(tool("mcp_call", "实时调用当前工作空间已授权的企业知识库或受控 HTTP MCP 工具，获取真实内部资料或接口数据", pm, "server"));
+        }
+        if (sourceTools) {
+            tools.add(tool("source_list", "列出当前工作空间可用的企业数据源（AGW/HTTP 接口）清单，含调用名 key、说明与参数定义", Json.obj(), null));
+            ObjectNode ps = Json.obj();
+            ps.putObject("key").put("type", "string").put("description", "数据源调用名 key、ID 或精确名称（可先通过 source_list 查看）");
+            ps.putObject("params").put("type", "object").put("description", "传给该接口的参数对象（无参数可传空对象 {}）");
+            tools.add(tool("source_query", "实时调用当前工作空间已授权的企业数据源（AGW/HTTP 接口），获取真实字段与最新业务数据", ps, "key"));
+        }
+        if (connectorTools) {
+            tools.add(tool("connector_list", "列出当前工作空间可用的飞书多维表格与飞书机器人连接器清单（含 connectorId 与类型）", Json.obj(), null));
+            ObjectNode pb = Json.obj();
+            pb.putObject("connectorId").put("type", "string").put("description", "飞书多维表格连接器 ID 或名称（留空则自动选用工作空间默认多维表格）");
+            pb.putObject("pageSize").put("type", "integer").put("description", "返回条数，默认 20，最多 50");
+            tools.add(tool("bitable_list", "实时读取飞书多维表格的真实表头字段名与最新记录，适合查数、统计或在制作看板前探测真实数据结构", pb, null));
+            if (allowWriteConnectors) {
+                ObjectNode pbc = Json.obj();
+                pbc.putObject("connectorId").put("type", "string").put("description", "飞书多维表格连接器 ID 或名称（可留空取默认）");
+                pbc.putObject("fields").put("type", "object").put("description", "要写入的字段键值对，键名必须与 bitable_list 返回的真实表头一致");
+                tools.add(tool("bitable_create", "仅当用户明确要求向飞书多维表格新增/写入一条记录时调用", pbc, "fields"));
+
+                ObjectNode pfc = Json.obj();
+                pfc.putObject("connectorId").put("type", "string").put("description", "飞书机器人连接器 ID 或名称（可留空取默认）");
+                pfc.putObject("title").put("type", "string").put("description", "卡片标题");
+                pfc.putObject("content").put("type", "string").put("description", "卡片正文（支持 Markdown）");
+                pfc.putObject("templateColor").put("type", "string").put("description", "卡片头部颜色：blue / green / orange / red，默认 blue");
+                pfc.putObject("fields").put("type", "array").put("description", "可选双列键值字段数组，每项为 {\"label\":\"字段名\",\"value\":\"值\"}");
+                tools.add(tool("feishu_send_card", "仅当用户明确要求发送飞书通知、汇报或告警卡片到飞书群时调用", pfc, "title"));
+            }
         }
         if (!appTools) return tools;
 
@@ -836,6 +901,91 @@ public class AskService {
                     if (thinking.length() < 20000) thinking.append(doneNote);
                     emit(sink, "thinking", Json.obj().put("text", doneNote));
                     yield content.length() > 12000 ? content.substring(0, 12000) + "\n…（已截断）" : content;
+                }
+                case "source_list" -> {
+                    if (dataSources == null) yield "当前环境未启用企业数据源服务。";
+                    String note = "正在查看当前工作空间可用的企业数据源清单…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    yield dataSources.formatCatalogTextForWorkspace(ws);
+                }
+                case "source_query" -> {
+                    if (dataSources == null) yield "当前环境未启用企业数据源服务。";
+                    String key = args.path("key").asText(args.path("sourceKey").asText(args.path("name").asText(args.path("id").asText("")))).trim();
+                    JsonNode params = args.has("params") && args.get("params").isObject()
+                            ? args.get("params")
+                            : (args.has("arguments") && args.get("arguments").isObject() ? args.get("arguments") : null);
+                    String note = "正在实时调用企业数据源「" + key + "」…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    Map<String, Object> res = dataSources.queryForWorkspace(
+                            ws, key, params, appId, appId != null && !appId.isBlank() ? "ask_app" : "ask_chat");
+                    String dataJson = Json.write(res.get("data"));
+                    String doneNote = "已从企业数据源「" + res.getOrDefault("name", key) + "」获取到真实返回（HTTP " + res.getOrDefault("status", 200) + "，" + dataJson.length() + " 字）。\n";
+                    if (thinking.length() < 20000) thinking.append(doneNote);
+                    emit(sink, "thinking", Json.obj().put("text", doneNote));
+                    String body = dataJson.length() > 10000 ? dataJson.substring(0, 10000) + "\n…（已截断）" : dataJson;
+                    yield "数据源「" + res.getOrDefault("name", key) + "」（key: `" + res.getOrDefault("key", key)
+                            + "`，HTTP " + res.getOrDefault("status", 200) + "）真实返回：\n```json\n" + body + "\n```";
+                }
+                case "connector_list" -> {
+                    if (enterpriseConnectors == null) yield "当前环境未启用企业连接器服务。";
+                    String note = "正在查看当前工作空间可用的飞书连接器清单…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    yield enterpriseConnectors.formatCatalogTextForWorkspace(ws);
+                }
+                case "bitable_list" -> {
+                    if (enterpriseConnectors == null) yield "当前环境未启用企业连接器服务。";
+                    String connId = args.path("connectorId").asText(args.path("connector").asText(args.path("name").asText(""))).trim();
+                    int pageSize = Math.max(1, Math.min(50, args.path("pageSize").asInt(20)));
+                    String note = "正在实时读取飞书多维表格" + (connId.isEmpty() ? "" : "「" + connId + "」") + "…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    Map<String, Object> res = enterpriseConnectors.bitableListForWorkspace(
+                            ws, connId, appId, Map.of("pageSize", pageSize));
+                    String formatted = com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService.formatBitableResultForModel(res);
+                    String doneNote = "已从飞书多维表格「" + res.getOrDefault("connectorName", connId) + "」读取到 " + res.getOrDefault("total", 0) + " 条记录。\n";
+                    if (thinking.length() < 20000) thinking.append(doneNote);
+                    emit(sink, "thinking", Json.obj().put("text", doneNote));
+                    yield formatted;
+                }
+                case "bitable_create" -> {
+                    if (enterpriseConnectors == null) yield "当前环境未启用企业连接器服务。";
+                    String connId = args.path("connectorId").asText(args.path("connector").asText(args.path("name").asText(""))).trim();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> fields = args.has("fields") && args.get("fields").isObject()
+                            ? Json.convert(args.get("fields"), Map.class) : Map.of();
+                    String note = "正在向飞书多维表格写入新记录…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    Map<String, Object> res = enterpriseConnectors.bitableCreateForWorkspace(ws, connId, appId, fields, Map.of());
+                    String doneNote = "已成功向飞书多维表格「" + res.getOrDefault("connectorName", connId) + "」写入记录（recordId=" + res.getOrDefault("recordId", "") + "）。\n";
+                    if (thinking.length() < 20000) thinking.append(doneNote);
+                    emit(sink, "thinking", Json.obj().put("text", doneNote));
+                    yield Json.write(res);
+                }
+                case "feishu_send_card" -> {
+                    if (enterpriseConnectors == null) yield "当前环境未启用企业连接器服务。";
+                    String connId = args.path("connectorId").asText(args.path("connector").asText(args.path("name").asText(""))).trim();
+                    String title = args.path("title").asText("织页 AI 通知");
+                    String content = args.path("content").asText("");
+                    String color = args.path("templateColor").asText("blue");
+                    List<Map<String, String>> fields = new ArrayList<>();
+                    if (args.has("fields") && args.get("fields").isArray()) {
+                        for (JsonNode n : args.get("fields")) {
+                            fields.add(Map.of("label", n.path("label").asText(""), "value", n.path("value").asText("")));
+                        }
+                    }
+                    String note = "正在通过飞书机器人发送交互卡片「" + title + "」…\n";
+                    if (thinking.length() < 20000) thinking.append(note);
+                    emit(sink, "thinking", Json.obj().put("text", note));
+                    Map<String, Object> res = enterpriseConnectors.sendFeishuCardForWorkspace(
+                            ws, connId, appId, title, content, color, fields, List.of());
+                    String doneNote = "已通过飞书连接器「" + res.getOrDefault("connectorName", connId) + "」发送交互卡片。\n";
+                    if (thinking.length() < 20000) thinking.append(doneNote);
+                    emit(sink, "thinking", Json.obj().put("text", doneNote));
+                    yield Json.write(res);
                 }
                 case "search" -> searchTool(appId, commit, args.path("pattern").asText(""), args.path("prefix").asText(""));
                 case "cloud_data" -> cloud == null ? "云服务不可用"
@@ -1104,10 +1254,16 @@ public class AskService {
         if (!sk.isBlank()) ctx.append(sk).append('\n');
         String mcpCtx = mcpContext(ws);
         if (!mcpCtx.isBlank()) ctx.append(mcpCtx).append('\n');
+        String srcCtx = sourceCatalogContext(ws);
+        if (!srcCtx.isBlank()) ctx.append(srcCtx).append('\n');
+        String connCtx = connectorCatalogContext(ws);
+        if (!connCtx.isBlank()) ctx.append(connCtx).append('\n');
         ctx.append("\n【当前创造计划全文】\n");
         ctx.append(app.planDoc() == null || app.planDoc().isBlank() ? "（当前计划为空）" : cap(app.planDoc(), 12000));
 
         boolean hasMcp = mcpRegistry != null && !mcpRegistry.listEnabledForWorkspace(ws).isEmpty();
+        boolean hasSources = dataSources != null && !dataSources.listVisibleSources(ws).isEmpty();
+        boolean hasConnectors = enterpriseConnectors != null && !enterpriseConnectors.listEnabledForWorkspace(ws).isEmpty();
         ArrayNode msgs = Json.M.createArrayNode();
         String sys = PLAN_CHAT_SYSTEM + (app.isSkill() ? "" : "\n" + com.tcl.csot.zhiye.constants.Capabilities.PLAN) + ctx;
         msgs.addObject().put("role", "system").put("content", sys);
@@ -1128,7 +1284,7 @@ public class AskService {
             StringBuilder raw = new StringBuilder();
             for (int round = 0; round <= MAX_TOOL_ROUNDS; round++) {
                 if (stopped.getAsBoolean()) return;
-                boolean allowMcp = hasMcp && round < MAX_TOOL_ROUNDS;
+                boolean allowEco = (hasMcp || hasSources || hasConnectors) && round < MAX_TOOL_ROUNDS;
                 ObjectNode body = Json.obj();
                 body.put("model", route.model());
                 body.put("stream", true);
@@ -1136,7 +1292,7 @@ public class AskService {
                 body.put("reasoning_effort", "medium");
                 body.putObject("stream_options").put("include_usage", true);
                 body.set("messages", msgs.deepCopy());
-                if (allowMcp) body.set("tools", toolDefs(false, false, true, null));
+                if (allowEco) body.set("tools", toolDefs(false, false, hasMcp, hasSources, hasConnectors, false, null));
 
                 HttpResponse<InputStream> res = upstream.send(route, "POST", "/chat/completions", Json.write(body).getBytes(StandardCharsets.UTF_8));
                 ArrayNode toolCalls = Json.M.createArrayNode();

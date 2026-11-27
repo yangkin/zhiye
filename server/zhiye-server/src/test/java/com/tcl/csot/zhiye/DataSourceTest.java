@@ -175,7 +175,7 @@ class DataSourceTest extends IntegrationTest {
                 .reduce((a, b) -> b).orElseThrow();
         String system = upstream.path("messages").get(0).path("content").asText();
         assertThat(system).contains("本会话已连接的数据源").contains("产线日产量").contains("mes_conversation")
-                .contains("当前问答没有执行接口调用").contains("window.zhiye.source.query");
+                .contains("source_query").contains("window.zhiye.source.query");
 
         // build 不再依赖浏览器重复传 sourceIds：会话保存的连接自动绑定到应用
         JsonNode app = c.ok(c.post("/api/conversations/" + conversationId + "/build",

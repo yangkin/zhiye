@@ -242,6 +242,7 @@ export function stepDetail(cwd, toolName, args = {}, snap, result, isError) {
     case 'mcp_list':
     case 'mcp_call':
     case 'inspect_source':
+    case 'inspect_bitable':
     case 'service_runtime_inspect': {
       const ok = !isError && result?.details?.ok !== false
       const { text, truncated } = headText(sanitizeText(cwd, resultText(result)), 80, 5 * 1024)
@@ -284,6 +285,7 @@ export function toolSummary(cwd, name, args = {}, { created } = {}) {
     case 'typecheck_diagnostics': return '增量类型与语法诊断'
     case 'code_symbols': return args.action === 'references' ? `追踪符号引用 · ${String(args.symbol || '').slice(0, 28)}` : `解析代码语义大纲${args.dir ? ' · ' + String(args.dir).slice(0, 24) : ''}`
     case 'inspect_source': return `探测数据源结构${args.key ? ' · ' + String(args.key).slice(0, 24) : ''}`
+    case 'inspect_bitable': return `探测飞书多维表格结构${args.connectorId ? ' · ' + String(args.connectorId).slice(0, 24) : ''}`
     case 'browser_test': return `浏览器交互自测（${Array.isArray(args.steps) ? args.steps.length : 0} 步${args.device === 'wide' ? ' · 宽屏' : ''}）`
     case 'test_endpoint': return `实测后端接口（${Array.isArray(args.requests) ? args.requests.length : 0} 步）`
     case 'install_package': return `安装白名单依赖 · ${String(args.packageName || '').slice(0, 32)}`

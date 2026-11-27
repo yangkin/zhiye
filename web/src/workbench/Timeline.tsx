@@ -10,7 +10,7 @@ const TOOL_ICON: Record<string, string> = {
   write: '✦', edit: '✎', read: '☰', bash: '>_', ls: '☰', grep: '⌕', find: '⌕',
   find_files: '⌕', grep_files: '⌕', verify_app: '✓', service_runtime_inspect: '◉',
   typecheck_diagnostics: '⚡', browser_test: '▶', test_endpoint: '⇄', code_symbols: '◈',
-  inspect_source: '⛁', install_package: '⊞', mcp_list: '◇', mcp_call: '◇',
+  inspect_source: '⛁', inspect_bitable: '⛁', install_package: '⊞', mcp_list: '◇', mcp_call: '◇',
   skill: '◆', read_skill: '◆', source: '⛁', request_confirm: '☁', screenshot: '▣',
 };
 
@@ -95,7 +95,7 @@ function groupRows(items: TimelineItem[], tools: Map<string, ToolItem>): Row[] {
 
 const READ_TOOLS = new Set(['read', 'ls', 'grep', 'find', 'find_files', 'grep_files', 'code_symbols']);
 const CHECK_TOOLS = new Set(['typecheck_diagnostics', 'browser_test', 'test_endpoint', 'verify_app']);
-const PROBE_TOOLS = new Set(['inspect_source', 'service_runtime_inspect', 'mcp_list', 'mcp_call']);
+const PROBE_TOOLS = new Set(['inspect_source', 'inspect_bitable', 'service_runtime_inspect', 'mcp_list', 'mcp_call']);
 
 function groupLabel(list: ToolItem[]) {
   const files = list.filter((t) => t.name === 'write' || t.name === 'edit');

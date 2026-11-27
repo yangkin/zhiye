@@ -15,19 +15,25 @@ export interface EcosystemItem {
   subtitle?: string;
 }
 
+export interface EcosystemPrefillState {
+  prefillPrompt?: string;
+  prefillEcosystem?: EcosystemItem;
+  prefillSource?: { id: string; name: string };
+}
+
 /** 将用户勾选的生态能力自动组装成结构化要求附加到 prompt，用户无需手动复制粘贴指令或记 connectorId。 */
 export function appendEcosystemContext(prompt: string, items: EcosystemItem[]): string {
   if (!items.length) return prompt;
   const lines = items.map((it) => {
     if (it.category === 'feishu_bitable') {
-      return `- 飞书多维表格「${it.name}」（connectorId: \`${it.id}\`）：实现读取与写入同步（云函数用 ctx.bitable，全栈后端用 ZHIYE_CONNECTOR_API/bitable）`;
+      return `- 飞书多维表格「${it.name}」（connectorId: \`${it.id}\`）：对话中可直接调用 \`bitable_list\` 实时查询真实字段与最新记录（需新增记录时调 \`bitable_create\`）；搭建看板或应用时先用 \`inspect_bitable\` 探测真实表头，再接入读写同步（云函数用 ctx.bitable，全栈后端用 ZHIYE_CONNECTOR_API/bitable）`;
     }
     if (it.category === 'mcp') {
-      return `- 企业知识与工具 MCP「${it.name}」（serverKey: \`${it.id}\`）：请通过 \`mcp_call\` 实时查询或调用获取真实规范与数据`;
+      return `- 企业知识与工具 MCP「${it.name}」（serverKey: \`${it.id}\`）：对话与开发时均可直接调用 \`mcp_call\` 实时查询或获取真实规范与数据`;
     }
-    return `- 飞书机器人「${it.name}」（connectorId: \`${it.id}\`）：在关键提交/告警/审批节点推送飞书交互卡片（云函数用 ctx.feishu.sendCard，全栈后端用 ZHIYE_CONNECTOR_API/feishu/send-card）`;
+    return `- 飞书机器人「${it.name}」（connectorId: \`${it.id}\`）：对话中按需调用 \`feishu_send_card\` 发送交互卡片；搭建应用时在提交/告警/审批节点推送飞书交互卡片（云函数用 ctx.feishu.sendCard，全栈后端用 ZHIYE_CONNECTOR_API/feishu/send-card）`;
   });
-  return `${prompt.trim()}\n\n【已选企业生态能力（免密直连）】\n${lines.join('\n')}`;
+  return `${prompt.trim()}\n\n【已选企业生态能力（免密直连，对话/开发均可直接调用）】\n${lines.join('\n')}`;
 }
 
 export function EcosystemChips({
@@ -75,6 +81,7 @@ export function EcosystemPickerModal({
   onToggle,
   pickedSourceIds,
   onPickSource,
+  onRemoveSource,
 }: {
   open: boolean;
   anchor: RefObject<HTMLElement | null>;
@@ -83,6 +90,7 @@ export function EcosystemPickerModal({
   onToggle: (item: EcosystemItem) => void;
   pickedSourceIds?: string[];
   onPickSource?: (source: DataSourceInfo) => void;
+  onRemoveSource?: (sourceId: string) => void;
 }) {
   const navigate = useNavigate();
   const box = useRef<HTMLDivElement>(null);
@@ -170,7 +178,7 @@ export function EcosystemPickerModal({
 
         {connectors.length > 0 ? (
           <>
-            <li style={groupHeadStyle} role="presentation">飞书与多维表格</li>
+            <li style={groupHeadStyle} role="presentation">飞书与多维表格 · 对话直调 / 应用同步</li>
             {connectors.map((c) => {
               const id = String(c.id ?? '');
               const name = String(c.name ?? id);
@@ -188,7 +196,7 @@ export function EcosystemPickerModal({
                   <Icon name={kind === 'feishu_bitable' ? 'database' : 'globe'} />
                   <span>
                     <b>{name}</b>
-                    <small>{kind === 'feishu_bitable' ? '飞书多维表格' : '飞书群机器人'}</small>
+                    <small>{kind === 'feishu_bitable' ? '飞书多维表格 · 查字段/做看板/同步写入' : '飞书群机器人 · 发通知/审批卡片'}</small>
                   </span>
                   {on ? <Icon name="check" /> : null}
                 </li>
@@ -199,7 +207,7 @@ export function EcosystemPickerModal({
 
         {mcpServers.length > 0 ? (
           <>
-            <li style={groupHeadStyle} role="presentation">企业知识与工具 (MCP)</li>
+            <li style={groupHeadStyle} role="presentation">企业知识与工具 (MCP) · 对话与开发直调</li>
             {mcpServers.map((s) => {
               const key = String(s.serverKey ?? s.id ?? '');
               const name = String(s.name ?? key);
@@ -228,7 +236,7 @@ export function EcosystemPickerModal({
 
         {onPickSource && sources.length > 0 ? (
           <>
-            <li style={groupHeadStyle} role="presentation">AGW 企业接口</li>
+            <li style={groupHeadStyle} role="presentation">AGW 企业接口 · 对话查数 / 一键看板</li>
             {sources.map((s) => {
               const on = pickedSrcSet.has(s.id);
               return (
@@ -239,7 +247,8 @@ export function EcosystemPickerModal({
                   className={on ? 'picked' : ''}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
-                    if (!on) onPickSource(s);
+                    if (on) onRemoveSource?.(s.id);
+                    else onPickSource(s);
                   }}
                 >
                   <Icon name="database" />

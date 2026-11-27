@@ -16,7 +16,7 @@ import { createBrowserTestExtension } from './browser-test.mjs'
 import { createEndpointTestExtension } from './endpoint-test.mjs'
 import { createCodeIntelExtension, hasSourceInspectSnapshot } from './code-intel.mjs'
 import { createPackageInstallExtension } from './package-installer.mjs'
-import { createMcpBridgeExtension, readMcpCatalog } from './mcp-bridge.mjs'
+import { createBitableInspectExtension, createMcpBridgeExtension, hasBitableConnectors, readMcpCatalog } from './mcp-bridge.mjs'
 import { createBoundedBashTool } from './safe-bash.mjs'
 
 export { toolSummary }
@@ -31,6 +31,7 @@ export function selectToolsForSession({ projectKind = 'template', agentDir = '' 
   const isStatic = projectKind === 'static'
   const isService = projectKind === 'service'
   const hasMcp = Boolean(agentDir) && readMcpCatalog(agentDir).length > 0
+  const hasBitable = !isSkill && Boolean(agentDir) && hasBitableConnectors(agentDir)
   const hasSources = !isSkill && Boolean(agentDir) && hasSourceInspectSnapshot(agentDir)
   const enableTypecheck = !isSkill
   const enableSymbols = !isSkill && !isScript && !isStatic
@@ -42,6 +43,7 @@ export function selectToolsForSession({ projectKind = 'template', agentDir = '' 
     ...(enableTypecheck ? ['typecheck_diagnostics'] : []),
     ...(enableSymbols ? ['code_symbols'] : []),
     ...(hasSources ? ['inspect_source'] : []),
+    ...(hasBitable ? ['inspect_bitable'] : []),
     ...(hasMcp ? ['mcp_list', 'mcp_call'] : []),
     'verify_app',
     ...(isSkill ? [] : ['request_confirm']),
@@ -52,7 +54,7 @@ export function selectToolsForSession({ projectKind = 'template', agentDir = '' 
   ]
   return {
     tools,
-    flags: { isSkill, isScript, isStatic, isService, hasMcp, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg },
+    flags: { isSkill, isScript, isStatic, isService, hasMcp, hasBitable, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg },
   }
 }
 
@@ -172,7 +174,7 @@ export class Agent {
       quietStartup: true,
     })
     const { tools: activeTools, flags } = selectToolsForSession({ projectKind: this.projectKind, agentDir })
-    const { isService, hasMcp, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg } = flags
+    const { isService, hasMcp, hasBitable, hasSources, enableTypecheck, enableSymbols, withBrowser, withShot, withPkg } = flags
     const needCodeIntel = enableTypecheck || enableSymbols || hasSources
     const extensionFactories = [
       { name: 'zhiye-guard', factory: createGuardExtension({ cwd, projectKind: this.projectKind, agentDir, log }) },
@@ -191,6 +193,7 @@ export class Agent {
           enableInspectSource: hasSources,
         }),
       }] : []),
+      ...(hasBitable ? [{ name: 'zhiye-bitable', factory: createBitableInspectExtension({ agentDir, env }) }] : []),
       ...(hasMcp ? [{ name: 'zhiye-mcp', factory: createMcpBridgeExtension({ agentDir, env }) }] : []),
       { name: 'zhiye-verify', factory: createVerifyExtension({ cwd, projectKind: this.projectKind, env }) },
       ...(withBrowser ? [{ name: 'zhiye-browser-test', factory: createBrowserTestExtension({ cwd, projectKind: this.projectKind, env }) }] : []),

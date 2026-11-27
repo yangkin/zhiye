@@ -325,6 +325,23 @@ public class ConversationService {
         LinkedHashSet<String> selectedSources = new LinkedHashSet<>();
         for (var source : dataSources.visibleSelection(ws, sourceIds(conversation.sourceIds()))) selectedSources.add(source.id());
         if (req.sourceIds() != null) selectedSources.addAll(req.sourceIds());
+        // 若对话里用户或助手实时调用/明确提到了当前工作空间可见的数据源（按 key 或名称匹配），创建应用时自动一并绑定，免去用户重复手动绑定
+        StringBuilder allDialogue = new StringBuilder();
+        for (ConversationRepository.MessageRow msg : messages) {
+            if (msg.content() != null) allDialogue.append('\n').append(msg.content());
+        }
+        String dialogueText = allDialogue.toString();
+        if (!dialogueText.isBlank()) {
+            for (var src : dataSources.listVisibleSources(ws)) {
+                if (selectedSources.contains(src.id())) continue;
+                boolean keyMatch = src.key() != null && src.key().length() >= 3
+                        && java.util.regex.Pattern.compile("(?<![A-Za-z0-9_])" + java.util.regex.Pattern.quote(src.key()) + "(?![A-Za-z0-9_])")
+                                .matcher(dialogueText).find();
+                boolean nameMatch = src.name() != null && src.name().trim().length() >= 3
+                        && dialogueText.contains(src.name().trim());
+                if (keyMatch || nameMatch) selectedSources.add(src.id());
+            }
+        }
         AppService.CreateRequest create = new AppService.CreateRequest(type, prompt, req.mode(), req.model(),
                 List.copyOf(assetIds), null, req.skillAppIds(), List.copyOf(selectedSources), req.billingType());
         Map<String, Object> app = apps.create(ws, create, idemKey);

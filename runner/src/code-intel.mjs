@@ -470,11 +470,41 @@ export function createCodeIntelExtension({
       pi.registerTool({
         name: 'inspect_source',
         label: '探测数据源结构',
-        description: '查看当前应用已绑定数据源的真实参数定义与服务端实测返回 JSON 结构，严禁凭空猜测外部接口字段名。',
+        description: '查看当前应用已绑定数据源的真实参数定义与服务端实测返回 JSON 结构；当接口需要传入具体参数时，也可以直接传 params 触发一次安全代理实测，严禁凭空猜测外部接口字段名。',
         parameters: Type.Object({
           key: Type.Optional(Type.String({ description: '可选：指定数据源调用名（key）；留空查看全部已绑定数据源' })),
+          params: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: '可选：传入具体查询参数实时探查该数据源返回结构' })),
         }),
         async execute(_id, params) {
+          if (params?.key && params?.params && typeof params.params === 'object' && Object.keys(params.params).length > 0) {
+            const gw = String(env.ZHIYE_GATEWAY_URL || '').trim()
+            const token = env.ZHIYE_TASK_TOKEN
+            if (gw && token) {
+              try {
+                const endpoint = `${new URL(gw).origin}/internal/sources/query`
+                const res = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ key: params.key, params: params.params }),
+                  signal: AbortSignal.timeout(20_000),
+                })
+                const raw = await res.text()
+                let data = raw
+                try { data = JSON.parse(raw) } catch {}
+                if (res.ok) {
+                  const body = typeof data === 'object' && data !== null ? JSON.stringify(data.data ?? data, null, 2) : String(data)
+                  return {
+                    content: [{ type: 'text', text: `数据源「${params.key}」实时探查成功（HTTP ${data?.status ?? res.status}）：\n\`\`\`json\n${body.slice(0, 8000)}\n\`\`\`` }],
+                    details: { ok: true },
+                  }
+                }
+                const msg = typeof data === 'object' && data?.message ? data.message : raw.slice(0, 400)
+                return { content: [{ type: 'text', text: `数据源「${params.key}」带参探查失败（HTTP ${res.status}）：${msg}` }], details: { ok: false } }
+              } catch (e) {
+                return { content: [{ type: 'text', text: `数据源带参探查异常：${e.message}` }], details: { ok: false } }
+              }
+            }
+          }
           const text = readSourceInspectSnapshot(agentDir, params?.key || '')
           return { content: [{ type: 'text', text }], details: {} }
         },

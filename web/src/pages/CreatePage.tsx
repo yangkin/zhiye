@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { create } from 'zustand';
 import { useQuery } from '@tanstack/react-query';
 import { WorkCard } from '../components/Community';
@@ -19,7 +19,7 @@ import { AddMenuButton, SourceChips } from '../components/AddMenu';
 import { ComposerAttachmentList, ComposerDropOverlay, PasteNoticeBanner, useComposerAssets } from '../components/ComposerAssets';
 import { MAX_ATTACHMENTS, MAX_PROMPT_CHARS } from '../lib/clipboardPaste';
 import { ModelModeButton, PolishButton, SkillChips, SkillPicker, mentionAt, useModelList } from '../components/ComposerPopovers';
-import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem } from '../components/EcosystemPicker';
+import { EcosystemChips, EcosystemPickerModal, appendEcosystemContext, type EcosystemItem, type EcosystemPrefillState } from '../components/EcosystemPicker';
 import { Modal } from '../components/Modal';
 import { loadDraft, saveDraft } from '../lib/drafts';
 
@@ -146,6 +146,7 @@ const HEADLINES = ['让想法成形', '一句话成应用', '把灵感织成页'
 
 export function CreatePage() {
   const f = useCreateForm();
+  const location = useLocation();
   const navigate = useNavigate();
   const { data: meta } = useMeta();
   const active = useActiveTask(5000).data ?? null;
@@ -204,6 +205,28 @@ export function CreatePage() {
   useEffect(() => {
     textarea.current?.focus();
   }, []);
+
+  // 从「生态管理」卡片点「去对话调用 / 做成看板」跳转过来：自动带入对应生态能力与预设指令
+  useEffect(() => {
+    const st = location.state as EcosystemPrefillState | null;
+    if (!st || (!st.prefillPrompt && !st.prefillEcosystem && !st.prefillSource)) return;
+    const cur = useCreateForm.getState();
+    const patch: Partial<CreateDraft> = {};
+    if (st.prefillPrompt) patch.prompt = st.prefillPrompt;
+    if (st.prefillSource) {
+      const exists = cur.sources.some((x) => x.id === st.prefillSource!.id);
+      patch.sources = exists ? cur.sources : [...cur.sources, st.prefillSource];
+    }
+    if (Object.keys(patch).length) f.set(patch);
+    if (st.prefillEcosystem) {
+      const item = st.prefillEcosystem;
+      setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev : [...prev, item]));
+    }
+    toast('已带入生态能力，点击发送即可实时调用或生成看板', 'ok');
+    navigate(location.pathname, { replace: true, state: null });
+    requestAnimationFrame(() => textarea.current?.focus());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   // 输入框高度按屏幕视口高度自适应（短屏笔记本克制不挤掉下方模板，大屏舒展展开），随窗口缩放实时调整
   useLayoutEffect(() => {
@@ -493,7 +516,7 @@ export function CreatePage() {
         />
         {f.sources.length ? (
           <div className="source-context" aria-label="新应用的数据源">
-            <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>创建后持续可用</small></span>
+            <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>对话可直调 · 创建后持续可用</small></span>
             <SourceChips sources={f.sources} onRemove={(id) => f.set({ sources: f.sources.filter((x) => x.id !== id) })} />
           </div>
         ) : null}
@@ -506,6 +529,30 @@ export function CreatePage() {
               pending={composer.pending}
               onRemove={(assetId) => f.set({ attachments: f.attachments.filter((x) => x.id !== assetId) })}
             />
+          </div>
+        ) : null}
+        {!f.prompt.trim() && (ecosystems.length > 0 || f.sources.length > 0) ? (
+          <div className="eco-quick-bar" aria-label="生态快捷指令">
+            <button
+              type="button"
+              className="eco-quick-pill"
+              onClick={() => {
+                f.set({ prompt: '帮我实时调用已选的企业生态能力，展示真实字段与最新数据摘要' });
+                requestAnimationFrame(() => textarea.current?.focus());
+              }}
+            >
+              <Icon name="spark" /> 直接调用查看数据
+            </button>
+            <button
+              type="button"
+              className="eco-quick-pill"
+              onClick={() => {
+                f.set({ prompt: '先实时调用已选的企业生态能力获取真实字段与样本数据，再基于真实结构帮我把返回内容做成交互式数据看板' });
+                requestAnimationFrame(() => textarea.current?.focus());
+              }}
+            >
+              <Icon name="grid" /> 把返回内容做成看板
+            </button>
           </div>
         ) : null}
         <div className="composer-bottom">
@@ -874,6 +921,7 @@ export function CreatePage() {
         onToggle={toggleEco}
         pickedSourceIds={f.sources.map((s) => s.id)}
         onPickSource={(s) => f.set({ sources: [...useCreateForm.getState().sources, { id: s.id, name: s.name }] })}
+        onRemoveSource={(sid) => f.set({ sources: useCreateForm.getState().sources.filter((x) => x.id !== sid) })}
       />
     </div>
   );

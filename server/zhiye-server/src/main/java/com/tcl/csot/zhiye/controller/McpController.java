@@ -30,6 +30,12 @@ public class McpController {
     private final TaskTokenService tokens;
     private final TaskRepository tasks;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService enterpriseConnectors;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.source.DataSourceService dataSources;
+
     public McpController(McpRegistryService mcp, AdminService admin, CurrentPrincipal principal,
                          TaskTokenService tokens, TaskRepository tasks) {
         this.mcp = mcp;
@@ -126,5 +132,36 @@ public class McpController {
         String appId = tasks.findById(taskId).map(t -> t.appId()).orElse(null);
         String callerWs = mcp.workspaceOfTaskOrApp(taskId, appId);
         return mcp.callToolForWorkspace(callerWs, body.path("serverKey").asText(""), body.path("tool").asText(""), body.get("arguments"), taskId, appId);
+    }
+
+    /** 供沙箱内编码 Runner 凭 ZHIYE_TASK_TOKEN 只读探查飞书多维表格真实字段与样本记录（严格工作空间隔离、密钥不出服务端）。 */
+    @PostMapping("/internal/connectors/bitable/inspect")
+    public Map<String, Object> proxyBitableInspect(@RequestBody(required = false) JsonNode body,
+                                                   @RequestHeader(value = "Authorization", required = false) String auth) {
+        String raw = auth != null && auth.startsWith("Bearer ") ? auth.substring(7).trim() : (auth == null ? "" : auth.trim());
+        String taskId = tokens.validate(raw).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_TASK_TOKEN", "无效或已过期的任务令牌"));
+        String appId = tasks.findById(taskId).map(t -> t.appId()).orElse(null);
+        String callerWs = mcp.workspaceOfTaskOrApp(taskId, appId);
+        if (enterpriseConnectors == null) throw ApiException.notFound("企业连接器服务");
+        String connectorId = body == null ? "" : body.path("connectorId").asText(body.path("name").asText("")).trim();
+        int pageSize = body == null ? 15 : Math.max(1, Math.min(20, body.path("pageSize").asInt(15)));
+        Map<String, Object> res = enterpriseConnectors.bitableListForWorkspace(callerWs, connectorId, appId, Map.of("pageSize", pageSize));
+        Map<String, Object> out = new LinkedHashMap<>(res);
+        out.put("formatted", com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService.formatBitableResultForModel(res));
+        return out;
+    }
+
+    /** 供沙箱内编码 Runner 凭 ZHIYE_TASK_TOKEN 带参实时探查工作空间可见企业数据源真实返回字段（严格工作空间隔离）。 */
+    @PostMapping("/internal/sources/query")
+    public Map<String, Object> proxySourceQuery(@RequestBody(required = false) JsonNode body,
+                                                @RequestHeader(value = "Authorization", required = false) String auth) {
+        String raw = auth != null && auth.startsWith("Bearer ") ? auth.substring(7).trim() : (auth == null ? "" : auth.trim());
+        String taskId = tokens.validate(raw).orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_TASK_TOKEN", "无效或已过期的任务令牌"));
+        String appId = tasks.findById(taskId).map(t -> t.appId()).orElse(null);
+        String callerWs = mcp.workspaceOfTaskOrApp(taskId, appId);
+        if (dataSources == null) throw ApiException.notFound("企业数据源服务");
+        String key = body == null ? "" : body.path("key").asText(body.path("name").asText("")).trim();
+        JsonNode params = body == null ? null : body.get("params");
+        return dataSources.queryForWorkspace(callerWs, key, params, appId, "agent_probe");
     }
 }
