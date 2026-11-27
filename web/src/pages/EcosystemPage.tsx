@@ -23,6 +23,7 @@ export function EcosystemPage() {
   const [tab, setTab] = useState<EcoTab>('feishu');
   const [query, setQuery] = useState('');
   const [feishuModal, setFeishuModal] = useState<null | { existing: Record<string, unknown> | null }>(null);
+  const [feishuTestModal, setFeishuTestModal] = useState<null | { id: string; name: string; keyword?: string }>(null);
   const [mcpModal, setMcpModal] = useState<null | { existing: Record<string, unknown> | null }>(null);
   const [agwModal, setAgwModal] = useState<AgwModal>(null);
 
@@ -221,6 +222,8 @@ export function EcosystemPage() {
               const id = String(c.id ?? '');
               const name = String(c.name ?? id);
               const isBitable = String(c.kind ?? '') === 'feishu_bitable';
+              const cfg = (c.config && typeof c.config === 'object' ? c.config : {}) as Record<string, unknown>;
+              const keyword = String(cfg.keyword ?? '').trim();
               const owned = Boolean(c.owned);
               const tr = testResults[id];
               return (
@@ -233,7 +236,8 @@ export function EcosystemPage() {
                       <h3>{name}</h3>
                       <div className="eco-badges">
                         <span className="eco-pill">{isBitable ? '飞书多维表格' : '飞书群机器人'}</span>
-                        <span className="eco-pill is-live">飞书直连</span>
+                        <span className="eco-pill is-live">{isBitable ? '飞书直连' : '已绑定目标群 · 免配群 ID'}</span>
+                        {!isBitable && keyword ? <span className="eco-pill">关键词：{keyword}</span> : null}
                         <span className={`eco-pill ${owned ? 'is-owned' : ''}`}>
                           {owned ? '我添加的' : '平台托管'}
                         </span>
@@ -247,34 +251,68 @@ export function EcosystemPage() {
                     </div>
                   ) : null}
                   <div className="eco-card-use-bar">
-                    <button
-                      type="button"
-                      className="eco-use-btn is-primary"
-                      onClick={() =>
-                        goUse({
-                          prefillEcosystem: { id, category: isBitable ? 'feishu_bitable' : 'feishu_bot', name },
-                          prefillPrompt: isBitable
-                            ? `帮我调用飞书多维表格「${name}」，读取真实字段名和最新记录并整理成表格展示`
-                            : `帮我用飞书机器人「${name}」整理并发送一条测试工作汇报卡片`,
-                        })
-                      }
-                    >
-                      <Icon name="spark" /> {isBitable ? '去对话调用' : '去对话发卡'}
-                    </button>
-                    <button
-                      type="button"
-                      className="eco-use-btn"
-                      onClick={() =>
-                        goUse({
-                          prefillEcosystem: { id, category: isBitable ? 'feishu_bitable' : 'feishu_bot', name },
-                          prefillPrompt: isBitable
-                            ? `先实时调用飞书多维表格「${name}」获取真实字段与样本数据，再基于真实结构帮我把返回内容做成交互式数据看板应用`
-                            : `帮我做一个带提交与异常告警功能的应用，关键节点自动通过飞书机器人「${name}」推送交互卡片`,
-                        })
-                      }
-                    >
-                      <Icon name="grid" /> {isBitable ? '做成看板' : '接入应用'}
-                    </button>
+                    {isBitable ? (
+                      <>
+                        <button
+                          type="button"
+                          className="eco-use-btn is-primary"
+                          onClick={() =>
+                            goUse({
+                              prefillEcosystem: { id, category: 'feishu_bitable', name },
+                              prefillPrompt: `帮我调用飞书多维表格「${name}」，读取真实字段名和最新记录并整理成表格展示`,
+                            })
+                          }
+                        >
+                          <Icon name="spark" /> 去对话调用
+                        </button>
+                        <button
+                          type="button"
+                          className="eco-use-btn"
+                          onClick={() =>
+                            goUse({
+                              prefillEcosystem: { id, category: 'feishu_bitable', name },
+                              prefillPrompt: `先实时调用飞书多维表格「${name}」获取真实字段与样本数据，再基于真实结构帮我把返回内容做成交互式数据看板应用`,
+                            })
+                          }
+                        >
+                          <Icon name="grid" /> 做成看板
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="eco-use-btn is-primary"
+                          onClick={() =>
+                            goUse({
+                              prefillEcosystem: { id, category: 'feishu_bot', name },
+                              prefillPrompt: `帮我做一个轻量的异常上报与值班通知网页应用（免后端，直接调用 window.zhiye.feishu.sendCard 推送飞书卡片），包含上报表单（事件标题、级别、所属模块、详细说明）和本地发送历史；提交时立即通过飞书机器人「${name}」推送对应颜色卡片到目标群`,
+                            })
+                          }
+                        >
+                          <Icon name="grid" /> 做上报/告警页
+                        </button>
+                        <button
+                          type="button"
+                          className="eco-use-btn"
+                          onClick={() =>
+                            goUse({
+                              prefillEcosystem: { id, category: 'feishu_bot', name },
+                              prefillPrompt: `帮我用飞书机器人「${name}」整理并发送一条工作汇报卡片`,
+                            })
+                          }
+                        >
+                          <Icon name="spark" /> 去对话发卡
+                        </button>
+                        <button
+                          type="button"
+                          className="eco-use-btn"
+                          onClick={() => setFeishuTestModal({ id, name, keyword })}
+                        >
+                          <Icon name="send" /> 自定义试发
+                        </button>
+                      </>
+                    )}
                   </div>
                   <div className="eco-card-foot">
                     <span className="eco-card-id" title={id}>{id}</span>
@@ -503,6 +541,17 @@ export function EcosystemPage() {
         />
       ) : null}
 
+      {/* 自定义试发飞书交互卡片弹窗 */}
+      {feishuTestModal ? (
+        <FeishuTestCardModal
+          connector={feishuTestModal}
+          onClose={() => setFeishuTestModal(null)}
+          onSent={(id, ok, msg) => {
+            setTestResults((prev) => ({ ...prev, [id]: { ok, text: msg } }));
+          }}
+        />
+      ) : null}
+
       {/* 添加 / 编辑企业知识库 / MCP 服务弹窗 */}
       {mcpModal ? (
         <McpServerModal
@@ -562,6 +611,7 @@ function FeishuConnectorModal({
   const [name, setName] = useState(String(existing?.name ?? ''));
   const [webhookUrl, setWebhookUrl] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
+  const [keyword, setKeyword] = useState(String(existingCfg.keyword ?? ''));
   const [bitableUrl, setBitableUrl] = useState(existingBitableHint);
   const [appId, setAppId] = useState(String(existingCfg.appId ?? ''));
   const [appSecret, setAppSecret] = useState('');
@@ -589,7 +639,9 @@ function FeishuConnectorModal({
               ...(bitableUrl.trim() ? { bitableUrl: bitableUrl.trim() } : {}),
               config: { ...(appId.trim() ? { appId: appId.trim() } : {}) },
             }
-          : {}),
+          : {
+              config: { ...(keyword.trim() ? { keyword: keyword.trim() } : {}) },
+            }),
         secrets:
           kind === 'feishu_bot'
             ? {
@@ -655,6 +707,9 @@ function FeishuConnectorModal({
 
         {kind === 'feishu_bot' ? (
           <div className="eco-fieldset">
+            <div className="eco-guide-box">
+              <b>已直接绑定目标飞书群，无需填写群 ID（chat_id）</b>：在目标群「设置 → 群机器人 → 添加自定义机器人」复制 Webhook 地址即可。配好后支持<b>对话发卡</b>、<b>普通网页免后端发卡</b>（表单上报/异常告警/日报一键推群）、<b>云函数</b>与<b>全栈服务</b>零密钥直连。
+            </div>
             <span className="eco-fieldset-title">机器人连接与安全校验</span>
             <div className="eco-field">
               <div className="eco-label-row">
@@ -672,20 +727,35 @@ function FeishuConnectorModal({
                 value={webhookUrl}
                 onChange={(e) => setWebhookUrl(e.target.value)}
               />
-              <small>在飞书群右上角「设置 → 群机器人 → 添加自定义机器人」中复制 Webhook 地址。</small>
             </div>
-            <div className="eco-field">
-              <div className="eco-label-row">
-                <label>签名校验 Secret</label>
-                <span className="eco-label-badge is-muted">可选</span>
+            <div className="eco-grid-2">
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>安全关键词</label>
+                  <span className="eco-label-badge is-muted">可选</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="例如：告警（如机器人开启了自定义关键词）"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                />
+                <small>开启「自定义关键词」时填入其一，发卡自动附带。</small>
               </div>
-              <input
-                type="password"
-                className="is-mono"
-                placeholder={isEdit && existing?.hasSecrets ? '留空保持原有签名密钥不变' : '若飞书机器人开启了签名校验，请在此填入密钥'}
-                value={webhookSecret}
-                onChange={(e) => setWebhookSecret(e.target.value)}
-              />
+              <div className="eco-field">
+                <div className="eco-label-row">
+                  <label>签名校验 Secret</label>
+                  <span className="eco-label-badge is-muted">可选</span>
+                </div>
+                <input
+                  type="password"
+                  className="is-mono"
+                  placeholder={isEdit && existing?.hasSecrets ? '留空保持原有签名密钥不变' : '开启签名校验时填入密钥'}
+                  value={webhookSecret}
+                  onChange={(e) => setWebhookSecret(e.target.value)}
+                />
+                <small>开启「签名校验」时填入，由平台服务端动态签名。</small>
+              </div>
             </div>
           </div>
         ) : (
@@ -961,6 +1031,113 @@ function McpServerModal({
             </div>
           </div>
         )}
+      </div>
+    </Modal>
+  );
+}
+
+const CARD_COLORS: Array<{ id: 'blue' | 'green' | 'orange' | 'red'; label: string; hex: string }> = [
+  { id: 'blue', label: '通知蓝', hex: '#3370ff' },
+  { id: 'green', label: '完成绿', hex: '#00b365' },
+  { id: 'orange', label: '预警橙', hex: '#ff8800' },
+  { id: 'red', label: '告警红', hex: '#f54a45' },
+];
+
+function FeishuTestCardModal({
+  connector,
+  onClose,
+  onSent,
+}: {
+  connector: { id: string; name: string; keyword?: string };
+  onClose: () => void;
+  onSent: (id: string, ok: boolean, text: string) => void;
+}) {
+  const [templateColor, setTemplateColor] = useState<'blue' | 'green' | 'orange' | 'red'>('blue');
+  const [title, setTitle] = useState('产线巡检日报提醒');
+  const [content, setContent] = useState('当前设备与指标巡检正常，这是一条来自织页 AI 生态中心的自定义测试卡片。');
+  const [sending, setSending] = useState(false);
+
+  const kw = (connector.keyword ?? '').trim();
+  const previewTitle = kw && !title.includes(kw) && !content.includes(kw) ? `[${kw}] ${title || '织页 AI 试发卡片'}` : title || '织页 AI 试发卡片';
+
+  const handleSend = async () => {
+    if (!title.trim()) return toast('请填写卡片标题', 'error');
+    setSending(true);
+    try {
+      await api.connectorTest(connector.id, {
+        title: title.trim(),
+        content: content.trim(),
+        templateColor,
+      });
+      const msg = `自定义卡片「${title.trim()}」已发送到目标飞书群`;
+      onSent(connector.id, true, msg);
+      toast(msg);
+      onClose();
+    } catch (e) {
+      const msg = errorMessage(e);
+      onSent(connector.id, false, msg);
+      toast(msg, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal
+      overline={`飞书群机器人 · ${connector.name}`}
+      title="自定义试发飞书交互卡片"
+      className="eco-modal"
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className="subtle-button" onClick={onClose}>取消</button>
+          <button type="button" className="primary-button" disabled={sending || !title.trim()} onClick={() => void handleSend()}>
+            {sending ? '发送中…' : '立即发送到飞书群'}
+          </button>
+        </>
+      }
+    >
+      <div className="eco-form">
+        <div className="eco-field">
+          <div className="eco-label-row">
+            <label>卡片样式主题</label>
+          </div>
+          <div className="eco-color-pills">
+            {CARD_COLORS.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`eco-color-pill ${templateColor === c.id ? 'active' : ''}`}
+                onClick={() => setTemplateColor(c.id)}
+              >
+                <span className="dot" style={{ background: c.hex }} />
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="eco-field">
+          <div className="eco-label-row">
+            <label>卡片标题</label>
+          </div>
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：T11 产线良率异常告警" />
+        </div>
+        <div className="eco-field">
+          <div className="eco-label-row">
+            <label>卡片正文</label>
+            <span className="eco-label-badge is-muted">支持 Markdown</span>
+          </div>
+          <textarea rows={3} value={content} onChange={(e) => setContent(e.target.value)} placeholder="输入通知详情，支持 **加粗**、列表等 Markdown 语法" />
+        </div>
+        <div className="eco-field">
+          <div className="eco-label-row">
+            <label>飞书群内卡片效果预览</label>
+          </div>
+          <div className="eco-feishu-preview">
+            <div className={`eco-feishu-preview-head is-${templateColor}`}>{previewTitle}</div>
+            <div className="eco-feishu-preview-body">{content || '（无正文内容）'}</div>
+          </div>
+        </div>
       </div>
     </Modal>
   );

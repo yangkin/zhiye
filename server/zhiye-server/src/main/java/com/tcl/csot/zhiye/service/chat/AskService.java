@@ -808,12 +808,12 @@ public class AskService {
                 tools.add(tool("bitable_create", "仅当用户明确要求向飞书多维表格新增/写入一条记录时调用", pbc, "fields"));
 
                 ObjectNode pfc = Json.obj();
-                pfc.putObject("connectorId").put("type", "string").put("description", "飞书机器人连接器 ID 或名称（可留空取默认）");
+                pfc.putObject("connectorId").put("type", "string").put("description", "飞书机器人连接器 ID 或名称（留空自动取工作空间默认机器人；自定义机器人已绑定目标飞书群，无需询问群 ID）");
                 pfc.putObject("title").put("type", "string").put("description", "卡片标题");
                 pfc.putObject("content").put("type", "string").put("description", "卡片正文（支持 Markdown）");
                 pfc.putObject("templateColor").put("type", "string").put("description", "卡片头部颜色：blue / green / orange / red，默认 blue");
                 pfc.putObject("fields").put("type", "array").put("description", "可选双列键值字段数组，每项为 {\"label\":\"字段名\",\"value\":\"值\"}");
-                tools.add(tool("feishu_send_card", "仅当用户明确要求发送飞书通知、汇报或告警卡片到飞书群时调用", pfc, "title"));
+                tools.add(tool("feishu_send_card", "仅当用户明确要求发送飞书通知、汇报或告警卡片到飞书群时调用（机器人已直接绑定目标群，无需群 ID）", pfc, "title"));
             }
         }
         if (!appTools) return tools;

@@ -707,6 +707,7 @@ export interface MonolithServiceStatus {
   lastError?: string | null;
   updatedAt?: string | null;
   envVars: MonolithEnvVar[];
+  platformInjectedEnv?: { key: string; desc: string }[];
   releases: MonolithRelease[];
   quota?: {
     maxMemoryMb: number;

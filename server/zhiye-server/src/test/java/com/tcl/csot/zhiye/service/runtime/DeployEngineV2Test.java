@@ -75,7 +75,7 @@ class DeployEngineV2Test {
                 "https://mvn.csot.local", "https://goproxy.csot.local",
                 null, true, null, null, null, List.of(),
                 2880, 60, 30, 600, 500, 1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000,
-                "zhiye-builds", "zhiye-runtime", null
+                "zhiye-builds", "zhiye-runtime", null, null
         );
 
         String nodeDf = DockerfileGenerator.generate(

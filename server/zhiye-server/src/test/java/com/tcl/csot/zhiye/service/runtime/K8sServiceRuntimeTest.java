@@ -33,7 +33,7 @@ class K8sServiceRuntimeTest {
                 "csi-nas", true, "zhiye", "app.kubernetes.io/part-of", "zhiye",
                 List.of("10.96.0.10/32"), 20, 60, 5, 120, 200,
                 1024, 1000, 5, 5, false, 5, 2048, 2000, 131072, 64000, "zhiye-builds", "zhiye-runtime",
-                "https://cdn.npmmirror.com/packages");
+                "https://cdn.npmmirror.com/packages", "http://zhiye-api.zhiye.svc:8080");
     }
 
     @Test
@@ -94,7 +94,11 @@ class K8sServiceRuntimeTest {
         assertThat(np.getSpec().getPolicyTypes()).containsExactly("Ingress", "Egress");
         assertThat(np.getSpec().getIngress().get(0).getFrom().get(0).getNamespaceSelector().getMatchLabels())
                 .containsEntry("kubernetes.io/metadata.name", "zhiye");
-        assertThat(np.getSpec().getEgress()).hasSize(2); // DNS + 白名单 CIDR
+        assertThat(np.getSpec().getEgress()).hasSize(3); // DNS + 织页平台连接器网关(8080/8083) + 白名单 CIDR
+        assertThat(np.getSpec().getEgress().get(1).getTo().get(0).getNamespaceSelector().getMatchLabels())
+                .containsEntry("kubernetes.io/metadata.name", "zhiye");
+        assertThat(props.resolvedInternalApiBase()).isEqualTo("http://zhiye-api.zhiye.svc:8080");
+        assertThat(props.resolvedInternalApiBase()).doesNotContain("127.0.0.1");
     }
 
     @Test
@@ -137,6 +141,32 @@ class K8sServiceRuntimeTest {
 
         provider.sleep("app_k8s_1", "k8s-demo");
         assertThat(client.apps().deployments().inNamespace("zhiye-apps").withName(depName).get().getSpec().getReplicas()).isEqualTo(0);
+
+        // 唤醒时应刷新 Secret（含最新的 ZHIYE_CONNECTOR_API 与 ZHIYE_CONNECTOR_TOKEN）并拉起副本
+        var updatedSpec = new ServiceRuntimeProvider.DeploySpec(
+                "app_k8s_1", "k8s-demo", "ver_1", "go", "Go", "", "",
+                "go build -o app .", "./app", 8080, "/health", 256, 500, true, 1,
+                Path.of("."), "FROM alpine", Map.of(
+                        "ZHIYE_CONNECTOR_API", "http://zhiye-api.zhiye.svc:8080/internal/app-connectors",
+                        "ZHIYE_CONNECTOR_TOKEN", "zct1.app_k8s_1.sig"));
+        Thread wakeCtrl = new Thread(() -> {
+            for (int i = 0; i < 40; i++) {
+                Deployment d = client.apps().deployments().inNamespace("zhiye-apps").withName(depName).get();
+                if (d != null && d.getSpec().getReplicas() != null && d.getSpec().getReplicas() > 0) {
+                    client.apps().deployments().inNamespace("zhiye-apps").withName(depName).editStatus(x ->
+                            new DeploymentBuilder(x).editOrNewStatus().withReadyReplicas(1).withAvailableReplicas(1).endStatus().build());
+                    break;
+                }
+                try { Thread.sleep(50); } catch (InterruptedException ignored) { break; }
+            }
+        });
+        wakeCtrl.start();
+        provider.wake(updatedSpec, res.imageRef());
+        wakeCtrl.join(2000);
+        var refreshedSecret = client.secrets().inNamespace("zhiye-apps").withName(depName + "-env").get();
+        assertThat(refreshedSecret.getStringData())
+                .containsEntry("ZHIYE_CONNECTOR_API", "http://zhiye-api.zhiye.svc:8080/internal/app-connectors")
+                .containsEntry("ZHIYE_CONNECTOR_TOKEN", "zct1.app_k8s_1.sig");
 
         provider.destroy("app_k8s_1", "k8s-demo");
         assertThat(client.apps().deployments().inNamespace("zhiye-apps").withName(depName).get()).isNull();

@@ -37,7 +37,7 @@ public class TemplateRequirementsService {
     private static final Pattern SOURCE_CALL = Pattern.compile(
             "(?:zhiye|ctx)\\.source\\.query\\(\\s*['\"`]([a-z][a-z0-9_]{1,47})['\"`]|sourceKey\\s*[:=]\\s*['\"`]([a-z][a-z0-9_]{1,47})['\"`]");
     private static final Pattern CONN_ID = Pattern.compile("\\b(conn_[a-zA-Z0-9_-]{4,48})\\b");
-    private static final Pattern FEISHU_CARD_CALL = Pattern.compile("ctx\\.feishu\\.sendCard|/feishu/send-card");
+    private static final Pattern FEISHU_CARD_CALL = Pattern.compile("(?:ctx|zhiye)\\.feishu\\.sendCard|/feishu/send-card");
     private static final Pattern BITABLE_CALL = Pattern.compile("ctx\\.bitable\\.|/bitable/(?:list|create|update)");
     private static final Pattern DOTENV_KEY = Pattern.compile("(?m)^\\s*(?:export\\s+)?([A-Z][A-Z0-9_]{1,63})\\s*=");
 
@@ -48,7 +48,7 @@ public class TemplateRequirementsService {
             "PORT", "HOST", "NODE_ENV", "PYTHONUNBUFFERED", "TZ", "LANG", "LC_ALL",
             "DATABASE_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD",
             "DATA_DIR", "ZHIYE_APP_ID", "ZHIYE_PUBLIC_URL", "ZHIYE_BASE_URL",
-            "ZHIYE_CONNECTOR_API", "ZHIYE_CONNECTOR_TOKEN");
+            "ZHIYE_CONNECTOR_API", "ZHIYE_CONNECTOR_TOKEN", "ZHIYE_FEISHU_BOT_ID");
 
     private final JdbcClient jdbc;
     private final GitService git;

@@ -30,6 +30,14 @@ spec:
             matchLabels: { app: zhiye-sandbox }
       ports:
         - { protocol: TCP, port: 8080 }
+    # 用户单体托管服务（zhiye-apps）回调平台内部企业连接器代理网关（/internal/app-connectors/**，HMAC 鉴权隔离）
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: zhiye-apps }
+          podSelector:
+            matchLabels: { zhiye/component: user-service }
+      ports:
+        - { protocol: TCP, port: 8080 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -138,6 +138,7 @@ zhiye:
     storage-class: ${ZHIYE_SERVICE_STORAGE_CLASS:}
     network-policy-enabled: ${ZHIYE_SERVICE_NETWORK_POLICY:true}
     gateway-pod-namespace: ${ZHIYE_GATEWAY_NAMESPACE:zhiye}
+    internal-api-base: ${ZHIYE_SERVICE_INTERNAL_API_BASE:http://zhiye-api.zhiye.svc:8080}
     default-idle-sleep-minutes: ${ZHIYE_SERVICE_IDLE_SLEEP_MIN:2880}
     idle-sweep-seconds: ${ZHIYE_SERVICE_IDLE_SWEEP_SEC:60}
     wake-timeout-seconds: ${ZHIYE_SERVICE_WAKE_TIMEOUT_SEC:30}

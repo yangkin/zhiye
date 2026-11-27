@@ -77,6 +77,13 @@
       return out ? out.result : null;
     },
   };
+  /* 飞书群机器人卡片推送（免后端、免开云服务、密钥全由平台代理托管）：
+     sendCard({ connectorId?, title, content, templateColor?: 'blue'|'green'|'orange'|'red', fields?: [{label, value}], buttons?: [...] }) */
+  window.zhiye.feishu = {
+    sendCard: async function (opts) {
+      return call('POST', '/feishu/send-card', opts || {});
+    },
+  };
   if (cfg.cloud === false || (!site && !cfg.token)) return;
   window.zhiye.cloud = {
     appId: cfg.appId,

@@ -685,8 +685,11 @@ export const api = {
     request<Record<string, unknown>>(`/api/connectors/${enc(id)}`, { method: 'PUT', body: input }),
   connectorDelete: (id: string) =>
     request<{ ok: boolean }>(`/api/connectors/${enc(id)}`, { method: 'DELETE' }),
-  connectorTest: (id: string) =>
-    request<Record<string, unknown>>(`/api/connectors/${enc(id)}/test`, { method: 'POST' }),
+  connectorTest: (id: string, payload?: { title?: string; content?: string; templateColor?: string }) =>
+    request<Record<string, unknown>>(`/api/connectors/${enc(id)}/test`, {
+      method: 'POST',
+      ...(payload ? { body: payload } : {}),
+    }),
   mcpServersList: () => request<Record<string, unknown>[]>('/api/mcp-servers'),
   mcpServerCreate: (input: Record<string, unknown>) =>
     request<Record<string, unknown>>('/api/mcp-servers', { method: 'POST', body: input }),

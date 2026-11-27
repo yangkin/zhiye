@@ -39,6 +39,8 @@ public class EnterpriseConnectorService {
     private static final Logger log = LoggerFactory.getLogger(EnterpriseConnectorService.class);
     private static final Set<String> ALLOWED_KINDS = Set.of("feishu_bot", "feishu_bitable", "feishu_app", "webhook_http");
     private static final Set<String> DEFAULT_FEISHU_HOSTS = Set.of("open.feishu.cn", "open.larksuite.com");
+    private static final Set<String> VALID_CARD_COLORS = Set.of(
+            "blue", "wathet", "turquoise", "green", "yellow", "orange", "red", "carmine", "violet", "purple", "indigo", "grey");
 
     public record ConnectorRow(
             String id, String workspaceId, String name, String kind, String mode, boolean enabled,
@@ -54,6 +56,8 @@ public class EnterpriseConnectorService {
     private final ConcurrentHashMap<String, CachedToken> tokenCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RateWindow> rateWindows = new ConcurrentHashMap<>();
     private final byte[] appTokenSigningKey;
+    @org.springframework.beans.factory.annotation.Value("${zhiye.connectors.allow-loopback-for-test:false}")
+    private boolean allowLoopbackForTest;
 
     public EnterpriseConnectorService(JdbcClient jdbc, ServiceCrypto crypto) {
         this.jdbc = jdbc;
@@ -128,30 +132,66 @@ public class EnterpriseConnectorService {
         StringBuilder sb = new StringBuilder("\n\n## 平台已托管企业连接器（免密直连，严禁在源码硬编码飞书密钥或前端直连 open.feishu.cn）\n");
         sb.append("当前可用连接器清单：\n");
         for (Map<String, Object> c : enabled) {
+            String kind = String.valueOf(c.getOrDefault("kind", ""));
+            String note = "feishu_bot".equals(kind) ? "，已直接绑定目标飞书群，发卡免配群 ID" : "";
             sb.append("- `").append(c.get("id")).append("` — **").append(c.get("name")).append("**")
-                    .append("（类型：`").append(c.get("kind")).append("`，模式：`").append(c.get("mode")).append("`）\n");
+                    .append("（类型：`").append(kind).append("`，模式：`").append(c.get("mode")).append("`").append(note).append("）\n");
         }
+        boolean hasBot = enabled.stream().anyMatch(c -> "feishu_bot".equals(c.get("kind")));
         boolean hasBitable = enabled.stream().anyMatch(c -> "feishu_bitable".equals(c.get("kind")) || "feishu_app".equals(c.get("kind")));
+        if (hasBot) {
+            sb.append("- **飞书群自定义机器人（`feishu_bot`）铁律**：Webhook 地址已直接绑定到目标飞书群，发卡片只需传 `connectorId`（可选，不传则自动使用当前工作空间默认机器人）、`title`、`content`（可选 `templateColor` / `fields` / `buttons`）；**严禁向用户索要或检查 `FEISHU_GROUP_ID`、`chat_id`、`groupId`、`receive_id` 或 Webhook 环境变量，严禁在页面显示「未配置目标群」阻塞发送**！\n");
+        }
         if (hasBitable) {
             sb.append("- **开发前字段探测（强烈推荐）**：接入飞书多维表格前，请先调用 `inspect_bitable` 读取真实表头列名与样例记录，严禁凭空猜测中英文列名！\n");
         }
         if (isService) {
             sb.append("""
-                    - **单体全栈后端调用方式（已自动注入环境变量 `ZHIYE_CONNECTOR_API` 与 `ZHIYE_CONNECTOR_TOKEN`，无需用户手动配密钥）**：
-                      - 发飞书卡片：`POST ${ZHIYE_CONNECTOR_API}/feishu/send-card`，Header `Authorization: Bearer ${ZHIYE_CONNECTOR_TOKEN}`，Body `{ connectorId, title, content, templateColor: "blue"|"green"|"orange"|"red", fields: [{label, value}] }`
+                    - **单体全栈后端调用方式（平台在预览与线上运行态已自动注入 `ZHIYE_CONNECTOR_API`、`ZHIYE_CONNECTOR_TOKEN` 及默认 `ZHIYE_FEISHU_BOT_ID`，无需用户在环境变量面板手动配置）**：
+                      - 发飞书卡片：`POST ${ZHIYE_CONNECTOR_API}/feishu/send-card`，Header `Authorization: Bearer ${ZHIYE_CONNECTOR_TOKEN}`，Body `{ connectorId, title, content, templateColor: "blue"|"green"|"orange"|"red", fields: [{label, value}] }`（不需要 `groupId` / `FEISHU_GROUP_ID`；离线沙箱 `test_endpoint` 不注入该变量属正常，运行态与线上托管均会自动注入）
                       - 飞书多维表格 CRUD：`POST ${ZHIYE_CONNECTOR_API}/bitable/list`（返回 `{ ok, total, items, data }`）、`.../bitable/create`（Body `{ connectorId, fields }`，返回 `{ ok, record_id, fields, data }`）、`.../bitable/update`（Body `{ connectorId, recordId, fields }`，返回 `{ ok, record_id, fields, data }`）
                       - 查企业员工目录：`POST ${ZHIYE_CONNECTOR_API}/org/employees`（`{ q }`）
                     """);
-        }
-        if (cloudEnabled || !isService) {
+        } else {
             sb.append("""
-                    - **云函数（`functions/*.ts`）调用方式（Deno 宿主已原生注入，零密钥泄露）**：
+                    - **普通网页前端免后端直发飞书卡片（首选，无需开启云服务、无需搭建后端、预览与发布均可直接生效，零密钥暴露）**：
+                      - `await window.zhiye.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })`
+                      - 适合表单提交自动推群、异常告警上报、日报/汇总一键发群、状态流转通知等场景；平台自动代发签名与限流，绝不暴露 Webhook 地址。
+                    """);
+        }
+        if (cloudEnabled) {
+            sb.append("""
+                    - **云函数（`functions/*.ts`）调用方式（Deno 宿主已原生注入，适合多表事务或服务端校验后发卡）**：
                       - `await ctx.feishu.sendCard({ connectorId, title, content, templateColor, fields })`
                       - `await ctx.bitable.list(connectorId)` / `await ctx.bitable.create(connectorId, fields)` / `await ctx.bitable.update(connectorId, recordId, fields)`
                       - `await ctx.org.searchEmployees(q)`
                     """);
         }
         return sb.toString();
+    }
+
+    /** 返回工作空间默认启用的某类连接器 ID（优先本工作空间自建，其次平台全局；无则返回空串）。 */
+    public String defaultEnabledConnectorId(String ws, String kind) {
+        if (kind == null || kind.isBlank()) return "";
+        try {
+            if (ws != null && !ws.isBlank()) {
+                return jdbc.sql("""
+                        select id from enterprise_connector
+                         where enabled = true and kind = ?
+                           and (workspace_id is null or workspace_id = ?)
+                         order by (workspace_id = ?) desc, updated_at desc
+                         limit 1
+                        """).params(kind, ws, ws).query(String.class).optional().orElse("");
+            }
+            return jdbc.sql("""
+                    select id from enterprise_connector
+                     where enabled = true and kind = ? and workspace_id is null
+                     order by updated_at desc
+                     limit 1
+                    """).param(kind).query(String.class).optional().orElse("");
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     // ==================== CRUD 管理 ====================
@@ -182,10 +222,10 @@ public class EnterpriseConnectorService {
         List<Map<String, Object>> enabled = listEnabledForWorkspace(ws);
         if (enabled.isEmpty()) return "";
         StringBuilder sb = new StringBuilder("\n\n【当前工作空间可用飞书生态连接器（免密托管，对话可随时调用）】\n");
-        sb.append("当用户要求读取/查询/统计飞书多维表格，或要求基于多维表格做成看板/应用时，**请直接调用 `bitable_list` 读取真实字段和记录**；仅当用户明确要求写入记录或发送群通知时，再调用 `bitable_create` 或 `feishu_send_card`：\n");
+        sb.append("当用户要求读取/查询/统计飞书多维表格，或要求基于多维表格做成看板/应用时，**请直接调用 `bitable_list` 读取真实字段和记录**；仅当用户明确要求写入记录或发送群通知时，再调用 `bitable_create` 或 `feishu_send_card`（飞书群机器人 Webhook 已绑定目标群，发卡片无需询问群 ID；做成普通网页应用时直接用 `window.zhiye.feishu.sendCard` 免后端发卡）：\n");
         for (Map<String, Object> c : enabled) {
             String kind = String.valueOf(c.getOrDefault("kind", ""));
-            String label = "feishu_bitable".equals(kind) ? "飞书多维表格" : "feishu_app".equals(kind) ? "飞书开放应用" : "飞书群机器人";
+            String label = "feishu_bitable".equals(kind) ? "飞书多维表格" : "feishu_app".equals(kind) ? "飞书开放应用" : "飞书群机器人（已绑定目标群）";
             sb.append("- **").append(c.get("name")).append("**（connectorId: `").append(c.get("id")).append("`，").append(label).append("）\n");
         }
         return sb.toString();
@@ -332,7 +372,7 @@ public class EnterpriseConnectorService {
         // 统一使用真实公域飞书直连模式（live），若填写了 Webhook URL 则立即做 SSRF 白名单校验
         String wh = normalized.path("secrets").path("webhookUrl").asText("").trim();
         if (!wh.isEmpty()) {
-            validateOutboundUrl(wh, normalized.path("config"));
+            validateOutboundUrl(wh, normalized.path("config"), allowLoopbackForTest);
         }
         normalized.put("mode", "live");
         return upsert(ws, normalized);
@@ -365,30 +405,123 @@ public class EnterpriseConnectorService {
     // ==================== 连通性测试 ====================
 
     public Map<String, Object> testConnectorForWorkspace(String ws, String connectorId) {
+        return testConnectorForWorkspace(ws, connectorId, null);
+    }
+
+    public Map<String, Object> testConnectorForWorkspace(String ws, String connectorId, JsonNode customCard) {
         ConnectorRow conn = requireEnabledConnector(connectorId);
         if (!isVisibleToWorkspace(conn, ws)) {
             throw new ApiException(HttpStatus.FORBIDDEN, "CONNECTOR_FORBIDDEN", "无权访问或测试其他工作空间的私有连接器");
         }
-        return testConnectorRow(conn);
+        return testConnectorRow(conn, customCard);
     }
 
     public Map<String, Object> testConnector(String connectorId) {
-        return testConnectorRow(requireEnabledConnector(connectorId));
+        return testConnector(connectorId, null);
     }
 
-    private Map<String, Object> testConnectorRow(ConnectorRow conn) {
+    public Map<String, Object> testConnector(String connectorId, JsonNode customCard) {
+        return testConnectorRow(requireEnabledConnector(connectorId), customCard);
+    }
+
+    private Map<String, Object> testConnectorRow(ConnectorRow conn, JsonNode customCard) {
         if ("feishu_bitable".equals(conn.kind())) {
             return bitableList(conn.id(), null, Map.of("pageSize", 5));
         }
-        return sendFeishuCard(conn.id(), null,
+        boolean hasCustom = customCard != null && customCard.isObject()
+                && (!customCard.path("title").asText("").isBlank() || !customCard.path("content").asText("").isBlank());
+        if (hasCustom) {
+            String title = truncate(customCard.path("title").asText("织页 AI 试发卡片").trim(), 200);
+            String content = truncate(customCard.path("content").asText("").trim(), 8000);
+            String color = normalizeCardColor(customCard.path("templateColor").asText(customCard.path("color").asText("blue")));
+            List<Map<String, String>> fields = parseCardFields(customCard.get("fields"));
+            if (fields.isEmpty()) {
+                fields = List.of(
+                        Map.of("label", "连接器", "value", conn.name()),
+                        Map.of("label", "发送时间", "value", Instant.now().toString())
+                );
+            }
+            return executeSendFeishuCard(conn, null, title.isBlank() ? "织页 AI 试发卡片" : title, content, color, fields, List.of());
+        }
+        return executeSendFeishuCard(conn, null,
                 "织页 AI 连接器连通性自检",
-                "连接器「" + conn.name() + "」连通性验证通过。",
+                "连接器「" + conn.name() + "」连通性验证通过，后续可在对话、网页应用、云函数或全栈服务中直接调用（无需填写群 ID）。",
                 "blue",
                 List.of(Map.of("label", "连接器 ID", "value", conn.id()), Map.of("label", "时间", "value", Instant.now().toString())),
                 List.of());
     }
 
     // ==================== 1. 发送公域飞书交互卡片 ====================
+
+    /** 统一解析应用侧（前端 SDK / 内部全栈网关）发卡请求：兼容多种常见字段别名、自动回退工作空间默认机器人、忽略多余 groupId。 */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> sendFeishuCardFromPayload(String appId, JsonNode b) {
+        String connectorId = b == null ? "" : firstNonBlank(
+                b.path("connectorId").asText(""),
+                b.path("connector_id").asText(""));
+        String title = b == null ? "织页应用通知" : firstNonBlank(
+                b.path("title").asText(""),
+                b.path("heading").asText(""),
+                b.path("subject").asText(""),
+                "织页应用通知");
+        String content = b == null ? "" : firstNonBlank(
+                b.path("content").asText(""),
+                b.path("text").asText(""),
+                b.path("markdown").asText(""),
+                b.path("message").asText(""));
+        String color = normalizeCardColor(b == null ? "blue" : firstNonBlank(
+                b.path("templateColor").asText(""),
+                b.path("color").asText(""),
+                b.path("headerColor").asText(""),
+                "blue"));
+        List<Map<String, String>> fields = parseCardFields(b == null ? null : b.get("fields"));
+        List<Map<String, Object>> buttons = new ArrayList<>();
+        if (b != null && b.has("buttons") && b.get("buttons").isArray()) {
+            int count = 0;
+            for (JsonNode n : b.get("buttons")) {
+                if (count++ >= 4) break;
+                if (n != null && n.isObject()) {
+                    buttons.add(Json.convert(n, Map.class));
+                }
+            }
+        }
+        return sendFeishuCard(
+                connectorId,
+                appId,
+                truncate(title, 200),
+                truncate(content, 8000),
+                color,
+                fields,
+                buttons);
+    }
+
+    private static List<Map<String, String>> parseCardFields(JsonNode node) {
+        List<Map<String, String>> fields = new ArrayList<>();
+        if (node == null || !node.isArray()) return fields;
+        int count = 0;
+        for (JsonNode n : node) {
+            if (count++ >= 20) break;
+            if (n == null || !n.isObject()) continue;
+            String label = firstNonBlank(n.path("label").asText(""), n.path("key").asText(""), n.path("name").asText(""));
+            String value = n.path("value").asText("");
+            if (!label.isBlank() || !value.isBlank()) {
+                fields.add(Map.of("label", truncate(label, 80), "value", truncate(value, 500)));
+            }
+        }
+        return fields;
+    }
+
+    private static String normalizeCardColor(String raw) {
+        String c = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        return VALID_CARD_COLORS.contains(c) ? c : "blue";
+    }
+
+    private static String firstNonBlank(String... candidates) {
+        for (String c : candidates) {
+            if (c != null && !c.isBlank()) return c.trim();
+        }
+        return "";
+    }
 
     public Map<String, Object> sendFeishuCard(String connectorId, String appId, String title, String content,
                                               String templateColor, List<Map<String, String>> fields,
@@ -412,8 +545,18 @@ public class EnterpriseConnectorService {
         enforceRateLimit(conn);
         long t0 = System.currentTimeMillis();
 
-        Map<String, Object> card = buildInteractiveCard(title, content, templateColor, fields, buttons);
-        String reqSummary = "title=" + truncate(title, 80) + " mode=" + conn.mode();
+        // 若飞书群自定义机器人配置了安全关键词（config.keyword），且标题/正文未包含，则自动在标题前置关键词避免触发 19024 拦截
+        String effectiveTitle = (title == null || title.isBlank()) ? "织页 AI 通知" : title;
+        String effectiveContent = content == null ? "" : content;
+        if ("feishu_bot".equals(conn.kind()) && conn.config() != null) {
+            String kw = conn.config().path("keyword").asText(conn.config().path("securityKeyword").asText("")).trim();
+            if (!kw.isEmpty() && !effectiveTitle.contains(kw) && !effectiveContent.contains(kw)) {
+                effectiveTitle = "[" + kw + "] " + effectiveTitle;
+            }
+        }
+
+        Map<String, Object> card = buildInteractiveCard(effectiveTitle, effectiveContent, normalizeCardColor(templateColor), fields, buttons);
+        String reqSummary = "title=" + truncate(effectiveTitle, 80) + " mode=" + conn.mode();
 
         try {
             JsonNode secrets = decryptSecrets(conn);
@@ -422,7 +565,7 @@ public class EnterpriseConnectorService {
                 if (webhookUrl.isEmpty()) {
                     throw ApiException.validation("飞书群机器人未配置 Webhook 地址，请在「生态」页编辑并填写 https://open.feishu.cn/open-apis/bot/v2/hook/...");
                 }
-                validateOutboundUrl(webhookUrl, conn.config());
+                validateOutboundUrl(webhookUrl, conn.config(), allowLoopbackForTest);
                 Map<String, Object> payload = new LinkedHashMap<>();
                 String signSecret = secrets.path("webhookSignSecret").asText(secrets.path("webhookSecret").asText("")).trim();
                 if (!signSecret.isEmpty()) {
@@ -439,7 +582,8 @@ public class EnterpriseConnectorService {
                 JsonNode parsed = Json.read(resp.body());
                 int code = parsed != null ? parsed.path("code").asInt(parsed.path("StatusCode").asInt(0)) : 0;
                 if (code != 0) {
-                    throw new IllegalStateException("飞书机器人返回错误码 " + code + ": " + parsed.path("msg").asText(resp.body()));
+                    String rawMsg = parsed != null ? parsed.path("msg").asText(parsed.path("StatusMessage").asText(resp.body())) : resp.body();
+                    throw new IllegalStateException(formatFeishuWebhookError(code, rawMsg));
                 }
                 Map<String, Object> out = Map.of("ok", true, "mode", "live", "connectorId", conn.id(), "connectorName", conn.name(), "response", parsed == null ? resp.body() : parsed);
                 recordAudit(conn.id(), appId, "feishu.sendCard", "ok", System.currentTimeMillis() - t0, reqSummary, truncate(resp.body(), 300), null);
@@ -800,6 +944,10 @@ public class EnterpriseConnectorService {
     }
 
     public static void validateOutboundUrl(String rawUrl, JsonNode config) {
+        validateOutboundUrl(rawUrl, config, false);
+    }
+
+    static void validateOutboundUrl(String rawUrl, JsonNode config, boolean allowLoopback) {
         try {
             URI u = URI.create(rawUrl);
             String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.ROOT);
@@ -808,8 +956,13 @@ public class EnterpriseConnectorService {
             }
             String host = u.getHost() == null ? "" : u.getHost().toLowerCase(Locale.ROOT);
             if (host.isEmpty()) throw ApiException.validation("非法目标 URL");
-            // 严禁访问云元数据地址与本机回环地址
-            if (host.equals("169.254.169.254") || host.equals("localhost") || host.startsWith("127.") || host.equals("::1")) {
+            // 严禁访问云元数据地址；非测试模式严禁访问本机回环地址
+            if (host.equals("169.254.169.254")) {
+                throw ApiException.validation("SSRF 安全拦截：禁止访问元数据地址 " + host);
+            }
+            boolean isLoopback = host.equals("localhost") || host.startsWith("127.") || host.equals("::1");
+            if (isLoopback) {
+                if (allowLoopback) return;
                 throw ApiException.validation("SSRF 安全拦截：禁止访问元数据或回环地址 " + host);
             }
             Set<String> allowed = new HashSet<>(DEFAULT_FEISHU_HOSTS);
@@ -921,6 +1074,20 @@ public class EnterpriseConnectorService {
             return String.valueOf(opts.get(key)).trim();
         }
         return def == null ? "" : def.trim();
+    }
+
+    private static String formatFeishuWebhookError(int code, String rawMsg) {
+        String lower = rawMsg == null ? "" : rawMsg.toLowerCase(Locale.ROOT);
+        if (code == 19024 || lower.contains("key words not found")) {
+            return "飞书群机器人开启了「自定义关键词」校验（错误码 " + code + "）：请在「生态 → 编辑连接器」中填入对应的安全关键词，系统发卡时将自动附带该关键词。";
+        }
+        if (code == 19021 || lower.contains("sign match fail")) {
+            return "飞书群机器人「签名校验」失败（错误码 " + code + "）：请核对「签名校验 Secret」是否与飞书群机器人安全设置完全一致。";
+        }
+        if (code == 19001 || code == 19002 || lower.contains("invalid webhook") || lower.contains("not found")) {
+            return "飞书群机器人 Webhook 地址无效或已被重置（错误码 " + code + "）：请在飞书群机器人设置中重新复制完整 Webhook 地址并更新。";
+        }
+        return "飞书机器人返回错误码 " + code + ": " + truncate(rawMsg, 260);
     }
 
     private static String truncate(String s, int max) {

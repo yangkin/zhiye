@@ -178,9 +178,12 @@ public class SiteFilter extends OncePerRequestFilter {
         var build = v.flatMap(x -> versions.build(x.buildId()));
         if (build.isEmpty()) { notFound(res, "站点内容缺失"); return; }
         if (acc.needsLogin()) res.setHeader("Cache-Control", "private, no-cache");
-        // 发布站点不放令牌：云数据库、存储、数据源都走同源 /__zhiye/*，身份来自站点会话
+        // 发布站点不放令牌：云数据库、存储、数据源、飞书卡片都走同源 /__zhiye/*，身份来自站点会话
         boolean cloudOn = cloud.isOn(appId);
-        String inject = cloudOn || user != null || acc.needsLogin() || sources.hasBindings(appId) || ai.usesAi(build.get().publishPrefix()) || ai.buildUses(build.get().publishPrefix(), "zhiye.fn")
+        String inject = cloudOn || user != null || acc.needsLogin() || sources.hasBindings(appId)
+                || ai.usesAi(build.get().publishPrefix())
+                || ai.buildUses(build.get().publishPrefix(), "zhiye.fn")
+                || ai.buildUses(build.get().publishPrefix(), "zhiye.feishu")
                 ? "<script>window.__ZHIYE_CLOUD__=" + Json.write(siteConfig(appId, cloudOn, access.userView(appId, user))) + ";</script>"
                   + "<script src=\"/__zhiye/sdk.js\"></script>"
                 : null;
@@ -354,7 +357,7 @@ public class SiteFilter extends OncePerRequestFilter {
         if (appId == null) return body;
         boolean enabled = jdbc.sql("select count(*) from app_cloud where app_id = ? and status = 'on'")
                 .params(appId).query(Long.class).single() > 0;
-        if (!enabled && !sources.hasBindings(appId) && !ai.usesAi(prefix) && !ai.buildUses(prefix, "zhiye.fn")) return body;
+        if (!enabled && !sources.hasBindings(appId) && !ai.usesAi(prefix) && !ai.buildUses(prefix, "zhiye.fn") && !ai.buildUses(prefix, "zhiye.feishu")) return body;
         // publicBaseUrl 结尾可能有斜杠，统一去掉；预览页在站点域，/cloud/* 在 api 域，必须用绝对地址
         String base = props.publicBaseUrl().replaceAll("/+$", "");
         // /cloud/sdk.js 在加载时读取 window.__ZHIYE_CLOUD__，所以配置脚本必须排在它前面
@@ -445,6 +448,10 @@ public class SiteFilter extends OncePerRequestFilter {
                 // 只有构建产物里确实调用了 zhiye.ai 的应用才开放，避免任何发布站点都能被拿来白用模型
                 String pp = versions.find(app.get().publishedVersionId()).flatMap(x -> versions.build(x.buildId())).map(b -> b.publishPrefix()).orElse(null);
                 if (!ai.usesAi(pp)) throw new com.tcl.csot.zhiye.exception.ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "AI_NOT_USED", "这个应用没有用到应用内 AI");
+            } else if (uri.equals("/__zhiye/feishu/send-card")) {
+                if (!"POST".equals(req.getMethod())) throw com.tcl.csot.zhiye.exception.ApiException.notFound("接口");
+                String pp = versions.find(app.get().publishedVersionId()).flatMap(x -> versions.build(x.buildId())).map(b -> b.publishPrefix()).orElse(null);
+                if (!ai.buildUses(pp, "zhiye.feishu")) throw new com.tcl.csot.zhiye.exception.ApiException(org.springframework.http.HttpStatus.FORBIDDEN, "FEISHU_NOT_USED", "这个应用没有接入飞书卡片推送");
             } else if (uri.startsWith("/__zhiye/fn/")) {
                 if (!"POST".equals(req.getMethod())) throw com.tcl.csot.zhiye.exception.ApiException.notFound("接口");
             } else if (!(uri.equals("/__zhiye/me") || uri.startsWith("/__zhiye/db/") || uri.equals("/__zhiye/storage") || uri.startsWith("/__zhiye/storage/")))

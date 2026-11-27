@@ -267,7 +267,7 @@ public final class K8sServiceResourceFactory {
                 .build();
     }
 
-    /** 严格网络隔离策略：只允许织页网关入站；出站仅放行 DNS 与显式白名单 CIDR（防止 Pod 间互访或扫描公司内网）。 */
+    /** 严格网络隔离策略：只允许织页网关入站；出站仅放行 DNS、织页平台内部连接器代理网关（api/site）与显式白名单 CIDR（防止 Pod 间互访或扫描公司内网）。 */
     public static NetworkPolicy buildNetworkPolicy(ServiceRuntimeProperties props, ServiceRuntimeProvider.DeploySpec spec) {
         String name = resourceName(spec.slug()) + "-netpol";
         List<NetworkPolicyEgressRule> egress = new ArrayList<>();
@@ -275,6 +275,15 @@ public final class K8sServiceResourceFactory {
         egress.add(new NetworkPolicyEgressRuleBuilder()
                 .addNewPort().withProtocol("UDP").withNewPort(53).endPort()
                 .addNewPort().withProtocol("TCP").withNewPort(53).endPort()
+                .build());
+        // 放行回调织页平台连接器代理网关（/internal/app-connectors/**，由 HMAC 令牌校验工作空间隔离）
+        egress.add(new NetworkPolicyEgressRuleBuilder()
+                .addNewTo()
+                .withNewNamespaceSelector().withMatchLabels(Map.of("kubernetes.io/metadata.name", props.gatewayPodNamespace())).endNamespaceSelector()
+                .withNewPodSelector().withMatchLabels(Map.of(props.gatewayPodLabelKey(), props.gatewayPodLabelValue())).endPodSelector()
+                .endTo()
+                .addNewPort().withProtocol("TCP").withNewPort(8080).endPort()
+                .addNewPort().withProtocol("TCP").withNewPort(8083).endPort()
                 .build());
         // 放行白名单 CIDR（如平台 PostgreSQL / 指定内网网关）
         for (String cidr : props.egressAllowedCidrs()) {

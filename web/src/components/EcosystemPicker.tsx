@@ -31,7 +31,7 @@ export function appendEcosystemContext(prompt: string, items: EcosystemItem[]): 
     if (it.category === 'mcp') {
       return `- 企业知识与工具 MCP「${it.name}」（serverKey: \`${it.id}\`）：对话与开发时均可直接调用 \`mcp_call\` 实时查询或获取真实规范与数据`;
     }
-    return `- 飞书机器人「${it.name}」（connectorId: \`${it.id}\`）：对话中按需调用 \`feishu_send_card\` 发送交互卡片；搭建应用时在提交/告警/审批节点推送飞书交互卡片（云函数用 ctx.feishu.sendCard，全栈后端用 ZHIYE_CONNECTOR_API/feishu/send-card）`;
+    return `- 飞书机器人「${it.name}」（connectorId: \`${it.id}\`）：已直接绑定目标飞书群（发卡免配群 ID，严禁索要 FEISHU_GROUP_ID / groupId）；对话中按需调用 \`feishu_send_card\` 发卡；普通网页应用直接用 \`window.zhiye.feishu.sendCard({ connectorId: '${it.id}', title, content, templateColor, fields })\` 免后端发卡；云函数用 \`ctx.feishu.sendCard\`；全栈后端用 \`POST \${ZHIYE_CONNECTOR_API}/feishu/send-card\`（运行态自动注入）`;
   });
   return `${prompt.trim()}\n\n【已选企业生态能力（免密直连，对话/开发均可直接调用）】\n${lines.join('\n')}`;
 }

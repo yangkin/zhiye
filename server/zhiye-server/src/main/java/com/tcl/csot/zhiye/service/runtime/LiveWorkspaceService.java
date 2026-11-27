@@ -86,6 +86,10 @@ public class LiveWorkspaceService {
     private final VersionRepository versions;
     private final GitService git;
     private final ZhiyeProperties props;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.service.connector.EnterpriseConnectorService enterpriseConnectors;
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.tcl.csot.zhiye.util.ServerPort serverPort;
 
     private final ConcurrentHashMap<String, Object> appLocks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LiveProc> running = new ConcurrentHashMap<>();
@@ -578,6 +582,16 @@ public class LiveWorkspaceService {
         env.put("HOST", "127.0.0.1");
         env.put("DATA_DIR", dir.resolve("data").toString());
         env.put("NO_COLOR", "1");
+        // 活体开发后端同样注入平台受控连接器代理凭证，保证联调飞书机器人/多维表格/数据源与线上运行态一致
+        if (enterpriseConnectors != null && "service".equals(kind)) {
+            String apiBase = (serverPort != null ? serverPort.selfBase() : "http://127.0.0.1:8080") + "/internal/app-connectors";
+            env.put("ZHIYE_CONNECTOR_API", apiBase);
+            env.put("ZHIYE_CONNECTOR_TOKEN", enterpriseConnectors.issueAppConnectorToken(app.id()));
+            String defaultBotId = enterpriseConnectors.defaultEnabledConnectorId(app.workspaceId(), "feishu_bot");
+            if (!defaultBotId.isBlank()) {
+                env.put("ZHIYE_FEISHU_BOT_ID", defaultBotId);
+            }
+        }
         Process proc = pb.start();
         Threads.start(() -> {
             try (BufferedReader br = new BufferedReader(new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {

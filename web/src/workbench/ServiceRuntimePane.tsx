@@ -780,13 +780,35 @@ export function ServiceRuntimePane({ app, focusSub, focusTick }: { app: AppDetai
           </div>
         ) : sub === 'env' ? (
           <div className="svc-config-stack">
+            {(svc?.platformInjectedEnv?.length ?? 0) > 0 ? (
+              <section className="svc-section-card svc-sys-env-card">
+                <div className="svc-section-head" style={{ marginBottom: 10 }}>
+                  <div>
+                    <h4>平台自动注入变量（免手动配置）</h4>
+                    <p>
+                      以下环境变量由织页平台在预览与线上运行态自动安全注入（不含明文飞书密钥），后端代码可直接通过 <code>process.env.*</code> / <code>os.environ</code> 读取。
+                    </p>
+                  </div>
+                  <span className="eco-pill is-live">已自动就绪</span>
+                </div>
+                <div className="svc-sys-env-grid">
+                  {svc?.platformInjectedEnv?.map((item) => (
+                    <div key={item.key} className="svc-sys-env-item">
+                      <code>{item.key}</code>
+                      <span>{item.desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
             <section className="svc-section-card">
               <div className="svc-section-head">
                 <div>
                   <h4>密文环境变量</h4>
                   <p>
                     全部键值经 <code>AES-256-GCM</code> 加密落库，运行态通过 K8s Secret / 隔离进程注入（保留变量{' '}
-                    <code>PORT</code> / <code>DATA_DIR</code> 不可覆盖）。
+                    <code>PORT</code> / <code>DATA_DIR</code> / <code>ZHIYE_CONNECTOR_*</code> 不可覆盖）。
                   </p>
                 </div>
                 <button

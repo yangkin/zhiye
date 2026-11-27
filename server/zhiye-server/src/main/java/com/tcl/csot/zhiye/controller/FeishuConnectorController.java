@@ -79,10 +79,11 @@ public class FeishuConnectorController {
         return Map.of("ok", true);
     }
 
-    /** 普通工作空间用户也可以直接自检连接器连通性（仅限平台全局或当前工作空间自建连接器）。 */
+    /** 普通工作空间用户也可以直接自检连接器连通性或试发自定义测试卡片（仅限平台全局或当前工作空间自建连接器）。 */
     @PostMapping("/api/connectors/{id}/test")
-    public Map<String, Object> testForWorkspace(@PathVariable String id) {
-        return connectors.testConnectorForWorkspace(ws(), id);
+    public Map<String, Object> testForWorkspace(@PathVariable String id,
+                                                @RequestBody(required = false) JsonNode body) {
+        return connectors.testConnectorForWorkspace(ws(), id, body);
     }
 
     @GetMapping("/api/admin/connectors")
@@ -105,9 +106,11 @@ public class FeishuConnectorController {
     }
 
     @PostMapping("/api/admin/connectors/{id}/test")
-    public Map<String, Object> testAdmin(@PathVariable String id, HttpServletRequest req) {
+    public Map<String, Object> testAdmin(@PathVariable String id,
+                                         @RequestBody(required = false) JsonNode body,
+                                         HttpServletRequest req) {
         admin.requireActor(req, ws());
-        return connectors.testConnector(id);
+        return connectors.testConnector(id, body);
     }
 
     @GetMapping("/api/admin/connectors/audits")

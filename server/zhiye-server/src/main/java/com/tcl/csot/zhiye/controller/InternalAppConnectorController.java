@@ -33,25 +33,10 @@ public class InternalAppConnectorController {
     }
 
     @PostMapping("/internal/app-connectors/feishu/send-card")
-    @SuppressWarnings("unchecked")
     public Map<String, Object> internalSendCard(@RequestHeader(value = "Authorization", required = false) String auth,
-                                                @RequestBody JsonNode b) {
+                                                @RequestBody(required = false) JsonNode b) {
         String appId = connectors.verifyAppConnectorToken(auth);
-        List<Map<String, String>> fields = new java.util.ArrayList<>();
-        if (b != null && b.has("fields") && b.get("fields").isArray()) {
-            b.get("fields").forEach(n -> fields.add(Map.of("label", n.path("label").asText(""), "value", n.path("value").asText(""))));
-        }
-        List<Map<String, Object>> buttons = new java.util.ArrayList<>();
-        if (b != null && b.has("buttons") && b.get("buttons").isArray()) {
-            b.get("buttons").forEach(n -> buttons.add(Json.convert(n, Map.class)));
-        }
-        return connectors.sendFeishuCard(
-                b == null ? "" : b.path("connectorId").asText(""),
-                appId,
-                b == null ? "织页应用通知" : b.path("title").asText("织页应用通知"),
-                b == null ? "" : b.path("content").asText(""),
-                b == null ? "blue" : b.path("templateColor").asText("blue"),
-                fields, buttons);
+        return connectors.sendFeishuCardFromPayload(appId, b);
     }
 
     @PostMapping("/internal/app-connectors/bitable/{op}")

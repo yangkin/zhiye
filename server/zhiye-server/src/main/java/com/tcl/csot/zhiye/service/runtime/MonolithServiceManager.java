@@ -43,7 +43,9 @@ import java.util.regex.Pattern;
 public class MonolithServiceManager {
     private static final Logger log = LoggerFactory.getLogger(MonolithServiceManager.class);
     private static final Pattern ENV_KEY_RE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
-    private static final Set<String> RESERVED_ENV = Set.of("PORT", "SERVER_PORT", "HOST", "DATA_DIR", "STATIC_DIR");
+    private static final Set<String> RESERVED_ENV = Set.of(
+            "PORT", "SERVER_PORT", "HOST", "DATA_DIR", "STATIC_DIR",
+            "ZHIYE_CONNECTOR_API", "ZHIYE_CONNECTOR_TOKEN", "ZHIYE_FEISHU_BOT_ID");
 
     public record ServiceRow(
             String appId, String runtime, String framework, String frontendDir, String backendDir,
@@ -754,6 +756,27 @@ public class MonolithServiceManager {
             keys.forEach(envKeys::add);
         } catch (Exception ignored) { }
 
+        ArrayNode platformInjected = root.putArray("platformInjectedEnv");
+        for (Map<String, String> item : buildPlatformInjectedEnvSummary(app, s)) {
+            platformInjected.add(item.get("key"));
+        }
+        if (enterpriseConnectors != null) {
+            ArrayNode connArr = root.putArray("connectors");
+            try {
+                for (Map<String, Object> c : enterpriseConnectors.listEnabledForWorkspace(app.workspaceId())) {
+                    ObjectNode cn = connArr.addObject();
+                    String kind = String.valueOf(c.getOrDefault("kind", ""));
+                    cn.put("id", String.valueOf(c.getOrDefault("id", "")));
+                    cn.put("name", String.valueOf(c.getOrDefault("name", "")));
+                    cn.put("kind", kind);
+                    if ("feishu_bot".equals(kind)) {
+                        cn.put("boundToGroup", true);
+                        cn.put("note", "自定义机器人 Webhook 已直接绑定目标飞书群，发卡片无需 FEISHU_GROUP_ID / groupId");
+                    }
+                }
+            } catch (Exception ignored) { }
+        }
+
         ObjectNode db = root.putObject("database");
         db.put("enabled", s.pgEnabled());
         if (s.pgEnabled() && s.pgSchema() != null && !s.pgSchema().isBlank()) {
@@ -867,6 +890,7 @@ public class MonolithServiceManager {
                     return em;
                 }).list();
         m.put("envVars", envList);
+        m.put("platformInjectedEnv", buildPlatformInjectedEnvSummary(app, s));
 
         List<Map<String, Object>> releases = jdbc.sql("""
                 select id, version_id, slot, status, image_ref, artifact_dir, duration_ms,
@@ -1224,9 +1248,13 @@ public class MonolithServiceManager {
         }
         // 自动注入平台受控企业连接器网关地址与本应用专属签名令牌（零明文飞书密钥进容器）
         if (enterpriseConnectors != null) {
-            String apiBase = (serverPort != null ? serverPort.selfBase() : "http://127.0.0.1:8080") + "/internal/app-connectors";
+            String apiBase = resolveInternalConnectorApiBase();
             env.put("ZHIYE_CONNECTOR_API", apiBase);
             env.put("ZHIYE_CONNECTOR_TOKEN", enterpriseConnectors.issueAppConnectorToken(app.id()));
+            String defaultBotId = enterpriseConnectors.defaultEnabledConnectorId(app.workspaceId(), "feishu_bot");
+            if (!defaultBotId.isBlank()) {
+                env.put("ZHIYE_FEISHU_BOT_ID", defaultBotId);
+            }
         }
 
         Path customDf = sourceDir.resolve("Dockerfile");
@@ -1238,6 +1266,36 @@ public class MonolithServiceManager {
                 targetAppId, targetSlug, ver.id(), s.runtime(), s.framework(), s.frontendDir(), s.backendDir(),
                 s.buildCmd(), s.startCmd(), s.port(), s.healthPath(), s.memoryMb(), s.cpuMillicores(),
                 s.pvcEnabled(), s.pvcSizeGi(), sourceDir, dockerfile, env);
+    }
+
+    /** 解析运行态容器回调织页连接器网关的完整 URL（K8s 走集群内部 Service，本地走回环端口）。 */
+    String resolveInternalConnectorApiBase() {
+        String configured = props.resolvedInternalApiBase();
+        if (configured != null && !configured.isBlank()) {
+            return configured + "/internal/app-connectors";
+        }
+        return (serverPort != null ? serverPort.selfBase() : "http://127.0.0.1:8080") + "/internal/app-connectors";
+    }
+
+    /** 返回脱敏的平台自动注入环境变量说明清单（仅键名与用途，绝不含任何密钥值）。 */
+    private List<Map<String, String>> buildPlatformInjectedEnvSummary(AppRow app, ServiceRow s) {
+        List<Map<String, String>> list = new ArrayList<>();
+        list.add(Map.of("key", "PORT", "desc", "服务监听端口（平台动态分配）"));
+        list.add(Map.of("key", "DATA_DIR", "desc", "应用持久化数据目录"));
+        if (s != null && s.pgEnabled()) {
+            list.add(Map.of("key", "DATABASE_URL", "desc", "独立托管 PostgreSQL 连接串"));
+            list.add(Map.of("key", "JDBC_DATABASE_URL", "desc", "Java JDBC PostgreSQL 连接串"));
+            list.add(Map.of("key", "PG_SCHEMA", "desc", "当前应用隔离 Schema 名称"));
+        }
+        if (enterpriseConnectors != null) {
+            list.add(Map.of("key", "ZHIYE_CONNECTOR_API", "desc", "平台企业连接器网关（飞书机器人/多维表格/数据源免密代理）"));
+            list.add(Map.of("key", "ZHIYE_CONNECTOR_TOKEN", "desc", "当前应用专属签名调用令牌（工作空间隔离，零明文密钥）"));
+            String botId = app == null ? "" : enterpriseConnectors.defaultEnabledConnectorId(app.workspaceId(), "feishu_bot");
+            if (!botId.isBlank()) {
+                list.add(Map.of("key", "ZHIYE_FEISHU_BOT_ID", "desc", "默认飞书群机器人连接器 ID（已绑定目标群，免配群 ID）"));
+            }
+        }
+        return list;
     }
 
     private Optional<ServiceRuntimeDetector.Spec> detectFromCommit(String appId, String commit) throws Exception {

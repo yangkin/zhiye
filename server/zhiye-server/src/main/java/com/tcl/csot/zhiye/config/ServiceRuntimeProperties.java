@@ -50,7 +50,8 @@ public record ServiceRuntimeProperties(
         Integer maxPlatformRunningCpuMillicores,
         String buildNamespace,
         String buildContextPvc,
-        String npmTarballCdn
+        String npmTarballCdn,
+        String internalApiBase
 ) {
     public ServiceRuntimeProperties {
         if (provider == null || provider.isBlank()) provider = "local";
@@ -69,6 +70,7 @@ public record ServiceRuntimeProperties(
         if (baseImageGoRuntime == null || baseImageGoRuntime.isBlank()) baseImageGoRuntime = "alpine:3.20";
         if (npmRegistry == null) npmRegistry = "";
         if (npmTarballCdn == null) npmTarballCdn = "";
+        if (internalApiBase == null) internalApiBase = "";
         if (pipIndexUrl == null) pipIndexUrl = "";
         if (mavenMirrorUrl == null) mavenMirrorUrl = "";
         if (goProxy == null) goProxy = "";
@@ -95,4 +97,15 @@ public record ServiceRuntimeProperties(
     }
 
     public boolean isK8s() { return "k8s".equalsIgnoreCase(provider); }
+
+    /** 单体服务容器内部回调织页连接器网关的集群基址（K8s 模式默认走集群 Service，绝不落到容器内 127.0.0.1）。 */
+    public String resolvedInternalApiBase() {
+        if (internalApiBase != null && !internalApiBase.isBlank()) {
+            return internalApiBase.trim().replaceAll("/+$", "");
+        }
+        if (isK8s()) {
+            return "http://zhiye-api." + gatewayPodNamespace + ".svc:8080";
+        }
+        return "";
+    }
 }

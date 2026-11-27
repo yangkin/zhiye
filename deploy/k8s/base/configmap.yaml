@@ -64,6 +64,8 @@ data:
   ZHIYE_RUNNER_ENTRYPOINT: /opt/zhiye/bin/start-runner.sh
   ZHIYE_RUNNER_IMAGE: zhiye-runner:dev
   ZHIYE_GATEWAY_URL: http://zhiye-api.zhiye.svc:8080/llm/v1
+  # 用户单体应用容器访问织页内部连接器网关（飞书机器人/多维表格/数据源）的集群内地址
+  ZHIYE_SERVICE_INTERNAL_API_BASE: http://zhiye-api.zhiye.svc:8080
   ZHIYE_SANDBOX_PVC: zhiye-runtime
   ZHIYE_NPM_REGISTRY: https://registry.npmmirror.com
   ZHIYE_SANDBOX_STARTUP_TIMEOUT: "120"

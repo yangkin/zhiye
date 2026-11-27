@@ -181,6 +181,26 @@ public class KubernetesServiceRuntimeProvider implements ServiceRuntimeProvider 
         if (dep.get() == null) {
             return deploy(spec).endpointUrl();
         }
+        // 唤醒前尽量同步刷新环境变量 Secret（含 ZHIYE_CONNECTOR_API / ZHIYE_CONNECTOR_TOKEN）与 NetworkPolicy；
+        // zhiye-site 使用最小权限 waker 角色时无 secrets/networkpolicies 写权限，按最小权限原则安全跳过并继续 scale(1)
+        try {
+            var secret = K8sServiceResourceFactory.buildEnvSecret(props, spec);
+            if (client.secrets().inNamespace(ns).withName(secret.getMetadata().getName()).get() == null) {
+                client.secrets().inNamespace(ns).resource(secret).create();
+            } else {
+                client.secrets().inNamespace(ns).resource(secret).update();
+            }
+            if (props.networkPolicyEnabled()) {
+                var netpol = K8sServiceResourceFactory.buildNetworkPolicy(props, spec);
+                if (client.network().v1().networkPolicies().inNamespace(ns).withName(netpol.getMetadata().getName()).get() == null) {
+                    client.network().v1().networkPolicies().inNamespace(ns).resource(netpol).create();
+                } else {
+                    client.network().v1().networkPolicies().inNamespace(ns).resource(netpol).update();
+                }
+            }
+        } catch (Exception e) {
+            log.debug("唤醒时跳过 Secret/NetworkPolicy 刷新（最小权限角色或集群限制）app={}: {}", spec.appId(), e.getMessage());
+        }
         dep.scale(1);
         waitDeploymentReady(ns, name, Duration.ofSeconds(props.wakeTimeoutSeconds()));
         return "http://" + name + "." + ns + ".svc.cluster.local";

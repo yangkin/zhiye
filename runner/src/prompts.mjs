@@ -140,7 +140,7 @@ export const CLOUD_USAGE = `- 页面里已经注入了 \`window.zhiye.cloud\`（
   status 为 401 表示需要登录，403 表示没有权限。
 - 云函数（服务端逻辑）：业务规则校验、审批等状态流转、多表一起写（事务）、组合调用数据源或企业飞书连接器时，写 \`functions/{name}.ts\`（默认导出 \`async (args, ctx) => 返回值\`），
   页面**必须真实通过 \`await window.zhiye.fn.call('name', { ... })\` 调用它们**，不能只写云函数文件却在前端算完直写 db；简单增删改查才直接用 zhiye.cloud.db。函数可使用 \`ctx\` 全部平台能力（\`ctx.db\` / \`ctx.storage\` / \`ctx.source\` / \`ctx.ai\` / \`ctx.feishu.sendCard\` / \`ctx.bitable.list|create|update\` / \`ctx.org.searchEmployees\` / \`ctx.log\` / \`ctx.user\`），密钥由平台托管、不进沙箱，10 秒超时。
-  - 发飞书卡片：\`await ctx.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\`
+  - 发飞书卡片：\`await ctx.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\`（自定义机器人已绑定目标飞书群，无需传 groupId / FEISHU_GROUP_ID）
   - 飞书多维表格 CRUD：\`await ctx.bitable.list(connectorId)\` / \`await ctx.bitable.create(connectorId, fields)\` / \`await ctx.bitable.update(connectorId, recordId, fields)\`
   - 组织员工检索：\`await ctx.org.searchEmployees(keyword)\`（查看 \`.zhiye/connectors.json\` 获取已启用连接器 ID）
   云函数里不要假设 \`ctx.user.loginName\` 有特定前缀（预览身份下为 author），若演示角色切换需要做角色校验，请结合 \`ctx.user.admin\` 与显式传入的角色参数判断。
@@ -164,11 +164,12 @@ export const SCREENSHOT = `
 - 截图或摘要里有布局错乱、宽屏两侧大片留白、横向溢出、文字被截断、空白页、报错时，先修好再截一次确认；没问题再写总结。`
 
 export const APP_AI = `
-## 应用内 AI（需要时使用）
+## 应用内 AI 与免后端飞书通知（按需使用）
 - 需要摘要、翻译、分类、字段抽取、看图识别（OCR）等能力时，调用平台代理：\`const text = await window.zhiye.ai.chat({ system: '你是…', messages: [{ role: 'user', content }], json: true })\`
   （也可以 \`await window.zhiye.ai.chat('一句话')\`；看图加 \`images: [dataURL]\`，最多 4 张、单张 4 MB；返回回复文本，json: true 时返回 JSON 字符串，自己 JSON.parse 并兜底）。
 - 不要在代码里写模型地址或任何密钥，不要直连外部模型接口。调用较慢（几秒到几十秒），要有加载状态和失败提示（error.message 是中文，可以直接显示）。
-- 先用 \`window.zhiye?.ai\` 判断是否可用（本地直接打开 dist 时没有），不可用时给出提示而不是报错。需要时用 read 读取内置技能 app-ai 的说明。`
+- 先用 \`window.zhiye?.ai\` 判断是否可用（本地直接打开 dist 时没有），不可用时给出提示而不是报错。需要时用 read 读取内置技能 app-ai 的说明。
+- **飞书群机器人推送（免后端、免开云服务）**：若工作空间已配置飞书群机器人连接器（\`feishu_bot\`，已直接绑定目标群，**绝对不要索要或校验 \`FEISHU_GROUP_ID\` / \`groupId\` / \`chat_id\`**），前端直接调用 \`await window.zhiye.feishu.sendCard({ connectorId, title, content, templateColor: 'blue'|'green'|'orange'|'red', fields: [{ label, value }] })\` 即可在预览与发布站点真实发送交互卡片（平台代理注入 Webhook 与签名，严禁前端直连 open.feishu.cn）。`
 
 const SERVICE = `
 ## 项目形态（自由多语言全栈 / 单体服务，不绑定固定模板）
@@ -195,7 +196,7 @@ const SERVICE = `
   1. 监听 \`0.0.0.0:\${PORT:-8080}\` 并提供健康检查接口（默认 \`GET /api/health\`，或在 \`zhiye.yaml\` 的 \`start.health\` 指定）；
   2. 前端请求后端接口统一使用相对路径 \`/api/...\`，不写死 \`localhost\`；
   3. 持久化数据写入 \`DATA_DIR\`（默认 \`.data/\`）或在 \`DATABASE_URL\` / \`JDBC_DATABASE_URL\` 存在时使用托管 PostgreSQL；
-  4. **企业连接器免密直连**：平台自动注入 \`ZHIYE_CONNECTOR_API\` 与 \`ZHIYE_CONNECTOR_TOKEN\`（查看 \`.zhiye/connectors.json\` 获取连接器 ID），后端带 \`Authorization: Bearer \${ZHIYE_CONNECTOR_TOKEN}\` 调用 \`/feishu/send-card\`、\`/bitable/list|create|update\`、\`/org/employees\` 即可，无需硬编码飞书密钥；
+  4. **企业连接器免密直连**：平台在预览与线上运行态自动注入 \`ZHIYE_CONNECTOR_API\`、\`ZHIYE_CONNECTOR_TOKEN\` 与默认 \`ZHIYE_FEISHU_BOT_ID\`（查看 \`.zhiye/connectors.json\` 获取连接器 ID），后端带 \`Authorization: Bearer \${ZHIYE_CONNECTOR_TOKEN}\` 调用 \`/feishu/send-card\`、\`/bitable/list|create|update\`、\`/org/employees\` 即可，无需硬编码飞书密钥。**飞书群自定义机器人（\`feishu_bot\`）已直接绑定到目标飞书群，发卡片只需 \`connectorId\`（可选）+\`title\`+\`content\`，严禁索要 \`FEISHU_GROUP_ID\` / \`groupId\` / \`chat_id\` 或显示「未配置目标群」阻塞发送**（注：离线构建沙箱的 \`test_endpoint\` 无连接器地址，运行态部署会自动注入）；
   5. 平台网关透传华星 SSO 请求头（\`X-Zhiye-User-Id/Login/Name/Admin\`）；排查线上或预发运行日志时可调用 \`service_runtime_inspect\`；验证前端页面视觉与交互时可直接调用 \`screenshot\` 或 \`browser_test\`。`
 
 export function systemPrompt(projectKind, cloudEnabled = false) {
