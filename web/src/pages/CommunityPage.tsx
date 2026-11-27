@@ -5,7 +5,7 @@ import { api, errorMessage } from '../api/client';
 import { APP_TYPES, type TemplateSort, type TemplateTab } from '../api/types';
 import { Icon } from '../lib/icons';
 import { useDebounced } from '../lib/useDebounced';
-import { WorkCard } from '../components/Community';
+import { PickAndPublishWorkModal, WorkCard } from '../components/Community';
 import { EmptyState, ErrorState, LoadingState } from '../components/EmptyState';
 import { Select } from '../components/Select';
 
@@ -34,6 +34,7 @@ export function CommunityPage() {
   const setType = (v: string) => setParam('type', v, '');
   const setSort = (v: TemplateSort) => setParam('sort', v, 'new');
   const [query, setQueryText] = useState(search.get('q') ?? '');
+  const [showPublish, setShowPublish] = useState(false);
   const setQuery = (v: string) => {
     setQueryText(v);
     setParam('q', v.trim(), '');
@@ -55,7 +56,7 @@ export function CommunityPage() {
           <h1>灵感社区</h1>
           <p>浏览同事分享的应用作品，支持预览效果、点赞收藏或直接复刻为自己的模板。</p>
         </div>
-        <button className="primary-button" onClick={() => navigate('/apps')}>
+        <button className="primary-button" onClick={() => setShowPublish(true)}>
           <Icon name="share" />
           发布我的作品
         </button>
@@ -117,17 +118,18 @@ export function CommunityPage() {
           icon="community"
           title={tab === 'liked' && !q && !type ? '还没有点赞的作品' : tab === 'mine' && !q && !type ? '你还没有发布作品' : filtered ? '没有找到相关作品' : '社区里还没有作品'}
           desc={
-            tab === 'mine' || !filtered ? '在「应用」页打开应用卡片的「⋯」菜单，选「发布到灵感社区」，同事就能看到并使用。' : '换个关键词或类型试试。'
+            tab === 'mine' || !filtered ? '点击「发布我的作品」直接选择你的应用，一键分享给同事预览和复刻。' : '换个关键词或类型试试。'
           }
           action={
             tab === 'mine' || !filtered ? (
-              <button className="primary-button" onClick={() => navigate('/apps')}>
-                去发布作品
+              <button className="primary-button" onClick={() => setShowPublish(true)}>
+                发布我的作品
               </button>
             ) : undefined
           }
         />
       )}
+      {showPublish ? <PickAndPublishWorkModal onClose={() => setShowPublish(false)} /> : null}
     </div>
   );
 }

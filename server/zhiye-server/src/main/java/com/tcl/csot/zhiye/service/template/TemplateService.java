@@ -267,7 +267,9 @@ public class TemplateService {
         m.put("framework", t.framework());
         m.put("sourceVersion", t.sourceVersion());
         m.put("fileCount", t.fileCount());
-        m.put("mine", t.ws().equals(ws));
+        boolean mine = t.ws().equals(ws);
+        m.put("mine", mine);
+        if (mine && t.sourceAppId() != null) m.put("sourceAppId", t.sourceAppId());
         m.put("author", t.author());
         m.put("previewUrl", t.previewPrefix() == null ? null : previewBase + "/t/" + t.id() + "/");
         m.put("cloneCount", t.cloneCount());

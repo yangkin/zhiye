@@ -1040,6 +1040,7 @@ export interface TemplateItem {
   sourceVersion: number | null;
   fileCount: number;
   mine: boolean;
+  sourceAppId?: string | null;
   author: string | null;
   previewUrl: string | null;
   cloneCount: number;
