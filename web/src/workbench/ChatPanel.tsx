@@ -1202,8 +1202,15 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
           </>
         ) : phase === 'plan' ? (
           <>
-            {chatAssets.length || composer.pending.length ? (
+            {boundSources.length ? (
+              <div className="source-context" aria-label="当前应用的数据源">
+                <span className="source-context-label"><Icon name="database" /> 应用数据源 <small>计划问答可直调 · 生成后持续可用</small></span>
+                <SourceChips sources={boundSources} onRemove={(id) => void changeSource('unbind', id, boundSources.find((s) => s.id === id)?.name ?? '')} />
+              </div>
+            ) : null}
+            {chatAssets.length || composer.pending.length || ecosystems.length ? (
               <div className="attachments chat-attachments">
+                <EcosystemChips items={ecosystems} onRemove={(id) => setEcosystems((prev) => prev.filter((x) => x.id !== id))} />
                 <ComposerAttachmentList
                   assets={chatAssets}
                   pending={composer.pending}
@@ -1234,7 +1241,7 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
               }}
             />
             {error ? <p className="composer-error" role="alert">{error}</p> : null}
-            <div className="composer-bottom">
+            <div className="composer-bottom workbench-composer-bottom">
               <div className="composer-tools">
                 <AddMenuButton
                   variant="workbench"
@@ -1254,6 +1261,35 @@ export function ChatPanel({ app, stream, currentVersion, versions, onTaskStarted
                   className="model-button model-button-inline"
                   onModel={(m) => void patchModel({ model: m })}
                   onMode={(m) => void patchModel({ mode: m })}
+                />
+                {!skill ? (
+                  <button
+                    ref={ecoBtn}
+                    type="button"
+                    className={`skill-button eco-chip${ecosystems.length ? ' on' : ''}`}
+                    aria-label="选择企业生态能力"
+                    aria-expanded={ecoOpen}
+                    title="计划阶段也可勾选飞书、知识库 MCP 或 AGW 接口查证或纳入计划"
+                    data-tip={ecosystems.length ? `生态 · 已选 ${ecosystems.length} 项` : '生态能力'}
+                    onClick={() => setEcoOpen((v) => !v)}
+                  >
+                    <Icon name="globe" />
+                    <span className="chip-label">{ecosystems.length ? `生态 · ${ecosystems.length}` : '生态'}</span>
+                    {ecosystems.length ? <span className="chip-badge">{ecosystems.length}</span> : null}
+                  </button>
+                ) : null}
+                <EcosystemPickerModal
+                  open={ecoOpen}
+                  anchor={ecoBtn}
+                  onClose={() => setEcoOpen(false)}
+                  selected={ecosystems}
+                  onToggle={toggleEco}
+                  pickedSourceIds={boundSources.map((s) => s.id)}
+                  onPickSource={skill ? undefined : (s) => void changeSource('bind', s.id, s.name)}
+                  onRemoveSource={skill ? undefined : (sid) => {
+                    const found = boundSources.find((x) => x.id === sid);
+                    void changeSource('unbind', sid, found?.name ?? sid);
+                  }}
                 />
                 {!skill && !planInView ? (
                   <button type="button" className="plan-jump-btn" onClick={scrollToPlan}>

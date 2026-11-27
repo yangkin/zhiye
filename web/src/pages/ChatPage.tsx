@@ -112,6 +112,7 @@ export function ChatPage() {
   const [picker, setPicker] = useState<null | { via: 'button' } | { via: 'mention'; start: number; query: string }>(null);
   const [ecoOpen, setEcoOpen] = useState(false);
   const [ecosystems, setEcosystems] = useState<EcosystemItem[]>([]);
+  const [sourceTouched, setSourceTouched] = useState(false);
   const toggleEco = (item: EcosystemItem) =>
     setEcosystems((prev) => (prev.some((x) => x.id === item.id) ? prev.filter((x) => x.id !== item.id) : [...prev, item]));
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -163,22 +164,31 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultId, id, model]);
 
+  // 拆分 messages/meta 与 sources 的水合依赖：避免中途增删 AGW 数据源更新缓存时覆盖掉本地刚发出的最新消息
   useEffect(() => {
-    if (!data) return;
-    setTitle(data.title || '新会话');
+    if (!data?.messages) return;
     setMessages(data.messages.filter((m) => m.role !== 'system').map((m) => ({
       ...m,
       builtApp: m.role === 'assistant' && /\[\[build(?::[^\]]*)?\]\]/.test(m.content),
       content: m.role === 'assistant' ? stripBuildMarker(m.content) : m.content,
     })));
+  }, [data?.messages, id]);
+
+  useEffect(() => {
+    if (!data) return;
+    setTitle(data.title || '新会话');
     if (!initial) {
       if (data.type) setType(data.type);
       if (data.model) setModel(data.model);
       if (data.mode) setMode(data.mode);
       if (data.assets) setAttachments(data.assets);
     }
-    setSources(data.sources ?? []);
-  }, [data, initial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.title, data?.type, data?.model, data?.mode, data?.assets, initial]);
+
+  useEffect(() => {
+    if (data?.sources) setSources(data.sources);
+  }, [data?.sources]);
 
   useEffect(() => {
     initialStarted.current = false;
@@ -198,6 +208,7 @@ export function ChatPage() {
     setSources(initial?.sources ?? []);
     setEcosystems([]);
     setEcoOpen(false);
+    setSourceTouched(false);
     setFilesOpen(false);
     setOpenFile(null);
     composer.dismissPasteNotice();
@@ -223,11 +234,14 @@ export function ChatPage() {
 
   const changeSources = async (next: SkillRef[]) => {
     if (sourceSaving) return;
+    const added = next.length > sources.length;
     setSourceSaving(true);
     try {
       const result = await api.updateConversationSources(id, next.map((s) => s.id));
       const saved = result.sources;
       setSources(saved);
+      if (added && saved.length > 0) setSourceTouched(true);
+      else if (saved.length === 0) setSourceTouched(false);
       qc.setQueryData(['conversation', id], (old: typeof data) => old ? { ...old, sources: saved } : old);
     } catch (err) {
       toast(errorMessage(err), 'error');
@@ -327,6 +341,7 @@ export function ChatPage() {
       if (id) saveDraft('chat:' + id, null);
       setAttachments([]);
       if (override === undefined) setEcosystems([]);
+      setSourceTouched(false);
     }
     const ctrl = new AbortController();
     askAbort.current?.abort();
@@ -638,7 +653,7 @@ export function ChatPage() {
                 />
               </div>
             ) : null}
-            {!asking && !prompt.trim() && ecosystems.length > 0 ? (
+            {!asking && !prompt.trim() && (ecosystems.length > 0 || (sourceTouched && sources.length > 0)) ? (
               <div className="eco-quick-bar" aria-label="生态快捷指令">
                 <button
                   type="button"

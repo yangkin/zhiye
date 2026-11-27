@@ -66,8 +66,17 @@ useCreateForm.subscribe((s) => {
  */
 const BUILD_WORDS = /(帮我做|做一个|做个|做出来|实现|生成|搭建|创建|开发|写一个|写个|设计一|改一下|改下|改成|改为|改个|改回|换成|换为|换个|调整|调大|调小|调宽|调高|修改|优化|美化|部署|上线|重构|替换|加上|加一个|加个|增加|新增|添加|补充|删掉|删除|去掉|移除|隐藏|居中|对齐|重排|排版|修复|修一下|还原)/;
 const QUESTION_WORDS = /(\?|？|吗|呢|怎么|如何|为什么|什么|干嘛|干吗|介绍|能不能|可不可以|区别|用处|用途|有哪些|支持|适合|是不是)/;
-/** 委婉提问式修改请求（如「能不能把标题调小一点？」「可以把按钮换成蓝色吗？」）应直接动手改，不要只动嘴不动手 */
-const POLITE_MODIFY_RE = /(能不能|可不可以|可以|能否|能|帮我|帮忙|请).{0,24}(改|换|调|加|增|删|去|移|修|补|美化|优化|居中|对齐|替换|隐藏|显示|做成|生成|写)/;
+/** 委婉提问式修改请求（如「能不能把标题调小一点？」「可以把按钮换成蓝色吗？」）应直接动手改，不要只动嘴不动手；注意不把「调用」误判成「调整」 */
+const POLITE_MODIFY_RE =
+  /(能不能|可不可以|可以|能否|能|帮我|帮忙|请).{0,24}(改|换|调整|调大|调小|调宽|调高|调低|调快|调慢|调一下|调下|调成|调为|调色|加|增|删|去|移|修|补|美化|优化|居中|对齐|替换|隐藏|显示|做成|生成|写)/;
+/** 明确要求「不改代码 / 只查数 / 只回答」的否定护栏：工作台里绝不误启动代码修改任务 */
+const NO_MODIFY_RE =
+  /(不(?:要|用|需)?改(?:代码|应用|页面|计划)|别改(?:代码|应用|页面|计划)|不(?:要|用)?修改|只(?:查数|查询|回答|看看|评估|读取|调用))/;
+/** 纯生态只读调用请求（查数据源、飞书多维表格、知识库/MCP），未要求改页面或做看板时直接走问答 */
+const ECOSYSTEM_READONLY_RE =
+  /(?:调用(?:一下)?|查(?:一下|看)|读取(?:一下)?).{0,24}(?:数据源|接口|api|飞书|多维表格|知识库|mcp)/i;
+const ECOSYSTEM_BUILD_INTENT_RE =
+  /(做成|接入|加到|放到|写到|集成到|改到|展示到|渲染到|修改|改一下|新增页面|做个?看板|搭建|生成|开发)/;
 /** 明确的纯咨询/排查根因类问题 */
 const PURE_INFO_QUESTION_RE = /(为什么|为啥|原理|怎么实现|是怎么|有什么区别|区别是什么|在哪|哪个文件|帮我查一下|先帮我查|先查一下|先看看为什么|分析一下原因)/;
 /** 闲聊打招呼、确认状态或纯粹表示放弃/取消：绝不误触发代码修改任务 */
@@ -77,6 +86,7 @@ const CASUAL_OR_ABORT_RE =
 export function isIntentToBuild(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (NO_MODIFY_RE.test(t)) return false;
   if (/[?？]\s*$/.test(t) && !POLITE_MODIFY_RE.test(t)) return false;
   return BUILD_WORDS.test(t);
 }
@@ -84,7 +94,8 @@ export function isIntentToBuild(text: string): boolean {
 export function isQuestion(text: string): boolean {
   const t = text.trim();
   if (!t || t.length > 160) return false;
-  if (CASUAL_OR_ABORT_RE.test(t)) return true;
+  if (CASUAL_OR_ABORT_RE.test(t) || NO_MODIFY_RE.test(t)) return true;
+  if (ECOSYSTEM_READONLY_RE.test(t) && !ECOSYSTEM_BUILD_INTENT_RE.test(t)) return true;
   if (POLITE_MODIFY_RE.test(t) && !PURE_INFO_QUESTION_RE.test(t)) return false;
   // 以问号结尾通常是提问，即使句子里有「实现/生成」这类词（例如「顶栏是怎么实现的？」）；
   // 明确以「帮我/给我/请」开头的命令句仍按需求处理。
@@ -99,6 +110,8 @@ export function quickRoute(text: string, hasElement = false): Route {
   const t = text.trim();
   const asked = /[?？]\s*$/.test(t) && !/^(帮我|给我|请|帮忙)/.test(t);
   const pureInfo = PURE_INFO_QUESTION_RE.test(t);
+  if (NO_MODIFY_RE.test(t)) return 'ask';
+  if (!hasElement && ECOSYSTEM_READONLY_RE.test(t) && !ECOSYSTEM_BUILD_INTENT_RE.test(t)) return 'ask';
   if (hasElement) return asked && pureInfo ? 'model' : 'modify';
   if (CASUAL_OR_ABORT_RE.test(t)) return 'ask';
   // 委婉修改请求（如「能不能把标题调小一点、图片居中？」）直接修改，不再只口头建议

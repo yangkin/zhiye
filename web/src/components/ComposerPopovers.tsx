@@ -75,9 +75,15 @@ export function useAnchoredPosition(
   return pos;
 }
 
-export function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[], onClose: () => void) {
+export function useOutside(
+  open: boolean,
+  refs: RefObject<HTMLElement | null>[],
+  onClose: () => void,
+  options?: { closeOnScroll?: boolean },
+) {
   const cb = useRef(onClose);
   cb.current = onClose;
+  const closeOnScroll = options?.closeOnScroll ?? true;
   useEffect(() => {
     if (!open) return;
     const down = (e: PointerEvent) => {
@@ -96,15 +102,15 @@ export function useOutside(open: boolean, refs: RefObject<HTMLElement | null>[],
       }
     };
     document.addEventListener('pointerdown', down, true);
-    window.addEventListener('scroll', onScroll, true);
+    if (closeOnScroll) window.addEventListener('scroll', onScroll, true);
     document.addEventListener('keydown', key, true);
     return () => {
       document.removeEventListener('pointerdown', down, true);
-      window.removeEventListener('scroll', onScroll, true);
+      if (closeOnScroll) window.removeEventListener('scroll', onScroll, true);
       document.removeEventListener('keydown', key, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, closeOnScroll]);
 }
 
 interface SkillPickerProps {

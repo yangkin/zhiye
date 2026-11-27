@@ -97,8 +97,9 @@ export function EcosystemPickerModal({
   const searchRef = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState('');
 
-  const pos = useAnchoredPosition(anchor, open, 336, 340);
-  useOutside(open, [box, anchor], onClose);
+  const pos = useAnchoredPosition(anchor, open, 336, 340, box);
+  // 生态弹层支持多选（连续勾选 AGW/飞书/MCP），且 useAnchoredPosition 会跟随按钮动态重排，因此不由布局滚动误关
+  useOutside(open, [box, anchor], onClose, { closeOnScroll: false });
 
   useEffect(() => {
     if (!open) {
