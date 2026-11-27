@@ -606,19 +606,14 @@ public class TaskExecutor {
 
         phase(ctx, "RUNNING", "正在编写代码", 20);
         String instruction = modify ? Prompts.modify(input.path("content").asText(), elementContext, app.projectKind())
-                : Prompts.generate(app, assetPaths(app, app.assetIds()));
+                : Prompts.generate(app, assetPaths(ctx, app, app.assetIds()));
         if (!app.isSkill() && enterpriseConnectors != null) {
             String connGuide = enterpriseConnectors.promptGuideForAgent(app.workspaceId(), app.isService(), cloudOn);
             if (!connGuide.isBlank()) instruction = instruction + connGuide;
         }
         if (modify && !msgAssets.isEmpty()) {
-            StringBuilder sb = new StringBuilder("\n\n## 用户这次附带的素材（已放进项目）\n");
-            for (String p : assetPaths(app, msgAssets)) {
-                sb.append("- ").append(p);
-                if (!app.isSkill()) sb.append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）");
-                sb.append('\n');
-            }
-            instruction += sb;
+            String assetSec = Prompts.formatAssetSection("## 用户这次附带的素材（已放进项目）", assetPaths(ctx, app, msgAssets), app.isSkill());
+            if (!assetSec.isEmpty()) instruction += "\n\n" + assetSec;
         }
         instruction += com.tcl.csot.zhiye.service.skillhub.SkillRefs.instruction(skills);
         if (!bound.isEmpty()) instruction += dataSources.instruction(app.id(), app.isService());
@@ -1250,11 +1245,28 @@ public class TaskExecutor {
         }
     }
 
-    private List<String> assetPaths(AppRow app, List<String> assetIds) {
+    private List<String> assetPaths(TaskContext ctx, AppRow app, List<String> assetIds) {
         List<String> out = new ArrayList<>();
+        String dir = assetDir(app);
         for (String id : assetIds == null ? List.<String>of() : assetIds) {
-            jdbc.sql("select name from asset where id = ?").param(id).query(String.class).optional()
-                    .ifPresent(n -> out.add(assetDir(app) + safeName(n)));
+            jdbc.sql("select name from asset where id = ?").param(id).query(String.class).optional().ifPresent(n -> {
+                String safe = safeName(n);
+                out.add(dir + safe);
+                if (ctx == null || ctx.workspace == null) return;
+                String stem = assetStem(safe);
+                String parsedRel = dir + stem + "-parsed.md";
+                if (Files.isRegularFile(ctx.workspace.resolve(parsedRel))) {
+                    out.add(parsedRel);
+                }
+                Path mediaDir = ctx.workspace.resolve(dir + stem + "-media");
+                if (Files.isDirectory(mediaDir)) {
+                    try (var stream = Files.list(mediaDir)) {
+                        stream.filter(Files::isRegularFile)
+                                .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+                                .forEach(p -> out.add(dir + stem + "-media/" + p.getFileName()));
+                    } catch (Exception ignored) { }
+                }
+            });
         }
         return out;
     }
@@ -1266,16 +1278,76 @@ public class TaskExecutor {
         return s.isBlank() ? "asset" : s;
     }
 
+    static String assetStem(String safeName) {
+        int dot = safeName.lastIndexOf('.');
+        String stem = dot > 0 ? safeName.substring(0, dot) : safeName;
+        return stem.isBlank() ? "document" : stem;
+    }
+
     private void copyAssets(TaskContext ctx, AppRow app, List<String> assetIds) throws Exception {
         if (assetIds == null) return;
+        String dir = assetDir(app);
         for (String id : assetIds) {
-            var row = jdbc.sql("select name, object_key from asset where id = ?").param(id)
-                    .query((rs, i) -> new String[]{rs.getString(1), rs.getString(2)}).optional();
+            var row = jdbc.sql("select name, mime, object_key from asset where id = ?").param(id)
+                    .query((rs, i) -> new String[]{rs.getString(1), rs.getString(2), rs.getString(3)}).optional();
             if (row.isEmpty()) continue;
-            Path target = ctx.workspace.resolve(assetDir(app) + safeName(row.get()[0]));
+            String origName = row.get()[0];
+            String mime = row.get()[1];
+            String objectKey = row.get()[2];
+            String safe = safeName(origName);
+            Path target = ctx.workspace.resolve(dir + safe);
             Files.createDirectories(target.getParent());
-            var in = store.get(row.get()[1]);
-            if (in.isPresent()) try (InputStream s = in.get()) { Files.copy(s, target, StandardCopyOption.REPLACE_EXISTING); }
+            var bytesOpt = store.getBytes(objectKey);
+            if (bytesOpt.isEmpty()) continue;
+            byte[] data = bytesOpt.get();
+            Files.write(target, data);
+            unpackDocumentAsset(ctx.workspace, dir, safe, origName, mime, data, app.isSkill());
+        }
+    }
+
+    /**
+     * 对二进制文档素材（.docx / .pdf / .pptx）自动生成可读 Markdown（*-parsed.md），
+     * 并将 Word 内嵌图片全部解压到 *-media/ 目录，使编码智能体可直接 read 文档并嵌入原图。
+     */
+    public static void unpackDocumentAsset(Path workspace, String dir, String safeName, String origName, String mime, byte[] data, boolean skill) {
+        String lower = safeName.toLowerCase(Locale.ROOT);
+        String stem = assetStem(safeName);
+        try {
+            if (lower.endsWith(".docx") || (mime != null && mime.toLowerCase(Locale.ROOT).contains("wordprocessingml.document"))) {
+                String mediaRelDir = dir + stem + "-media/";
+                String linkPrefix = skill ? ("./" + stem + "-media/") : ("./" + mediaRelDir.replaceFirst("^public/", ""));
+                var res = com.tcl.csot.zhiye.service.chat.DocxExtractor.extract(data, linkPrefix);
+                if (!res.images().isEmpty()) {
+                    Path mediaDir = workspace.resolve(mediaRelDir);
+                    Files.createDirectories(mediaDir);
+                    for (var img : res.images()) {
+                        Files.write(mediaDir.resolve(img.filename()), img.bytes());
+                    }
+                }
+                StringBuilder md = new StringBuilder();
+                md.append("# ").append(origName).append("\n\n");
+                if (res.notice() != null && !res.notice().isBlank()) {
+                    md.append("> ").append(res.notice()).append("\n\n");
+                }
+                if (!res.images().isEmpty()) {
+                    md.append("> 本文档共提取出 ").append(res.images().size()).append(" 张内嵌图片，已全部解压至 `")
+                            .append(mediaRelDir).append("`，正文中的图片路径可直接用于 HTML `<img>` 标签。\n\n");
+                }
+                if (res.markdown() != null && !res.markdown().isBlank()) {
+                    md.append(res.markdown()).append('\n');
+                }
+                if (res.hasContent() || res.notice() != null) {
+                    Files.writeString(workspace.resolve(dir + stem + "-parsed.md"), md.toString(), java.nio.charset.StandardCharsets.UTF_8);
+                }
+            } else if (lower.endsWith(".pdf") || lower.endsWith(".pptx") || "application/pdf".equalsIgnoreCase(mime)) {
+                String extracted = com.tcl.csot.zhiye.service.chat.AskAttachments.extract(origName, mime, data);
+                if (extracted != null && !extracted.isBlank()) {
+                    String md = "# " + origName + "\n\n" + extracted + "\n";
+                    Files.writeString(workspace.resolve(dir + stem + "-parsed.md"), md, java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("自动解包文档素材失败 {}：{}", origName, e.getMessage());
         }
     }
 

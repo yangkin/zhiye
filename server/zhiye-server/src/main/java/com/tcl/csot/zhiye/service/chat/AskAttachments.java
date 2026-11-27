@@ -34,11 +34,15 @@ public class AskAttachments {
 
     static final int MAX_ATTACH = 5;
     /** 单个文本附件带进模型的上限 */
-    static final int TEXT_CHARS = 8000;
+    static final int TEXT_CHARS = 14000;
     /** 全部文本附件合计上限 */
-    static final int TOTAL_TEXT_CHARS = 24000;
+    static final int TOTAL_TEXT_CHARS = 32000;
     /** 图片超过这个大小就不带（上传上限 10MB，太大的 base64 会让请求很慢） */
     static final long IMAGE_BYTES = 6L * 1024 * 1024;
+    /** Word 内嵌图片带给多模态模型的上限（构建时会全部解压到 public/assets/） */
+    static final int MAX_DOCX_VISION_IMAGES = 4;
+    static final long MAX_DOCX_VISION_IMAGE_BYTES = 2L * 1024 * 1024;
+    static final long MAX_DOCX_VISION_TOTAL_BYTES = 5L * 1024 * 1024;
 
     private final AssetService assets;
 
@@ -49,8 +53,9 @@ public class AskAttachments {
         if (assetIds == null || assetIds.isEmpty()) return List.of();
         List<Attached> out = new ArrayList<>();
         int textTotal = 0;
+        int docCount = 0;
         for (String id : assetIds) {
-            if (id == null || id.isBlank() || out.size() >= MAX_ATTACH) continue;
+            if (id == null || id.isBlank() || docCount >= MAX_ATTACH) continue;
             AssetService.Content c;
             try {
                 c = assets.content(ws, id);
@@ -60,6 +65,7 @@ public class AskAttachments {
                 throw new RuntimeException(e);
             }
             if (c == null) continue;
+            docCount++;
             // SVG 是 XML 文本，当文档处理（视觉模型对矢量图效果不好）
             if (c.mime().startsWith("image/") && !c.mime().equals("image/svg+xml")) {
                 out.add(c.data().length <= IMAGE_BYTES
@@ -70,6 +76,42 @@ public class AskAttachments {
             if (textTotal >= TOTAL_TEXT_CHARS) {
                 out.add(new Attached(id, c.name(), c.mime(), "（附件过多，这份没有读取）", null));
                 continue;
+            }
+            // Word（.docx）：提取完整结构化 Markdown + 表格 + 内嵌图片（同时把关键内嵌图片带给视觉模型）
+            if (isDocx(c.name(), c.mime())) {
+                try {
+                    DocxExtractor.Result docx = DocxExtractor.extract(c.data(), null);
+                    if (docx.legacyBinaryDoc() || (!docx.hasContent() && docx.notice() != null)) {
+                        out.add(new Attached(id, c.name(), c.mime(), "（" + docx.notice() + "）", null));
+                        continue;
+                    }
+                    StringBuilder body = new StringBuilder();
+                    if (!docx.images().isEmpty()) {
+                        body.append("（该 Word 文档共解析出 ").append(docx.images().size())
+                                .append(" 张内嵌图片，已附在下方供视觉参考；构建页面时全部原图会自动解压到 `public/assets/` 并生成带图片链接的 Markdown，可直接嵌入 HTML。）\n\n");
+                    }
+                    body.append(docx.markdown() == null || docx.markdown().isBlank() ? "（文档正文无文字，主要内容为内嵌图片）" : docx.markdown());
+                    String text = body.toString();
+                    int room = Math.min(TEXT_CHARS, TOTAL_TEXT_CHARS - textTotal);
+                    if (text.length() > room) text = text.substring(0, room) + "\n……（内容过长，已截断；构建时完整内容会自动解压到项目目录）";
+                    textTotal += text.length();
+                    out.add(new Attached(id, c.name(), c.mime(), text, null));
+
+                    long visionBytes = 0;
+                    int visionCount = 0;
+                    for (DocxExtractor.ExtractedImage img : docx.images()) {
+                        if (visionCount >= MAX_DOCX_VISION_IMAGES) break;
+                        if (!img.isRasterForVision() || img.bytes().length > MAX_DOCX_VISION_IMAGE_BYTES) continue;
+                        if (visionBytes + img.bytes().length > MAX_DOCX_VISION_TOTAL_BYTES) continue;
+                        visionBytes += img.bytes().length;
+                        visionCount++;
+                        out.add(new Attached(id + "#" + img.filename(), c.name() + " 内嵌图 " + visionCount + " (" + img.filename() + ")",
+                                img.mime(), null, img.bytes()));
+                    }
+                    continue;
+                } catch (Exception e) {
+                    log.warn("提取 Word 附件失败 {}：{}", c.name(), e.getMessage());
+                }
             }
             String text = extract(c.name(), c.mime(), c.data());
             if (text == null) {
@@ -126,18 +168,25 @@ public class AskAttachments {
         return "\n\n【本会话前序轮次上传的附件上下文（多轮对话持续有效；构建应用时所有原文件会自动拷贝至 public/assets/）】\n" + sb.toString().trim();
     }
 
-    /** 提取文档文字；对 CSV / XLSX 自动生成结构化数据画像 + 样例行；返回 null 表示这个格式读不了 */
-    static String extract(String name, String mime, byte[] data) {
-        String lower = name.toLowerCase();
+    static boolean isDocx(String name, String mime) {
+        String lower = name == null ? "" : name.toLowerCase();
+        return lower.endsWith(".docx")
+                || (mime != null && mime.toLowerCase().contains("wordprocessingml.document"));
+    }
+
+    /** 提取文档文字；对 CSV / XLSX 自动生成结构化数据画像 + 样例行；对 DOCX 保留标题/表格与图片标记；返回 null 表示这个格式读不了 */
+    public static String extract(String name, String mime, byte[] data) {
+        String lower = name == null ? "" : name.toLowerCase();
+        String m = mime == null ? "" : mime;
         try {
-            if (lower.endsWith(".csv") || "text/csv".equalsIgnoreCase(mime)) return csvProfile(data);
-            if (mime.startsWith("text/") || lower.matches(".*\\.(txt|md|markdown|json|log|xml|ya?ml|sql)$"))
+            if (lower.endsWith(".csv") || "text/csv".equalsIgnoreCase(m)) return csvProfile(data);
+            if (m.startsWith("text/") || lower.matches(".*\\.(txt|md|markdown|json|log|xml|ya?ml|sql)$"))
                 return new String(data, StandardCharsets.UTF_8);
-            if (mime.equals("application/pdf") || lower.endsWith(".pdf")) return pdfText(data);
-            if (lower.endsWith(".docx")) return docxText(data);
+            if (m.equals("application/pdf") || lower.endsWith(".pdf")) return pdfText(data);
+            if (isDocx(name, m)) return docxText(data);
             if (lower.endsWith(".xlsx")) return xlsxText(data);
             if (lower.endsWith(".pptx")) return pptxText(data);
-            if (mime.equals("image/svg+xml") || lower.endsWith(".svg")) return new String(data, StandardCharsets.UTF_8);
+            if (m.equals("image/svg+xml") || lower.endsWith(".svg")) return new String(data, StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("提取附件文字失败 {}：{}", name, e.getMessage());
         }
@@ -152,25 +201,35 @@ public class AskAttachments {
         }
     }
 
-    /** OOXML：解 zip，取需要的 XML，去标签留文字 */
+    /** OOXML XML 提取：仅解码 .xml / .rels 文本条目，跳过图片等二进制条目，规范化路径分隔符，避免媒体文件撑爆条目上限 */
     private static Map<String, String> unzip(byte[] data) throws Exception {
         Map<String, String> files = new LinkedHashMap<>();
         try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(data))) {
             ZipEntry e;
-            while ((e = in.getNextEntry()) != null) {
-                if (e.isDirectory() || files.size() > 200) continue;
-                files.put(e.getName(), new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            int seen = 0;
+            while ((e = in.getNextEntry()) != null && seen++ < 2000) {
+                if (e.isDirectory() || files.size() > 300) continue;
+                String norm = e.getName().replace('\\', '/').replaceFirst("^/+", "");
+                String lower = norm.toLowerCase();
+                if (!lower.endsWith(".xml") && !lower.endsWith(".rels")) continue;
+                files.put(norm, new String(in.readAllBytes(), StandardCharsets.UTF_8));
             }
         }
         return files;
     }
 
     private static String docxText(byte[] data) throws Exception {
-        String xml = unzip(data).get("word/document.xml");
-        if (xml == null) return null;
-        return tidy(stripTags(xml
-                .replaceAll("</w:p>", "\n").replaceAll("<w:br\\s*/?>", "\n")
-                .replaceAll("<w:cr\\s*/?>", "\n").replaceAll("<w:tab\\s*/?>", "\t")));
+        DocxExtractor.Result res = DocxExtractor.extract(data, null);
+        if (res.legacyBinaryDoc()) return res.notice();
+        if (res.hasContent()) {
+            StringBuilder sb = new StringBuilder();
+            if (!res.images().isEmpty()) {
+                sb.append("（含 ").append(res.images().size()).append(" 张内嵌图片）\n\n");
+            }
+            sb.append(res.markdown());
+            return tidy(sb.toString());
+        }
+        return res.notice();
     }
 
     private static String pptxText(byte[] data) throws Exception {

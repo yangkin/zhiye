@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.tcl.csot.zhiye.repository.AppRepository;
 import com.tcl.csot.zhiye.entity.AppRow;
 import com.tcl.csot.zhiye.config.AuthProperties;
+import com.tcl.csot.zhiye.config.ZhiyeProperties;
 import com.tcl.csot.zhiye.entity.SsoUser;
 import com.tcl.csot.zhiye.exception.ApiException;
 import com.tcl.csot.zhiye.util.Ids;
@@ -37,11 +38,13 @@ public class AccessService {
     private final JdbcClient jdbc;
     private final AppRepository apps;
     private final AuthProperties auth;
+    private final ZhiyeProperties props;
 
-    public AccessService(JdbcClient jdbc, AppRepository apps, AuthProperties auth) {
+    public AccessService(JdbcClient jdbc, AppRepository apps, AuthProperties auth, ZhiyeProperties props) {
         this.jdbc = jdbc;
         this.apps = apps;
         this.auth = auth;
+        this.props = props;
     }
 
     public boolean ssoAvailable() { return auth.ssoEnabled(); }
@@ -137,9 +140,11 @@ public class AccessService {
         return Optional.empty();
     }
 
-    /** 不写 Domain：host-only cookie，只在这个应用的子域名上有效，其他应用和平台拿不到 */
+    /** 不写 Domain：host-only cookie，只在这个应用的子域名上有效，其他应用和平台拿不到；按站点协议决定 Secure，兼容主站 HTTPS + 站点 HTTP 部署 */
     public String siteCookie(String value, java.time.Duration maxAge) {
-        return org.springframework.http.ResponseCookie.from(SITE_COOKIE, value).httpOnly(true).secure(auth.sso().secureCookie())
+        boolean siteHttps = props != null && props.site() != null && "https".equalsIgnoreCase(props.site().siteScheme());
+        boolean secure = siteHttps && auth.sso().secureCookie();
+        return org.springframework.http.ResponseCookie.from(SITE_COOKIE, value).httpOnly(true).secure(secure)
                 .sameSite("Lax").path("/").maxAge(maxAge).build().toString();
     }
 

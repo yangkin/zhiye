@@ -11,18 +11,42 @@ public final class Prompts {
     private Prompts() {}
 
     private static void appendAssetSection(StringBuilder sb, List<String> assetPaths) {
-        if (assetPaths == null || assetPaths.isEmpty()) return;
-        sb.append("## 用户上传的素材（已放进项目）\n");
+        String section = formatAssetSection("## 用户上传的素材（已放进项目）", assetPaths, false);
+        if (!section.isEmpty()) sb.append(section).append('\n');
+    }
+
+    /** 生成 / 修改共用的素材说明段：支持原始文件、自动解析的文档 Markdown（*-parsed.md）及 Word 解压原图（*-media/*）。 */
+    public static String formatAssetSection(String heading, List<String> assetPaths, boolean skill) {
+        if (assetPaths == null || assetPaths.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append(heading).append('\n');
         boolean hasSpreadsheet = false;
+        boolean hasParsedDoc = false;
         for (String p : assetPaths) {
-            sb.append("- ").append(p).append("（代码中用相对路径 `./").append(p.replaceFirst("^public/", "")).append("` 引用）\n");
+            sb.append("- ").append(p);
+            if (!skill) {
+                String rel = "./" + p.replaceFirst("^public/", "");
+                if (p.endsWith("-parsed.md")) {
+                    sb.append("（平台已自动解析的完整文档 Markdown，请直接用 `read` 工具读取全部正文、表格与图片链接）");
+                    hasParsedDoc = true;
+                } else {
+                    sb.append("（代码中用相对路径 `").append(rel).append("` 引用）");
+                }
+            } else if (p.endsWith("-parsed.md")) {
+                sb.append("（平台已自动解析的完整文档 Markdown，请直接用 `read` 工具读取）");
+                hasParsedDoc = true;
+            }
+            sb.append('\n');
             String lower = p.toLowerCase();
             if (lower.endsWith(".xlsx") || lower.endsWith(".csv")) hasSpreadsheet = true;
+        }
+        if (hasParsedDoc) {
+            sb.append("- **Word/PDF/PPT 文档与图片专项要求**：平台已将二进制文档的正文、标题、表格和图片顺序完整解析到 `*-parsed.md`，并将 Word 内嵌图片全部解压到对应的 `*-media/` 目录。**请先用 `read` 读取 `*-parsed.md` 全文，再按文档内容和顺序生成页面，并直接用相对路径（如 `./assets/...-media/image1.png`）嵌入原图**；不要直接用 `read` 打开二进制 `.docx`/`.pdf`，绝不要声称无法读取文档。\n");
         }
         if (hasSpreadsheet) {
             sb.append("- **表格数据专项要求**：检测到用户上传了真实 `.xlsx`/`.csv` 数据文件，请先阅读内置技能 `excel-csv-to-dashboard`，全量解析 `public/assets/` 里的真实数据生成交互式看板（严禁用编造的假数据替换真实表格行），并在页面顶栏保留「导入新 Excel / CSV 刷新看板」入口。\n");
         }
-        sb.append('\n');
+        return sb.toString();
     }
 
     public static String generate(AppRow app, List<String> assetPaths) {
@@ -116,11 +140,8 @@ public final class Prompts {
         sb.append("## 用户需求\n").append(app.prompt()).append("\n\n");
         if (app.planDoc() != null && !app.planDoc().isBlank() && !app.planDoc().trim().equals(app.prompt().trim()))
             sb.append("## 补充说明\n").append(app.planDoc()).append("\n\n");
-        if (!assetPaths.isEmpty()) {
-            sb.append("## 用户上传的素材（已放进 references/assets/）\n");
-            for (String p : assetPaths) sb.append("- ").append(p).append('\n');
-            sb.append('\n');
-        }
+        String skillAssets = formatAssetSection("## 用户上传的素材（已放进 references/assets/）", assetPaths, true);
+        if (!skillAssets.isEmpty()) sb.append(skillAssets).append('\n');
         sb.append("""
                 ## 工作方式
                 先在第一段回复里写一个简短的待办清单（每项一行，例如「1. 编写 SKILL.md … 2. 编写 references/ … 3. 编写 scripts/ … 4. 自检」，按这个 skill 的实际文件写），然后按清单逐项完成。

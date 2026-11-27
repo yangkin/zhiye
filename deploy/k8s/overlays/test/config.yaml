@@ -11,9 +11,10 @@ data:
   ZHIYE_SKILLHUB_ENABLED: "true"
   ZHIYE_SKILLHUB_MOCK: "false"
   ZHIYE_PUBLIC_BASE_URL: https://zhiye.csot.tcl.com
-  ZHIYE_PREVIEW_BASE: https://preview.zhiye.csot.tcl.com
+  ZHIYE_PREVIEW_BASE: http://preview.zhiye.csot.tcl.com
   ZHIYE_SITE_BUILD_PREVIEW_BASE: https://zhiye.csot.tcl.com
   ZHIYE_SITE_TEMPLATE_PREVIEW_BASE: https://zhiye.csot.tcl.com
+  ZHIYE_SITE_SCHEME: http
   ZHIYE_SITE_HOST_SUFFIX: zhiye.csot.tcl.com
   ZHIYE_SSO_REDIRECT_URL: https://zhiye.csot.tcl.com/access_token
   ZHIYE_S3_ENDPOINT: http://clouds3.csot.tcl.com:8082

@@ -5,11 +5,11 @@ metadata:
   namespace: zhiye
 spec:
   ingressClassName: traefik
+  # 仅一级子域 zhiye.csot.tcl.com 命中公司 *.csot.tcl.com 通配符证书；
+  # 二级子域 preview.zhiye.csot.tcl.com 与 *.zhiye.csot.tcl.com 走 HTTP 80（避免通配符证书层级不匹配告警）
   tls:
     - hosts:
         - zhiye.csot.tcl.com
-        - preview.zhiye.csot.tcl.com
-        - "*.zhiye.csot.tcl.com"
       secretName: zhiye-test-tls
   rules:
     - host: zhiye.csot.tcl.com

@@ -202,6 +202,10 @@ function Workbench({ id }: { id: string }) {
   const cloudOn = cloudQ.data?.enabled ?? false;
   const baseFrameSrc = previewVersion ? previewVersion.previewUrl : (app?.previewUrl ?? null);
   const frameSrc = baseFrameSrc && cloudOn && previewAs !== 'admin' ? `${baseFrameSrc}?__as=${previewAs}` : baseFrameSrc;
+  // 主站为 HTTPS 而应用站点运行在 HTTP（例如公司仅有一张 *.csot.tcl.com 证书、二级站点走 HTTP）时，
+  // 浏览器会拦截 HTTPS 页面内嵌 HTTP iframe（Mixed Content），改为展示一键新标签页预览引导卡
+  const mixedContentPreview =
+    typeof window !== 'undefined' && window.location.protocol === 'https:' && !!frameSrc && /^http:\/\//i.test(frameSrc);
   // 支持同一工作空间跨应用并行任务（默认上限由服务端 QuotaService 兜底），单应用仍串行防冲突
   const lockedEarly = !!app?.activeTask && !isTerminal(app.activeTask.status);
   const vp = usePreviewViewport('auto');
@@ -224,10 +228,15 @@ function Workbench({ id }: { id: string }) {
   const [frameLoading, setFrameLoading] = useState(false);
   const frameKey = frameSrc ? `${frameSrc}#${refreshKey}` : null;
   useEffect(() => {
-    if (frameKey) setFrameLoading(true);
-  }, [frameKey]);
+    if (frameKey && !mixedContentPreview) setFrameLoading(true);
+    else setFrameLoading(false);
+  }, [frameKey, mixedContentPreview]);
   const refreshPreview = async () => {
     if (!frameSrc || refreshing) return;
+    if (mixedContentPreview) {
+      window.open(frameSrc, '_blank', 'noopener');
+      return;
+    }
     setRefreshing(true);
     const ok = await probePreview(frameSrc);
     setRefreshing(false);
@@ -921,7 +930,35 @@ function Workbench({ id }: { id: string }) {
                 ref={vp.stageRef}
                 className={`preview-stage ${editMode ? 'is-selecting' : ''} ${vp.isConstrained ? 'is-constrained-desktop' : ''} ${vp.isScaled ? 'is-scaled' : ''}`}
               >
-                {frameSrc ? (
+                {frameSrc && mixedContentPreview ? (
+                  <div className="preview-empty mixed-preview-card">
+                    <span className="mixed-preview-icon">
+                      <Icon name="external" />
+                    </span>
+                    <h3>独立 HTTP 服务实时预览</h3>
+                    <p>
+                      当前工作台运行在 HTTPS，而该独立服务站点运行在 HTTP。受浏览器安全策略限制无法直接内嵌 iframe，请点击下方按钮在新标签页中预览和调试。
+                    </p>
+                    <code className="mixed-preview-url">{frameSrc.replace(/\?_zhiye_preview=.*$/, '')}</code>
+                    <div className="mixed-preview-actions">
+                      <button type="button" className="primary-button" onClick={openExternal}>
+                        <Icon name="external" />
+                        在新标签页打开实时预览
+                      </button>
+                      <button
+                        type="button"
+                        className="subtle-button"
+                        onClick={async () => {
+                          const clean = frameSrc.replace(/\?_zhiye_preview=.*$/, '');
+                          toast((await copyText(clean)) ? '服务地址已复制。' : '请手动复制地址。');
+                        }}
+                      >
+                        <Icon name="copy" />
+                        复制访问地址
+                      </button>
+                    </div>
+                  </div>
+                ) : frameSrc ? (
                   <>
                     {frameLoading ? (
                       <div className="ze-mode-tip" role="status" aria-live="polite" style={{ top: 10, bottom: 'auto', opacity: 0.9 }}>

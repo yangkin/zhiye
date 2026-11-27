@@ -34,10 +34,13 @@ public class AssetService {
         String name = file.getOriginalFilename() == null ? "file" : Path.of(file.getOriginalFilename()).getFileName().toString();
         String mime = file.getContentType() == null ? "application/octet-stream" : file.getContentType();
         String lower = name.toLowerCase();
+        if (lower.matches(".*\\.(doc|xls|ppt)$")) {
+            throw ApiException.validation("暂不支持旧版 .doc/.xls/.ppt 格式，请在 Word/WPS/Excel 中「另存为 .docx/.xlsx/.pptx」后再上传");
+        }
         boolean ok = mime.startsWith("image/") || mime.equals("application/pdf") || mime.startsWith("text/")
                 || mime.contains("officedocument")
                 || lower.matches(".*\\.(png|jpe?g|gif|webp|svg|pdf|txt|md|markdown|csv|json|log|ya?ml|docx|xlsx|pptx)$");
-        if (!ok) throw ApiException.validation("只支持图片、PDF、Word/Excel/PPT 和文本文件");
+        if (!ok) throw ApiException.validation("只支持图片、PDF、新版 Office（.docx/.xlsx/.pptx）和文本文件");
         if (lower.endsWith(".svg")) mime = "image/svg+xml";
         String id = Ids.newId("as");
         String key = "assets/" + ws + "/" + id;
